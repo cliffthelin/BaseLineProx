@@ -64,19 +64,48 @@ def _carrier(ifname: str):
         return None
 
 
-def _route_default():
+def _bridge_members(brname: str):
+    brif = Path("/sys/class/net") / brname / "brif"
+    try:
+        return [p.name for p in brif.iterdir()]
+    except OSError:
+        return []
+
+
+def _route_dev_is_live(dev: str, up_nics: list) -> bool:
+    """A route's device is live if it's an up physical NIC directly, or a
+    bridge whose underlying member NIC is up (e.g. vmbr0 -> enp0s31f6)."""
+    if dev in up_nics:
+        return True
+    return any(m in up_nics for m in _bridge_members(dev))
+
+
+def _route_default(up_nics=None):
+    """Return (gw, dev) for the default route that's actually usable right
+    now. Multiple default routes can coexist (e.g. a stale bridge route to
+    a dead wired NIC alongside a freshly-tethered interface) - picking the
+    routing table's first line regardless of which device is actually live
+    is how a real, working tether connection got silently ignored in favor
+    of a dead cached one. Prefer a route whose device has carrier; fall
+    back to the first route line only if none do, so a genuine total
+    failure still reports the same "no live device" detail as before."""
+    up_nics = up_nics or []
     try:
         out = subprocess.run(["ip", "-4", "route", "show", "default"],
                               capture_output=True, text=True, timeout=5).stdout
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None, None
+    routes = []
     for line in out.splitlines():
         parts = line.split()
         if "via" in parts and "dev" in parts:
-            gw = parts[parts.index("via") + 1]
-            dev = parts[parts.index("dev") + 1]
+            routes.append((parts[parts.index("via") + 1], parts[parts.index("dev") + 1]))
+    if not routes:
+        return None, None
+    for gw, dev in routes:
+        if _route_dev_is_live(dev, up_nics):
             return gw, dev
-    return None, None
+    return routes[0]
 
 
 def _addr_for(ifname: str):
@@ -132,7 +161,7 @@ def check_lifeline():
     if not record("carrier_present", bool(up_nics), f"up={up_nics} down={[n for n in nics if n not in up_nics]}"):
         return facts
 
-    gw, dev = _route_default()
+    gw, dev = _route_default(up_nics)
     ip_addr = _addr_for(dev) if dev else None
     if not record("address_assigned", bool(ip_addr), f"{dev}: {ip_addr}" if ip_addr else f"no address on {dev or 'default route device'}"):
         return facts
