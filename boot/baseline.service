@@ -1,0 +1,20 @@
+[Unit]
+Description=Baseline Console
+Conflicts=getty@tty1.service
+After=multi-user.target
+Before=getty.target
+
+[Service]
+ExecStart=/opt/baseline/bin/baseline
+Restart=always
+RestartSec=1
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Type=idle
+
+[Install]
+WantedBy=multi-user.target

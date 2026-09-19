@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Baseline Core CLI — minimal Step 3 skeleton.
+
+Boots on tty1 in place of the login getty. Real hardware/network/harness
+commands land in Steps 4-6; this is the shell they plug into.
+"""
+import json
+import sys
+from pathlib import Path
+
+from rich.console import Console
+from rich.table import Table
+
+sys.path.insert(0, "/opt/baseline/lib")
+import hardware  # noqa: E402
+import network  # noqa: E402
+import harness  # noqa: E402
+
+SNAPSHOT_PATH = Path("/var/lib/baseline/hardware_snapshot.json")
+console = Console()
+
+
+def banner() -> str:
+    return "\nBASELINE\nSystem ready\n"
+
+
+def cmd_hardware() -> None:
+    raw, err = hardware.collect()
+    if err:
+        print(f"[hardware] collection failed: {err}")
+        return
+    current = hardware.normalize(raw)
+
+    SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    previous = None
+    if SNAPSHOT_PATH.exists():
+        try:
+            previous = json.loads(SNAPSHOT_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            previous = None
+
+    table = Table(title="Hardware", show_header=True, header_style="bold cyan")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("System", f"{current['machine']['system']} ({current['machine']['type']})")
+    table.add_row("CPU", f"{current['cpu']['model']} x{current['cpu']['cores']}")
+    table.add_row("Memory", f"{current['memory']['total']} total, {current['memory']['used']} used")
+    table.add_row("Kernel", f"{current['system']['kernel']} ({current['system']['distro']})")
+    console.print(table)
+
+    if previous is None:
+        console.print("[yellow](no prior snapshot - this boot is the baseline)[/yellow]")
+    elif previous == current:
+        console.print("[green](unchanged since last snapshot)[/green]")
+    else:
+        console.print("[yellow](hardware differs from last snapshot - deltas not yet classified, Step 4 follow-up)[/yellow]")
+
+    SNAPSHOT_PATH.write_text(json.dumps(current, indent=2))
+
+
+def cmd_network() -> None:
+    facts = network.check_lifeline()
+    table = Table(title="Lifeline Networking", show_header=True, header_style="bold cyan")
+    table.add_column("Stage")
+    table.add_column("Status")
+    table.add_column("Detail")
+    for f in facts:
+        status = "[green]OK[/green]" if f["ok"] else "[red]FAIL[/red]"
+        table.add_row(f["fact"], status, f["detail"])
+    console.print(table)
+
+    if facts and not facts[-1]["ok"]:
+        console.print(f"[red]Stopped at:[/red] {facts[-1]['fact']} - everything upstream of this is fine.")
+    elif facts:
+        console.print("[green]Lifeline fully up: hardware -> network -> LLM provider all reachable.[/green]")
+
+
+def dispatch(line: str) -> bool:
+    """Handle one command. Returns False to exit the shell."""
+    if not line:
+        return True
+    if line in ("exit", "quit"):
+        return False
+    if line == "hardware":
+        cmd_hardware()
+    elif line == "network":
+        cmd_network()
+    elif line.startswith("ask "):
+        print(harness.ask(line[4:].strip()))
+    elif line in ("help", "?"):
+        print("commands: hardware, network, ask <question>, exit")
+    else:
+        print(f"unknown command: {line!r} (try 'help')")
+    return True
+
+
+def main() -> int:
+    print(banner())
+    while True:
+        try:
+            line = input("baseline> ").strip()
+        except EOFError:
+            print()
+            break
+        except KeyboardInterrupt:
+            print()
+            continue
+        if not dispatch(line):
+            break
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
