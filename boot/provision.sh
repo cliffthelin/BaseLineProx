@@ -18,7 +18,7 @@ done
 apt-get update
 
 echo "=== Installing base packages ==="
-apt-get install -y inxi python3-rich tmux
+apt-get install -y inxi python3-rich python3-textual tmux
 
 echo "=== Installing Node.js 22 (NodeSource - Debian's own package is too old) ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -

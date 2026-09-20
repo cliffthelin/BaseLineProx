@@ -172,6 +172,22 @@ want to keep; only run foreground, disposable instances when you
 specifically want to watch the association handshake once and then let
 it be replaced by a proper backgrounded one.
 
+## Textual TUI under systemd
+
+**Symptom:** A Textual app's `systemd` unit shows `Active: running` with no
+crash, but the physical console screen never changes from whatever was
+there before - the app is silently doing nothing, as far as the operator
+can tell.
+**Cause:** Textual (via Rich) writes its actual terminal rendering to
+**stderr**, not stdout. A unit with `StandardOutput=tty` but
+`StandardError=journal` sends the real screen output straight into the
+systemd journal - invisible on the physical display - while stdout
+carries essentially nothing.
+**Fix:** Set `StandardError=tty` (matching `StandardOutput=tty`) in the
+unit so both streams reach the console. Confirmed by redirecting the
+streams to separate files on a manual run: the ANSI-escape-sequence
+frames were all in the stderr capture, none in stdout.
+
 ## Hardware detection
 
 **Symptom:** No wired network interface (`eth0`, `enpXsY`, etc.) appears

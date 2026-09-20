@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Baseline Core CLI — minimal Step 3 skeleton.
+"""Baseline Core - Step 3/7: a real Textual TUI on tty1.
 
-Boots on tty1 in place of the login getty. Real hardware/network/harness
-commands land in Steps 4-6; this is the shell they plug into.
+Replaces the plain input()-loop REPL with a mouse-capable, persistent
+interface - still on the raw Linux console (no kmscon/DRM yet, no
+Wayland/X), so fonts stay bitmap and mouse fidelity is whatever the
+console itself supports. kmscon (antialiased fonts, full mouse) is a
+deliberate follow-up, not done here - see the PRD's Step 7 discussion.
 """
 import json
 import sys
 from pathlib import Path
 
-from rich.console import Console
-from rich.table import Table
+from textual import work
+from textual.app import App, ComposeResult
+from textual.containers import Horizontal
+from textual.widgets import Button, DataTable, Footer, Header, Input, Log, TabbedContent, TabPane
 
 sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
@@ -18,127 +23,100 @@ import harness  # noqa: E402
 import tether  # noqa: E402
 
 SNAPSHOT_PATH = Path("/var/lib/baseline/hardware_snapshot.json")
-console = Console()
-
-# Snapshot at startup so tether can tell "a phone plugged in after boot"
-# apart from NICs that were already there (wired, wifi, wwan).
-try:
-    KNOWN_NICS_AT_BOOT = frozenset(p.name for p in Path("/sys/class/net").iterdir())
-except OSError:
-    KNOWN_NICS_AT_BOOT = frozenset()
 
 
-def banner() -> str:
-    return "\nBASELINE\nSystem ready\n"
+class BaselineApp(App):
+    TITLE = "BASELINE"
+    SUB_TITLE = "System ready"
+    CSS = """
+    Screen { background: $surface; }
+    DataTable { height: 1fr; }
+    #chat_log { height: 1fr; border: solid $accent; }
+    #chat_input { dock: bottom; }
+    .toolbar { height: 3; }
+    """
+    BINDINGS = [("q", "quit", "Quit")]
 
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with TabbedContent(initial="hardware_tab"):
+            with TabPane("Hardware", id="hardware_tab"):
+                with Horizontal(classes="toolbar"):
+                    yield Button("Refresh", id="hw_refresh", variant="primary")
+                yield DataTable(id="hw_table")
+            with TabPane("Network", id="network_tab"):
+                with Horizontal(classes="toolbar"):
+                    yield Button("Refresh", id="net_refresh", variant="primary")
+                    yield Button("Tether", id="net_tether", variant="warning")
+                yield DataTable(id="net_table")
+            with TabPane("Chat", id="chat_tab"):
+                yield Log(id="chat_log")
+                yield Input(placeholder="Ask Baseline...", id="chat_input")
+        yield Footer()
 
-def cmd_hardware() -> None:
-    raw, err = hardware.collect()
-    if err:
-        print(f"[hardware] collection failed: {err}")
-        return
-    current = hardware.normalize(raw)
+    def on_mount(self) -> None:
+        self.query_one("#hw_table", DataTable).add_columns("Field", "Value")
+        self.query_one("#net_table", DataTable).add_columns("Stage", "Status", "Detail")
+        self.refresh_hardware()
+        self.refresh_network()
 
-    SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    previous = None
-    if SNAPSHOT_PATH.exists():
-        try:
-            previous = json.loads(SNAPSHOT_PATH.read_text())
-        except (json.JSONDecodeError, OSError):
-            previous = None
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "hw_refresh":
+            self.refresh_hardware()
+        elif event.button.id == "net_refresh":
+            self.refresh_network()
+        elif event.button.id == "net_tether":
+            self.run_tether()
 
-    table = Table(title="Hardware", show_header=True, header_style="bold cyan")
-    table.add_column("Field")
-    table.add_column("Value")
-    table.add_row("System", f"{current['machine']['system']} ({current['machine']['type']})")
-    table.add_row("CPU", f"{current['cpu']['model']} x{current['cpu']['cores']}")
-    table.add_row("Memory", f"{current['memory']['total']} total, {current['memory']['used']} used")
-    table.add_row("Kernel", f"{current['system']['kernel']} ({current['system']['distro']})")
-    console.print(table)
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "chat_input" or not event.value.strip():
+            return
+        question = event.value.strip()
+        event.input.value = ""
+        log = self.query_one("#chat_log", Log)
+        log.write_line(f"> {question}")
+        self.ask_harness(question)
 
-    if previous is None:
-        console.print("[yellow](no prior snapshot - this boot is the baseline)[/yellow]")
-    elif previous == current:
-        console.print("[green](unchanged since last snapshot)[/green]")
-    else:
-        console.print("[yellow](hardware differs from last snapshot - deltas not yet classified, Step 4 follow-up)[/yellow]")
+    def refresh_hardware(self) -> None:
+        table = self.query_one("#hw_table", DataTable)
+        table.clear()
+        raw, err = hardware.collect()
+        if err:
+            table.add_row("error", err)
+            return
+        current = hardware.normalize(raw)
+        table.add_row("System", f"{current['machine']['system']} ({current['machine']['type']})")
+        table.add_row("CPU", f"{current['cpu']['model']} x{current['cpu']['cores']}")
+        table.add_row("Memory", f"{current['memory']['total']} total, {current['memory']['used']} used")
+        table.add_row("Kernel", f"{current['system']['kernel']} ({current['system']['distro']})")
+        SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SNAPSHOT_PATH.write_text(json.dumps(current, indent=2))
 
-    SNAPSHOT_PATH.write_text(json.dumps(current, indent=2))
+    def refresh_network(self) -> None:
+        table = self.query_one("#net_table", DataTable)
+        table.clear()
+        for f in network.check_lifeline():
+            status = "[green]OK[/green]" if f["ok"] else "[red]FAIL[/red]"
+            table.add_row(f["fact"], status, f["detail"])
 
+    @work(thread=True)
+    def run_tether(self) -> None:
+        tether.auto_tether()
+        self.call_from_thread(self.refresh_network)
 
-def cmd_network() -> None:
-    facts = network.check_lifeline()
-    table = Table(title="Lifeline Networking", show_header=True, header_style="bold cyan")
-    table.add_column("Stage")
-    table.add_column("Status")
-    table.add_column("Detail")
-    for f in facts:
-        status = "[green]OK[/green]" if f["ok"] else "[red]FAIL[/red]"
-        table.add_row(f["fact"], status, f["detail"])
-    console.print(table)
+    @work(thread=True)
+    def ask_harness(self, question: str) -> None:
+        answer = harness.ask(question)
+        self.call_from_thread(self._write_chat, answer)
 
-    if facts and not facts[-1]["ok"]:
-        console.print(f"[red]Stopped at:[/red] {facts[-1]['fact']} - everything upstream of this is fine.")
-    elif facts:
-        console.print("[green]Lifeline fully up: hardware -> network -> LLM provider all reachable.[/green]")
-
-
-def cmd_tether() -> None:
-    console.print("[cyan]Looking for a tethered device (USB phone)...[/cyan]")
-    result = tether.auto_tether(KNOWN_NICS_AT_BOOT)
-
-    if result["stage"] == "no_candidate":
-        console.print(f"[red]No tether device found:[/red] {result['detail']}")
-        return
-
-    console.print(f"Trying: {result.get('interface', '?')} (candidates seen: {', '.join(result.get('candidates', [])) or 'none'})")
-
-    if result["ok"]:
-        console.print(f"[green]Tether up:[/green] {result['interface']} -> {result['address']} ({result['detail']})")
-        console.print("[cyan]Re-checking lifeline...[/cyan]")
-        cmd_network()
-    elif result["stage"] == "no_carrier":
-        console.print(f"[red]FAIL (no_carrier):[/red] {result['detail']}")
-    elif result["stage"] == "no_dhcp_offer":
-        console.print(f"[red]FAIL (no_dhcp_offer):[/red] {result['detail']}")
-    else:
-        console.print(f"[red]FAIL:[/red] {result['detail']}")
-
-
-def dispatch(line: str) -> bool:
-    """Handle one command. Returns False to exit the shell."""
-    if not line:
-        return True
-    if line in ("exit", "quit"):
-        return False
-    if line == "hardware":
-        cmd_hardware()
-    elif line == "network":
-        cmd_network()
-    elif line == "tether":
-        cmd_tether()
-    elif line.startswith("ask "):
-        print(harness.ask(line[4:].strip()))
-    elif line in ("help", "?"):
-        print("commands: hardware, network, tether, ask <question>, exit")
-    else:
-        print(f"unknown command: {line!r} (try 'help')")
-    return True
+    def _write_chat(self, answer: str) -> None:
+        log = self.query_one("#chat_log", Log)
+        log.write_line(answer)
+        log.write_line("")
 
 
 def main() -> int:
-    print(banner())
-    while True:
-        try:
-            line = input("baseline> ").strip()
-        except EOFError:
-            print()
-            break
-        except KeyboardInterrupt:
-            print()
-            continue
-        if not dispatch(line):
-            break
+    BaselineApp().run()
     return 0
 
 
