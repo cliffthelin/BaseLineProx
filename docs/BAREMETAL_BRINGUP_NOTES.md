@@ -144,6 +144,20 @@ the phone's screen locks or after a period with no active data flow.
 **Fix:** Keep the phone screen on/unlocked during testing; re-check
 Personal Hotspot is still showing as active before re-testing.
 
+## dhclient CLI flags
+
+**Symptom:** A script-driven `dhclient -1 -timeout <n> <iface>` call fails
+immediately every time with `Unknown command: -timeout`, easy to miss if
+you only capture the last line of output ("exiting.") - it looks exactly
+like a silent DHCP failure rather than a usage error.
+**Cause:** ISC `dhclient` (4.4.3-P1, Debian trixie) has no `-timeout` CLI
+flag. `timeout` is a `dhclient.conf` directive, not a command-line option.
+**Fix:** Bound the wall-clock time with the external `timeout` command
+instead: `timeout <n> dhclient -1 <iface>`. Found while hardening
+Baseline's own tether bring-up (`baseline/lib/tether.py`) - what looked
+like iPhone hotspot flakiness across several retries was actually this
+bug on every single attempt, not the phone.
+
 ## Wi-Fi
 
 **Symptom:** Running `wpa_supplicant -i <iface> -c <conf>` in the

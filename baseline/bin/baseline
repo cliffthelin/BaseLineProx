@@ -15,9 +15,17 @@ sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
 import network  # noqa: E402
 import harness  # noqa: E402
+import tether  # noqa: E402
 
 SNAPSHOT_PATH = Path("/var/lib/baseline/hardware_snapshot.json")
 console = Console()
+
+# Snapshot at startup so tether can tell "a phone plugged in after boot"
+# apart from NICs that were already there (wired, wifi, wwan).
+try:
+    KNOWN_NICS_AT_BOOT = frozenset(p.name for p in Path("/sys/class/net").iterdir())
+except OSError:
+    KNOWN_NICS_AT_BOOT = frozenset()
 
 
 def banner() -> str:
@@ -75,6 +83,28 @@ def cmd_network() -> None:
         console.print("[green]Lifeline fully up: hardware -> network -> LLM provider all reachable.[/green]")
 
 
+def cmd_tether() -> None:
+    console.print("[cyan]Looking for a tethered device (USB phone)...[/cyan]")
+    result = tether.auto_tether(KNOWN_NICS_AT_BOOT)
+
+    if result["stage"] == "no_candidate":
+        console.print(f"[red]No tether device found:[/red] {result['detail']}")
+        return
+
+    console.print(f"Trying: {result.get('interface', '?')} (candidates seen: {', '.join(result.get('candidates', [])) or 'none'})")
+
+    if result["ok"]:
+        console.print(f"[green]Tether up:[/green] {result['interface']} -> {result['address']} ({result['detail']})")
+        console.print("[cyan]Re-checking lifeline...[/cyan]")
+        cmd_network()
+    elif result["stage"] == "no_carrier":
+        console.print(f"[red]FAIL (no_carrier):[/red] {result['detail']}")
+    elif result["stage"] == "no_dhcp_offer":
+        console.print(f"[red]FAIL (no_dhcp_offer):[/red] {result['detail']}")
+    else:
+        console.print(f"[red]FAIL:[/red] {result['detail']}")
+
+
 def dispatch(line: str) -> bool:
     """Handle one command. Returns False to exit the shell."""
     if not line:
@@ -85,10 +115,12 @@ def dispatch(line: str) -> bool:
         cmd_hardware()
     elif line == "network":
         cmd_network()
+    elif line == "tether":
+        cmd_tether()
     elif line.startswith("ask "):
         print(harness.ask(line[4:].strip()))
     elif line in ("help", "?"):
-        print("commands: hardware, network, ask <question>, exit")
+        print("commands: hardware, network, tether, ask <question>, exit")
     else:
         print(f"unknown command: {line!r} (try 'help')")
     return True
