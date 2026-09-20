@@ -1,10 +1,16 @@
 [Unit]
 Description=Baseline Console
 Conflicts=getty@tty1.service
-After=multi-user.target
-Before=getty.target
+After=getty@tty1.service
 
 [Service]
+Environment=HOME=/root
+# TTYReset/TTYVHangup reset termios flags, but not the console's loaded
+# font/Unicode glyph-mapping table - that can be left corrupted (glyphs
+# rendering as wrong/missing characters) by an earlier ungraceful exit.
+# Reload it explicitly before every start; "-" so a missing font file on
+# a different image doesn't block startup.
+ExecStartPre=-/usr/bin/setfont /usr/share/consolefonts/Lat15-Fixed16.psf.gz -C /dev/tty1
 ExecStart=/opt/baseline/bin/baseline
 Restart=always
 RestartSec=1

@@ -57,11 +57,186 @@ def _physical_nics():
     return out
 
 
+FRIENDLY_DRIVERS = {
+    "r8152": "Ethernet (USB/dock)", "r8169": "Ethernet", "r8168": "Ethernet",
+    "e1000e": "Ethernet", "igb": "Ethernet", "tg3": "Ethernet", "bnx2": "Ethernet",
+    "iwlwifi": "Wi-Fi", "ath9k": "Wi-Fi", "ath10k_pci": "Wi-Fi", "rtl8xxxu": "Wi-Fi",
+    "ipheth": "Phone Tether (iPhone)", "rndis_host": "Phone Tether (Android)",
+    "cdc_ether": "Phone Tether", "cdc_ncm": "Phone Tether",
+    "cdc_mbim": "Cellular Modem", "qmi_wwan": "Cellular Modem", "cdc_wdm": "Cellular Modem",
+}
+
+# Drivers for links that need a physical cable - "no carrier" here really
+# does mean physically disconnected, and no command can fix that. Every
+# other interface (Wi-Fi, Cellular Modem, Phone Tether) can lack carrier
+# just because it hasn't associated yet, which is a recoverable, "Available"
+# state, not a dead one.
+WIRED_DRIVERS = {"r8152", "r8169", "r8168", "e1000e", "igb", "tg3", "bnx2"}
+
+
+def is_wired(ifname: str) -> bool:
+    driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
+    try:
+        return driver_link.resolve().name in WIRED_DRIVERS
+    except OSError:
+        return False
+
+
+ALIAS_FILE = Path("/etc/baseline/interface_aliases.json")
+
+
+def load_aliases() -> dict:
+    try:
+        return json.loads(ALIAS_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_alias(ifname: str, alias: str) -> None:
+    """An operator-chosen name overriding the driver-based default, e.g.
+    renaming "Ethernet" to "Office Uplink". Empty alias clears it, going
+    back to the driver-based default."""
+    aliases = load_aliases()
+    alias = alias.strip()
+    if alias:
+        aliases[ifname] = alias
+    else:
+        aliases.pop(ifname, None)
+    ALIAS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ALIAS_FILE.write_text(json.dumps(aliases))
+
+
+def friendly_name(ifname: str, show_hardware_id: bool = False) -> str:
+    """Human label for an interface: an operator-set alias if one exists,
+    else a driver-based default ("Wi-Fi" instead of "wlp2s0"). With
+    show_hardware_id, appends the raw device name too."""
+    aliases = load_aliases()
+    label = aliases.get(ifname)
+    if label is None:
+        driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
+        try:
+            label = FRIENDLY_DRIVERS.get(driver_link.resolve().name)
+        except OSError:
+            label = None
+    if label is None:
+        label = "Bridge" if (Path("/sys/class/net") / ifname / "bridge").exists() else ifname
+    if show_hardware_id and label != ifname:
+        return f"{label} ({ifname})"
+    return label
+
+
+def device_details(ifname: str) -> dict:
+    """Best-effort hardware identity for one interface, pulled from udev's
+    own hardware database - works uniformly for onboard (PCI) and
+    external (USB dock/tether) devices without hand-parsing lspci/lsusb.
+    Baseline's own inxi-based Hardware tab lists the same physical device
+    again as a separate row (inxi's Network section isn't correlated back
+    to a specific ifname); this is the reliable, ifname-keyed source for
+    "which manufacturer, on what bus, using which driver" bridged into
+    the Network tab's own modal instead of sending the operator to
+    cross-reference the Hardware tab by hand."""
+    try:
+        out = subprocess.run(["udevadm", "info", "-q", "property", f"/sys/class/net/{ifname}"],
+                              capture_output=True, text=True, timeout=5).stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        out = ""
+    props = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
+    try:
+        driver = driver_link.resolve().name
+    except OSError:
+        driver = None
+    bus = props.get("ID_BUS")
+    connection = {"pci": "Onboard (PCI)", "usb": "External (USB)"}.get(bus, bus or "unknown")
+    # ID_OUI_FROM_DATABASE is the manufacturer that put the part on the
+    # board/dock (e.g. "Dell Inc."), distinct from ID_VENDOR_FROM_DATABASE,
+    # the chipset maker (e.g. "Intel Corporation") - both are useful, so
+    # both are kept rather than picking one.
+    return {
+        "driver": driver or "unknown",
+        "connection": connection,
+        "chipset_vendor": props.get("ID_VENDOR_FROM_DATABASE") or props.get("ID_VENDOR", ""),
+        "model": props.get("ID_MODEL_FROM_DATABASE") or props.get("ID_MODEL", ""),
+        "manufacturer": props.get("ID_OUI_FROM_DATABASE", ""),
+    }
+
+
+def is_admin_up(ifname: str) -> bool:
+    """Administrative state (has this interface been told to come up),
+    distinct from carrier (is a cable/AP actually connected). Read via
+    the IFF_UP bit rather than parsing `ip link show` text."""
+    try:
+        flags = int(Path(f"/sys/class/net/{ifname}/flags").read_text().strip(), 16)
+        return bool(flags & 0x1)
+    except (OSError, ValueError):
+        return True
+
+
+def set_admin_state(ifname: str, up: bool):
+    """Genuinely bring the interface up or down (`ip link set`), not a
+    cosmetic toggle - disabling the interface you're using to reach this
+    console over the network will actually disconnect it."""
+    action = "up" if up else "down"
+    result = subprocess.run(["ip", "link", "set", ifname, action], capture_output=True, text=True, timeout=5)
+    if result.returncode != 0:
+        return False, (result.stderr or f"ip link set {ifname} {action} failed").strip()
+    return True, f"{ifname} set {action}"
+
+
+def _human_bytes(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024:
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}PB"
+
+
+def interface_stats(ifname: str):
+    """(rx_bytes, tx_bytes) lifetime counters for this interface, or
+    (None, None) if unreadable. Non-zero even on a currently-down
+    interface that carried traffic earlier this boot."""
+    stats = Path("/sys/class/net") / ifname / "statistics"
+    try:
+        rx = int((stats / "rx_bytes").read_text().strip())
+        tx = int((stats / "tx_bytes").read_text().strip())
+        return rx, tx
+    except (OSError, ValueError):
+        return None, None
+
+
+def interface_traffic_label(ifname: str) -> str:
+    """e.g. 'down 1.2MB up 340.0KB', or '' if no traffic has ever
+    passed (nothing worth showing for a device that's never been used).
+    ASCII only, deliberately - this renders on a bare TERM=linux console,
+    which doesn't reliably have Unicode arrow glyphs in its font."""
+    rx, tx = interface_stats(ifname)
+    if not rx and not tx:
+        return ""
+    return f"down {_human_bytes(rx or 0)} up {_human_bytes(tx or 0)}"
+
+
 def _carrier(ifname: str):
     try:
         return (Path("/sys/class/net") / ifname / "carrier").read_text().strip() == "1"
     except OSError:
         return None
+
+
+def list_interfaces():
+    """Cheap inventory: every physical NIC with its driver-bound and
+    carrier state. Shared by the Hardware tab (driver/hardware facts) and
+    the Network tab (connectivity grouping) - no full lifeline probe
+    (DNS/gateway/internet checks) needed just to list what's there."""
+    out = []
+    for name in _physical_nics():
+        out.append({
+            "name": name,
+            "friendly": friendly_name(name),
+            "driver_bound": os.path.exists(f"/sys/class/net/{name}/device/driver"),
+            "carrier": bool(_carrier(name)),
+            "wired": is_wired(name),
+        })
+    return out
 
 
 def _bridge_members(brname: str):
@@ -130,13 +305,16 @@ def _tcp_probe(host: str, port: int, timeout: float = 3.0):
         return False, str(e)
 
 
+DNS_PROBE_HOST = "www.proxmox.com"
+
+
 def _dns_probe(host: str, timeout: float = 3.0):
     socket.setdefaulttimeout(timeout)
     try:
-        socket.gethostbyname(host)
-        return True, ""
+        addr = socket.gethostbyname(host)
+        return True, f"{host} -> {addr}"
     except OSError as e:
-        return False, str(e)
+        return False, f"{host}: {e}"
 
 
 def check_lifeline():

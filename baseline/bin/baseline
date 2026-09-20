@@ -1,110 +1,911 @@
 #!/usr/bin/env python3
 """Baseline Core - Step 3/7: a real Textual TUI on tty1.
 
-Replaces the plain input()-loop REPL with a mouse-capable, persistent
-interface - still on the raw Linux console (no kmscon/DRM yet, no
-Wayland/X), so fonts stay bitmap and mouse fidelity is whatever the
-console itself supports. kmscon (antialiased fonts, full mouse) is a
-deliberate follow-up, not done here - see the PRD's Step 7 discussion.
+Network tab: one merged, status-grouped list (Reachable / Unreachable /
+Available). Every row is selectable (mouse or keyboard) and opens a
+modal - a real "Set as Primary"/"Set as Fallback" action for physical
+interfaces (genuinely reprioritizes the kernel's default route via
+netpref.py, not a stored label that does nothing), or an honest
+description-only modal for Gateway/DNS/Internet/provider rows. No config
+forms for providers yet - that means handling credential entry, which
+Baseline itself should not do on the operator's behalf; a real fix is a
+future baseline-auth-setup.sh-style flow, not a fake form here.
+
+Console tab: the exact command set and Rich-table output Baseline had
+before this TUI existed (hardware/network/tether/ask/help/exit), as a
+real typed-command transcript - not replaced by the tabs, kept alongside
+them.
 """
+import functools
 import json
+import subprocess
 import sys
+import time
+import traceback
 from pathlib import Path
 
+from rich.table import Table
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
-from textual.widgets import Button, DataTable, Footer, Header, Input, Log, TabbedContent, TabPane
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.markup import escape as escape_markup
+from textual.screen import ModalScreen
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Log, RadioButton, RadioSet, RichLog, Select, Static, Switch, Tabs, TabbedContent, TabPane
 
 sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
 import network  # noqa: E402
 import harness  # noqa: E402
 import tether  # noqa: E402
+import providers  # noqa: E402
+import netpref  # noqa: E402
 
 SNAPSHOT_PATH = Path("/var/lib/baseline/hardware_snapshot.json")
+UI_ERROR_LOG = Path("/var/log/baseline/ui_errors.log")
+NETWORK_AUTOREFRESH_SECONDS = 15
+CATEGORY_ORDER = ["Network", "AI Provider"]
+STATUS_ORDER = ["Active", "Reachable", "Available", "Unreachable"]
+STATUS_STYLE = {"Active": "#87ff87", "Reachable": "#5faf5f", "Available": "#ffd700", "Unreachable": "#ff5f5f"}
+LIFELINE_STAGE_LABELS = [
+    ("nic_detected", "NIC detected"),
+    ("driver_bound", "Driver bound"),
+    ("carrier_present", "Carrier present"),
+    ("address_assigned", "Address assigned"),
+    ("gateway_reachable", "Gateway reachable"),
+    ("dns_functioning", "DNS functioning"),
+    ("internet_reachable", "Internet reachable"),
+    ("llm_provider_reachable", "LLM provider reachable"),
+]
+
+
+def _log_ui_error(context: str, exc: BaseException) -> None:
+    try:
+        UI_ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with UI_ERROR_LOG.open("a") as f:
+            f.write(f"--- {time.strftime('%Y-%m-%dT%H:%M:%S')} {context} ---\n")
+            f.write("".join(traceback.format_exception(exc)))
+    except OSError:
+        pass
+
+
+def _safe(fn):
+    """Textual treats any unhandled exception - anywhere, including a
+    render callback run via call_from_thread - as fatal: it always kills
+    the whole app (confirmed in Textual's own _handle_exception: "Always
+    results in the app exiting"). Under systemd's Restart=always that
+    looks like a crash-to-traceback screen that then "falls back to" a
+    fresh main page - one bad row of hardware/network data anywhere
+    shouldn't be able to do that. Catch it here, log it, keep running."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            _log_ui_error(fn.__qualname__, exc)
+    return wrapper
+
+
+MODAL_CSS = """
+Screen { background: #000000; color: #e4e4e4; }
+
+/* Every default Textual Button/ToggleButton/RadioSet style below is a
+$theme-variable ($surface, $primary, etc.) - illegible or inconsistent
+under TERM=linux. Every color here is an explicit hex value instead.
+"solid" (a plain box-drawing line, matching DataTable's own border)
+replaces Textual's default "tall" border style, which renders as thick
+vertical bar glyphs instead of a clean line. */
+Button {
+    background: #1c1c1c; color: #e4e4e4;
+    border: solid #005f87;
+    text-style: bold;
+}
+Button:hover { background: #005f87; color: #ffffff; border: solid #0087af; }
+Button:focus { background: #00005f; color: #ffffff; border: solid #ffffff; }
+Button.-primary { background: #005f87; color: #ffffff; border: solid #0087af; }
+Button.-primary:hover { background: #0087af; color: #ffffff; border: solid #ffffff; }
+Button.-primary:focus { background: #00005f; color: #ffffff; border: solid #ffffff; }
+
+RadioSet { background: #1c1c1c; border: solid #005f87; color: #e4e4e4; }
+RadioSet:focus { border: solid #ffffff; }
+ToggleButton { background: #1c1c1c; color: #e4e4e4; border: solid #005f87; }
+ToggleButton > .toggle--button { color: #005f87; background: #1c1c1c; }
+ToggleButton.-on > .toggle--button { color: #87ff87; background: #1c1c1c; }
+ToggleButton:focus { background: #00005f; border: solid #ffffff; }
+ToggleButton:focus > .toggle--label { color: #ffffff; background: #00005f; }
+
+Header { background: #005f87; color: #ffffff; }
+Footer { background: #1c1c1c; color: #e4e4e4; }
+"""
+
+
+class InfoModal(ModalScreen):
+    """Description-only modal - Gateway/DNS/Internet/provider rows.
+    No config form: entering provider credentials is not something
+    Baseline does on the operator's behalf."""
+    BINDINGS = [Binding("escape", "close_modal", "Close", show=True)]
+    CSS = MODAL_CSS + """
+    InfoModal { align: center middle; }
+    #dialog {
+        width: 60; height: auto; padding: 1 2;
+        border: thick #005f87;
+        background: #1c1c1c;
+        color: #e4e4e4;
+    }
+    #dialog Button { margin-top: 1; }
+    #modal_title { color: #ffffff; text-style: bold; }
+    """
+
+    def __init__(self, title: str, body: str):
+        super().__init__()
+        self._title = title
+        self._body = body
+
+    def compose(self) -> ComposeResult:
+        # markup=False: title/body are real collected data (interface
+        # names, error text, subprocess output), not markup we authored -
+        # anything in there that looks like "[...]" (e.g. a Python
+        # "[Errno -2] ..." message, or inxi's "[400 TB]") would otherwise
+        # raise MarkupError and crash the whole app (Textual's Static/
+        # Label parse content as markup by default; any unhandled
+        # exception is fatal to the app, confirmed in Textual's own
+        # _handle_exception).
+        yield Header(show_clock=True)
+        with Vertical(id="dialog"):
+            yield Label(self._title, id="modal_title", markup=False)
+            yield Static(self._body, markup=False)
+            yield Button("Close", id="close")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
+
+    def action_close_modal(self) -> None:
+        self.dismiss()
+
+
+class ConnectionModal(ModalScreen):
+    """A physical interface's modal - everything about this device in one
+    place instead of sending the operator to cross-reference the Hardware
+    tab by hand: manufacturer/model/connection-type/driver (bridged in
+    from network.device_details(), which reads udev's own hardware
+    database - works for onboard PCI and USB-dock/tether devices alike),
+    a renameable alias, a real Enable/Disable switch, its Primary/
+    Fallback role as a genuine toggle (RadioSet - Up/Down/Left/Right
+    between the two, Enter/Space to pick), and, when this is the device
+    actually carrying the lifeline right now, its exact position in that
+    NIC->driver->carrier->address->gateway->DNS->internet->LLM chain.
+
+    Nothing here is applied on change alone - (s) Save and Close commits
+    whatever was edited (alias/power/role, whichever changed) in one
+    step; (esc) Close without saving discards all of it and leaves the
+    device untouched. No TabbedContent in this modal (Tab already means
+    "close and reopen the next tab pane" at the App level), so this one
+    doesn't fight that - Tab cycles its own fields (Input -> Switch ->
+    RadioSet -> buttons) via the same "no TabbedContent found -> fall
+    back to normal focus order" path InfoModal already uses."""
+    BINDINGS = [
+        Binding("escape", "close_modal", "Close without saving", show=True),
+        Binding("s", "save_and_close", "Save and Close", show=True),
+        Binding("left", "prev_button", "", show=False),
+        Binding("right", "next_button", "", show=False),
+    ]
+    CSS = MODAL_CSS + """
+    ConnectionModal { align: center middle; }
+    #dialog {
+        width: 64; height: 28; padding: 1 2;
+        border: thick #005f87;
+        background: #1c1c1c;
+        color: #e4e4e4;
+    }
+    #dialog Label { margin-top: 1; color: #87d7ff; }
+    #dialog Input { border: solid #005f87; background: #000000; color: #e4e4e4; }
+    #dialog Input:focus { border: solid #ffffff; }
+    .power_row { height: auto; align: left middle; }
+    .power_row Label { margin-top: 0; margin-right: 1; }
+    Switch { background: #1c1c1c; border: solid #005f87; }
+    Switch:focus { border: solid #ffffff; }
+    Switch > .switch--slider { color: #005f87; background: #000000; }
+    Switch.-on > .switch--slider { color: #87ff87; background: #000000; }
+    #dialog RadioSet { margin-top: 0; width: auto; }
+    #dialog Horizontal { height: auto; }
+    #dialog Button { margin-top: 1; margin-right: 1; }
+    #modal_title { color: #ffffff; text-style: bold; }
+    """
+
+    def __init__(self, ifname: str, friendly: str, status_line: str, facts: list, is_active_device: bool):
+        super().__init__()
+        self.ifname = ifname
+        self.friendly = friendly
+        self.status_line = status_line
+        self.facts = facts
+        # Not named is_active - Screen already has a read-only property
+        # of that name (whether *this screen* is the topmost active one).
+        self.is_active_device = is_active_device
+        self._admin_up_at_open = True
+
+    def _lifeline_text(self) -> str:
+        if not self.is_active_device or not self.facts:
+            return "Not currently carrying the lifeline. Available as an alternate path (see Role above)."
+        fact_map = {f["fact"]: f for f in self.facts}
+        lines = []
+        for key, label in LIFELINE_STAGE_LABELS:
+            f = fact_map.get(key)
+            if f is None:
+                lines.append(f"-  {label}: not reached")
+            else:
+                mark = "OK" if f["ok"] else "FAIL"
+                lines.append(f"{mark}  {label}: {f['detail']}")
+        return "\n".join(lines)
+
+    def compose(self) -> ComposeResult:
+        # markup=False on every raw-data widget, same reasoning as
+        # InfoModal. #modal_result keeps markup on (default) since it's
+        # genuinely styled by us - its dynamic parts get escape_markup()'d
+        # at the point they're interpolated instead.
+        details = network.device_details(self.ifname)
+        self._admin_up_at_open = network.is_admin_up(self.ifname)
+        alias = network.load_aliases().get(self.ifname, "")
+
+        identity = [f"Device: {self.ifname}"]
+        if details.get("manufacturer"):
+            identity.append(f"Manufacturer: {details['manufacturer']}")
+        if details.get("chipset_vendor") and details["chipset_vendor"] != details.get("manufacturer"):
+            identity.append(f"Chipset: {details['chipset_vendor']}")
+        if details.get("model"):
+            identity.append(f"Model: {details['model']}")
+        identity.append(f"Connection: {details.get('connection', 'unknown')}")
+        identity.append(f"Driver: {details.get('driver', 'unknown')}")
+
+        pref = netpref.load_preference()
+        yield Header(show_clock=True)
+        with VerticalScroll(id="dialog"):
+            yield Label(self.friendly, id="modal_title", markup=False)
+            yield Static("\n".join(identity), markup=False)
+            yield Static(self.status_line, markup=False)
+            yield Label("Alias (blank = default name):")
+            yield Input(value=alias, placeholder=self.friendly, id="alias_input")
+            with Horizontal(classes="power_row"):
+                yield Label("Enabled:")
+                yield Switch(value=self._admin_up_at_open, id="power_switch")
+            yield Label("Role:")
+            with RadioSet(id="role_set"):
+                yield RadioButton("Primary", id="role_primary", value=(pref.get("primary") == self.ifname))
+                yield RadioButton("Fallback", id="role_fallback", value=(pref.get("fallback") == self.ifname))
+            yield Label("Lifeline position:")
+            yield Static(self._lifeline_text(), markup=False, id="lifeline_text")
+            yield Static("", id="modal_result")
+            with Horizontal():
+                yield Button("Save and Close", id="save", variant="primary")
+                yield Button("Close without saving", id="close")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            self.action_save_and_close()
+        else:
+            self.dismiss()
+
+    def action_close_modal(self) -> None:
+        self.dismiss()
+
+    def action_prev_button(self) -> None:
+        self.screen.focus_previous()
+
+    def action_next_button(self) -> None:
+        self.screen.focus_next()
+
+    def action_save_and_close(self) -> None:
+        alias_value = self.query_one("#alias_input", Input).value
+        power_on = self.query_one("#power_switch", Switch).value
+        pressed = self.query_one("#role_set", RadioSet).pressed_button
+        role = pressed.id if pressed is not None else None
+        self.query_one("#modal_result", Static).update("[cyan]Saving...[/cyan]")
+        self.run_save_and_close(alias_value, power_on, role)
+
+    @work(thread=True, exit_on_error=False)
+    def run_save_and_close(self, alias_value: str, power_on: bool, role: str | None) -> None:
+        messages = []
+        failed = False
+
+        try:
+            network.save_alias(self.ifname, alias_value)
+        except OSError as exc:
+            failed = True
+            messages.append(f"alias: {exc}")
+
+        if power_on != self._admin_up_at_open:
+            ok, detail = network.set_admin_state(self.ifname, power_on)
+            messages.append(detail)
+            failed = failed or not ok
+
+        if role == "role_primary":
+            ok, detail = netpref.apply_primary(self.ifname)
+            messages.append(detail)
+            failed = failed or not ok
+        elif role == "role_fallback":
+            try:
+                netpref.save_preference(fallback=self.ifname)
+            except OSError as exc:
+                failed = True
+                messages.append(str(exc))
+
+        style = "red" if failed else "green"
+        summary = "; ".join(messages) if messages else "Nothing changed."
+        self.app.call_from_thread(self.query_one("#modal_result", Static).update, f"[{style}]{escape_markup(summary)}[/{style}]")
+        self.app.call_from_thread(self.app.collect_network)
+        if not failed:
+            # Only dismiss on success - a failure (e.g. "could not
+            # determine gateway") must stay visible, not vanish with the
+            # modal, or the operator has no way to see what went wrong.
+            self.app.call_from_thread(self.dismiss)
+
+
+class HardwareModal(ModalScreen):
+    """Any hardware row's modal - Details is real data (every scalar
+    field inxi reported for that item). Description/Troubleshooting/Logs/
+    Configuration are placeholders: the data to fill them (per-device
+    docs, known-fix notes, a real log source, an actual config action)
+    hasn't been determined yet, so they say that honestly rather than
+    faking content.
+
+    BINDINGS carries "escape" -> close: this modal's own TabbedContent
+    (Details/Description/.../Configuration) absorbs every Tab press to
+    cycle its five panes, so Tab alone can never reach the Close button -
+    Escape is the only reliable, always-available way out. "s" is the
+    other exit: Save and Close. There's nothing to save yet - the
+    Configuration tab is still a placeholder with no real fields - so
+    right now it behaves the same as Escape. It's wired up so that once
+    Configuration grows real editable fields, this is the one place that
+    needs to change to persist them; the keybinding itself doesn't need
+    to wait for that."""
+    BINDINGS = [
+        Binding("escape", "close_modal", "Close without saving", show=True),
+        Binding("s", "save_and_close", "Save and Close", show=True),
+        Binding("left", "prev_button", "", show=False),
+        Binding("right", "next_button", "", show=False),
+    ]
+    CSS = MODAL_CSS + """
+    HardwareModal { align: center middle; }
+    #hw_dialog {
+        width: 74; height: 22; padding: 1 2;
+        border: thick #005f87;
+        background: #1c1c1c;
+        color: #e4e4e4;
+    }
+    #hw_dialog TabbedContent { height: 1fr; }
+    #hw_dialog TabPane { padding: 1 0; }
+    #hw_dialog Button { margin-top: 1; margin-right: 1; }
+    #hw_modal_title { color: #ffffff; text-style: bold; }
+    """
+
+    def __init__(self, group: str, label: str, fields: dict):
+        super().__init__()
+        self.group = group
+        self.label = label
+        self.fields = fields
+
+    def compose(self) -> ComposeResult:
+        # markup=False throughout: group/label/fields are real inxi data,
+        # not markup we authored. inxi's own SMART output literally
+        # contains things like "written-units: ... [400 TB]" - Textual's
+        # Static/Label parse content as markup by default, and that
+        # "[400 TB]" is exactly the kind of text its stricter markup
+        # parser raises MarkupError on (confirmed live) - which, being an
+        # unhandled exception, is always fatal to the whole app.
+        yield Header(show_clock=True)
+        with Vertical(id="hw_dialog"):
+            yield Label(f"{self.group}: {self.label}", id="hw_modal_title", markup=False)
+            with TabbedContent():
+                with TabPane("Details"):
+                    try:
+                        text = "\n".join(f"{k}: {v}" for k, v in self.fields.items()) or "(no fields reported)"
+                    except Exception as exc:
+                        _log_ui_error("HardwareModal.compose:Details", exc)
+                        text = "(could not render details for this item)"
+                    yield Static(text, markup=False)
+                with TabPane("Description"):
+                    yield Static("No description configured yet for this item.")
+                with TabPane("Troubleshooting"):
+                    yield Static("No troubleshooting guidance configured yet for this item.")
+                with TabPane("Logs"):
+                    yield Static("No log source wired up yet for this item.")
+                with TabPane("Configuration"):
+                    yield Static("No configuration actions defined yet for this item.")
+            with Horizontal():
+                yield Button("Save and Close", id="save", variant="primary")
+                yield Button("Close without saving", id="close")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            self.action_save_and_close()
+        else:
+            self.dismiss()
+
+    def action_close_modal(self) -> None:
+        self.dismiss()
+
+    def action_prev_button(self) -> None:
+        self.screen.focus_previous()
+
+    def action_next_button(self) -> None:
+        self.screen.focus_next()
+
+    def action_save_and_close(self) -> None:
+        # Nothing editable exists yet (Configuration is still a
+        # placeholder) - once it holds real fields, persist them here
+        # before dismissing.
+        self.dismiss()
 
 
 class BaselineApp(App):
-    TITLE = "BASELINE"
-    SUB_TITLE = "System ready"
+    TITLE = "BaselineOS"
+    SUB_TITLE = "starting..."
     CSS = """
-    Screen { background: $surface; }
-    DataTable { height: 1fr; }
-    #chat_log { height: 1fr; border: solid $accent; }
-    #chat_input { dock: bottom; }
-    .toolbar { height: 3; }
+    Screen { background: #000000; color: #e4e4e4; }
+    DataTable { height: 1fr; border: solid #0087af; }
+    /* DataTable's header is painted as a Rich text style, not a boxed
+    widget - "border-bottom" has no effect on it (Textual silently drops
+    unsupported component-class properties). "underline" is the closest
+    real separator line available here: it renders across the whole
+    header row, including the padding between columns. */
+    DataTable > .datatable--header,
+    #hw_table > .datatable--header,
+    #net_table > .datatable--header {
+        background: #005f87;
+        color: #ffffff;
+        text-style: bold underline;
+    }
+    /* Cursor highlight only shows once the table genuinely has focus -
+    not immediately on switching tabs, so it can't be mistaken for "this
+    row is active" before the operator has actually navigated into it. */
+    #hw_table:focus > .datatable--cursor,
+    #net_table:focus > .datatable--cursor {
+        background: #00005f;
+        color: #ffffff;
+    }
+    DataTable > .datatable--odd-row {
+        background: #1c1c1c;
+        color: #e4e4e4;
+    }
+    DataTable > .datatable--even-row {
+        background: #000000;
+        color: #e4e4e4;
+    }
+    #chat_log { height: 1fr; border: solid #0087af; }
+    #chat_input, #console_input { dock: bottom; }
+    #console_log { height: 1fr; border: solid #0087af; }
+    .toolbar { height: 3; align: left middle; }
+    .toolbar Static { margin-right: 2; content-align: left middle; }
+    Tab.-active { color: #ffffff; text-style: bold; }
+    Underline > .underline--bar { color: #00005f; background: #00005f; }
     """
-    BINDINGS = [("q", "quit", "Quit")]
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("r", "manual_refresh", "Refresh"),
+        ("t", "run_tether", "Tether"),
+        ("i", "toggle_hardware_ids", "Toggle IDs"),
+        ("p", "return_to_proxmox", "Proxmox"),
+        # priority=True: Screen binds "tab" to focus-cycling by default,
+        # which would otherwise win over this since it's more specific
+        # than an App-level binding. Priority bindings are checked from
+        # the App down, before that normal (widget-up) resolution.
+        Binding("tab", "next_tab", "Next Tab", priority=True),
+        # Not priority: DataTable already binds "down" itself (its own
+        # row-cursor movement) and widget-level bindings are checked
+        # before this bubbles up - so this only actually fires when
+        # nothing more specific claims "down", e.g. focus is on the tab
+        # bar rather than inside a table. Down is the primary way to
+        # enter a table from the tab bar.
+        Binding("down", "focus_tab_content", "", show=False),
+        # Fallback, not a replacement for Down: a bare TERM=linux console
+        # doesn't always deliver arrow-key escape sequences reliably, so
+        # Shift+Tab (a much simpler, more universally-supported sequence)
+        # does the exact same "enter the table" action as a backup when
+        # Down doesn't land. priority=True because Screen's own default
+        # "shift+tab" -> focus_previous would otherwise win first and
+        # walk focus backward instead.
+        Binding("shift+tab", "focus_tab_content", "", show=False, priority=True),
+    ]
+
+    show_hardware_ids = False
+    current_harness = "claude"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with TabbedContent(initial="hardware_tab"):
             with TabPane("Hardware", id="hardware_tab"):
-                with Horizontal(classes="toolbar"):
-                    yield Button("Refresh", id="hw_refresh", variant="primary")
-                yield DataTable(id="hw_table")
+                yield DataTable(id="hw_table", cursor_type="row")
             with TabPane("Network", id="network_tab"):
-                with Horizontal(classes="toolbar"):
-                    yield Button("Refresh", id="net_refresh", variant="primary")
-                    yield Button("Tether", id="net_tether", variant="warning")
-                yield DataTable(id="net_table")
+                yield DataTable(id="net_table", cursor_type="row")
             with TabPane("Chat", id="chat_tab"):
+                with Horizontal(classes="toolbar"):
+                    yield Static("Harness:")
+                    yield Select(
+                        [(h["name"] + ("" if h["implemented"] else " (not implemented)"), h["id"]) for h in providers.HARNESSES],
+                        value="claude", id="harness_select", allow_blank=False,
+                    )
                 yield Log(id="chat_log")
                 yield Input(placeholder="Ask Baseline...", id="chat_input")
+            with TabPane("Console", id="console_tab"):
+                yield RichLog(id="console_log", markup=True, wrap=True)
+                yield Input(placeholder="hardware | network | tether | ask <question> | help | exit", id="console_input")
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#hw_table", DataTable).add_columns("Field", "Value")
-        self.query_one("#net_table", DataTable).add_columns("Stage", "Status", "Detail")
-        self.refresh_hardware()
-        self.refresh_network()
+        self.query_one("#hw_table", DataTable).add_columns("Group", "Field", "Value")
+        self.query_one("#net_table", DataTable).add_columns("Group", "Connections", "Status", "Detail")
+        self.collect_hardware()
+        self.collect_network()
+        self.set_interval(NETWORK_AUTOREFRESH_SECONDS, self.collect_network)
+        self.query_one("#console_log", RichLog).write("Baseline console. Type 'help' for commands.")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "hw_refresh":
-            self.refresh_hardware()
-        elif event.button.id == "net_refresh":
-            self.refresh_network()
-        elif event.button.id == "net_tether":
-            self.run_tether()
+    def action_manual_refresh(self) -> None:
+        self.collect_hardware()
+        self.collect_network()
+
+    def action_run_tether(self) -> None:
+        self.run_tether()
+
+    def action_toggle_hardware_ids(self) -> None:
+        self.show_hardware_ids = not self.show_hardware_ids
+        self.collect_network()
+
+    def action_return_to_proxmox(self) -> None:
+        # tty2, not a Textual concept - a real switch of the physical
+        # console's active virtual terminal. systemd-logind auto-starts
+        # a getty there on first switch (confirmed live: chvt 2 alone
+        # is enough, no separate unit to enable/start by hand). Baseline
+        # keeps running on tty1 underneath; this doesn't stop or affect
+        # it, it just stops being the visible console until switched
+        # back (see /etc/profile.d/baseline-return.sh for the return
+        # trip, installed by provision.sh).
+        subprocess.run(["chvt", "2"], check=False)
+
+    def _active_tabbed_content(self):
+        # "tab" is bound with priority=True so it's checked App-down
+        # before a modal gets a chance to handle its own Tab key - query
+        # the *topmost* screen's TabbedContent, not always the main app's,
+        # so a modal with its own tabs (HardwareModal) gets real Tab
+        # cycling instead of silently reaching behind itself.
+        try:
+            return self.screen.query_one(TabbedContent)
+        except NoMatches:
+            return None
+
+    @_safe
+    def action_next_tab(self) -> None:
+        tabbed = self._active_tabbed_content()
+        if tabbed is None:
+            if len(self.screen_stack) > 1:
+                self.screen.focus_next()
+            return
+        pane_ids = [pane.id for pane in tabbed.query(TabPane)]
+        if not pane_ids:
+            return
+        current = tabbed.active
+        idx = pane_ids.index(current) if current in pane_ids else -1
+        tabbed.active = pane_ids[(idx + 1) % len(pane_ids)]
+        # Switching panes leaves focus on whatever was focused in the old
+        # pane, which just went invisible - Textual doesn't reassign it,
+        # so self.focused becomes None. Down and Shift+Tab both require
+        # focus to be on the tab bar specifically (action_focus_tab_content
+        # checks isinstance(self.focused, Tabs)), so a stale/None focus
+        # silently breaks both entering a table with Down *and* the
+        # Shift+Tab fallback - exactly what landing on a fresh tab with
+        # nothing usably focused looks like. Always put focus back on the
+        # tab bar after switching, matching the state at initial app start.
+        try:
+            tabbed.query_one(Tabs).focus()
+        except NoMatches:
+            pass
+
+    @_safe
+    def action_focus_tab_content(self) -> None:
+        # The tab bar's focused widget is a Tabs (ContentTabs) instance,
+        # not an individual Tab - checking for Tab here always failed,
+        # which is why Down never left the tab bar.
+        if not isinstance(self.focused, Tabs):
+            return
+        tabbed = self._active_tabbed_content()
+        if tabbed is None:
+            return
+        pane = tabbed.get_pane(tabbed.active)
+        target = pane.query("DataTable, Input")
+        if target:
+            target.first().focus()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "harness_select":
+            self.current_harness = event.value
+            chosen = next(h for h in providers.HARNESSES if h["id"] == event.value)
+            log = self.query_one("#chat_log", Log)
+            if chosen["implemented"]:
+                log.write_line(f"[switched to {chosen['name']}]")
+            else:
+                log.write_line(f"[{chosen['name']} is not implemented yet - staying on Claude Code until it is]")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id != "chat_input" or not event.value.strip():
+        if event.input.id == "chat_input":
+            self._handle_chat_input(event.value)
+        elif event.input.id == "console_input":
+            self._handle_console_input(event.value)
+
+    def _handle_chat_input(self, value: str) -> None:
+        if not value.strip():
             return
-        question = event.value.strip()
-        event.input.value = ""
+        question = value.strip()
+        self.query_one("#chat_input", Input).value = ""
         log = self.query_one("#chat_log", Log)
         log.write_line(f"> {question}")
+        chosen = next(h for h in providers.HARNESSES if h["id"] == self.current_harness)
+        if not chosen["implemented"]:
+            log.write_line(f"[{chosen['name']} has no adapter yet - see baseline/lib/harness.py to add one]")
+            log.write_line("")
+            return
         self.ask_harness(question)
 
-    def refresh_hardware(self) -> None:
-        table = self.query_one("#hw_table", DataTable)
-        table.clear()
+    def _handle_console_input(self, value: str) -> None:
+        if not value.strip():
+            return
+        line = value.strip()
+        self.query_one("#console_input", Input).value = ""
+        console = self.query_one("#console_log", RichLog)
+        console.write(f"[bold]baseline>[/bold] {line}")
+        if line in ("exit", "quit"):
+            self.exit()
+        elif line == "help":
+            console.write("commands: hardware, network, tether, ask <question>, exit")
+        elif line == "hardware":
+            self.run_console_hardware()
+        elif line == "network":
+            self.run_console_network()
+        elif line == "tether":
+            self.run_console_tether()
+        elif line.startswith("ask "):
+            self.run_console_ask(line[4:].strip())
+        else:
+            console.write(f"unknown command: {line!r} (try 'help')")
+
+    # -- Console: the exact pre-TUI command set and Rich-table output. --
+    @work(thread=True, exit_on_error=False)
+    def run_console_hardware(self) -> None:
         raw, err = hardware.collect()
+        console = self.query_one("#console_log", RichLog)
         if err:
-            table.add_row("error", err)
+            self.call_from_thread(console.write, f"[hardware] collection failed: {err}")
             return
         current = hardware.normalize(raw)
+        previous = None
+        if SNAPSHOT_PATH.exists():
+            try:
+                previous = json.loads(SNAPSHOT_PATH.read_text())
+            except (json.JSONDecodeError, OSError):
+                previous = None
+        table = Table(title="Hardware", show_header=True, header_style="bold cyan")
+        table.add_column("Field")
+        table.add_column("Value")
         table.add_row("System", f"{current['machine']['system']} ({current['machine']['type']})")
         table.add_row("CPU", f"{current['cpu']['model']} x{current['cpu']['cores']}")
         table.add_row("Memory", f"{current['memory']['total']} total, {current['memory']['used']} used")
         table.add_row("Kernel", f"{current['system']['kernel']} ({current['system']['distro']})")
+        self.call_from_thread(console.write, table)
+        if previous is None:
+            self.call_from_thread(console.write, "[yellow](no prior snapshot - this boot is the baseline)[/yellow]")
+        elif previous == current:
+            self.call_from_thread(console.write, "[green](unchanged since last snapshot)[/green]")
+        else:
+            self.call_from_thread(console.write, "[yellow](hardware differs from last snapshot)[/yellow]")
         SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
         SNAPSHOT_PATH.write_text(json.dumps(current, indent=2))
 
-    def refresh_network(self) -> None:
-        table = self.query_one("#net_table", DataTable)
-        table.clear()
-        for f in network.check_lifeline():
+    @work(thread=True, exit_on_error=False)
+    def run_console_network(self) -> None:
+        facts = network.check_lifeline()
+        console = self.query_one("#console_log", RichLog)
+        table = Table(title="Lifeline Networking", show_header=True, header_style="bold cyan")
+        table.add_column("Stage")
+        table.add_column("Status")
+        table.add_column("Detail")
+        for f in facts:
             status = "[green]OK[/green]" if f["ok"] else "[red]FAIL[/red]"
             table.add_row(f["fact"], status, f["detail"])
+        self.call_from_thread(console.write, table)
+        if facts and not facts[-1]["ok"]:
+            self.call_from_thread(console.write, f"[red]Stopped at:[/red] {facts[-1]['fact']} - everything upstream of this is fine.")
+        elif facts:
+            self.call_from_thread(console.write, "[green]Lifeline fully up: hardware -> network -> LLM provider all reachable.[/green]")
 
-    @work(thread=True)
+    @work(thread=True, exit_on_error=False)
+    def run_console_tether(self) -> None:
+        console = self.query_one("#console_log", RichLog)
+        self.call_from_thread(console.write, "[cyan]Looking for a tethered device (USB phone)...[/cyan]")
+        result = tether.auto_tether()
+        if result["stage"] == "no_candidate":
+            self.call_from_thread(console.write, f"[red]No tether device found:[/red] {result['detail']}")
+            return
+        self.call_from_thread(console.write, f"Trying: {result.get('interface', '?')} (candidates seen: {', '.join(result.get('candidates', [])) or 'none'})")
+        if result["ok"]:
+            self.call_from_thread(console.write, f"[green]Tether up:[/green] {result['interface']} -> {result['address']} ({result['detail']})")
+            self.call_from_thread(console.write, "[cyan]Re-checking lifeline...[/cyan]")
+            self.run_console_network()
+            self.call_from_thread(self.collect_network)
+        else:
+            self.call_from_thread(console.write, f"[red]FAIL ({result['stage']}):[/red] {result['detail']}")
+
+    @work(thread=True, exit_on_error=False)
+    def run_console_ask(self, question: str) -> None:
+        answer = harness.ask(question)
+        self.call_from_thread(self.query_one("#console_log", RichLog).write, answer)
+
+    # -- Hardware: collection happens off the UI thread, since `inxi`
+    # can take real time and must never freeze button clicks/typing. --
+    # Each gets its own exclusive *group* - exclusive=True cancels every
+    # other worker in the same group, and both defaulted to Textual's
+    # shared "default" group. on_mount() (and manual refresh) call
+    # collect_hardware() immediately followed by collect_network(); that
+    # second call was silently cancelling the hardware worker before its
+    # thread body ever ran, which is why the Hardware tab stayed empty.
+    @work(thread=True, exclusive=True, group="hardware", exit_on_error=False)
+    def collect_hardware(self) -> None:
+        raw, err = hardware.collect()
+        if err:
+            self.call_from_thread(self._render_hardware_error, err)
+            return
+        current = hardware.normalize(raw)
+        inventory = hardware.full_inventory(raw)
+        SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SNAPSHOT_PATH.write_text(json.dumps(current, indent=2))
+        self.call_from_thread(self._render_hardware, inventory)
+
+    @_safe
+    def _render_hardware(self, inventory: list) -> None:
+        table = self.query_one("#hw_table", DataTable)
+        table.clear()
+        self._hw_rows_by_key = {}
+        for i, item in enumerate(inventory):
+            key = f"hw:{i}"
+            self._hw_rows_by_key[key] = item
+            try:
+                table.add_row(escape_markup(item["group"]), escape_markup(item["label"]),
+                               escape_markup(item["detail"]), key=key)
+            except Exception as exc:
+                _log_ui_error(f"_render_hardware row {key!r}", exc)
+
+    @_safe
+    def _render_hardware_error(self, err: str) -> None:
+        table = self.query_one("#hw_table", DataTable)
+        table.clear()
+        table.add_row("error", "collection failed", escape_markup(err))
+
+    # -- Network: same off-thread treatment; also drives the header
+    # subtitle so lifeline status is visible from any tab. --
+    @work(thread=True, exclusive=True, group="network", exit_on_error=False)
+    def collect_network(self) -> None:
+        facts = network.check_lifeline()
+        interfaces = network.list_interfaces()
+        provider_states = providers.check_providers()
+        self.call_from_thread(self._render_network, facts, interfaces, provider_states)
+
+    @_safe
+    def _render_network(self, facts: list, interfaces: list, provider_states: list) -> None:
+        fact_map = {f["fact"]: f for f in facts}
+        rows = []  # (key, category, label, status, detail)
+        self._last_facts = facts
+        self._active_display_dev = None
+
+        active_dev = None
+        active_members = set()
+        addr_fact = fact_map.get("address_assigned")
+        if addr_fact and addr_fact["ok"] and ":" in addr_fact["detail"]:
+            active_dev, ip = (p.strip() for p in addr_fact["detail"].split(":", 1))
+            active_members.add(active_dev)
+            brif = Path("/sys/class/net") / active_dev / "brif"
+            try:
+                active_members.update(p.name for p in brif.iterdir())
+            except OSError:
+                pass
+            display_dev = next((m for m in active_members if m != active_dev), active_dev)
+            self._active_display_dev = display_dev
+            # "Active" - the one connection actually carrying the lifeline
+            # right now, not just "Reachable" like a passing check - no
+            # ambiguity about which path is in use. IP and traffic shown
+            # right on this row, not just in the modal - the two things
+            # an operator glancing at the main page needs most.
+            traffic = network.interface_traffic_label(display_dev)
+            detail = f"{ip} | {traffic}" if traffic else ip
+            rows.append((f"iface:{display_dev}", "Network", network.friendly_name(display_dev, self.show_hardware_ids), "Active", detail))
+
+        for stage, label in (("gateway_reachable", "Gateway"), ("dns_functioning", "DNS"), ("internet_reachable", "Internet")):
+            f = fact_map.get(stage)
+            if f is not None:
+                rows.append((f"info:{label}", "Network", label, "Reachable" if f["ok"] else "Unreachable", f["detail"]))
+
+        for iface in interfaces:
+            if iface["name"] in active_members:
+                continue
+            name = network.friendly_name(iface["name"], self.show_hardware_ids)
+            if iface["carrier"]:
+                traffic = network.interface_traffic_label(iface["name"])
+                rows.append((f"iface:{iface['name']}", "Network", name, "Available", traffic or "connected, not in use"))
+            elif iface["wired"]:
+                # A wired link with no carrier is truly physically
+                # disconnected - no command can fix that, so it's
+                # Unreachable, not just "available if you try".
+                rows.append((f"iface:{iface['name']}", "Network", name, "Unreachable", "not physically connected"))
+            else:
+                # Wi-Fi / Cellular Modem / Phone Tether can lack carrier
+                # simply because nothing has associated yet - a recoverable
+                # state, not a dead one.
+                rows.append((f"iface:{iface['name']}", "Network", name, "Available", "not connected"))
+
+        claude = next((p for p in provider_states if p["name"] == "Claude Subscription"), None)
+        if claude:
+            status = "Reachable" if claude["state"] in ("reachable", "available") else "Unreachable"
+            rows.append((f"info:{claude['name']}", "AI Provider", claude["name"], status, claude["detail"]))
+        for p in provider_states:
+            if p is claude:
+                continue
+            rows.append((f"info:{p['name']}", "AI Provider", p["name"], "Unreachable", p["detail"]))
+
+        self._net_rows_by_key = {key: (label, status, detail) for key, _cat, label, status, detail in rows}
+
+        def sort_key(row):
+            _key, category, _label, status, _detail = row
+            return (CATEGORY_ORDER.index(category), STATUS_ORDER.index(status))
+
+        table = self.query_one("#net_table", DataTable)
+        table.clear()
+        for key, category, label, status, detail in sorted(rows, key=sort_key):
+            style = STATUS_STYLE[status]
+            try:
+                table.add_row(escape_markup(category), escape_markup(label),
+                               f"[{style}]{status}[/{style}]", escape_markup(detail), key=key)
+            except Exception as exc:
+                # One bad row (e.g. a subprocess/OSError message like
+                # "[Errno 113] No route to host" reaching here unescaped)
+                # must not leave the whole table blank - table.clear()
+                # already ran, so a crash here previously meant every row
+                # after it silently never got added.
+                _log_ui_error(f"_render_network row {key!r}", exc)
+
+        if facts and facts[-1]["ok"]:
+            self.sub_title = "online - lifeline up"
+        elif facts:
+            self.sub_title = f"offline - stopped at {facts[-1]['fact']}"
+
+    @_safe
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        key = event.row_key.value
+        if key is None:
+            return
+        if event.data_table.id == "hw_table":
+            item = getattr(self, "_hw_rows_by_key", {}).get(key)
+            if item:
+                self.push_screen(HardwareModal(item["group"], item["label"], item["fields"]))
+            return
+        if event.data_table.id != "net_table":
+            return
+        if key not in getattr(self, "_net_rows_by_key", {}):
+            return
+        label, group, detail = self._net_rows_by_key[key]
+        if key.startswith("iface:"):
+            ifname = key.split(":", 1)[1]
+            is_active = ifname == getattr(self, "_active_display_dev", None)
+            facts = getattr(self, "_last_facts", [])
+            self.push_screen(ConnectionModal(ifname, label, f"Status: {group}\n{detail}", facts, is_active))
+        else:
+            self.push_screen(InfoModal(label, f"Status: {group}\n\n{detail}"))
+
+    @work(thread=True, exit_on_error=False)
     def run_tether(self) -> None:
         tether.auto_tether()
-        self.call_from_thread(self.refresh_network)
+        self.call_from_thread(self.collect_network)
 
-    @work(thread=True)
+    @work(thread=True, exit_on_error=False)
     def ask_harness(self, question: str) -> None:
         answer = harness.ask(question)
         self.call_from_thread(self._write_chat, answer)

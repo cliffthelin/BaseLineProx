@@ -35,6 +35,9 @@ cp "$SRC/baseline/bin/baseline-auth-setup.sh" /opt/baseline/bin/baseline-auth-se
 cp "$SRC/baseline/lib/hardware.py" /opt/baseline/lib/hardware.py
 cp "$SRC/baseline/lib/network.py" /opt/baseline/lib/network.py
 cp "$SRC/baseline/lib/harness.py" /opt/baseline/lib/harness.py
+cp "$SRC/baseline/lib/netpref.py" /opt/baseline/lib/netpref.py
+cp "$SRC/baseline/lib/providers.py" /opt/baseline/lib/providers.py
+cp "$SRC/baseline/lib/tether.py" /opt/baseline/lib/tether.py
 chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh
 
 echo "=== Installing systemd unit (Baseline takes over tty1) ==="
@@ -42,6 +45,15 @@ cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 systemctl daemon-reload
 systemctl disable --now getty@tty1.service
 systemctl enable --now baseline.service
+
+echo "=== Installing the Proxmox<->BaselineOS return command ==="
+# The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
+# login console); this installs the 'baseline' shell command that
+# switches back, so the round trip works both directions.
+cp "$SRC/boot/baseline-return.sh" /etc/profile.d/baseline-return.sh
+
+echo "=== Verifying tty1 console font ==="
+bash "$SRC/tests/console_font_check.sh"
 
 echo
 echo "Done. Baseline owns tty1. Auth is not yet configured - run"
