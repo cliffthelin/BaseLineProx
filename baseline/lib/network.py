@@ -170,10 +170,17 @@ def check_lifeline():
         record("gateway_reachable", False, "no default gateway in routing table")
         return facts
     gw_ok, gw_detail = _tcp_probe(gw, 1, timeout=2.0)
-    # a gateway may not have port 1 open; fall back to a ping-style reachability
+    # a gateway may not have port 1 open; fall back to a ping-style reachability,
+    # explicitly bound to the device we picked (-I dev). Without this, a second
+    # interface sharing the gateway's subnet (e.g. a dead bridge still holding a
+    # stale same-subnet address) can win the kernel's route lookup for that
+    # specific destination even though the *default* route correctly named a
+    # different, live device - found live during the V0.1 bare-metal test, see
+    # docs/BAREMETAL_BRINGUP_NOTES.md.
     if not gw_ok:
         try:
-            ping = subprocess.run(["ping", "-c", "1", "-W", "2", gw], capture_output=True, timeout=5)
+            ping = subprocess.run(["ping", "-c", "1", "-W", "2", "-I", dev, gw],
+                                   capture_output=True, timeout=5)
             gw_ok = ping.returncode == 0
             gw_detail = "" if gw_ok else "no ping reply"
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
