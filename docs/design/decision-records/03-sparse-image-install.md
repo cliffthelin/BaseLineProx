@@ -212,3 +212,65 @@ target.img3 1050624 33554398 32503775  15.5G  Linux LVM
 ## Whether Investigation 4 is unblocked
 
 **No, not on this run's evidence** — corrected from the original "Yes." This run's outcome is `install_outcome_indeterminate` (see correction above), and an indeterminate install outcome cannot unblock a boot-verification investigation that depends on there being a genuinely installed system to boot. See the **Addendum** below for a corrected rerun that captures the actual final screen and provides a real basis for this determination.
+
+---
+
+## Addendum: corrected rerun with adequate screen-capture discipline
+
+Date: 2026-09-20 (same day, later run)
+
+### What was different this time
+
+Same pipeline (`run_final.sh`, unmodified — no new code written for this rerun, per instruction not to build additional frameworks for what is fundamentally a capture-discipline fix), same `guestfwd` networking, same answer-server/credential/wrapper logic already verified in the body of this record. Two changes only:
+1. **`-no-reboot` removed** from the QEMU invocation, so a successful install's own reboot happens for real (QEMU stays alive) instead of terminating the process at exactly the moment the interesting evidence appears.
+2. **Screendumps taken every 10 seconds** (via the QEMU monitor socket, `screendump` → PPM → PNG) starting immediately after boot, instead of one dump at an arbitrarily chosen t=90s.
+
+### Result: `install_success_confirmed`
+
+The t=90s capture (tick 9) shows the installer's own explicit, unambiguous completion sequence — not inferred from any indirect signal:
+
+```
+INFO: progress  99.0 % - make system bootable
+INFO: progress 100.0 % - installation finished
+INFO: Finished: 'ok' Installation finished - auto rebooting in 5 seconds ..
+INFO: Finished: 'ok' Installation finished - auto rebooting in 4 seconds ..
+INFO: Finished: 'ok' Installation finished - auto rebooting in 3 seconds ..
+INFO: Finished: 'ok' Installation finished - auto rebooting in 2 seconds ..
+INFO: Finished: 'ok' Installation finished - auto rebooting in 1 seconds ..
+INFO: Installation done.
+No post-installation-webhook configured; skipping
+Installation done, rebooting...
+Terminate all remaining processes
+Kill any remaining processes
+unmounting ISO
+/sys                    : ignored
+/proc                   : ignored
+/dev                    : ignored
+/cdrom                  : successfully unmounted
+/                       : ignored
+eject: cannot open /dev/sr0: Device or resource busy
+rebooting - please remove the ISO boot media
+```
+
+This is the installer's own self-reported `'ok'` completion state, not QEMU's exit code, not partition-table inference, not disk usage — exactly the class of evidence the instruction required and the original record lacked.
+
+The `eject: cannot open /dev/sr0` line and subsequent "please remove the ISO boot media" are expected, benign messages — QEMU's virtual CD-ROM doesn't support the eject call the installer environment attempts, so the ISO remained attached across the reboot. Consequence, also captured directly at tick 12 (t=120s): the reboot brought the automated-installer boot menu back up and it began re-running against the already-installed disk a second time (visible from `-boot d` still preferring the CD, and the installer's own log lines repeating from "searching for block device containing the ISO" onward) — **this is a test-harness artifact of not removing/detaching the ISO for the reboot, not a second install failure**, and is exactly why real deployments are told to remove the boot media before reboot. It was not chased further, consistent with the instruction not to build additional test scope here — reaching an actual post-install login screen under a real boot configuration (no installer ISO attached, fresh NVRAM) is Investigation 4's job, not this correction's.
+
+### Cleanup and shutdown
+
+The second QEMU instance was stopped with a clean HMP `quit` via the monitor socket (not `kill -9`) once the success screen was captured and the harmless installer-reboot-loop was understood — this is not the "normal shutdown of the running Proxmox system" Investigation 4 will need to perform (there was no running Proxmox system yet in this session; the disk had rebooted back into the installer, not into itself), but it is a clean stop of the QEMU process itself.
+
+### Outcome classification for this record, per the three states requested
+
+- **Original run (t=90s single-sample, `-no-reboot`)**: `install_outcome_indeterminate` — stands as corrected above. Not `install_failed` (no failure screen was ever captured) and not confirmed success (no explicit completion screen was captured; the inference from `-no-reboot` exit + partition table was invalid).
+- **This rerun**: `install_success_confirmed` — the installer's own `'ok'` / "Installation done" / 100% completion sequence was captured directly and unambiguously.
+
+### What this does and doesn't establish
+
+Confirmed: the automated-install pipeline (answer server, `guestfwd` networking, credential handling, wrapper) can and did drive a real Proxmox VE 9.2-1 installation to the installer's own self-reported successful completion, at least once, reproducibly using the same unmodified code as the original (indeterminate) attempt.
+
+Not established by this rerun, and explicitly left to Investigation 4: whether the resulting disk actually boots into a running Proxmox system under fresh OVMF NVRAM with no installer ISO attached, what a real login screen looks like, how long that takes, or whether a normal shutdown from within the installed system succeeds. The image produced by this rerun was deleted after this evidence was captured (same cleanup discipline as the rest of this investigation — large artifacts don't persist in the gitignored workspace once their evidence is recorded); Investigation 4, when authorized, will regenerate a fresh image from this same proven pipeline rather than reusing a stored one, since regeneration takes on the order of 2 minutes and is now a known-reliable operation.
+
+### Whether Investigation 4 is unblocked — final answer for this record
+
+**Yes, on this corrected evidence** — but per explicit instruction, Investigation 4 does not begin until the user has seen this addendum (including the success screenshot) and agrees the installation succeeded.
