@@ -1,28 +1,192 @@
 # Decision record: Answer-file and credential behavior
 
-Date: pending
+Date: 2026-09-20
 Investigator: Claude Code
-Status: not started
+Status: complete
 
-**Carried forward from Investigation 1**: `prepare-iso --fetch-from http` is an officially documented mode where the booted installer fetches the answer file via an HTTPS POST at boot time (optionally pinned via `--cert-fingerprint`), rather than embedding it in the ISO. This should be evaluated as the primary secret-delivery design before falling back to `--fetch-from iso`. `root-password-hashed` is confirmed real and accepted by `validate-answer`. See [01-assistant-iso-feasibility.md](01-assistant-iso-feasibility.md).
+**Carried forward from Investigation 1**: `prepare-iso --fetch-from http` is an officially documented mode where the booted installer fetches the answer file via an HTTPS POST at boot time. `root-password-hashed` is confirmed real and accepted by `validate-answer`. This investigation determines whether HTTP mode is actually safer, given the answer file also controls destructive install behavior (target disk).
 
-## Evidence collected
-(pending)
+## Correction to Investigation 1's trust-anchor description
 
-## Result
-(pending)
+Per review: the Proxmox archive keyring is the actual trust anchor for everything downstream, and its acquisition deserves explicit, not incidental, documentation. Recorded here for the record:
 
-## Remaining uncertainty
-(pending)
+- **Keyring URL**: `https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg`, fetched over TLS.
+- **TLS cert presented by `enterprise.proxmox.com`**: `CN=enterprise.proxmox.com`, issued by Let's Encrypt (`C=US, O=Let's Encrypt, CN=YR1`), SHA256 fingerprint `19:A6:35:2F:8A:75:16:CF:BB:36:A4:99:F5:2E:51:75:2A:93:40:B1:E4:21:E4:DC:57:1B:D3:5E:90:DD:AA:17`.
+- **GPG key actually used for verification** ("Proxmox Trixie Release Key"): fingerprint `24B3 0F06 ECC1 836A 4E5E FECB A7BC D142 0BFE 778E`, matching the `gpgv` output from Investigation 1 exactly.
+- Plain HTTP was used **only** for artifacts (`Release`, `Packages`, the `.deb`) verified against this already-TLS-acquired key — never for the key itself. This is the correct model and is restated here explicitly rather than left implicit.
+- On the "Ubuntu officially supported as an execution host" qualification: confirmed correct — nothing found this investigation changes it. The assistant runs on this host because its dynamic library dependencies happen to be satisfied by Ubuntu 26.04.1, not because Proxmox documents or supports Ubuntu as an execution environment. This remains an *observed compatibility*, not a support claim, and should be re-verified on every future Ubuntu/library update rather than assumed permanent.
 
-## Accepted / rejected approach
-(pending)
+## Constraints observed
+
+Synthetic, high-entropy canary values only — no real Baseline credentials, handoff passphrases, or API tokens were used anywhere in this investigation. No installer was booted. No block device was written to. All work in `experiments/m0-inv1/` and `experiments/m0-inv1/inv2/` (gitignored). Every prepared ISO and leftover temp artifact generated during testing was deleted after its contents were inspected and recorded — not committed, not left lying around with embedded canary secrets any longer than needed for inspection.
+
+**Methodology correction, caught by review**: the hash canary was initially generated with `openssl passwd -6 -salt canhashsaltXYZ "CANARY_FOR_HASH_9i8u7y6t5r4e"` — the plaintext as a **positional CLI argument**, which is exactly the argv-exposure pattern this investigation's own findings later condemn. This was a synthetic canary, so nothing sensitive actually leaked, but the methodology itself modeled the wrong pattern while checking for it. Corrected and re-verified:
+
+```
+$ PW='CANARY_FOR_HASH_9i8u7y6t5r4e'
+$ openssl passwd -6 -salt canhashsaltXYZ -stdin <<< "$PW"
+$6$canhashsaltXYZ$HHrmbSW45rhm7OlZybGwHQN.wSuSMVn..5UVGN7YGRg6HEwYPArRNwIagZ/RHjqaAsImA2K2JZMIVcE.GiJPZ/
+```
+Identical hash to the original (confirming reproducibility, not just a different value), produced via bash's `<<<` herestring redirection rather than an `echo`/`printf` subprocess — a herestring is a shell-level redirection, not a subprocess invocation, so `openssl`'s own argv contains only `passwd -6 -salt canhashsaltXYZ -stdin`, never the plaintext. (A direct live `/proc/<pid>/cmdline` capture was attempted to confirm this empirically but raced against the process's own sub-millisecond runtime and sampled after exit — inconclusive by itself, but the construction argument above is sufficient: no subprocess call in this pipeline ever received the plaintext as an argument, by inspection of the exact commands run.) All later hash-generation in this investigation used the corrected form. This is the pattern Milestone 1's actual hash-generation code must use — never `openssl passwd -6 <password>`.
+
+## 1. The credential contract
+
+**Schema**: `global.root-password` (plaintext) and `global.root-password-hashed` (pre-hashed) are mutually exclusive — confirmed by direct test, not just documentation:
+
+```
+$ validate-answer (both set)   -> "root-password and root-password-hashed cannot be set at the same time"
+$ validate-answer (neither set) -> "One of root-password or root-password-hashed must be set"
+```
+
+**Hash algorithm validation: none at parse time.** Tested MD5 (`$1$`), a bcrypt-shaped string (`$2b$...`), and an arbitrary non-hash string in `root-password-hashed` — **all three passed `validate-answer` with no error.** The field is stored and forwarded as an opaque string; nothing in the assistant tool validates it's a real, strong hash. This means Baseline is fully responsible for generating a correct, sufficiently strong hash itself (SHA-512 `$6$`, high iteration count, via a controlled generator — `openssl passwd -6` was used successfully in this investigation's own testing) — the tool provides no safety net here, and a malformed hash would only be discovered at real install time (untested this investigation; deferred to Milestone 1/2's actual boot).
+
+**How the hash is generated without plaintext in argv/env/logs/history**: not the assistant's concern — it only *consumes* an already-hashed string from the TOML file. The generation step is entirely Baseline's own responsibility and needs its own careful implementation (e.g. `openssl passwd -6` reads the password via a prompt or `-stdin`, never as a bare CLI argument — this needs to be the actual invocation pattern used in Milestone 1, not `openssl passwd -6 mypassword`, which would put it in argv).
+
+**Does validation or ISO preparation reproduce the hash/password in output?**
+- `validate-answer` (no `-d`): no, output is just "parsed successfully, no errors found" or a specific error line — no credential echoed. Confirmed via canary test, zero matches.
+- `validate-answer -d` (debug): **yes, both fields, unredacted.** Full canary values appeared verbatim in captured stdout for both the plaintext-password variant and the hashed-password variant (the earlier session's report that the hash canary didn't appear was a grep-pattern error on my part — it does appear; corrected here). **`-d` must never be used against a real answer file in any code path whose output could be logged, captured, or displayed without explicit secret-handling.** This is a concrete, load-bearing finding for §7's "no secret leaks via debug/error output" requirement — Baseline's own tooling should never invoke `-d` in production, and if a debug mode is ever offered to a human operator interactively, its output must be treated as secret-bearing.
+- `prepare-iso`'s own progress output: no credential echoed (confirmed, canary search on `prepare-iso-mode.log`/`prepare-http-mode.log` — clean).
+- `inspect-iso`: **actively redacts** — displayed `root-password-hashed = "<redacted>"` and `HTTP auth token: <redacted>` in its own human-readable summary. This is a genuinely good design choice on Proxmox's part and worth matching in Baseline's own "show me the script" tooling.
+- **The raw prepared ISO itself**: contains the hash in fully recoverable, `grep`-able plaintext form (`--fetch-from iso` mode) — confirmed by direct byte search (`grep -a -c "canhashsaltXYZ" prepared-iso-mode.iso` → 1 match). `inspect-iso`'s redaction is a *display* courtesy only; it does not mean the underlying ISO is safe to hand to someone untrusted.
+
+**Plaintext option**: `root-password` exists and works. **Baseline can and should categorically refuse to use it** — nothing about the schema requires it; `root-password-hashed` is a fully sufficient, equally supported alternative, and there is no reason for Baseline's own tooling to ever construct a `root-password`-bearing answer file.
+
+**Length/character constraints**: minimum 8 characters enforced on plaintext `root-password` (`` `global.root-password` must be at least 8 characters long `` — confirmed by direct test with an empty string). A 400-character random plaintext password was accepted with no upper bound encountered. **No constraint of any kind on `root-password-hashed`**, consistent with it being unvalidated (see above) — Baseline's own hash generator is the only place length/strength actually gets enforced.
+
+**Exit code caveat (non-security, but load-bearing for Milestone 1 tooling)**: every `validate-answer` invocation this investigation returned **exit code 0**, including all four deliberately-invalid answer files (both-set, neither-set, empty password, etc.) — errors are only reported via stdout text (`Error: Found issues in the answer file.` plus a specific message line), never via a non-zero exit status. **Any Baseline code that calls `validate-answer` must parse stdout for the literal string `Error:`, not trust `$?`.** This is exactly the kind of assumption `test_answer_file.py` (PRD §8.1) needs to encode as a regression test.
+
+**Forced first-boot rotation before remote access — stronger than expected.** The answer file's `[first-boot]` section supports an `ordering` field with three values (confirmed via official documentation, not just the `--help` text): `before-network` (runs before any network device is configured at all), `network-online` (after connectivity is up), `fully-up` (default, normal running system). **`before-network` gives a structural guarantee, not a race-prone one**: if no network device is configured yet, there is no possible avenue for remote SSH/password authentication to occur concurrently — the guarantee comes from the absence of networking, not from any locking mechanism the tool would otherwise need to provide (and doesn't). This directly answers the question: **yes**, forced rotation of a one-time credential can be enforced before any remote authentication is possible, by staging the rotation script via `--on-first-boot` with `ordering = "before-network"`.
+
+## 2. Answer delivery modes compared
+
+| | Embedded (`--fetch-from iso`) | HTTP (`--fetch-from http`) |
+|---|---|---|
+| **Where the answer data exists** | Inside the prepared ISO file itself, as a plaintext-readable `answer.toml` (confirmed: `inspect-iso` reads it back out; raw byte `grep` finds the hash directly in the ISO). | Not in the ISO. The ISO carries only the fetch configuration: URL, optional cert fingerprint, optional auth token. The actual answer content only exists transiently, in the booted installer's memory, for the duration of one HTTP POST/response — **this part was not directly observed** (would require booting the installer, out of scope this investigation) but is consistent with the source review of `proxmox-fetch-answer`, which does not write the response body to disk (only the cert fingerprint gets written, to `/tmp/cert_fingerprint`, inside the installer's own ephemeral environment). |
+| **How long it persists** | For the life of the ISO file — indefinitely, until the ISO is deleted. | Only for the duration of one boot's fetch-and-install sequence, on the answer server's side and in the installer's transient memory — not observed directly this investigation. |
+| **What remains after success, failure, or cancellation** | The prepared ISO, unchanged, still carries the embedded answer (including the hash) regardless of whether an install using it ever succeeds. | Not observed directly (no boot performed). By source inspection, nothing writes the answer body to persistent storage in the fetch client itself. |
+| **Appears in the prepared ISO?** | Yes — confirmed directly, full `answer.toml` recoverable via both `inspect-iso` and raw byte search. | No answer content — confirmed via raw byte search (zero matches for the hostname/fqdn canary). **But the auth token, if supplied via `--answer-auth-token`, does appear in the ISO in fully recoverable plaintext form** — confirmed directly (`grep -a -c` found the canary session token in the http-mode ISO, 1 match). This is a materially important finding: the mechanism whose name implies "authentication" provides **no confidentiality for its own credential** against anyone who has the prepared ISO. Its only real value is against a passive network observer or an opportunistic/generic server that never sees the ISO — not against a threat model where the ISO itself might be exposed. |
+| **Appears in logs/process state/temp files?** | No credential in `prepare-iso`'s own stdout/stderr on success; `prep-tmp` staging directory was empty after a successful run. **On induced failure (permission-denied output path), a fully-prepared, credential-bearing 1.7GB `.tmp` file was left behind in the staging directory** — see §7 below, tested directly, not assumed. | Same tooling-level observations for the prepare step. Fetch-time behavior (during an actual boot) not observed. |
+| **Availability dependencies** | None beyond the ISO itself existing — fully self-contained, works with no network at install time. | Requires the answer server to be reachable at install time; DNS/HTTP(S)/possibly DHCP-option or DNS-TXT discovery all introduce availability dependencies an embedded ISO doesn't have. |
+| **Replay and substitution risk** | The *file itself* can be tampered with by anyone who can modify the ISO before it's used — but that's the same risk surface as tampering with the installer ISO generally, and outside this mechanism's own threat model. | **This is the mechanism the review specifically flagged, and the finding confirms the concern is real**: see §3/§4 below — the official client provides transport authenticity (via cert pinning) but no session-binding, no single-use enforcement, and no proof the response is fresh rather than replayed. Whatever protects against a substituted/replayed answer directing the installer at the wrong disk has to be built by Baseline, not assumed from the protocol. |
+| **Cleanup behavior** | None needed beyond normal file deletion of the prepared ISO once used — but see the ISO's own sensitivity (§7.1 of the PRD; the credential is in there for as long as the file exists). | Nothing persistent to clean up on the fetch-client side, by source inspection; the answer-server side (which Baseline would build) needs its own explicit session-expiry/cleanup design — see §4. |
+
+**Correcting the instruction's framing check**: the review was right not to let "HTTP retrieval is automatically safer" stand unexamined. It's safer *for keeping the answer content out of the ISO* — clearly demonstrated above. It is **not** automatically safer *for authenticity of what gets installed*, because the official mechanism's authentication primitives (cert pinning, bearer token) don't, by themselves, prevent a correctly-authenticated server from returning a stale, substituted, or wrong-target answer — that requires binding logic neither client nor protocol provides.
+
+## 3. What `--fetch-from http` actually means (from official source, not paraphrase)
+
+Verified directly against Proxmox's own source (`proxmox-fetch-answer/src/fetch_plugins/http.rs` and `proxmox-installer-common/src/http.rs`, `github.com/proxmox/pve-installer`, `master` branch at time of check):
+
+- **Protocol/method**: HTTP **POST**, not GET. The POST body is JSON containing system-identification data (per the wiki: DMI fields — system/baseboard/chassis — network interface MAC addresses). This is not a static-file fetch; the server is expected to be able to generate a per-machine answer dynamically.
+- **HTTPS is not structurally required by the client.** The URL scheme is whatever the operator configures via `--url`; nothing in the reviewed source rejects a plain `http://` URL. (A real-world example found during research literally uses `http://192.168.48.1:4080/...`.) **Correcting an earlier, imprecise summary from this investigation's own preliminary web research**: "HTTPS is required" was not accurate — HTTPS is *supported and recommended*, with strong pinning available when used, but the mode name `http` does not mean "always HTTPS," and Baseline's own tooling must never assume TLS is in effect just because `--fetch-from http` was selected — the actual configured URL's scheme is the only thing that determines it, and Baseline must construct that URL as `https://` explicitly and verify it did so, never infer it from the mode name.
+- **Certificate validation**: via the `ureq` HTTP client library (confirmed from source). Two mutually exclusive modes: default is the platform's system certificate store (`ureq::tls::RootCerts::PlatformVerifier`); if `--cert-fingerprint` is supplied, that **replaces** default CA validation entirely with a custom verifier that accepts only a certificate matching the given SHA256 fingerprint. Fingerprint pinning is not additive to CA trust — it's a full substitute for it, which is the correct and expected behavior for this use case (a self-signed, purpose-built answer server has no business being CA-trusted anyway).
+- **Fingerprint delivery**: via `--cert-fingerprint` at ISO-prep time, via DHCP option 251, or via a DNS TXT record at `proxmox-auto-installer-cert-fingerprint.{search-domain}` — the latter two only used if the URL itself was *also* discovered via the matching DHCP/DNS method (not mixed-and-matched, per the docs and consistent with the source's discovery logic).
+- **Redirects**: no explicit redirect handling found in the reviewed fetch code; default `ureq` behavior would apply if unconfigured. Not confirmed with certainty from the excerpts available — flagged as a remaining unknown, not asserted.
+- **Timeout/retry**: a global 60-second timeout is set (`GLOBAL_TIMEOUT: Duration = Duration::from_secs(60)`, applied via `.timeout_global(...)`), confirmed directly from source. No retry logic observed in the reviewed code.
+- **Maximum response size**: **not strictly bounded** — the source contains the client's own developer comment: `"read_to_string limits the size to 10 MB, should be increase that?"`, i.e. Rust's `read_to_string` imposes a de facto ~10MB ceiling, called out in the source itself as possibly needing to change. Should not be treated as a hard, permanent guarantee.
+- **System/hardware facts transmitted**: yes, sent unconditionally as the POST body when using HTTP fetch mode — DMI (system/baseboard/chassis) and network interface MAC addresses, per the wiki example and consistent with the `AnswerFetchData { sysinfo: sysinfo::get()? }` structure found in source. `validate-answer` itself can show what this payload would contain, per the wiki ("display the identifying information that will be sent").
+- **Can the response vary based on those facts?** Yes — that's the documented purpose of sending them (dynamic, per-machine answer generation is explicitly the point of this mode).
+- **How the installer authenticates the server**: TLS + cert-fingerprint pinning when configured (strong, if used); otherwise ordinary CA trust (weak for a purpose-built private server, since any CA-trusted cert would be accepted) or, if plain HTTP is configured, **no server authentication of any kind**.
+- **How/whether the server authenticates the installer session**: optional static bearer token (`Authorization: Bearer <name>:<secret>`) if `--answer-auth-token` was set at prep time. This is the *only* authentication of the client to the server the official mechanism offers, and per §2's finding, that token is itself embedded recoverably in the prepared ISO — so it authenticates "possessor of this ISO," which is a much weaker property than it sounds like, and is **not itself a defense against the answer-substitution concern in §4**, since anyone who legitimately possesses the ISO already has the token.
+
+## 4. Treating the answer file as an authorization artifact
+
+Confirmed directly and concretely, not hypothetically: `inspect-iso`'s own output on the `--fetch-from iso` test ISO shows `[disk-setup] disk-list = ["sda"]` as a plain, unauthenticated (beyond whatever protects the ISO itself) field controlling exactly which disk gets destroyed. In HTTP mode, that same field would come from whatever the answer server returns — **and per §3, the official client provides no session-binding, no single-use enforcement, and no freshness/replay proof beyond whatever the transport-level cert-pinning and optional static bearer token provide.** The review's concern is confirmed as real, not speculative.
+
+**What a safe network-delivery design requires, and what the official mechanism does vs. doesn't provide out of the box:**
+
+| Requirement | Provided by the official mechanism? | Notes |
+|---|---|---|
+| HTTPS | Supported, not enforced by mode name (§3) | Baseline must construct an explicit `https://` URL and verify it did. |
+| Pinned certificate / authenticated server identity | **Yes**, via `--cert-fingerprint`, strong when used | This is the one piece the official mechanism does well — use it always, never fall back to CA trust for a private per-session server. |
+| One-time unguessable session identifier | **No** — nothing built in | Must be built by Baseline: encode a high-entropy, single-use token into the `--url` path itself (e.g. `https://<host>:<port>/answer/<session-id>`), since the URL is the only per-session value the client sends structurally. |
+| Short expiry | **No** — nothing built in | Must be enforced server-side: Baseline's own answer server (which we would write) rejects any request after a short TTL from ISO-prep time. |
+| Single successful retrieval | **No** — nothing built in | Must be enforced server-side: the answer server invalidates the session identifier after the first successful response, refusing any subsequent request for the same session. |
+| Binding to the intended installation/session | **Partially, via sysinfo** — the POST body includes DMI/MAC data (§3) | Baseline's answer server should cross-check this against the operator-confirmed target identity (from the GUI's drive-selection step) **before** returning a real answer — refusing to answer at all if the reported hardware facts don't match what the operator selected. This is the strongest binding available and it's server-side logic Baseline has to write; the client doesn't enforce it. |
+| Refusal after replay or mismatch | **No** — nothing built in | Same as above: entirely the responsibility of Baseline's own answer server. |
+| Isolated / host-only networking where practical | **N/A to the mechanism itself**, but fully compatible | Nothing prevents running the answer server on a QEMU host-only or otherwise non-globally-reachable network for the duration of the install — this is an environmental control Baseline applies around the mechanism, not something the mechanism provides or requires. |
+| No broadly reachable answer server | Same as above | Operational discipline, not a protocol feature. |
+
+**Bottom line**: the official HTTP mechanism supplies real transport authenticity (cert pinning) but essentially none of the session-lifecycle/replay/binding protections the review correctly identified as necessary given the answer file's power to select a destructive target. All of those have to be built as a thin, purpose-specific answer server that Baseline controls end-to-end — this is not a case of "reject the official mechanism," it's a case of "the official mechanism is a necessary but not sufficient layer; Baseline's own server supplies the rest."
+
+## 5. Canary-leak testing — results
+
+Canaries planted: a plaintext-password canary (`CANARY_PLAINTEXT_...`), a password-hash canary (`openssl passwd -6` of a distinct synthetic string, distinguishable salt `canhashsaltXYZ`), a hostname/FQDN canary (`canary-host-4b7e91f2.example.invalid`), and an answer-session/token canary (`canary-session-token-9d2f1a7c3e`, used as the bearer-token secret).
+
+| Marker | `validate-answer` (plain) | `validate-answer -d` | `prepare-iso` progress log | `inspect-iso` display | Raw bytes of prepared ISO |
+|---|---|---|---|---|---|
+| Plaintext password | not found | **found, verbatim** | not found | n/a (not embedded field in hashed test) | n/a |
+| Password hash | not found | **found, verbatim** | not found | shown as `<redacted>` | **found, verbatim** (`--fetch-from iso` only) |
+| Hostname/FQDN | not found (plain), found (debug, expected — it's not secret) | found | not found | shown in full (not secret) | found (`--fetch-from iso` only), **not found** (`--fetch-from http` — confirms no answer content embedded) |
+| Session/auth token | n/a to validate-answer (only used at prepare-iso time) | n/a | not found | shown as `<redacted>` | **found, verbatim** (embedded in the http-mode ISO despite the mode being chosen specifically to avoid embedding sensitive material) |
+
+No canary was found in process environment dumps (none of the tooling used environment variables for any of these fields in the tested code paths) or in any file outside `experiments/m0-inv1/inv2/`. No canary-bearing argument was found in `validate-answer`'s or `prepare-iso`'s own subprocess argv for the *answer content* (it travels via file path arguments, not inline values) — **except** `--answer-auth-token`, which was passed as a literal CLI argument in this investigation's own test invocation, exactly mirroring how it would appear in real usage: **this field structurally cannot avoid appearing in argv/process-listing/shell-history at ISO-preparation time**, unlike `root-password`/`root-password-hashed`, which travel through the answer-file argument (a path, not a value). All raw output containing the plaintext/hash canaries stayed inside `experiments/m0-inv1/inv2/` (gitignored) and was not committed; the two large prepared ISOs were deleted after inspection.
+
+## 6. Required decision
+
+**Provisional delivery model: Authenticated ephemeral HTTPS retrieval — but built by Baseline around the official mechanism, not simply "turn on `--fetch-from http`."**
+
+Specifically:
+- Use `--fetch-from http` with an explicitly-constructed `https://` URL (never inferred from the mode name).
+- Always use `--cert-fingerprint` pinning — never fall back to CA trust for what is, functionally, a private single-use server.
+- Encode a high-entropy, single-use session identifier in the URL path itself, minted at GUI-driven ISO-prep time.
+- Build a small, Baseline-owned answer server that: enforces a short TTL from prep time; enforces single successful retrieval (invalidates the session ID immediately after one response); cross-checks the POST's reported DMI/MAC facts against the operator-confirmed target identity from the GUI's drive-selection step (PRD §5.1) before returning a real answer, refusing otherwise; runs only on an isolated/host-only network for the duration of the install, never broadly reachable.
+- **Do not use `--answer-auth-token` for anything security-relevant** — it travels through argv at prep time (conflicting with the PRD §7 "no secrets in argv" requirement) and is embedded recoverably in the prepared ISO regardless (confirmed this investigation), so it provides no real confidentiality against anyone who has the ISO. The session-identifier-in-URL approach above already provides everything this token would have, without the argv exposure, and is equally exposed-in-the-ISO by design (which is fine — the URL's job is to be presented, not to be secret; its protection comes from single-use + short TTL + hardware-fact binding, not from confidentiality).
+- Generate `root-password-hashed` with a Baseline-controlled, high-entropy, one-time credential — never a hash of an ordinary user-chosen password — exactly matching the review's instruction, since the hash format itself is unvalidated by the tool (§1) and enables offline guessing if weak.
+- Stage a forced-rotation `--on-first-boot` script with `ordering = "before-network"`, giving a structural (not race-prone) guarantee that the one-time credential is rotated before any remote authentication is possible.
+
+**What this protects against**: a passive network observer, DNS spoofing or a MITM without the pinned certificate's private key, a generic/opportunistic server responding to a misdirected request, and — via the hardware-fact binding Baseline adds — a response being applied to a machine other than the one the operator actually confirmed in the GUI.
+
+**What this does not protect against, and must be stated plainly rather than implied**: an attacker who already possesses the prepared ISO gets the cert fingerprint, the session-identifier URL, and (if ever used) the auth token — none of those are secret once the ISO is out. Confidentiality of the *installation-triggering configuration* is not this design's job; its job is authenticity and single-use-ness of the *answer content itself*, which remains protected because the ISO carries no answer content in HTTP mode (§2) and the server refuses to serve it more than once or to a mismatched machine. If the ISO itself needs to be treated as sensitive for other reasons (it still contains the fingerprint/URL/hostname of a real deployment), that's a PRD §7.1 concern, not resolved by this decision.
+
+**What Investigation 3 (offline staging containment, per the reordering this session's instructions used — the "what does --fetch-from http mean" and "treat answer file as authorization artifact" items were folded into this investigation rather than kept separate) may rely on**: the credential contract from §1 (hash-only, `before-network` first-boot rotation), and the answer-server design sketch from §4/§6 as the target for a real prototype — not yet built or tested end-to-end against a booted installer. That prototype, and confirmation that `ordering = "before-network"` behaves as documented in practice, is Milestone 1/2 work, not resolved by this investigation.
+
+## 7. Additional verification requested by review
+
+**Source ISO checksum and verification authority.** `proxmox-ve_9.2-1.iso`, SHA256 `4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c` (1,706,178,560 bytes), confirmed identical across four independent sources: the download page's inline value, `http://download.proxmox.com/iso/proxmox-ve_9.2-1.iso.sha256`, `http://download.proxmox.com/iso/SHA256SUMS`, and this session's own `sha256sum` of the locally-downloaded file. **Stronger than what was established in Investigation 1 or earlier this session**: `http://download.proxmox.com/iso/SHA256SUMS.asc` exists and is a real **detached GPG signature** over `SHA256SUMS`, not just a plaintext checksum file. Verified directly:
+```
+$ gpg --homedir <isolated-temp-dir> --no-default-keyring --keyring ./proxmox-archive-keyring-trixie.gpg --verify SHA256SUMS.asc
+gpg: Signature made ... using RSA key 24B30F06ECC1836A4E5EFECBA7BCD1420BFE778E
+gpg: Good signature from "Proxmox Trixie Release Key <proxmox-release@proxmox.com>"
+```
+Same key fingerprint as the one used for the package repository's `Release` file in Investigation 1 — one trust anchor covers both. This closes a gap from earlier in the session, where the ISO checksum was trusted from the plaintext `.sha256` file/page value alone without a GPG signature backing it; that plaintext value is now independently corroborated by a properly signed source.
+
+**Prepared ISO checksums.**
+- `--fetch-from iso` mode (hashed canary embedded): SHA256 `d257c7ffcc5b54aeb18ebd27a29ff8091b5363632de128f584b70c9625a35efb`, 1,707,278,336 bytes.
+- `--fetch-from http` mode (URL/fingerprint/token only): SHA256 `d851795f2fdab6c40ec238aaaa5491bc37f8a3125b01fe75991304ce673e5488`, 1,706,885,120 bytes.
+- (Both regenerated using the argv-safe hash from §-correction above; both deleted after checksumming and inspection, not retained.)
+
+**Exact size differences from source (1,706,178,560 bytes):**
+- `--fetch-from iso`: **+1,099,776 bytes** (the embedded `answer.toml` plus ISO structure overhead for adding it).
+- `--fetch-from http`: **+706,560 bytes** (smaller — only the fetch configuration, no answer content, consistent with §2's finding).
+
+**Every location containing the plaintext canary vs. the hash canary** (consolidating and correcting the earlier table, which had one grep-pattern false negative):
+- Plaintext canary (`CANARY_PLAINTEXT_...`): found **only** in `validate-answer -d` stdout, for the answer file that used plaintext `root-password`. Not found anywhere else — not in non-debug output, not in any prepared ISO (the plaintext-password answer file was never used as input to `prepare-iso` in this investigation), not in `prep-tmp`, not in logs.
+- Hash canary (`$6$canhashsaltXYZ$...`): found in `validate-answer -d` stdout (hashed-variant answer file); found in the `--fetch-from iso`-mode prepared ISO's raw bytes (`grep -a -c` → 1 match) and in `inspect-iso`'s structured dump of that ISO (unredacted in the raw-byte case, `<redacted>` only in `inspect-iso`'s own human-readable display); found in the **leftover `.tmp` file from the induced permission-denied failure** (see below) — a location not previously identified. Not found in the `--fetch-from http`-mode ISO (no answer content embedded, per §2).
+- Session/token canary: found in the `--fetch-from http`-mode prepared ISO's raw bytes (embedded auth token, per §2/§5) and in `inspect-iso`'s dump (shown as `<redacted>` there specifically).
+
+**`prep-tmp` cleanup — success vs. simulated failure, both actually tested this pass:**
+- **Success** (both modes): `prep-tmp` empty afterward — confirmed on four separate successful runs across this investigation.
+- **Simulated failure A — corrupted/truncated source ISO** (first 50MB of the real ISO only): `prepare-iso` detected this and refused before writing anything (`Error: The source ISO file is not able to be installed automatically.`); `prep-tmp` empty, no partial output file created. Clean failure.
+- **Simulated failure B — output path made unwritable** (`chmod 555` on the destination directory, forcing failure at the final move step, after the ISO was fully staged): **`prep-tmp` was left holding a complete, 1,707,278,336-byte, credential-bearing `.tmp` file** (confirmed via `grep -a -c` on the leftover file: the hash canary was present, 1 match) — `Error: Permission denied (os error 13)` was the only signal, and nothing removed the staged file automatically. **This is a direct, concrete confirmation of the PRD's "failure may leave things behind" concern** — not hypothetical. Milestone 1's containment/cleanup design (PRD §5.8) must explicitly handle this: a failed `prepare-iso` run can leave a fully-formed, secret-bearing ISO-sized temp file in the staging directory, and nothing in the tool itself cleans it up.
+- **Cross-cutting finding**: both simulated failures, like every `validate-answer` failure earlier in this investigation, returned **exit code 0**. The exit-code-doesn't-reflect-failure pattern from §1 extends to `prepare-iso` itself, not just `validate-answer` — any Baseline wrapper around either command must treat stdout text (`Error:`) as the only reliable failure signal.
+
+**Is the embedded answer file recoverable by someone possessing the prepared ISO?** **Yes, trivially — no special tooling required.** Demonstrated two independent ways: Proxmox's own `inspect-iso` reads it back out directly, and a bare `grep -a` against the raw ISO file finds the hash in plain, unencoded text with no ISO-parsing tooling at all. Anyone who obtains a `--fetch-from iso`-mode prepared ISO has the root password hash, full stop — this is not a theoretical risk, it was reproduced directly.
+
+**Is SHA-512 crypt merely accepted, or recommended/required?** **Merely accepted — confirmed via the exact wiki text**, which only says `root-password-hashed` is "the pre-hashed password ... written verbatim to `/etc/passwd`" and "can be generated using the `mkpasswd` tool, for example" — no algorithm is named, recommended, or required anywhere in the official documentation, consistent with §1's direct finding that MD5, a bcrypt-shaped string, and arbitrary non-hash text all pass validation equally. **Note the "written verbatim to `/etc/passwd`" detail**: whatever format Baseline chooses must be a format the *installed system's own* libc/PAM stack can authenticate against at login time (untested this investigation — no boot performed). SHA-512 (`$6$`) is a reasonable choice on general Linux crypt(3)-compatibility grounds (broadly supported across glibc versions, including Debian trixie) — **this is general platform knowledge, not something this investigation verified against the actual installed Proxmox/Debian-trixie system**, and should be confirmed against a real post-install login in Milestone 1/2, not assumed from this research alone. Separately, `--verify-root-password` (mentioned only in `--help`, absent from the wiki) was tested and **requires an interactive terminal** — it refused cleanly under `< /dev/null` (`Error: Verifying the root password requires an interactive terminal.`, again exit code 0) — confirming it's a human-facing convenience check, not usable in Baseline's non-interactive automation path.
 
 ## Security implications
-(pending)
+
+- `validate-answer -d` is a genuine secret-leak vector if ever invoked against a real answer file in any logged/captured context — treat as forbidden in production code paths.
+- `root-password-hashed` has zero format validation from the tool — Baseline's hash generator is the sole guarantor of hash quality/correctness; a bug there fails silently at `validate-answer` time and would only surface at real-install time (untested this investigation).
+- `--answer-auth-token` is not a meaningful confidentiality boundary (embedded in the ISO regardless) and forces argv exposure — excluded from the accepted design.
+- The prepared ISO, in `--fetch-from iso` mode, is confirmed to contain the root password hash in raw recoverable form — this concretely confirms PRD §7.1's "prepared ISO is itself sensitive" concern and is direct evidence for preferring the HTTP-based design over embedded-ISO mode as the default.
+- `exit code 0` on validation failure means any automation around `validate-answer` must parse output text, not trust exit status — a correctness bug here could silently proceed with an invalid answer file. This same pattern was confirmed on `prepare-iso` failures too (§7), so it's a property of this tool family generally, not one subcommand.
+- A failed `prepare-iso` run (tested directly: an unwritable output path) leaves a complete, credential-bearing, ISO-sized `.tmp` file in the staging directory with no automatic cleanup — Milestone 1's offline-staging containment design (PRD §5.8) must treat `prepare-iso`'s own temp/staging directory as something Baseline's tooling has to clean up itself on every exit path, not something the tool guarantees.
 
 ## Tests added
-(pending)
 
-## Next milestone unblocked?
-Not yet evaluated.
+None yet (research investigation). Findings here directly inform, for Milestone 1: `test_answer_file.py` (stdout-text-based error detection, not exit code; hash-field format is Baseline's own responsibility to validate before ever calling this tool), `test_secret_handling.py` (assert `-d` is never invoked in any production code path; assert `--answer-auth-token` is never used), and a new test area for the not-yet-built answer server (single-use enforcement, TTL enforcement, hardware-fact-mismatch refusal) — this last group has no PRD §8.1 test file yet and should be added when the answer-server module is designed.
+
+## Whether Investigation 3 is unblocked
+
+**Yes**, with a specific, evidence-backed provisional design to build against rather than an open question. The main follow-on work is prototyping the Baseline-owned answer server described in §6 and its single-use/binding/TTL enforcement — that prototype work has not been done yet and is explicitly out of this investigation's scope (no installer was booted).
