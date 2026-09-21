@@ -1,6 +1,6 @@
 # Milestone 1 implementation plan — sparse-image installer, image-only
 
-Status: **v2 provisionally approved — Phase 0 only. The rest of Milestone 1 (Gates B–F, all four module boundaries) remains unapproved pending Phase 0's outcome.** No implementation started, no privileged operation performed while preparing this plan.
+Status: **Phase 0 complete — Gate A does NOT pass. Result: `networking_unresolved`.** See [decision-records/10-m1-phase0-network-resolution.md](decision-records/10-m1-phase0-network-resolution.md) for full evidence. Per this plan's own rule, `networking_unresolved` is blocking: **no Milestone 1 production module (Gates B–F, all four boundaries in §4) may begin.** Root cause is partially identified (IPv6/SLIRP-RA address-family selection is part of it, confirmed directly) but not resolved (the deeper cause — the installer's `from-dhcp`-to-static-bridge-config transplant not producing a usable address in either family — remains open, distinguished as a second, untested candidate cause). Awaiting user decision on how to proceed: authorize a further, narrowly-scoped test, or a different resolution path.
 Parent: [drive-setup-gui-v2-prd.md](drive-setup-gui-v2-prd.md) §9 (Milestone 1), built on [milestone-0-plan.md](milestone-0-plan.md)'s closed-out evidence (commit `519f367`, accepted).
 Author: Claude Code, planning pass only — this document is the deliverable for this turn.
 
@@ -82,7 +82,7 @@ Each gate is a stop/go checkpoint with its own evidence. **A failed gate stops p
 
 | Gate | Condition | Tied to |
 |---|---|---|
-| **A** | Networking proven — all five properties in Phase 0 step 5 confirmed, including post-reboot persistence — **before any of the four modules in §4 are implemented.** | Phase 0 |
+| **A** | Networking proven — all five properties in Phase 0 step 5 confirmed, including post-reboot persistence — **before any of the four modules in §4 are implemented.** | Phase 0 — **FAILED, `networking_unresolved`. See [decision-records/10-m1-phase0-network-resolution.md](decision-records/10-m1-phase0-network-resolution.md).** Outbound HTTPS and route-reachability both failed decisively (100% packet loss, clean connection refusal) under the one tested correction. |
 | **B** | Prepared ISO verified without booting — `inspect-iso` output and a raw byte scan confirm fetch mode, URL, cert fingerprint, and the absence of forbidden strings (plaintext password, hash, full answer content in HTTP mode), matching Investigation 2/3's postcondition set. | Boundary 1 + 2 |
 | **C** | Installation reaches explicit success — the literal `Finished: 'ok'`/`Installation done` sequence captured via screendump, never inferred from QEMU exit code or partition structure alone. | Boundary 3 (install half) |
 | **D** | Fresh boot has usable networking — Phase 0's five-property check re-run against the actual installed image (not the Phase 0 investigation image), under fresh OVMF NVRAM, confirming Phase 0's finding generalizes to the real Milestone 1 pipeline's own output. | Boundary 3 (boot half) |
@@ -163,7 +163,7 @@ The evidence report is the same Markdown-narrative counterpart as v1, but organi
 
 ## 11. Criteria for declaring Milestone 1 complete (revised, reduced)
 
-1. Gate A passes, with Phase 0's evidence recorded, **before** any of the four §4 modules exist as production code — or, if networking cannot be safely corrected, an explicit `networking_unresolved` result is recorded and handed back to the user rather than built around.
+1. Gate A passes, with Phase 0's evidence recorded, **before** any of the four §4 modules exist as production code — or, if networking cannot be safely corrected, an explicit `networking_unresolved` result is recorded and handed back to the user rather than built around. **Current status: Gate A has failed (`networking_unresolved`, see decision record 10) — items 2–8 below are not yet in progress and none of §4's modules may be started until Gate A passes on a subsequent attempt.**
 2. Gates B through F each pass with their own recorded evidence, in order.
 3. All four module boundaries in §4 exist under `baseline/lib/` with tests written first (TDD) and passing. **Coverage is a floor, not proof**: ≥80% line coverage is a minimum sanity check, but a module is considered actually verified by its behavioral tests and its gate's own evidence (§5), not by the coverage percentage alone — a well-covered module that hasn't passed its gate's real evidence check is not "done," and a module with thin coverage but strong, specific behavioral tests targeting its fail-closed conditions (§4 of v1's invariants, carried forward conceptually) is the higher bar to meet, not the percentage.
 4. The manifest (§8) and evidence report have been generated from at least one real run and reviewed.
