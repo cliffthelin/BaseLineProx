@@ -204,14 +204,36 @@ def test_plan_and_derive_picks_replace_for_fixture_b():
 # 4. add_dhcp_stanza - additive rewrite, IPv6 stanza preserved verbatim
 # ===========================================================================
 
-def test_add_dhcp_stanza_preserves_ipv6_stanza_byte_for_byte():
+def test_add_dhcp_stanza_inserts_before_trailing_source_directive():
+    # Real evidence (decision record 12): appending at the absolute end
+    # of the file placed the new stanza AFTER the trailing
+    # `source /etc/network/interfaces.d/*` line - non-standard Debian/
+    # ifupdown2 layout, and a real `ifreload --syntax-check` run treated
+    # an unrelated, otherwise-non-fatal bridge-fd warning as fatal
+    # specifically against that layout. The fix inserts immediately
+    # after the target's own stanza, always before any later `source`
+    # line.
     cfg = _cfg(FIXTURE_A_IPV6_ONLY)
     new_files = ic.add_dhcp_stanza(cfg, "vmbr0")
     new_text = new_files["/etc/network/interfaces"]
-    # The ENTIRE original text is a prefix of the new text - nothing about
-    # the existing inet6 stanza (or anything else) was touched.
-    assert new_text.startswith(FIXTURE_A_IPV6_ONLY)
-    assert new_text == FIXTURE_A_IPV6_ONLY + "iface vmbr0 inet dhcp\n"
+    expected = (
+        "auto lo\niface lo inet loopback\n\niface ens3 inet6 manual\n\n"
+        "auto vmbr0\niface vmbr0 inet6 static\n"
+        "\taddress fec0::5054:ff:feba:5e12/64\n"
+        "\tgateway fe80::2\n"
+        "\tbridge-ports ens3\n"
+        "\tbridge-stp off\n"
+        "\tbridge-fd 0\n\n"
+        "iface vmbr0 inet dhcp\n\n"
+        "source /etc/network/interfaces.d/*\n"
+    )
+    assert new_text == expected
+    # The new stanza's position, not just its presence: it must appear
+    # strictly before the source directive, never after.
+    assert new_text.index("iface vmbr0 inet dhcp") < new_text.index("source /etc/network/interfaces.d/*")
+    # The existing inet6 stanza is still byte-identical and unmoved.
+    assert "iface vmbr0 inet6 static" in new_text
+    assert "\taddress fec0::5054:ff:feba:5e12/64" in new_text
 
 
 def test_add_dhcp_stanza_refuses_when_inet_stanza_already_exists():
@@ -257,6 +279,42 @@ def test_reparsing_the_additive_result_shows_known_documented_duplicate_limitati
 
 
 # ===========================================================================
+# 4b. ifreload --syntax-check's interactive-vs-scripted exit-code mismatch
+# (decision record 13): confirmed directly, real host, real ifupdown2 -
+# the identical bridge-fd warning against the identical, UNMODIFIED
+# Proxmox-generated file exits 0 run interactively and exits 1 run via
+# Python's subprocess module (exactly how this module invokes every
+# subprocess). Refusing on every non-zero exit made the repair action
+# unusable against a stock installer-generated config with no repair
+# involved at all - not specific to the additive stanza.
+# ===========================================================================
+
+def test_syntax_check_advisory_only_true_for_warning_only_stderr():
+    assert repair._syntax_check_advisory_only('warning: vmbr0: bridge-fd: value of out range "0": valid attribute range: 2-255')
+
+
+def test_syntax_check_advisory_only_true_for_multiple_warning_lines():
+    assert repair._syntax_check_advisory_only(
+        "warning: vmbr0: bridge-fd: value of out range \"0\"\nwarning: vmbr0: another advisory note\n")
+
+
+def test_syntax_check_advisory_only_false_for_genuine_error():
+    assert not repair._syntax_check_advisory_only("error: could not parse /etc/network/interfaces: line 12")
+
+
+def test_syntax_check_advisory_only_false_when_mixed_with_non_warning_line():
+    assert not repair._syntax_check_advisory_only(
+        "warning: vmbr0: bridge-fd: value of out range \"0\"\nerror: something else is actually wrong\n")
+
+
+def test_syntax_check_advisory_only_false_for_empty_stderr():
+    # A non-zero exit with no explanatory output at all is not something
+    # this fail-closed helper is willing to wave through.
+    assert not repair._syntax_check_advisory_only("")
+    assert not repair._syntax_check_advisory_only("   \n  \n")
+
+
+# ===========================================================================
 # 5. Full additive repair pipeline (mirrors test_repair.py's structure)
 # ===========================================================================
 
@@ -278,7 +336,7 @@ def broken_facts_fixture_a():
 
 def make_additive_runner(files=None, target="vmbr0", new_addr="10.0.2.20/24", gateway="10.0.2.2",
                           clustered=False, protected_session=False, syntax_ok=True, apply_ok=True,
-                          verify_ok=True, dns_ok=True, https_ok=True):
+                          verify_ok=True, dns_ok=True, https_ok=True, syntax_advisory_only=False):
     files = files if files is not None else {"/etc/network/interfaces": FIXTURE_A_IPV6_ONLY}
     r = FakeRunner(files=files)
     r.script(lambda a: a == ["ip", "route", "show", "default"], FakeProc(0, "", ""))
@@ -294,8 +352,14 @@ def make_additive_runner(files=None, target="vmbr0", new_addr="10.0.2.20/24", ga
                               "ESTAB  0      0      10.0.2.15:22       10.0.2.99:51000\n", ""))
     r.script(lambda a: a[:1] == ["systemd-run"], FakeProc(0, "", ""))
     r.script(lambda a: a[:2] == ["systemctl", "stop"], FakeProc(0, "", ""))
-    r.script(lambda a: a[:2] == ["ifreload", "--syntax-check"],
-             FakeProc(0, "", "") if syntax_ok else FakeProc(1, "", "syntax error"))
+    if syntax_advisory_only:
+        # Real, confirmed shape (decision record 13): non-zero exit, but
+        # stderr is entirely a `warning:`-prefixed, advisory-only message.
+        r.script(lambda a: a[:2] == ["ifreload", "--syntax-check"],
+                 FakeProc(1, "", 'warning: vmbr0: bridge-fd: value of out range "0": valid attribute range: 2-255'))
+    else:
+        r.script(lambda a: a[:2] == ["ifreload", "--syntax-check"],
+                 FakeProc(0, "", "") if syntax_ok else FakeProc(1, "", "syntax error"))
     r.script(lambda a: a == ["ifreload", "-a"],
              FakeProc(0, "", "") if apply_ok else FakeProc(1, "", "ifreload: apply failed"))
     if verify_ok:
@@ -324,9 +388,13 @@ def test_additive_pipeline_success_fixture_a_produces_bounded_additive_proposal(
     assert result.ok
     assert result.outcome == "success"
     final_text = r.files["/etc/network/interfaces"]
-    # Additive, bounded: original file is an exact prefix, only one new
-    # line appended.
-    assert final_text == FIXTURE_A_IPV6_ONLY + "iface vmbr0 inet dhcp\n"
+    # Additive and bounded: the new stanza is inserted before the
+    # trailing source directive, not appended after it (see decision
+    # record 12/13 - appending after `source` was the real root cause
+    # of the ifreload --syntax-check failure found in the QEMU run).
+    assert "iface vmbr0 inet dhcp" in final_text
+    assert final_text.index("iface vmbr0 inet dhcp") < final_text.index("source /etc/network/interfaces.d/*")
+    assert "iface vmbr0 inet6 static" in final_text
 
 
 def test_ens3_remains_manual_after_real_pipeline_run():
@@ -397,6 +465,35 @@ def test_failed_syntax_check_restores_exact_original():
     assert not result.ok
     assert "syntax_invalid" in result.detail
     assert r.files["/etc/network/interfaces"] == FIXTURE_A_IPV6_ONLY
+
+
+def test_advisory_only_syntax_check_warning_does_not_block_the_repair():
+    # The real finding (decision record 13): ifreload --syntax-check's
+    # non-zero exit against a warning-only, non-interactive invocation
+    # must not be treated the same as a genuine syntax error - this is
+    # the actual, real-world shape the QEMU integration run hit, and the
+    # fix this test locks in.
+    r = make_additive_runner(syntax_advisory_only=True)
+    result = repair_additive.add_dhcp_to_bridge(r, "vmbr0", "test-operator", operator_present=True,
+                                                  check_lifeline_fn=broken_facts_fixture_a)
+    assert result.ok
+    assert result.outcome == "success"
+    assert "iface vmbr0 inet dhcp" in r.files["/etc/network/interfaces"]
+
+
+def test_advisory_only_syntax_check_warning_does_not_block_replace_path_either():
+    # The exact same ifreload behavior would affect the existing replace
+    # path (reset_interface_to_dhcp) against Fixture B or any real
+    # Proxmox-generated bridge-fd-0 config - not specific to the
+    # additive extension, so both call sites needed the fix.
+    r = make_additive_runner(files={"/etc/network/interfaces": FIXTURE_B_IPV4_FALLBACK},
+                              syntax_advisory_only=True)
+    result = repair.reset_interface_to_dhcp(r, "vmbr0", "test-operator", operator_present=True,
+                                             check_lifeline_fn=broken_facts_fixture_a)
+    assert result.ok
+    assert result.outcome == "success"
+    assert "iface vmbr0 inet dhcp" in r.files["/etc/network/interfaces"]
+    assert "192.168.100.2/24" not in r.files["/etc/network/interfaces"]
 
 
 def test_successful_dhcp_verifies_address_route_gateway_dns_and_https():
@@ -493,7 +590,9 @@ def test_confirming_proceeds_and_unlocks_package_install_on_success():
         check_lifeline_fn=broken_facts_fixture_a)
     assert result["action"] == "additive"
     assert result["package_install_allowed"] is True
-    assert r.files["/etc/network/interfaces"] == FIXTURE_A_IPV6_ONLY + "iface vmbr0 inet dhcp\n"
+    final_text = r.files["/etc/network/interfaces"]
+    assert "iface vmbr0 inet dhcp" in final_text
+    assert final_text.index("iface vmbr0 inet dhcp") < final_text.index("source /etc/network/interfaces.d/*")
 
 
 def test_package_install_stays_locked_when_verification_fails():

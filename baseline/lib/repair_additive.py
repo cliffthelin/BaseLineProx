@@ -226,7 +226,7 @@ def add_dhcp_to_bridge(runner: Runner, observed_dev: str, requested_by: str,
 
         # --- 6: validate syntax without applying ---
         check = runner.run(["ifreload", "--syntax-check", "-a"], timeout=15)
-        if check.returncode != 0:
+        if check.returncode != 0 and not repair._syntax_check_advisory_only(check.stderr):
             restored, restore_detail = repair.restore_backup(runner, attempt_id)
             repair.cancel_rollback(runner, unit)
             repair.clear_pending_manifest(runner)
@@ -234,6 +234,9 @@ def add_dhcp_to_bridge(runner: Runner, observed_dev: str, requested_by: str,
             repair.log_event(runner, attempt_id, "restored", "info" if restored else "fail", restore_detail)
             raise RepairRefused("syntax_invalid",
                                  f"ifreload --syntax-check failed: {check.stderr.strip()}; restore: {restore_detail}")
+        elif check.returncode != 0:
+            repair.log_event(runner, attempt_id, "syntax_check_advisory", "info",
+                              f"non-zero exit but advisory-only warnings, proceeding: {check.stderr.strip()}")
 
         # --- 7: apply ---
         apply_res = runner.run(["ifreload", "-a"], timeout=30)

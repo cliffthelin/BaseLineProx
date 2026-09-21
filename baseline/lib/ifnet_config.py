@@ -302,16 +302,31 @@ def rewrite_stanza_to_dhcp(cfg: ParsedConfig, target_name: str) -> dict:
 
 
 def add_dhcp_stanza(cfg: ParsedConfig, target_name: str) -> dict:
-    """Additive repair: append a NEW `iface <target_name> inet dhcp`
-    stanza to the end of the file that already declares `target_name`,
-    leaving that existing stanza - and every other line in every file -
-    byte-identical to the input. This is the counterpart to
-    rewrite_stanza_to_dhcp for the case where `target_name` has no
-    `inet` stanza at all yet (only a non-inet, e.g. `inet6 static`, one)
-    - see topology.derive_additive_target. Never deletes or rewrites the
-    existing stanza; the two families coexist as separate `iface`
-    blocks, which is standard, valid ifupdown2 syntax for dual-stack
-    configuration.
+    """Additive repair: insert a NEW `iface <target_name> inet dhcp`
+    stanza immediately after the existing stanza that declares
+    `target_name`, leaving that existing stanza - and every other line
+    in every file - byte-identical to the input. This is the
+    counterpart to rewrite_stanza_to_dhcp for the case where
+    `target_name` has no `inet` stanza at all yet (only a non-inet, e.g.
+    `inet6 static`, one) - see topology.derive_additive_target. Never
+    deletes or rewrites the existing stanza; the two families coexist as
+    separate `iface` blocks, which is standard, valid ifupdown2 syntax
+    for dual-stack configuration.
+
+    Placement matters and was fixed after real evidence, not assumed:
+    an earlier version appended the new stanza at the absolute end of
+    the file. Real Proxmox-generated interfaces files end with a
+    `source /etc/network/interfaces.d/*` directive (confirmed, Milestone
+    1 decision records 10/12), and appending after it put the new
+    `iface` block textually past that directive - non-standard Debian/
+    ifupdown2 layout (a `source`/`source-directory` line is conventionally
+    the last thing in the file). A real `ifreload --syntax-check -a` run
+    (decision record 12) treated an unrelated, pre-existing, otherwise-
+    non-fatal `bridge-fd` range warning as fatal specifically against
+    that append-after-source layout; the identical warning was non-fatal
+    against the original, unmodified file. Inserting right after the
+    target's own stanza - always before any later `source` line - is
+    both the conventional placement and, per that evidence, the fix.
 
     Known, accepted limitation (documented, not fixed here): this
     module's own ParsedConfig keys stanzas by name only, so if the file
@@ -342,18 +357,19 @@ def add_dhcp_stanza(cfg: ParsedConfig, target_name: str) -> dict:
                             "nothing for an additive DHCP stanza to attach to")
 
     original = cfg.files[stanza.source_path]
+    lines = original.splitlines(keepends=True)
     ending = "\n"
-    if stanza.lines and stanza.lines[0].endswith("\r\n"):
-        # Stanza.lines are stored without their original line terminator
-        # (str.splitlines() strips it) - this branch is defensive and
-        # will not trigger against Stanza.lines as currently populated;
-        # kept only so a future change to how lines are captured fails
-        # loud (wrong ending) rather than silent, not to claim CRLF
-        # support that hasn't actually been tested.
+    if lines and lines[stanza.line_start].endswith("\r\n"):
         ending = "\r\n"
-    text = original if original.endswith(ending) else original + ending
-    new_block = f"iface {target_name} inet dhcp{ending}"
-    new_text = text + new_block
+
+    before = lines[:stanza.line_end]
+    after = lines[stanza.line_end:]
+    # Always a blank line on each side of the new stanza - simple and
+    # always valid, even though `after` may already start with one of
+    # its own (ifupdown2 tolerates repeated blank lines; this file
+    # format has no other use for them).
+    new_block = f"{ending}iface {target_name} inet dhcp{ending}"
+    new_text = "".join(before) + new_block + "".join(after)
 
     out = dict(cfg.files)
     out[stanza.source_path] = new_text

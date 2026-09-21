@@ -569,6 +569,34 @@ def verify_target(runner: Runner, target_interface: str, stabilize: bool = True)
 
 
 # --------------------------------------------------------------------------
+# ifreload --syntax-check's exit code is not a reliable pass/fail signal by
+# itself - confirmed directly, real host, real ifupdown2 (Milestone 1
+# decision record 13): the identical `bridge-fd: value of out range "0"`
+# warning, against the identical file, exits 0 when ifreload is run
+# attached to an interactive terminal and exits 1 when invoked exactly as
+# this module invokes every subprocess - via Python's subprocess module,
+# no controlling tty. This is ifreload's own interactive-vs-scripted
+# behavior, not a property of any particular interfaces-file content: it
+# reproduces against a completely unmodified, stock Proxmox-installer-
+# generated config, with no repair action involved at all. Refusing on
+# every non-zero exit here would make ifreload --syntax-check unusable as
+# a precondition from any non-interactive caller - not just this one.
+# --------------------------------------------------------------------------
+
+def _syntax_check_advisory_only(stderr: str) -> bool:
+    """True only if every non-blank line of ifreload --syntax-check's
+    stderr is an advisory `warning:`-prefixed message - exactly the
+    class of output confirmed (above) to be non-fatal when ifreload runs
+    interactively. A genuine parse/syntax problem is not expected to
+    consist solely of `warning:` lines, so anything else - including no
+    output at all - stays fail-closed and is still treated as a real
+    failure by the caller.
+    """
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    return bool(lines) and all(line.lstrip().startswith("warning:") for line in lines)
+
+
+# --------------------------------------------------------------------------
 # The bounded action itself - the transactional pipeline, exactly in the
 # order Cliff specified:
 #   1 discover topology
@@ -682,7 +710,7 @@ def reset_interface_to_dhcp(runner: Runner, observed_dev: str, requested_by: str
 
         # --- 6: validate syntax without applying ---
         check = runner.run(["ifreload", "--syntax-check", "-a"], timeout=15)
-        if check.returncode != 0:
+        if check.returncode != 0 and not _syntax_check_advisory_only(check.stderr):
             restored, restore_detail = restore_backup(runner, attempt_id)
             cancel_rollback(runner, unit)
             clear_pending_manifest(runner)
@@ -690,6 +718,9 @@ def reset_interface_to_dhcp(runner: Runner, observed_dev: str, requested_by: str
             log_event(runner, attempt_id, "restored", "info" if restored else "fail", restore_detail)
             raise RepairRefused("syntax_invalid",
                                  f"ifreload --syntax-check failed: {check.stderr.strip()}; restore: {restore_detail}")
+        elif check.returncode != 0:
+            log_event(runner, attempt_id, "syntax_check_advisory", "info",
+                       f"non-zero exit but advisory-only warnings, proceeding: {check.stderr.strip()}")
 
         # --- 7: apply ---
         apply_res = runner.run(["ifreload", "-a"], timeout=30)
