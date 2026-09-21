@@ -78,25 +78,75 @@ anything else.
   of `/usr`. This partial backup is enough to reconstruct Baseline's
   own app/config state on a fresh OS install; it is **not** a full
   system image.
-- **No reboot of the laptop has been attempted.** That's the standard
-  next step to try clearing an ext4 journal-abort wedge, but it's a
-  real risk on the *only* boot drive and needs explicit authorization -
-  don't assume it. Given the working theory has shifted toward genuine
-  media failure (see above), a reboot may not actually help and the
-  drive should likely be treated as failing hardware regardless of
-  whether it happens to come back read-write after one.
+- **UPDATE: user rebooted the laptop themselves** (not explicitly
+  authorized in chat first - happened directly at the physical
+  console). Boot log showed a new, alarming symptom: `WARNING: VG name
+  pve is used by VGs 58P3UX-...-2OEmuD and wdSVr9-...-JW1rDy` (two
+  volume groups both named "pve") and the `getty.target` ordering-cycle
+  skip message from earlier in the session (docs/changelog/boot/001.md)
+  reappearing. Also, immediately post-boot, all network interfaces
+  showed `carrier_present: FAIL` (no link at all), so SSH was
+  unreachable for a few minutes.
+- **Once network came back, the picture resolved cleanly - genuinely
+  good outcome:**
+  - `/` is mounted `rw` again and a live write test succeeded - the
+    read-only state is gone.
+  - **`tar` and `sha256sum` both load and run normally now** - the
+    "binary fails to execute with I/O error" symptom that drove the
+    "genuine media failure" theory is **gone**. In hindsight this was
+    very likely a software-level wedge from the ext4 journal abort
+    (widespread defensive read failures cascading from one bad
+    write), not permanent media death - a clean reboot + fsck fixed
+    it. The `full_inventory()` "Display" fact investigation two
+    reboots earlier turned up the same kind of lesson: be skeptical of
+    "the drive is dying" conclusions drawn from software-observable
+    symptoms alone without independent hardware evidence (SMART data,
+    which was never actually obtained this session - no `nvme-cli`
+    installed, no non-interactive `sudo`).
+  - The duplicate-VG warning also resolved: `vgs`/`pvs` now show
+    exactly one clean `pve` VG on one PV. The PV's device path moved
+    from `/dev/sdb3` (throughout this whole session) to **`/dev/sda3`**
+    this boot - device-letter reassignment across a reboot is an
+    *already-documented* gotcha from earlier in this project (see
+    `docs/BAREMETAL_BRINGUP_NOTES.md`). The "duplicate VG" message was
+    almost certainly LVM's boot-time scanner catching the same
+    physical volume at two different transient device paths before
+    udev finished settling names, not a real second installation.
+  - `baseline.service` is active and healthy post-reboot;
+    `getty.target` itself is genuinely active (not skipped) once boot
+    settled, so that regression didn't stick either.
+  - **Do not assume device paths are stable** - `/dev/sdX` letters can
+    and do change across reboots on this hardware. Anything hardcoding
+    `/dev/sdb` specifically (there is nothing in the Baseline app
+    itself that does - it resolves interfaces/devices by name/driver,
+    not hardcoded paths - but double-check any new scripts) needs to
+    tolerate this.
+- **Net assessment, revised**: this looks recoverable/transient rather
+  than terminal hardware failure, but it demonstrably CAN wedge the
+  whole filesystem read-only and take multiple system binaries down
+  with it under some trigger condition that was never root-caused
+  (what actually caused the original `usb 2-1.2: USB disconnect` at
+  16:01:40 is still unknown - cable, power, or a real intermittent
+  fault in the drive/enclosure). Don't consider this fully closed -
+  keep the backups made tonight, and treat a recurrence as reason to
+  actually get real SMART/health data on this drive before trusting it
+  further.
 
 **Recommended next steps for whoever picks this up:**
-1. Treat this drive as failing hardware needing replacement soon, not
-   just a one-off glitch to route around - two independent binaries
-   failing to load with a stable physical connection is a strong
-   signal. The NVMe-migration conversation from earlier this session
-   (see "Not done" below) is no longer hypothetical.
-2. If more data recovery is wanted before replacing the drive, reuse
-   the working custom-framing approach (attempt 3 above), not
-   `tarfile`/`tar`/`rsync` - all three failed or were unreliable on
-   this specific degraded filesystem for reasons not fully understood.
-3. Get explicit authorization before rebooting the laptop.
+1. Filesystem and service state are healthy as of the end of this
+   session - no immediate action required, but this incident is real
+   evidence the boot drive needs closer monitoring (real SMART data
+   would help - not obtained this session) and that the NVMe-migration
+   conversation from earlier (see "Not done" below) is worth prioritizing
+   even though nothing is on fire right now.
+2. If it recurs, reuse the working custom-framing approach (attempt 3
+   in the earlier account of this incident, still above), not
+   `tarfile`/`tar`/`rsync` directly - all three were unreliable while
+   the filesystem was in its degraded state, for reasons not fully
+   understood.
+3. Get explicit authorization before rebooting the laptop in the
+   future - this time it happened without an explicit go-ahead logged
+   in chat.
 4. Handle `partial-verified-20260920-1817.tar.gz` as containing live
    secrets (OAuth token, SSH host private keys) - never push it
    anywhere public.
