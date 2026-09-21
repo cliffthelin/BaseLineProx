@@ -6,7 +6,35 @@ have no access to that Project (it's a claude.ai web feature, not
 reachable from this CLI session), so I can't verify what did or didn't
 transfer - this is the definitive account from this side, not a diff.
 
-## READ THIS FIRST - active drive incident, partially resolved
+## READ THIS FIRST - active drive incident, resolved; full backups now exist
+
+Filesystem is healthy (see the "UPDATE" entry further down). After that
+recovery, **three complete, checksum-verified backups were made** with
+the drive in its now-healthy state (no corruption this round - `tar`
+worked normally, 97,210 files each in the two full ones):
+
+| File | Size | Locations | sha256 |
+|---|---|---|---|
+| `Private_Baseline_files.tar.gz` | 61KB | this CLI machine's `/run/media/cane/CACHE/baseline_repo/backups/`, laptop `/root/backups/`, sent to the user directly | `50d38279b201097ee68dd969f61daa40745c7ea6a39bb2837112d330ad8d5396` |
+| `baseline-fullroot-20260920-185140.tar.gz` | 2.40GB | CLI machine's `backups/`, laptop's internal Ubuntu drive `/mnt/baseline-backups/` | `759ee9a9d814e05454d3ad5b9da0f6ba5b0d1f9ed61b94072af53d578493aceb` |
+| `baseline-tight-20260920-185838.tar.xz` | 1.91GB | CLI machine's `backups/`, laptop `/root/backups/` | `7e946e28bec0f36e9171c2db5ed51458e0f1a03922692247f408bcc9bcdec5aa` |
+
+`Private_Baseline_files.tar.gz` contains real secrets (OAuth token, SSH
+host/root private keys) - same handling rule as everywhere else in this
+doc: never public, never GitHub. The two full-root archives exclude
+only `/proc /sys /dev /run /tmp /mnt /media /lost+found` and stay on
+one filesystem (`--one-file-system`); expect harmless `tar` warnings
+for postfix's unix-domain sockets and one "file changed as we read it"
+for the live `/var/lib/lxcfs` fuse mount - neither affects integrity
+(both archives passed `gzip -t`/`xz -t` plus a full `tar tzf`/`tar tJf`
+listing).
+
+The earlier partial/corrupted backups from during the incident
+(`partial-verified-20260920-1817.tar.gz`, the failure logs) are still
+in `backups/` too - superseded by these for restore purposes, but kept
+since they're small and document what the degraded state actually
+looked like.
+
 
 The laptop's boot drive (a 28.7GB USB stick, `/dev/sdb`, holding the
 `pve-root` LVM volume that everything runs from) had a real failure
