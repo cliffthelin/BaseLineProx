@@ -1,91 +1,122 @@
 # Milestone 1 implementation plan — sparse-image installer, image-only
 
-Status: **proposed, awaiting review — no implementation started, no privileged operation performed while preparing this plan.**
+Status: **revised (v2), still proposed, not approved — v1 rejected as too broad; this version is reduced to one demonstrable vertical slice.** No implementation started, no privileged operation performed while preparing this plan.
 Parent: [drive-setup-gui-v2-prd.md](drive-setup-gui-v2-prd.md) §9 (Milestone 1), built on [milestone-0-plan.md](milestone-0-plan.md)'s closed-out evidence (commit `519f367`, accepted).
 Author: Claude Code, planning pass only — this document is the deliverable for this turn.
 
-## 0. Canonical repository determination
+## Revision note (why this version exists)
 
-**Recommendation: `cliffthelin/BaseLineProx` (the `origin` remote) is the canonical repository. Do not continue pushing to `cliffthelin/baseline` (the `cliff` remote) without the user's explicit decision on its status.**
+The first version of this plan (commit `771b4c4`) was reviewed and **not approved**. The core objection: it treated destination networking as a "zero-cost discovered-fact check" folded into a Phase 7 end-to-end proof — but networking is the only genuinely unresolved uncertainty in the core image pipeline (Milestone 0 only ever observed IPv6-only behavior inside QEMU/SLIRP and explicitly scoped that finding to the test environment, never resolved it). Discovering a networking failure at the end of a nine-module build would invalidate work built on top of an untested assumption. This version moves that investigation to **Phase 0, before any production module is written**, and cuts everything else down to what one usable vertical slice actually needs — no storage ancestry, no MD RAID/LUKS, no generalized key management, no single expensive end-of-pipeline test standing in for incremental verification. Four cohesive module boundaries instead of nine, and six named gates instead of one big proof at the end.
 
-Evidence, from existing repository documentation only, no assumption:
+## 0. Canonical repository — unchanged from v1
 
-- [`docs/SESSION_HANDOFF.md`](SESSION_HANDOFF.md) (written earlier this project, not by this planning pass) states explicitly, under "What exists and where": **"GitHub: <https://github.com/cliffthelin/BaseLineProx> (public), `main` branch... confirmed to contain everything described below."** This is stated as the project's GitHub location without qualification.
-- The same document separately states: **"A second, pre-existing private repo, `cliffthelin/baseline`, unexpectedly received a push from this session too (a `git remote` mix-up — see the git-workflow note below). I don't know its history. Worth checking directly whether it should be archived/deleted or is intentional and predates this session."** This is a direct, documented statement that the `baseline` repo's role is **unresolved and was flagged as a probable accident**, not confirmed as an intended second canonical location.
-- The root [`README.md`](../../README.md) links out to a PRD artifact and describes project layout with no reference to either GitHub remote by name — no additional signal either way from it.
-- This session (before this planning pass) pushed every Milestone 0 commit to **both** remotes, following a pattern already established earlier in the conversation, not because a canonical-repo decision was made — this plan is the first point where that pattern is actually checked against the project's own documentation, per this turn's explicit instruction.
+**`cliffthelin/BaseLineProx` (the `origin` remote) remains the sole canonical repository**, per `docs/SESSION_HANDOFF.md`'s explicit documentation (see v1's §0 for the full evidence, unchanged by this revision). This plan pushes to `origin` only. No push to `cliff` (`cliffthelin/baseline`) happens unless the user explicitly says otherwise.
 
-**This is not ambiguous evidence — it's a documented repo with an explicit "(public)" / "source of truth" designation, versus a second repo explicitly flagged in the project's own notes as "I don't know its history" / "worth checking whether it should be archived."** Recommendation: treat `BaseLineProx` as canonical for all Milestone 1+ work — branches, PRs, issues, releases — and stop pushing to `cliffthelin/baseline` until the user confirms what that repo is for. This plan does not modify either repository's settings, visibility, branch protection, or push configuration — that decision is the user's; this section only stops an unexamined dual-push pattern from continuing by default.
-
-## 1. Hard constraints carried forward from Milestone 0 (still apply)
+## 1. Hard constraints carried forward from Milestone 0 (unchanged)
 
 - No physical block-device writes of any kind.
-- No physical-device argument, dormant flag, helper action, or polkit capability accepted or created anywhere in Milestone 1 code — enforced structurally (§5.4 of the PRD), not by convention. This is the single non-negotiable invariant of this entire milestone; see §4 below for how it's tested.
-- All experimentation and intermediate artifacts stay under `experiments/`; promoted code moves into `baseline/lib/`, `packaging/baseline-drive-setup/`, and `tests/unit/drive_setup_tests/` only once it has real unit-test coverage per this plan.
-- No host system modification: no `apt install` to the development host, no APT source changes, no systemd unit installed on the *development* host (first-boot units are staged *into disk images*, never installed on the machine doing the building).
-- Setup-intent signing in Milestone 1 uses **test/synthetic Ed25519 keys only**, generated and held in-memory or in a gitignored workspace for the duration of a build/test run. **Production trust-anchor provisioning (where a real signing key is generated, stored, and rotated for real releases; where a real verification key is baked into a real first-boot image) is explicitly not delivered in Milestone 1** — this is called out again in §7 and §8 below because it's the item most likely to get silently assumed "done" by the time implementation is underway.
+- No physical-device argument, dormant flag, helper action, or polkit capability accepted or created anywhere in Milestone 1 code — enforced structurally, not by convention.
+- All experimentation stays under `experiments/`; promoted code moves into `baseline/lib/`, `packaging/baseline-drive-setup/`, and `tests/unit/drive_setup_tests/` only with real test coverage.
+- No host system modification: no `apt install` to the development host, no APT source changes, no systemd unit installed on the development host.
+- Setup-intent signing uses a **single synthetic Ed25519 test key per run, generated fresh each time, discarded after** — no key management subsystem, no rotation, no revocation list, no persistence of any key across runs. Production trust-anchor provisioning remains explicitly out of scope (§7).
 
-## 2. Scope — smallest end-to-end image-only installer path
+## 2. Scope — one demonstrable vertical slice, not a platform
 
-Per instruction, Milestone 1 is scoped as one continuous, provable pipeline: validate → generate credential → serve answer → prepare ISO → install to sparse image → enforce one-time boot media → verify boot (both firmware paths) and clean shutdown → stage first-boot unit with a synthetic-key-signed setup-intent bundle → prove the tty1 discovery-then-indefinite-confirmation gate → prove diagnostic-package install happens only after that confirmation → produce a build manifest and evidence report → clean up every retained-artifact category per policy.
+Per review, Milestone 1 is now exactly this chain, and nothing beyond it:
 
-This intentionally pulls one proof-integration exercise forward from what the PRD's §9 originally scoped as Milestone 2 (a real QEMU first-boot pass reaching package installation) so that Milestone 1 is a genuinely *end-to-end* proof, not merely "image gets created." **This does not silently expand Milestone 1's production scope**: the PRD's Milestone 2 remains responsible for the *transactional* mechanisms (firewall apply/rollback, SSH/tether application, handoff restore) — Milestone 1's first-boot proof only exercises the state machine's discovery → propose → indefinite-confirm → apply(diagnostics) → verify → commit shape already built and proven in Investigation 6, with the five diagnostic packages standing in as the one real "apply" action, not the full set of Milestone 2 consequential actions. This distinction is restated in §9 (non-goals) so it isn't lost between this plan and the PRD.
+1. Verified source artifacts (ISO + assistant package, via the existing GPG/hash chain already proven in Investigation 1/2 — reused, not rebuilt).
+2. Safe ephemeral credential generation (argv-free, per Investigation 2/3).
+3. Pinned, single-use answer delivery (per Investigation 2/3's accepted design).
+4. Guarded ISO preparation and cleanup (never trusting exit codes, per Investigation 2's confirmed finding).
+5. Sparse-image-only installation.
+6. Explicit installer-success verification (the literal `Finished: 'ok'` signal, per Investigation 3's own corrected mistake — never inferred).
+7. Disk-first reboot and fresh-OVMF verification (`once=d` mandatory, per Investigation 4's confirmed defect).
+8. **Resolved destination networking** — new in this revision, and the actual gating concern; see Phase 0.
+9. tty1 discovery and indefinite local authorization (the corrected state machine from Investigation 6).
+10. Authorized installation of the five diagnostic packages, confirmed to persist after reboot.
+11. A machine-readable manifest and a concise evidence report.
 
-## 3. Deliverables and module boundaries
+Everything not in this list is removed or deferred — see §6.
 
-All new library modules follow the existing flat-under-`baseline/lib/` convention already used by `hardware.py`, `network.py`, `harness.py`, `handoff.py`, `providers.py`, `tether.py`, `netpref.py` — no new package nesting introduced without a reason the existing layout doesn't already provide.
+## 3. Phase 0: destination-network resolution (runs first, before any production module is written)
 
-| Module | Promoted from | Responsibility |
+**Why this comes first**: every later phase either runs inside a QEMU guest reachable by the answer server (steps 2–7) or depends on the *installed* system being reachable for anything beyond a local console session (step 9's tty1 flow doesn't strictly need network, but the diagnostic-package install and any real Milestone 2 work eventually will). Milestone 0 observed IPv6-only `fec0::/64` addressing throughout every QEMU session but never investigated *why*, and explicitly scoped the finding to the test environment rather than resolving it. That gap is closed here, first, cheaply, using only the disposable sparse-image/QEMU environment and existing non-interactive permissions — no new privilege, no host change.
+
+**Procedure**:
+
+1. **Reproduce once.** Regenerate one fresh sparse-image install using the exact proven pipeline from Investigation 3 (`run_final.sh`, unmodified) and confirm the `fec0::/64`-only result reproduces, on this specific run, before investigating further — not assumed still true from a prior investigation's evidence.
+2. **Capture, don't infer, every layer of evidence**:
+   - The answer file's actual `[network]` section as generated (`source = "from-dhcp"` per Investigation 1's fixture — confirm this is still what Milestone 1's credential/answer modules would actually produce).
+   - The installer-generated network configuration on the installed disk (`/etc/network/interfaces` or equivalent, inspected via a disposable QEMU guest boot with the target disk attached — never by mounting the sparse file directly on the host, consistent with every Milestone 0 investigation's "no loop device against anything but a controlled fixture" discipline; here there is no fixture, so no loop device at all — boot and inspect from inside the guest).
+   - The kernel command line the installed system actually boots with (`/proc/cmdline` inside the guest).
+   - DHCP lease state, interface state (`ip addr`, `ip link`), routes (`ip route`, `ip -6 route`), and DNS configuration (`/etc/resolv.conf` or `resolvectl status`) — captured from inside the running guest, not assumed from configuration files alone.
+   - Which networking implementation is actually active and enabled — `systemctl status systemd-networkd`, `systemctl status NetworkManager`, presence/absence of `ifupdown`/`ifupdown2`, checked directly rather than presumed. This directly answers the review's correction: the test identifies what's actually running, it does not presume NetworkManager (or any other specific implementation) is the relevant one.
+3. **Determine the source, by elimination against direct evidence, not by guessing**: does the IPv6-only behavior originate in (a) the answer file's own `from-dhcp` request never asking for IPv4 explicitly, (b) `proxmox-auto-install-assistant`'s installer environment itself, (c) QEMU SLIRP's DHCP server behavior specifically (SLIRP is known to serve both v4 and v6, so this needs its own direct check — e.g. does a `tcpdump`/`dhclient`-visible DHCPv4 offer even reach the guest), (d) whichever networking implementation §3.2's last check identified as active, or (e) some first-boot transformation applied after install. Each of these produces a distinguishable evidence signature; the goal is to land on one, evidenced answer, not a plausible-sounding guess.
+4. **Test only the smallest plausible correction** implied by step 3's finding — e.g. if SLIRP itself is the limiting factor, confirm whether a plain `-netdev user` without additional flags actually offers IPv4 in a trivial standalone QEMU boot (unrelated to the installer) as a control case; if it's the installed system's own active networking implementation, test the smallest configuration change that implementation would need (e.g. one interface-config line), not a rewrite of the networking stack. No speculative multi-option matrix — one hypothesis, one smallest test, evaluated on direct evidence.
+5. **Prove usable networking after a fresh boot**, with every one of these five properties independently confirmed, not inferred from any subset:
+   - An assigned address (v4 or intentionally-chosen v6 — see below).
+   - A correct default route.
+   - DNS resolution (an actual resolved lookup, not just `resolv.conf` contents).
+   - Outbound HTTPS reachability (an actual successful TLS connection to something, not just a route existing).
+   - **Persistence across reboot** — the same five checks repeated after a clean reboot of the same installed disk, not just the first boot.
+6. **If networking cannot be corrected safely within this phase's scope, define a fail-closed detection and stop condition, and do not build the remaining pipeline around broken networking.** Concretely: if step 4's smallest correction doesn't produce a passing step 5, Phase 0 ends with an explicit, evidence-backed `networking_unresolved` result, a precise description of what was tried and what remains broken, and **Gate A does not pass** — no later-phase module gets written against an assumption that this gap will somehow resolve itself, and the decision to either (a) accept IPv6-only operation as intentional (if that's genuinely sufficient for Baseline's actual needs — a real question for the user, not this investigation to decide unilaterally) or (b) escalate with real diagnostic capability (which may require authorization this phase is instructed to avoid) is handed back explicitly rather than absorbed silently.
+
+**Authorization discipline for this phase specifically**: every step above uses only a disposable sparse image, QEMU, and already-confirmed non-interactive permissions. If any specific diagnostic step would require sudo, pkexec, polkit, a keyring, or any interactive prompt, that specific step is skipped and recorded as unavailable evidence — Phase 0 continues with whatever it can determine from the rest, and reports the gap plainly rather than working around it.
+
+## 4. Module boundaries — four cohesive boundaries, not nine
+
+| Boundary | File(s) | Responsibility | Promoted from |
+|---|---|---|---|
+| **1. Artifact acquisition and verification** | `baseline/lib/drive_setup_acquire.py` | Reproduces Investigation 1/2's exact GPG-signed-`Release` → hash-pinned-`Packages` → hash-pinned-`.deb`/ISO chain against cached fixture metadata; extracts the assistant binary without touching the host package database. | Investigation 1/2's verification commands, not previously written as reusable code — this is the one genuinely new module in this boundary. |
+| **2. Answer delivery and ISO preparation** | `baseline/lib/drive_setup_answer.py` | One cohesive module covering: argv-free one-time credential generation and hashing; the ephemeral single-use, TTL-bounded, hardware-fact-checked HTTPS answer server; the postcondition-based wrapper around `prepare-iso` that never trusts exit codes and owns staging-directory cleanup on every path; and workspace/path validation ensuring every target resolves to a controlled regular file. These four concerns are tightly coupled in practice (the credential feeds the answer content, the wrapper/workspace guard the call that consumes it) and are combined into one boundary rather than four separate files. | `experiments/m0-inv3/credential.py`, `answer_server.py`, `wrapper.py`, `workspace.py` — consolidated. |
+| **3. Image installation and boot verification** | `baseline/lib/drive_setup_install.py` | QEMU invocation construction (sparse-file-only, `guestfwd`-isolated networking, mandatory `-boot order=c,once=d`), screendump-based explicit-success detection, legacy-BIOS and fresh-OVMF-NVRAM boot verification, and the Phase-0-resolved networking configuration applied and re-checked against the same five properties. | New orchestration, reusing QEMU-invocation and screendump patterns from `experiments/m0-inv3/run_e2e_install.py` and Investigation 4's commands. |
+| **4. First-boot setup and evidence** | `baseline/lib/firstboot_statemachine.py` (promoted, unchanged from its corrected version) + `baseline/lib/setup_intent.py` (promoted, minimal — see §7) | The proven propose → indefinite-`CONFIRM` → apply → verify → commit state machine and tty1 ownership; minimal setup-intent canonical-format signing/verification with a synthetic per-run key; the diagnostic-package install step gated behind confirmation; the manifest (§8) and evidence-report generation. | `experiments/m0-inv6/firstboot_statemachine.py` (corrected version only) + `experiments/m0-inv9/setup_intent.py` (near-verbatim, already minimal). |
+
+Two files under one boundary (#4) rather than one, because the state machine and the setup-intent verifier are both "first-boot trust and confirmation" concerns that were already separately proven and don't benefit from forced merging — the boundary is conceptual (owned by one area of responsibility), not a literal one-file-per-boundary rule.
+
+**Explicitly not promoted or built in Milestone 1**: `storage_ancestry.py`, any MD RAID/LUKS fixture code, any exclusive-access/`O_EXCL`/automount-handling code, any production key-provisioning/rotation code, `pinned_client.py`/`preflight.py` (kept as test-only infrastructure, not shipped), `vnc_type.py` (test-harness only). See §6 for the reasoning behind each.
+
+## 5. Gate sequence
+
+Each gate is a stop/go checkpoint with its own evidence. **A failed gate stops progress into later phases and produces a written evidence note — it does not trigger a compensating framework, a fallback design, or scope expansion to "solve" the failure at the same time it's discovered.** That decision goes back to the user, the same way Investigation 8's genuinely-unresolved outcome was reported plainly rather than forced into a false "solved."
+
+| Gate | Condition | Tied to |
 |---|---|---|
-| `baseline/lib/drive_setup_credential.py` | `experiments/m0-inv3/credential.py` | Argv-free one-time credential generation (`secrets.token_urlsafe`) and SHA-512-crypt hashing via `openssl passwd -6 -salt <salt> -stdin`, never via a CLI positional argument. |
-| `baseline/lib/drive_setup_answer_server.py` | `experiments/m0-inv3/answer_server.py` | Ephemeral, single-use, TTL-bounded HTTPS answer service with `dmi.system.name`/MAC hardware-fact matching against the operator-confirmed target identity. Fixes the one known gap from Investigation 3: `logging.basicConfig` must actually be configured so request timestamps are captured, not silently dropped. |
-| `baseline/lib/drive_setup_wrapper.py` | `experiments/m0-inv3/wrapper.py` | Postcondition-based wrapper around every `proxmox-auto-install-assistant` subcommand invocation — never trusts `$?`; owns staging-directory cleanup on every exit path. |
-| `baseline/lib/drive_setup_workspace.py` | `experiments/m0-inv3/workspace.py` | Workspace creation and path validation — asserts every target path is a regular file resolving inside a helper-controlled workspace directory, never a caller-supplied or block-device-shaped path. |
-| `baseline/lib/drive_setup_iso.py` | New (orchestration layer) | Ties acquisition verification (GPG/hash chain, reusing the exact commands proven in Investigation 1/2) + credential generation + answer-server startup + `prepare-iso` invocation (via the wrapper) into one `prepare_install_iso(...)` entry point. This is new code, not a promotion — Milestone 0 never built an orchestrator, only the individual proven pieces. |
-| `baseline/lib/drive_setup_boot.py` | New, reusing patterns from `experiments/m0-inv3/run_e2e_install.py` and `experiments/m0-inv4` boot commands | QEMU invocation construction (sparse-file-only `-drive`, `guestfwd`-isolated networking, mandatory `-boot order=c,once=d`), screendump-based completion-signal detection (the literal `Finished: 'ok'` / `Installation done` sequence — never inferred from exit code or partition-table state alone, per Investigation 3's own corrected mistake), and `system_powerdown`-based clean-shutdown verification. |
-| `baseline/lib/storage_ancestry.py` | `experiments/m0-inv7/storage_ancestry.py` (near-verbatim) | Read-only sysfs/LVM/MD/ZFS ancestry resolution — promoted essentially unchanged; Investigation 7's design was already read-only and dependency-free. |
-| `baseline/lib/setup_intent.py` | `experiments/m0-inv9/setup_intent.py` (near-verbatim) | Canonical serialization, strict duplicate-key rejection, Ed25519 sign/verify, fail-closed policy chain, durable existence-based consumed-intent ledger. Promoted essentially unchanged — Investigation 9's module was already dependency-minimal (`cryptography` + stdlib) and structured for this. Signing keys used by Milestone 1's own build/test process are synthetic/test keys only (§1). |
-| `baseline/lib/firstboot_statemachine.py` | `experiments/m0-inv6/firstboot_statemachine.py` (post-correction version) | The corrected propose → **indefinite literal-`CONFIRM`** → apply → verify → commit state machine, durable journal (fsync-file + fsync-dir + atomic rename), tty1 ownership. Promoted from the corrected version only — the original auto-confirm draft is not promoted under any circumstance. |
-| `packaging/baseline-drive-setup/usr/lib/baseline-drive-setup/baseline-firstboot.service` | `experiments/m0-inv6/baseline-firstboot.service` | Systemd unit staged *into built images*, mirroring `boot/baseline.service`'s tty1-ownership pattern. Never installed on the development host. |
-| `packaging/baseline-drive-setup/usr/lib/baseline-drive-setup/baseline-drive-prep-helper` | Existing v1 helper, extended | Gains `automated-install` subcommand per PRD §5.5. Extension only — the existing structural-absence-of-physical-device-argument property (already true of v1, since it only ever expressed image-file targets) must be preserved and is the subject of a new static surface test (§4). |
-| `tests/unit/drive_setup_tests/` | New, per PRD §8.1 naming | One test module per library module above, TDD-first per this project's standing testing rule (write test → red → minimal implementation → green → refactor → verify ≥80% coverage), AAA structure. |
+| **A** | Networking proven — all five properties in Phase 0 step 5 confirmed, including post-reboot persistence — **before any of the four modules in §4 are implemented.** | Phase 0 |
+| **B** | Prepared ISO verified without booting — `inspect-iso` output and a raw byte scan confirm fetch mode, URL, cert fingerprint, and the absence of forbidden strings (plaintext password, hash, full answer content in HTTP mode), matching Investigation 2/3's postcondition set. | Boundary 1 + 2 |
+| **C** | Installation reaches explicit success — the literal `Finished: 'ok'`/`Installation done` sequence captured via screendump, never inferred from QEMU exit code or partition structure alone. | Boundary 3 (install half) |
+| **D** | Fresh boot has usable networking — Phase 0's five-property check re-run against the actual installed image (not the Phase 0 investigation image), under fresh OVMF NVRAM, confirming Phase 0's finding generalizes to the real Milestone 1 pipeline's own output. | Boundary 3 (boot half) |
+| **E** | First boot waits for real local approval — the 40-second-idle-no-change plus post-`CONFIRM` apply/verify/commit evidence, reproduced with the same discipline Investigation 6 used after its own correction. | Boundary 4 (state machine) |
+| **F** | Packages persist after reboot — the five diagnostic tools installed only after Gate E's confirmation, `iperf3` confirmed disabled/inactive immediately after install **and again after a full reboot**, matching Investigation 5's already-proven check. | Boundary 4 (package step) |
 
-**Not promoted, deliberately**: `experiments/m0-inv3/pinned_client.py`, `preflight.py` (test/attack-simulation infrastructure used to *validate* the answer server's own pinning behavior — stays as test-only tooling under `tests/unit/drive_setup_tests/` or `tests/integration/`, never ships in the production package), `experiments/m0-inv6/vnc_type.py` (QEMU-monitor test-harness helper — becomes shared test infrastructure under `tests/integration/`, not a `baseline/lib/` module, since production code never drives QEMU by screen-scraping keystrokes).
+Gates run in order; B–F do not start implementation until A passes, per the review's core instruction. Within B–F, each gate's own module can be developed and unit-tested incrementally (TDD, per this project's standing rule) — the gates are integration checkpoints, not a ban on incremental work within a boundary.
 
-## 4. Invariants and fail-closed conditions
+## 6. Removed or deferred scope, and why
 
-These are the properties Milestone 1 must hold structurally, each with the test that proves it:
+| Item | Disposition | Reasoning |
+|---|---|---|
+| MD RAID / LUKS-on-LVM validation | **Deferred, likely to Milestone 3 timing, not Milestone 1** | Not needed for an image-only installer that never resolves live-host storage ancestry against anything but the disposable image it itself created — this concern only exists once physical-device selection (excluding a currently-mounted host device's ancestry) is in scope, which is Milestone 3, not Milestone 1. |
+| Storage-ancestry productionization (`storage_ancestry.py`) | **Deferred entirely, not part of Milestone 1** | Same reasoning — physical-device support is structurally absent through Milestone 1, so there is no live host device whose ancestry ever needs excluding. Investigation 7's module and its real-tool-validation gap both move to whichever milestone actually needs live-ancestry exclusion (Milestone 3). |
+| Physical-device exclusivity (`O_EXCL`, `flock`, monitoring) | **Deferred to Milestone 3, unchanged from Investigation 8's own conclusion** | Investigation 8 already deferred this; nothing in Milestone 1's image-only scope requires it. |
+| Automount/disconnect handling | **Deferred to Milestone 3** | Same reasoning — only relevant once a real removable/physical device exists in scope. |
+| Production key provisioning or rotation | **Deferred, explicitly out of scope for Milestone 1** | See §7 — Milestone 1 uses one synthetic per-run key, never a managed key lifecycle. |
+| Any module required only for physical-drive support | **Deferred to Milestone 3** | Consistent with §5.4's structural-absence requirement — nothing in this list gets built even partially. |
+| A single expensive end-to-end proof standing in for incremental verification (v1's Phase 7) | **Replaced by the six-gate sequence in §5** | The review's point: one big proof at the end creates a second "learn too late" failure mode structurally identical to the networking one this revision exists to fix. Gates B–F each produce their own evidence as work proceeds, not one terminal checkpoint. |
 
-1. **No physical-device code path exists.** `tests/unit/drive_setup_tests/test_backend_surface.py` statically enumerates every accepted subcommand/argument shape of both the Python library and the bash helper and asserts none of them can resolve to a block-device path — a static assertion over the schema, not a runtime behavioral probe. This test must exist and pass **before** any other Milestone 1 module is considered mergeable, since every other deliverable depends on this boundary holding.
-2. **Every destructive-looking operation targets only a workspace-controlled regular file.** `drive_setup_workspace.py`'s path-resolution check runs before any path is referenced in a QEMU argv or wrapper call; tested with a symlink-to-block-device fixture and a `/dev/*`-shaped string fixture, both rejected.
-3. **No tool exit code is trusted.** Every wrapper call around `validate-answer`/`prepare-iso` parses stdout for the literal `Error:` prefix and independently verifies the resulting artifact's existence/type/size, per Investigation 2/3's direct finding that both subcommands return 0 on every tested failure mode. Tested with an induced failure (unwritable output path) exactly reproducing Investigation 2's finding.
-4. **No secret crosses argv, environment, logs, or debug output.** `drive_setup_credential.py`'s hash generation uses the proven stdin-pipe `subprocess.run([...], input=..., shell=False)` pattern exclusively; `validate-answer -d` (debug mode) is never invoked by any Milestone 1 code path, full stop — enforced by a grep-based static check over the module source in CI, not just a runtime assertion, since the risk is a *future* accidental addition of a debug flag.
-5. **Every wrapper-managed temporary artifact is accounted for on every exit path.** Success, induced-failure, and interrupted-process (SIGKILL mid-run) cases are all tested; a leftover credential-bearing temp file (Investigation 2's confirmed real defect) must not survive any of the three.
-6. **Answer-server replay/TTL/hardware-fact binding holds against the real client, not only the synthetic test matrix.** At least one real end-to-end QEMU install (reusing Investigation 3's proven pipeline) must exercise a real post-consumption replay attempt and observe the real `403 already consumed` response, not only a synthetic client hitting the server's HTTP surface.
-7. **Installer media is one-time boot media.** Every QEMU invocation constructed by `drive_setup_boot.py` uses `-boot order=c,once=d` — tested by a fixture asserting the constructed argv always contains this exact flag when an installer ISO is attached, and a real-boot integration test reproducing Investigation 4's finding (reboot after install must not re-enter the installer).
-8. **Installer completion is only ever established from the installer's own explicit self-reported signal.** `drive_setup_boot.py`'s completion detector must match the literal `Finished: 'ok'` / `Installation done` sequence via periodic screendump — QEMU exit code, partition-table structure, and disk usage are permitted as *corroborating* signals in the build manifest but never as the sole basis for an `install_success_confirmed` classification. An install that doesn't reach this signal within a bounded timeout is reported `install_outcome_indeterminate`, never inferred as success or failure.
-9. **Setup-intent verification is fail-closed with no default-permit branch.** `setup_intent.py`'s `verify_intent()` (promoted near-verbatim) is re-run against its existing 16-scenario synthetic test suite as a regression gate; any Milestone 1 code that constructs or consumes a bundle must go through this function, never a bespoke check.
-10. **The first-boot confirmation gate has no timeout, no default, and does not treat EOF as confirmation.** `firstboot_statemachine.py`'s promoted CONFIRM-gate is re-verified with the same discipline Investigation 6 used (a 40-second-idle screenshot showing no state change, a post-CONFIRM apply/verify/commit screenshot) — this is the one property from Milestone 0 that a regression here would be most severe, given the project's own prior real defect in exactly this area.
-11. **Diagnostic packages install only after the confirmation gate, never before or unattended.** The end-to-end QEMU proof (§2) must show, on screen, that no `apt-get install` for the five tools runs until the literal `CONFIRM` has been entered — reusing Investigation 5's evidence that `DEBIAN_FRONTEND=noninteractive` package installation triggers no `sensors-detect`/SMART self-test, now gated behind the confirmation step rather than run unconditionally.
-12. **Consumed-intent replay protection is existence-based, not content-based**, per Investigation 9 — carried forward unchanged into the promoted module; no Milestone 1 code may add a "try to parse and see if it's still valid" fallback path that would reintroduce the fail-open risk Investigation 9's test 9b specifically closed.
+## 7. Setup-intent: minimal, not a subsystem
 
-## 5. Milestone sequence with fast acceptance tests
+Per review, Milestone 1's setup-intent handling stays deliberately small:
 
-Each phase below is TDD-first (write the test, watch it fail, implement minimally, verify green, refactor, confirm ≥80% coverage on the modules touched) per this project's standing testing rule, and each phase's acceptance test is meant to be fast enough to run routinely, not a full end-to-end QEMU pass every time — the full pipeline integration test (Phase 7) is the expensive one, run less frequently.
+- **Canonical format**: unchanged from Investigation 9's promoted `setup_intent.py` — sorted-key, compact-separator JSON with strict duplicate-key rejection at parse time.
+- **Synthetic signing key**: exactly one Ed25519 keypair generated fresh per build/test run, held in memory or a gitignored temp path, discarded at the end of the run. No key ever persists across runs, no key is ever committed, no key ever stands in for a production trust anchor.
+- **Strict verification**: the same fail-closed `verify_intent()` chain proven with 16/16 synthetic tests in Investigation 9 — schema allowlist, expiry, target-match, action-set membership, existence-based replay ledger — reused essentially unchanged.
+- **Local authorization**: verification success is a precondition for *proposing* the confirmed action on tty1 (Gate E), never itself an execution trigger — unchanged from Investigation 9's own stated principle.
+- **Honest integrity-only labeling**: Milestone 1's bundle verification key is stored beside the bundle (no independent provisioning channel exists yet), so it is documented, in the manifest and evidence report, as an **integrity/corruption check**, not authentication — exactly the distinction Investigation 9 established. No language in Milestone 1's code, tests, or evidence report claims more than this.
+- **What is explicitly not built**: key rotation, multiple trusted keys, a revocation list, remote/out-of-band key distribution, or any persistence layer for keys — a "key-management subsystem" in miniature is exactly what this section exists to prevent, per the review's direct instruction.
 
-1. **Acquisition/verification module** (`drive_setup_iso.py`'s verification half). Acceptance: reproduces Investigation 1/2's exact GPG→hash chain against a **cached, checked-in-as-fixture** copy of the real signed metadata (not a live network fetch on every test run) — a tampered fixture must fail verification.
-2. **Credential generation** (`drive_setup_credential.py`). Acceptance: `test_secret_handling.py` asserts no code path places a password/hash into `subprocess` argv (inspectable via mocking `subprocess.run` and asserting on the call's `args`/`input` split), and that the generated hash round-trips through a synthetic `crypt`-compatible verifier.
-3. **Answer server** (`drive_setup_answer_server.py`). Acceptance: re-run of Investigation 3's 10-scenario matrix as real `tests/unit/` coverage (not experiment-local), plus the logging gap fix verified (a request produces a timestamped log line).
-4. **Wrapper + workspace** (`drive_setup_wrapper.py`, `drive_setup_workspace.py`). Acceptance: success path, induced-failure path (unwritable output), and an interrupted-process path (SIGKILL mid-`prepare-iso`) all leave zero leftover credential-bearing files, verified by a canary-content grep over the workspace directory tree after each.
-5. **Orchestration + workspace-scoped install** (`drive_setup_iso.py` full, `drive_setup_boot.py`'s install half). Acceptance: one real sparse-image install via QEMU, reaching `install_success_confirmed` per invariant 8, with the resulting image's partition/LVM structure statically verified (`fdisk -l`/`blkid -p` on the file directly, no loop device).
-6. **Boot verification** (`drive_setup_boot.py`'s boot half). Acceptance: reproduces Investigation 4 — legacy-BIOS reboot-to-disk, fresh-OVMF-NVRAM boot to login, and a `system_powerdown`-based clean-shutdown check, all against a freshly-generated image from Phase 5 (not a stored one), plus the `once=d` regression fixture from invariant 7.
-7. **Full pipeline integration proof** (all modules together, including staged `firstboot_statemachine.py` + a synthetic-key-signed `setup_intent.py` bundle). Acceptance: one continuous run — acquire, generate credential, serve answer, prepare ISO, install, verify boot both firmware paths, boot again with first-boot unit staged, observe tty1 discovery-then-wait, type `CONFIRM`, observe the five diagnostic packages install and `iperf3` end up disabled/inactive (per Investigation 5's finding), observe completion marker set, observe clean shutdown. This is the expensive test — run before declaring Milestone 1 complete and on-demand thereafter, not on every commit.
-8. **Manifest + evidence report generator.** Acceptance: given a completed Phase 7 run's captured state (screendumps, logs, checksums, timing), produces one machine-readable JSON manifest (schema below) and one human-readable Markdown evidence report, both without requiring re-running the pipeline.
-9. **Retention/cleanup pass.** Acceptance: after a full Phase 7 run plus manifest generation, a scripted retention check (§7) confirms every ephemeral-credential, answer-file, temporary-ISO, test-key, and disposable-image category has been handled per its stated policy — this is itself a test, not a manual step.
+## 8. Manifest and evidence report (unchanged in spirit from v1, reduced in content)
 
-## 6. Build manifest schema (machine-readable deliverable, item 11)
-
-A JSON document per completed Milestone 1 pipeline run, written to a retained (non-secret) location:
+Machine-readable JSON manifest per completed run, network fields promoted from Phase 0's afterthought status to first-class:
 
 ```json
 {
@@ -93,87 +124,54 @@ A JSON document per completed Milestone 1 pipeline run, written to a retained (n
   "run_id": "<uuid>",
   "started_at": "<ISO8601>",
   "completed_at": "<ISO8601>",
-  "source_iso": {"sha256": "...", "size_bytes": 0, "verified_via": "gpg-signed-release-chain"},
-  "assistant_version": "9.2.x",
-  "fetch_mode": "http",
-  "answer_server": {"tls_cert_fingerprint": "...", "session_consumed_once": true, "hardware_fact_match": true},
-  "install_outcome": "install_success_confirmed | install_outcome_indeterminate | install_failed",
-  "boot_verification": {"legacy_bios_reboot_to_disk": "boot_success", "fresh_uefi_nvram": "boot_success", "clean_shutdown": "confirmed | not_captured"},
-  "partition_structure": {"table": "gpt", "partitions": ["bios-boot", "esp", "lvm"]},
-  "firstboot_proof": {
-    "setup_intent_key": "synthetic-test-key",
-    "confirmation_gate_no_timeout_verified": true,
-    "diagnostic_packages_installed_after_confirmation": true,
-    "iperf3_state": "disabled/inactive"
+  "source_iso": {"sha256": "...", "verified_via": "gpg-signed-release-chain"},
+  "gate_results": {
+    "A_networking_proven": "pass | fail | networking_unresolved",
+    "B_iso_verified": "pass | fail",
+    "C_install_success": "pass | fail | indeterminate",
+    "D_fresh_boot_networking": "pass | fail",
+    "E_firstboot_confirmation_gate": "pass | fail",
+    "F_packages_persist_after_reboot": "pass | fail"
   },
-  "artifact_retention": {"credentials_purged": true, "temp_isos_deleted": true, "test_keys_discarded": true, "disposable_image_retained": false}
+  "networking": {"addressing": "ipv4 | ipv6 | dual", "source_of_behavior": "answer-file | installer | slirp | <networking-impl> | first-boot", "correction_applied": "none | <description>"},
+  "setup_intent": {"key_type": "synthetic-per-run", "label": "integrity-only"},
+  "artifact_retention": {"credentials_purged": true, "temp_isos_deleted": true, "test_key_discarded": true}
 }
 ```
 
-The human-readable evidence report is the Markdown narrative counterpart — screenshots referenced by path, the exact commands run, and the same invariant-by-invariant checklist as §4, each marked pass/fail with a link to the specific test or captured evidence, in the same style this session's decision records already use.
+The evidence report is the same Markdown-narrative counterpart as v1, but organized by gate (A–F) rather than by phase, each gate's section carrying its own pass/fail and linked evidence — this directly supports "a failed gate stops later phases and produces evidence" rather than requiring a full run to see any result.
 
-## 7. Artifact retention rules (item 12)
-
-Consistent with the discipline already established across Milestone 0's nine investigations:
+## 9. Artifact retention rules (unchanged from v1)
 
 | Category | Retention |
 |---|---|
-| Ephemeral one-time install credentials (plaintext) | Never written to disk at all — process memory only, per `drive_setup_credential.py`'s design; nothing to retain or destroy. |
-| Password hash | Exists only inside the answer file / prepared ISO / installed disk image's own shadow file — not separately retained by tooling. |
-| Answer files | Deleted immediately after the one QEMU session that consumes them completes (success or failure) — never retained across runs. |
-| Prepared ISOs | Deleted after the one install that used them, or after a failed run's postcondition check confirms the artifact was inspected — never reused across installs (Investigation 2's finding: a fixed one-time credential makes reuse unsafe). |
-| Test/synthetic Ed25519 keys (setup-intent) | Discarded at the end of each test/build run; **never checked into the repository, never reused across runs, never treated as a stand-in for a real provisioned key.** A fresh keypair every run is the default, not an optimization. |
-| Disposable sparse install images | Deleted after their evidence (manifest, screenshots, static verification output) is captured, **unless** explicitly held for the next phase's reuse within the same pipeline run (e.g. Phase 5's image feeding Phase 6/7) — never retained past the run that produced them without a stated reason. |
-| Build manifest (JSON) + evidence report (Markdown) | Retained — these contain no secret material by construction (the schema in §6 has no credential fields) and are the actual Milestone 1 deliverable. |
-| Screendumps/logs referenced by the evidence report | Retained only for the specific run(s) cited in a currently-relevant evidence report; superseded runs' large binary artifacts (PPM/PNG dumps, full serial logs) may be pruned once a corrected/final report supersedes them, mirroring how Investigation 3's original indeterminate-run artifacts were handled. |
-| `experiments/` workspace contents generally | Gitignored, never committed, cleaned opportunistically — this was already the rule through Milestone 0 and doesn't change. |
+| Ephemeral one-time install credentials (plaintext) | Never written to disk — process memory only. |
+| Password hash | Exists only inside the answer file / prepared ISO / installed disk's own shadow file — not separately retained. |
+| Answer files | Deleted immediately after the one QEMU session that consumes them. |
+| Prepared ISOs | Deleted after the one install that used them — never reused. |
+| Synthetic setup-intent key | Discarded at the end of each run — never checked in, never reused. |
+| Disposable sparse install images | Deleted after their evidence is captured, unless explicitly reused within the same gate sequence (e.g. the same image serving Gates C and D). |
+| Build manifest + evidence report | Retained — no secret fields by construction. |
+| Phase 0's own investigation artifacts | Deleted after Phase 0's findings are recorded, same discipline as every Milestone 0 investigation. |
 
-## 8. Dependency and privilege boundaries
+## 10. Dependency and privilege boundaries (unchanged from v1, trimmed)
 
-- **No new host packages.** The extracted `proxmox-auto-install-assistant` binary and the already-present `xorriso`, `qemu-system-x86_64`, `ovmf` packages are sufficient, per Investigation 1's direct confirmation — Milestone 1 adds no `apt install` requirement.
-- **No new Python dependencies beyond what Milestone 0 already confirmed present**: `cryptography` (setup-intent signing), stdlib only for everything else. If a genuine new dependency need emerges during implementation, it must be justified in that phase's own commit, not assumed here.
-- **No privileged operation of any kind runs on the development host.** Every QEMU session runs as the unprivileged invoking user against workspace-local files; `pkexec` is never invoked by Milestone 1 code, since the shipped helper's physical-device capability remains structurally absent (§1/§4 invariant 1) and the existing image-backed helper action doesn't require new privilege beyond what v1 already has.
-- **Setup-intent signing keys are test/synthetic only** (§1, §7) — no real key generation, storage, or rotation infrastructure is built in Milestone 1. This is a hard boundary, not a simplification of convenience: building real key-lifecycle plumbing prematurely, before the verification-side logic has been used in anger, risks exactly the kind of "signed implies more than it does" overclaim Investigation 9 was created to catch.
-- **No credential manager, keyring, or system secret store is touched.** The one-time install credential lives in process memory only; test/synthetic setup-intent keys live in memory or a gitignored temp path for the duration of one run.
+- No new host packages — the extracted assistant binary plus already-present `xorriso`, `qemu-system-x86_64`, `ovmf` are sufficient.
+- No new Python dependencies beyond `cryptography` (setup-intent) and stdlib.
+- No privileged operation on the development host — every QEMU session runs unprivileged against workspace-local files; `pkexec` is never invoked, since the physical-device capability remains structurally absent.
+- Setup-intent keys are synthetic, per-run, and discarded (§7) — no keyring, credential manager, or system secret store is touched.
 
-## 9. Explicit non-goals for Milestone 1
+## 11. Criteria for declaring Milestone 1 complete (revised, reduced)
 
-- Real setup-intent trust-anchor provisioning (real signing-key generation/storage/rotation, real independently-provisioned verification key baked into a real released first-boot image) — explicitly deferred, not delivered, per §1/§8.
-- The transactional firewall apply/rollback mechanism (PRD §5.10) — Milestone 2 scope, untouched here; Milestone 1's first-boot proof (§2) only exercises the discovery→confirm→apply(diagnostics)→verify→commit shape, not a real firewall transaction.
-- SSH preconfiguration application, tether preconfiguration application, and handoff-packet transactional restore (PRD §5.11–§5.13) — all Milestone 2 scope.
-- Any physical-device code path, argument, flag, or polkit action — structurally excluded, not merely unimplemented (§4 invariant 1).
-- Real MD RAID and LUKS-on-LVM storage-ancestry validation against actual `mdadm`/`cryptsetup` output — see §10, this belongs to Milestone 1 but as an explicitly scoped, separately-tracked sub-task, not assumed complete because Investigation 7's synthetic tests already pass.
-- Resolving the NetworkManager-presence assumption — see §11, tracked but not blocking.
-- Any change to either GitHub repository's settings, visibility, or push configuration — §0 is a recommendation, not an action taken.
-- A production release build pipeline, CI wiring, or packaging beyond what's needed to prove the modules in §3 work — Milestone 1 produces tested library modules and one proof-integration run, not a shipped release artifact.
-
-## 10. Where MD RAID / LUKS-on-LVM validation belongs
-
-Investigation 7 left this explicitly open: 12/12 synthetic tests pass for both fixture shapes, but neither has real-tool-output validation (`mdadm`/`cryptsetup` were absent from the Milestone 0 test image). This belongs in **Milestone 1, Phase 4 or 5** (alongside the wrapper/orchestration work, since it needs the same "install `mdadm`/`cryptsetup` inside a disposable QEMU guest, not the development host" pattern Investigation 5/7 already used successfully) — **as its own explicitly-tracked sub-task, not folded silently into "storage ancestry is done."** Concretely: build the same loop-backed MD RAID1 and LUKS-on-LVM fixtures Investigation 7 already scripted (`experiments/m0-inv7/fixture_test.sh` already has the MD RAID portion half-built) inside a disposable QEMU guest with `mdadm`/`cryptsetup` installed via the normal (non-offline, per §5.8's own decision) package mechanism, capture the real `mdadm --detail`/`cryptsetup luksDump` output, and confirm it matches the synthetic model exactly the way LVM and ZFS already did. This does not block Phases 1–3 or 6–9 of this plan and can run in parallel with them; it does block calling `storage_ancestry.py` "fully real-tool-validated" in the Milestone 1 completion report (§12).
-
-## 11. Treatment of the unresolved NetworkManager assumption
-
-PRD §5.12 assumes Proxmox's base install omits NetworkManager, and §11's open-risks list confirms this was never actually investigated at Milestone 0 — it's an unverified assumption, not a finding. Milestone 1 does not need to resolve this to complete its own scope (§2's proof exercise doesn't exercise §5.12's tether-preconfiguration code, which is Milestone 2 work), but it **must not be silently assumed true by any Milestone 1 code** that happens to touch networking. Concrete handling: add one direct, cheap check to Phase 6 or 7's QEMU proof run — after reaching the installed system's login/first-boot state, confirm via a simple discovered-fact query (already within `firstboot_statemachine.py`'s fact-discovery step, which runs unattended and has no side effects per invariant 10) whether `NetworkManager.service` exists/is enabled on the real installed Proxmox system. This costs nothing extra (the QEMU session already exists for Phase 7 regardless) and converts an unverified assumption into either a confirmed fact or a correctly-flagged remaining unknown before Milestone 2 code starts depending on it. If it's not confirmed by the time Milestone 2 begins, Milestone 2's plan must treat §5.12 as still unresolved, not inherit Milestone 1's silence as tacit confirmation.
-
-## 12. Criteria for declaring Milestone 1 complete
-
-All of the following, each with evidence recorded the same way Milestone 0's decision records did (not just a checkbox):
-
-1. Every module in §3's table exists under `baseline/lib/` or `tests/unit/drive_setup_tests/` with tests written first (TDD, red→green→refactor) and passing.
-2. ≥80% coverage on every module listed in PRD §8.6, verified by the project's coverage tool, not estimated.
-3. All twelve invariants in §4 have a passing, named test — no invariant is "true by inspection" without an automated check.
-4. Phase 7's full pipeline integration proof has run at least once successfully, with its manifest (§6) and evidence report generated and reviewed.
-5. §10's MD RAID/LUKS real-tool validation sub-task is either complete (with evidence matching LVM/ZFS's standard) or explicitly still open and stated as a named carry-forward into Milestone 2 — not silently dropped.
-6. §11's NetworkManager check has run at least once during Phase 7 and its result (confirmed present, confirmed absent, or inconclusive) is recorded in the evidence report — not left as an unexamined assumption.
-7. §7's retention rules have been verified by the Phase 9 automated check on at least one full run — no leftover credential-bearing or secret-bearing artifact found.
-8. `test_backend_surface.py` (invariant 1) passes and is confirmed to cover both the Python library's and the bash helper's full accepted-argument surface — this is re-verified explicitly at completion, not just once during Phase 1.
-9. A short closeout document (mirroring this session's decision-record style) is written summarizing what was proven, what was partially proven, and what's carried into Milestone 2 — matching the honesty standard Milestone 0's ledger set, not a "Milestone 1: done" one-liner.
-10. Nothing has been pushed to `cliffthelin/baseline` since this plan's acceptance unless the user has explicitly resolved §0's ambiguity in its favor.
-
-## 13. Repository/commit workflow for Milestone 1 work
-
-Per §0's recommendation: all Milestone 1 commits target `origin` (`cliffthelin/BaseLineProx`) only, using the existing non-interactive credentials already confirmed working in this session. No push to `cliff` (`cliffthelin/baseline`) happens as part of implementing this plan unless the user says otherwise. If any git operation would prompt for authentication or authorization, it is skipped and the local commit is preserved, exactly as this session's standing practice already requires.
+1. Gate A passes, with Phase 0's evidence recorded, **before** any of the four §4 modules exist as production code — or, if networking cannot be safely corrected, an explicit `networking_unresolved` result is recorded and handed back to the user rather than built around.
+2. Gates B through F each pass with their own recorded evidence, in order.
+3. All four module boundaries in §4 exist under `baseline/lib/` with tests written first (TDD) and passing, ≥80% coverage on each.
+4. The manifest (§8) and evidence report have been generated from at least one real run and reviewed.
+5. §9's retention rules are verified on at least one full run — no leftover credential-bearing artifact.
+6. Setup-intent's manifest/evidence-report language states "integrity-only" plainly, per §7 — no overclaim.
+7. Nothing has been pushed to `cliffthelin/baseline`.
+8. A short closeout note (matching this session's decision-record honesty standard) states what passed, what didn't, and what's explicitly carried into Milestone 2 or Milestone 3 — including, if applicable, an unresolved networking result, which would itself be a valid and important Milestone 1 finding rather than a failure to hide.
 
 ---
 
-This plan is the deliverable for this turn. No code has been written, no privileged interface invoked, no package installed, and no authorization request triggered while preparing it. Awaiting review before any implementation phase begins.
+This revised plan is the deliverable for this turn. No code has been written, no privileged interface invoked, no package installed, and no authorization request triggered while preparing it. Awaiting review before any implementation phase — including Phase 0 — begins.
