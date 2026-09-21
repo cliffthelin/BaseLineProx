@@ -6,77 +6,100 @@ have no access to that Project (it's a claude.ai web feature, not
 reachable from this CLI session), so I can't verify what did or didn't
 transfer - this is the definitive account from this side, not a diff.
 
-## READ THIS FIRST - active drive incident, unresolved
+## READ THIS FIRST - active drive incident, partially resolved
 
 The laptop's boot drive (a 28.7GB USB stick, `/dev/sdb`, holding the
 `pve-root` LVM volume that everything runs from) had a real failure
-event and the situation is **not yet safely resolved**. Whoever
-continues this needs to pick up here before anything else.
+event. **A verified, uncorrupted partial backup now exists** (see
+below), but the drive itself is still degraded/read-only and the root
+cause (wedged software state vs. genuine media failure) is still
+unresolved. Whoever continues this needs to pick up here before
+anything else.
 
 **Timeline (2026-09-20):**
 - `16:01:40` - kernel logs `usb 2-1.2: USB disconnect, device number 4`
   for the boot drive.
 - `16:01:47` - ext4's journal aborts, several `Buffer I/O error`s, the
   root filesystem (`dm-1`, i.e. `pve-root`) remounts itself read-only
-  (`errors=remount-ro` kernel safety trigger).
-- Since then: the device still shows up in `lsblk` and most small/
-  simple reads succeed (`cat /etc/hostname`, `python3 --version`), but
-  **`/usr/bin/tar` itself fails to execute with a consistent I/O error
-  on every attempt**, and a full filesystem walk (via Python, to avoid
-  the broken `tar` binary) hit **15,372 I/O-error failures out of
-  ~18,338 files attempted (~84% failure rate)**, spread across
-  essentially every directory (`/usr/share`, `/usr/lib/modules`, `/etc`,
-  `/var/log`, `/var/lib`, `/boot` - not localized to one area).
-  Notably, **no new USB disconnect events** were logged during that
-  entire walk - the connection itself held steady throughout, yet most
-  reads still failed. That pattern reads as either (a) ext4/the block
-  layer left in a wedged state by the one disconnect, now
-  short-circuiting most I/O defensively, or (b) genuinely extensive
-  media failure on the drive. Not conclusively distinguished yet.
-- **Two backup attempts, both failed to produce a valid archive**:
-  1. First attempt used Python's `tarfile.add()` directly - corrupted,
-     because it writes the tar header before copying file content, so
-     a read that failed *partway through* a file (not just at open)
-     desynced every entry after it in the stream. Produced a
-     167MB file that's garbage after ~4 entries.
-  2. Second attempt buffered each file fully into memory before ever
-     writing to the tar stream (should have been safe) - **still
-     corrupted**, breaking after 4247 valid-looking entries
-     (`tar tzf` fails with "Skipping to next header" /
-     "Archive contains ... where numeric off_t value expected").
-     Root cause not identified - worth debugging properly with more
-     time than this session has left, or trying a fundamentally
-     different strategy (see below).
-  Both corrupted archives, plus the full failure log (15,372 entries)
-  and a listing of what each attempt did capture, are on the CLI
-  machine's persistent storage at
-  `/run/media/cane/CACHE/baseline_repo/backups/` and were also sent
-  directly to the user via chat - **do not trust either .tar.gz as a
-  real backup**, they're partial/corrupted evidence, not a restore
-  point.
+  (`errors=remount-ro` kernel safety trigger). Confirmed still
+  read-only as of the end of this session (`touch` fails with
+  "Read-only file system").
+- User confirmed the physical USB connection is seated ("It's plugged
+  in"). No new USB disconnect events logged since. Reads continue to
+  mostly fail regardless (see below) with a stable connection, which
+  points more toward (b) below.
+- A full filesystem walk (via Python, since `/usr/bin/tar` itself fails
+  to execute with a consistent I/O error) hit **15,372-15,373
+  I/O-error failures out of ~18,338 files attempted (~84% failure
+  rate)**, spread across essentially every directory - not localized.
+  **`/usr/bin/rsync` also failed to execute** with the same I/O error
+  pattern as `tar`, while `python3`, `cat`, and plain file reads kept
+  working reliably throughout. Two different, unrelated system
+  binaries failing to load points toward (b) **genuine, fairly
+  extensive media failure** on the drive, more than (a) a simple
+  software wedge - not conclusively proven, but the working theory.
+- **Three backup attempts; the third succeeded and is verified valid**:
+  1. Python `tarfile.add()` directly - corrupted (writes the tar header
+     before copying content, so a read failing partway through a file
+     desynced everything after it in the stream).
+  2. Buffered each file fully into memory first (should have avoided
+     the above) - **still corrupted**, breaking after 4247 entries.
+     Root cause never fully identified - suspected but unconfirmed:
+     `tarfile.gettarinfo()`'s PAX-header prep may use stat-time size
+     before the manual `ti.size` override, desyncing PAX-format
+     entries specifically. Do not reuse `tarfile` for this host without
+     understanding that first.
+  3. **Abandoned `tarfile`/any archive-format library entirely.**
+     Custom minimal framing (tag byte + length-prefixed path + length-
+     prefixed data, written by a remote Python process, parsed by a
+     local Python process into individual real files on local disk -
+     see `remote_backup3.py`/`local_receive.py` if still present in
+     that session's scratchpad, otherwise trivial to rewrite from this
+     description) - **worked cleanly**: 2966 files, 417MB, local
+     receiver's count matched the remote sender's count exactly, zero
+     errors. Repackaged locally (purely local tar of local files, no
+     remote I/O involved, so no corruption risk) into
+     `partial-verified-20260920-1817.tar.gz`, 139.8MB,
+     sha256 `6a03a37ad58e8c6744d6e3e3e069446583044891b0d158c2081e19e82e454d09`
+     - **both `gzip -t` and `tar tzf` pass cleanly on this one.**
+     Contains the real, critical files: all of `/opt/baseline`
+     (including `bin/baseline` itself, which `tar` couldn't read),
+     `/etc/systemd/system/baseline.service`, `/etc/baseline/*`
+     (**including the live `harness.env` OAuth token and
+     `interface_aliases.json`**), and `/etc/ssh/ssh_host_*_key`
+     (**including the private host keys**).
+  **This archive contains live secrets - never commit it to the public
+  BaseLineProx repo or any public location.** It was sent directly to
+  the user via chat only. The two earlier *corrupted* archives were
+  deleted (not useful, superseded by the working one); the raw failure
+  logs from attempt 2 were kept and also sent to the user directly.
+- **Still not captured**: ~13,605-15,372 files (the ~84% that fail to
+  read at all right now) - most of the base OS, kernel, `/boot`, most
+  of `/usr`. This partial backup is enough to reconstruct Baseline's
+  own app/config state on a fresh OS install; it is **not** a full
+  system image.
 - **No reboot of the laptop has been attempted.** That's the standard
-  next step to clear an ext4 journal-abort wedge (if that's what this
-  is), but it's a real risk on the *only* boot drive and needs explicit
-  authorization, not an assumption. The user asked to physically check/
-  reseat the USB connection first - unknown whether that happened.
+  next step to try clearing an ext4 journal-abort wedge, but it's a
+  real risk on the *only* boot drive and needs explicit authorization -
+  don't assume it. Given the working theory has shifted toward genuine
+  media failure (see above), a reboot may not actually help and the
+  drive should likely be treated as failing hardware regardless of
+  whether it happens to come back read-write after one.
 
 **Recommended next steps for whoever picks this up:**
-1. Confirm with the user whether the physical USB connection was
-   checked/reseated.
-2. If a real backup is still needed before any reboot/fsck attempt,
-   try a fundamentally more robust transfer strategy than a single
-   continuous tar stream - e.g. `rsync -a --partial --ignore-errors`
-   (rsync handles individual file failures without corrupting anything
-   else, since each file is its own independent transfer) copying
-   directly into a local directory tree rather than one archive file,
-   or scp'ing files one at a time. Do not reuse the single-stream-tar
-   approach without first finding why entry ~4247 broke it.
-2. Get explicit authorization before rebooting the laptop - if the
-   drive really is failing physically, a reboot might not come back.
-3. Once the immediate data-preservation question is settled, the
-   NVMe-migration conversation from earlier this session (see "Not
-   done" below) stops being hypothetical - this incident is real
-   evidence for prioritizing it.
+1. Treat this drive as failing hardware needing replacement soon, not
+   just a one-off glitch to route around - two independent binaries
+   failing to load with a stable physical connection is a strong
+   signal. The NVMe-migration conversation from earlier this session
+   (see "Not done" below) is no longer hypothetical.
+2. If more data recovery is wanted before replacing the drive, reuse
+   the working custom-framing approach (attempt 3 above), not
+   `tarfile`/`tar`/`rsync` - all three failed or were unreliable on
+   this specific degraded filesystem for reasons not fully understood.
+3. Get explicit authorization before rebooting the laptop.
+4. Handle `partial-verified-20260920-1817.tar.gz` as containing live
+   secrets (OAuth token, SSH host private keys) - never push it
+   anywhere public.
 
 ## Do this first (before anything else works)
 
