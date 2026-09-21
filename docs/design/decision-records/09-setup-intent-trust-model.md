@@ -1,0 +1,26 @@
+# Decision record: Setup-intent trust model consolidation
+
+Date: pending
+Investigator: Claude Code
+Status: not started
+
+## Evidence collected
+(pending)
+
+## Result
+(pending)
+
+## Remaining uncertainty
+(pending)
+
+## Accepted / rejected approach
+(pending)
+
+## Security implications
+(pending)
+
+## Tests added
+(pending)
+
+## Next milestone unblocked?
+Not yet evaluated.
