@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 Investigator: Claude Code
-Status: complete (legacy-BIOS-only portion deferred per instruction — not needed unless the real target requires legacy boot)
+Status: complete, including shutdown-gap follow-up (legacy-BIOS-only portion still deferred per instruction — not needed unless the real target requires legacy boot)
 
 ## Scope actually run, per explicit instruction to keep this fast
 
@@ -53,7 +53,7 @@ QEMU was stopped with a clean HMP `quit`.
 
 - **Boot succeeded or failed**: succeeded, both times (BIOS-mode reboot-to-disk, and fresh-NVRAM UEFI boot).
 - **Time to login screen**: BIOS-mode reboot-to-disk reached login by t=120s of the *combined* install+reboot session (install itself accounts for ~100s of that; the disk-boot-to-login portion was under 20s). Fresh-UEFI-NVRAM boot reached login in **under 10 seconds** — the first sampling interval.
-- **Whether fresh NVRAM was sufficient**: **yes**. The installer itself ran under legacy BIOS (`-boot d`, no OVMF at all, per Investigation 3) — this is the exact case Investigation 4 exists to check, since Proxmox's installer must have written a genuinely portable EFI bootloader into the ESP for this to work. It did: a completely blank NVRAM store, never touched by the installer, booted straight to a working login prompt with no manual EFI boot-manager intervention required.
+- **Whether fresh NVRAM was sufficient**: **yes, within the scope this test actually covers**. The installer itself ran under legacy BIOS (`-boot d`, no OVMF at all, per Investigation 3) — this is the exact case this check exists to catch, since Proxmox's installer must have written a genuinely portable EFI bootloader into the ESP for this to work. It did: a completely blank NVRAM store, never touched by the installer, booted straight to a working login prompt with no manual EFI boot-manager intervention required. **Precise framing, as instructed**: this demonstrates the disk is **portable across fresh OVMF state** — QEMU's own UEFI implementation, freshly initialized — not universal compatibility with every physical machine's UEFI firmware. Different vendors' real UEFI implementations (Dell, HP, Supermicro, consumer boards, etc.) can differ from OVMF and from each other in boot-manager behavior, boot-order persistence, and edge-case handling; this result rules out an OVMF-specific NVRAM-state problem, it does not stand in for a physical-hardware UEFI boot test.
 - **Shutdown result**: not performed this round — the current instruction's step list ends at "capture the login screen or the exact boot failure; report the result and stop," and explicitly said not to expand scope. Both QEMU instances were stopped via a clean monitor `quit` (not `kill -9`), which is a clean stop of the *process*, not a normal in-guest shutdown of Proxmox itself (no login/shutdown command was issued inside the guest). If a verified normal-shutdown result is needed, that's a small, separate follow-up, not performed here per the "keep it fast" instruction.
 - **Any visible errors**: none in either boot. The only anomaly in the whole sequence is the repeated-CD-boot behavior from the first (pre-`once=d`) attempt in Investigation 3 — see below, not observed this run since `once=d` fixed it.
 
@@ -74,6 +74,24 @@ Confirmed: the specific image produced by this project's automated-install pipel
 Not run, per explicit instruction ("do not run the legacy BIOS test yet unless the intended physical target actually requires legacy boot"): a from-scratch legacy-BIOS-only boot test (distinct from the BIOS-mode *reboot* that happened incidentally as part of step 1–2, which was legacy BIOS by default since no OVMF was specified there either — so legacy BIOS boot-to-login was, in fact, also demonstrated as a side effect of steps 1–2, just not as its own isolated, deliberately-scoped test).
 
 Not tested: a verified clean in-guest shutdown; whether the fresh-NVRAM boot remains stable across a second/third boot cycle; any hardware-specific UEFI quirks a real physical machine's firmware might introduce that OVMF's implementation doesn't reproduce.
+
+## Shutdown-gap closure (follow-up, same day)
+
+The original run stopped both QEMU instances via a clean monitor `quit`, which is a clean stop of the *process*, not a verified normal in-guest shutdown. Closed with one focused check, no new tooling:
+
+- Created a **qcow2 overlay** (`qemu-img create -f qcow2 -b target.img -F raw shutdown_test_overlay.qcow2`) backed by the preserved image — the preserved `target.img` itself was never opened for writing at any point in this check, by construction of how qcow2 backing files work, not merely by intent.
+- Booted the overlay under the same fresh-NVRAM configuration as the main UEFI test (blank `OVMF_VARS` copy, no installer ISO, no host block devices).
+- Reached the same real Proxmox login prompt again (confirmed via screendump before proceeding — reproducibility holds).
+- Sent `system_powerdown` via the QEMU monitor (the ACPI power-button signal, not a forced stop) and started a bounded wait, polling every 10 seconds whether the QEMU process still existed, up to 90 seconds. **`quit` was not used at any point** — the process was left to exit on its own or the timeout would have been the recorded result.
+
+**Result: QEMU exited on its own, well within the 90-second bound** — confirmed gone by the first poll after the command was sent (bounded at ≤20 seconds of wall-clock time from when `system_powerdown` was issued, and very likely faster than that, since some of that window was polling/tooling overhead before the first check even ran).
+
+**What is and isn't directly evidenced by this:**
+- **QEMU exits on its own**: confirmed directly — this is the one thing polling for process existence can prove without ambiguity.
+- **Proxmox begins an orderly shutdown**: not directly captured on screen — the shutdown sequence happened faster than this check's screenshot cadence could catch a mid-sequence frame (the attempted screendump at the first poll interval raced against the process's own exit and produced no file). The strong circumstantial reading is that `system_powerdown` was received and acted on by the guest's own ACPI handling (systemd-logind/acpid, standard on a Debian-trixie-based Proxmox install) rather than the VM hanging and requiring a forced stop — a hang would have run out the 90-second window, not exited early. This is inference from timing, not a captured shutdown-sequence screen, and is reported as such rather than overclaimed.
+- **Filesystems/services stop normally**: not independently verified (would require inspecting the disk afterward, e.g. an ext4 clean-unmount flag check) — not performed, consistent with the instruction to record the result rather than investigate further regardless of outcome.
+
+Overlay artifacts (`shutdown_test_overlay.qcow2`, the test's own `OVMF_VARS` copy, serial log) were deleted after this check; the preserved base image (`target.img`) is untouched and remains at `experiments/m0-inv3/runs/m0inv3-final-Pww7AS/target.img`.
 
 ## Whether Investigation 5 is unblocked
 
