@@ -434,9 +434,9 @@ Explicitly deferred. Needs its own risk model and likely a separate installer mo
 
 ## 11. Open risks / explicit unknowns to resolve at Milestone 0
 
-- Whether `proxmox-auto-install-assistant` is obtainable/runnable on this Ubuntu 26.04 desktop without Docker.
+- ~~Whether `proxmox-auto-install-assistant` is obtainable/runnable on this Ubuntu 26.04 desktop without Docker.~~ **Resolved** — see [decision-records/01-assistant-iso-feasibility.md](decision-records/01-assistant-iso-feasibility.md): confirmed host is Ubuntu 26.04.1 LTS; the official `.deb` runs directly against the host's own libraries once extracted, no isolated Debian chroot/nspawn needed.
 - Whether Proxmox base install omits NetworkManager (assumed for §5.12) — confirm against a real installed system.
-- The actual answer-file schema's handling of the root password, and what ends up embedded in the prepared ISO (§7.1) — drives the final shape of the secret-delivery mechanism.
+- The actual answer-file schema's handling of the root password, and what ends up embedded in the prepared ISO (§7.1) — **partially resolved**: `root-password-hashed` is a real, functional field (confirmed via `validate-answer`), and `prepare-iso --fetch-from http` exists as an officially documented mode that avoids embedding the answer file in the ISO at all — see decision record 01's "Significant additional finding." Investigation 2 should evaluate this as the primary secret-delivery design.
 - The exclusive-access design (§5.1a) — genuinely unresolved, not a placeholder.
 - The offline-install containment approach (§5.8).
 - Whether Baseline's existing tty1 TUI infrastructure can host the destination-hardware first-boot flow directly, or needs its own mode.
