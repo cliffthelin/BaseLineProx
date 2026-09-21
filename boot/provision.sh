@@ -18,7 +18,7 @@ done
 apt-get update
 
 echo "=== Installing base packages ==="
-apt-get install -y inxi python3-rich python3-textual tmux
+apt-get install -y inxi python3-rich python3-textual tmux gnupg
 
 echo "=== Installing Node.js 22 (NodeSource - Debian's own package is too old) ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -38,7 +38,9 @@ cp "$SRC/baseline/lib/harness.py" /opt/baseline/lib/harness.py
 cp "$SRC/baseline/lib/netpref.py" /opt/baseline/lib/netpref.py
 cp "$SRC/baseline/lib/providers.py" /opt/baseline/lib/providers.py
 cp "$SRC/baseline/lib/tether.py" /opt/baseline/lib/tether.py
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh
+cp "$SRC/baseline/lib/handoff.py" /opt/baseline/lib/handoff.py
+cp "$SRC/baseline/bin/baseline-setup-wizard" /opt/baseline/bin/baseline-setup-wizard
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard
 
 echo "=== Installing systemd unit (Baseline takes over tty1) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -56,6 +58,11 @@ echo "=== Verifying tty1 console font ==="
 bash "$SRC/tests/console_font_check.sh"
 
 echo
-echo "Done. Baseline owns tty1. Auth is not yet configured - run"
+echo "Done. Baseline owns tty1. Run the setup wizard yourself (it's"
+echo "interactive - a form with sensible defaults, and it can restore"
+echo "identity/state from a previous build's encrypted handoff packet"
+echo "instead of starting from scratch):"
+echo "  /opt/baseline/bin/baseline-setup-wizard"
+echo "If you skip it or aren't restoring a token, run"
 echo "  /opt/baseline/bin/baseline-auth-setup.sh"
-echo "yourself (it needs your own interactive login) to connect an AI account."
+echo "yourself afterward (it needs your own interactive login) to connect an AI account."

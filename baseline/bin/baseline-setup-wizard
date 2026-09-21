@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Baseline first-run setup wizard.
+
+Run once when a drive is first set up (fresh, or as a planned
+replacement for a previous one). Every field has a sensible default so
+confirming is usually just pressing Enter; the one meaningfully
+different path is restoring from a previous build's encrypted handoff
+packet (see baseline/lib/handoff.py) - if you have one, this wizard
+applies its secrets (Claude Code OAuth token, SSH host/root keys,
+interface aliases) instead of asking you to reproduce them by hand.
+
+Must run as root (writes /etc/hostname, /etc/ssh/ssh_host_*,
+/etc/baseline/*, /root/.ssh/*).
+"""
+import getpass
+import os
+import shutil
+import socket
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/opt/baseline/lib")
+import handoff  # noqa: E402
+
+try:
+    from rich.console import Console
+    from rich.prompt import Confirm, Prompt
+    from rich.panel import Panel
+except ImportError:
+    print("This wizard needs python3-rich (apt install python3-rich).", file=sys.stderr)
+    sys.exit(1)
+
+console = Console()
+
+
+def require_root():
+    if os.geteuid() != 0:
+        console.print("[red]baseline-setup-wizard must run as root.[/red]")
+        sys.exit(1)
+
+
+def restore_from_packet() -> bool:
+    """Returns True if a packet was found and applied."""
+    if not Confirm.ask("Restore identity/state from a previous Baseline handoff packet?", default=False):
+        return False
+
+    default_path = None
+    for candidate in Path("/mnt").glob("**/Private_Baseline_files*.gpg"):
+        default_path = str(candidate)
+        break
+    path_str = Prompt.ask("Path to the encrypted handoff packet", default=default_path or "")
+    packet_path = Path(path_str).expanduser()
+    if not packet_path.is_file():
+        console.print(f"[red]No file at {packet_path} - skipping restore.[/red]")
+        return False
+
+    passphrase = getpass.getpass("Handoff packet passphrase: ")
+    extract_to = Path("/root/.baseline-handoff-restore")
+    try:
+        manifest = handoff.open_packet(packet_path, passphrase, extract_to)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return False
+
+    console.print(Panel(
+        f"Host label: {manifest['host_label']}\n"
+        f"Created: {manifest['created']}\n"
+        f"Has Claude Code token: {manifest['has_harness_token']}\n"
+        f"Has interface aliases: {manifest['has_interface_aliases']}\n"
+        f"Files: {len(manifest['files_included'])}",
+        title="Handoff packet contents (nothing applied yet)",
+    ))
+    if not Confirm.ask("Apply this packet's files to this host now?", default=True):
+        shutil.rmtree(extract_to, ignore_errors=True)
+        return False
+
+    _apply_extracted(extract_to)
+    shutil.rmtree(extract_to, ignore_errors=True)
+    console.print("[green]Handoff packet applied.[/green]")
+    return True
+
+
+def _apply_extracted(extract_to: Path) -> None:
+    pairs = [
+        (extract_to / "etc-baseline", Path("/etc/baseline")),
+        (extract_to / "var-lib-baseline", Path("/var/lib/baseline")),
+        (extract_to / "var-log-baseline", Path("/var/log/baseline")),
+    ]
+    for src, dest in pairs:
+        if src.is_dir():
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+
+    ssh_key_dir = extract_to / "ssh-host-keys"
+    if ssh_key_dir.is_dir():
+        for f in ssh_key_dir.iterdir():
+            dest = Path("/etc/ssh") / f.name
+            shutil.copy2(f, dest)
+            os.chmod(dest, 0o600 if not f.name.endswith(".pub") else 0o644)
+
+    root_ssh_src = extract_to / "root-ssh"
+    if root_ssh_src.is_dir():
+        root_ssh_dest = Path("/root/.ssh")
+        root_ssh_dest.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for name in ("id_rsa", "id_rsa.pub", "config"):
+            f = root_ssh_src / name
+            if f.is_file():
+                dest = root_ssh_dest / name
+                shutil.copy2(f, dest)
+                os.chmod(dest, 0o600 if name != "id_rsa.pub" else 0o644)
+        # authorized_keys is deliberately NOT restored here - Proxmox's
+        # own /etc/pve/priv/authorized_keys is cluster/host-specific and
+        # overwriting it blind on a *different* host is exactly the kind
+        # of silent access change this wizard shouldn't make without a
+        # human looking at it first.
+        ak = root_ssh_src / "authorized_keys"
+        if ak.is_file():
+            console.print(f"[yellow]Not auto-restoring authorized_keys - review "
+                           f"{ak} by hand and merge into /etc/pve/priv/authorized_keys "
+                           f"yourself if it should carry over.[/yellow]")
+
+
+def form(restored: bool) -> dict:
+    current_hostname = socket.gethostname()
+    hostname = Prompt.ask("Hostname", default=current_hostname)
+    node_name = Prompt.ask("Proxmox node name", default=hostname)
+
+    if restored:
+        console.print("[dim]Claude Code token and interface aliases came from the "
+                       "restored packet - not asking for them again.[/dim]")
+        need_auth_setup = False
+    else:
+        need_auth_setup = not Path("/etc/baseline/harness.env").exists()
+
+    return {"hostname": hostname, "node_name": node_name, "need_auth_setup": need_auth_setup}
+
+
+def apply_form(values: dict) -> None:
+    Path("/etc/hostname").write_text(values["hostname"] + "\n")
+    try:
+        socket.sethostname(values["hostname"])
+    except OSError:
+        pass
+
+
+def offer_new_packet() -> None:
+    if not Confirm.ask("Create an encrypted handoff packet of this host's current state, "
+                        "for future rebuilds?", default=True):
+        return
+    host_label = Prompt.ask("Label for this packet (shown before it's decrypted next time)",
+                             default=socket.gethostname())
+    out_path = Prompt.ask("Where to save it", default="/root/backups/Private_Baseline_files.tar.gz.gpg")
+    passphrase = getpass.getpass("Passphrase to protect it with: ")
+    confirm_passphrase = getpass.getpass("Confirm passphrase: ")
+    if passphrase != confirm_passphrase:
+        console.print("[red]Passphrases didn't match - not creating a packet.[/red]")
+        return
+    manifest = handoff.create_packet(values["hostname"], Path(out_path), passphrase)
+    console.print(f"[green]Wrote {out_path} ({len(manifest['files_included'])} files, "
+                  f"mode 0600).[/green]")
+
+
+def main() -> int:
+    require_root()
+    console.print(Panel("BaselineOS first-run setup", style="bold"))
+    restored = restore_from_packet()
+    values = form(restored)
+    apply_form(values)
+    if values["need_auth_setup"]:
+        console.print("[yellow]No Claude Code token configured - run "
+                       "/opt/baseline/bin/baseline-auth-setup.sh yourself when ready "
+                       "(needs your own interactive login).[/yellow]")
+    offer_new_packet()
+    console.print("[bold green]Setup complete.[/bold green]")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
