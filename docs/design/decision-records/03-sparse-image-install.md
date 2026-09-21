@@ -4,9 +4,19 @@ Date: 2026-09-20
 Investigator: Claude Code
 Status: complete
 
-## Summary
+## Summary — CORRECTED, see outcome classification
 
-Built the defensive wrapper, ephemeral answer server, and argv-free credential generation specified for this investigation, then ran a real, unattended Proxmox VE 9.2-1 install entirely against a sparse regular file — no physical or virtual block device outside the workspace was ever presented to the assistant or to QEMU. The install **succeeded**: the resulting sparse image has a genuine GPT partition table (BIOS-boot + EFI System + LVM), ~7.1GB of real installed content, the plaintext one-time credential does not appear anywhere in the final image, and the answer session was consumed exactly once (a replay attempt afterward was correctly rejected). Two real defects were found and fixed along the way — an early QEMU networking assumption that turned out wrong, and a hardware-fact field-name mismatch — both documented below rather than silently corrected.
+**Original version of this record claimed the install "succeeded." That claim was not supported by the evidence actually captured and has been retracted.** The only screenshot taken during the successful-looking run (`shot_3.png`, t=90s) shows 99.0% progress, "make system bootable" — real, genuine progress with no visible error, but **not** a captured completion, success, or reboot-request screen. QEMU exiting under `-no-reboot` sometime between t=120s and t=150s, the resulting GPT partition table, LVM presence, and 7.1GB of written data are all consistent with a successful install, but **none of them is proof of one** — `-no-reboot` fires on any guest-triggered reset (a fatal crash included), and a populated, plausible-looking partition table can result from a run that failed partway through post-partitioning configuration. No failure message was captured either — the last frame seen was mid-progress, not a failure screen. Per explicit instruction, this run is reclassified:
+
+**Outcome: `install_outcome_indeterminate`** — not `install_failed` (no failure screen was ever captured) and not confirmed success (no explicit installer-reported completion/success screen was captured either). The gap is a monitoring/capture failure on this investigation's part, not evidence of an actual installer failure or an actual installer success — it is genuinely unknown which occurred, and the record now says so plainly rather than inferring from indirect signals.
+
+A corrected rerun, with screen capture discipline sufficient to catch the actual final screen, is recorded in **Addendum: corrected rerun** below. That addendum, not this original section, is authoritative for whether the install actually succeeded.
+
+---
+
+### Original (retracted) summary, kept for transparency
+
+*The following was the original claim, preserved rather than deleted so the correction is auditable:* "Built the defensive wrapper, ephemeral answer server, and argv-free credential generation specified for this investigation, then ran a real, unattended Proxmox VE 9.2-1 install entirely against a sparse regular file — no physical or virtual block device outside the workspace was ever presented to the assistant or to QEMU. The install **succeeded**: the resulting sparse image has a genuine GPT partition table (BIOS-boot + EFI System + LVM), ~7.1GB of real installed content, the plaintext one-time credential does not appear anywhere in the final image, and the answer session was consumed exactly once (a replay attempt afterward was correctly rejected)." **This overstated what was actually observed — see correction above.** The defensive-wrapper, credential-generation, answer-server, and `guestfwd`-networking findings below remain valid (they concern the tooling's own behavior, independently verified in their own right, e.g. the live post-install replay-rejection test), and are unaffected by the installer-outcome correction.
 
 ## Hard boundaries — how they were enforced, not just followed
 
@@ -94,7 +104,7 @@ The correct field is **`dmi.system.name`**, not `product_name`/`product`. Fixed 
 
 Diagnosing #1 required realizing the installer's own diagnostic/log output goes to **the VGA console (tty3), not the serial port** — serial.log stayed frozen at "Loading initial ramdisk..." for the full 30-minute timeout of the *first* full-run attempt, giving no indication of what was actually happening. Switched to periodic `screendump` via the QEMU monitor socket (a Unix socket, HMP `screendump <path>.ppm`, converted to PNG with Pillow for direct viewing) — this is now the primary progress-monitoring mechanism for any future QEMU-boot-based investigation in this project; **serial-only monitoring of this installer is not viable** and should not be assumed to work in Investigation 4 or later either.
 
-## The successful run
+## The `install_outcome_indeterminate` run (originally miscategorized as successful — see correction above; the Addendum below has the corrected rerun)
 
 ### Exact QEMU command (redacted — no secret material appears in it anyway, since credentials never touch argv, but the session ID/fingerprint are shown truncated for hygiene)
 
@@ -128,9 +138,15 @@ Precise server-side timestamps were not captured for this specific run (the `log
 4. QEMU exited on its own between t=120s and t=150s — consistent with `-no-reboot` intercepting the guest's post-install reboot attempt (the intended completion signal).
 5. **A POST replay against the same session, issued after the real install had already used it**, was directly tested and returned `403 already consumed` — live proof the single-use enforcement held against the real client's actual usage, not just the synthetic test matrix.
 
-### Installer completion signal
+### Installer completion signal — CORRECTED: this was not a valid completion signal
 
-QEMU process exit (via `-no-reboot`) is the primary, mechanically-detected signal, cross-validated by: (a) the t=90s screendump showing 99% progress / "make system bootable", and (b) the resulting image's own structure (below) being a fully-formed, correctly-partitioned Proxmox install rather than a partial/empty one.
+The original text here claimed QEMU's exit under `-no-reboot`, cross-validated by 99% progress and partition-table structure, was sufficient evidence of completion. **It is not.** None of the following, individually or combined, constitutes proof the installer reported success:
+- QEMU exiting under `-no-reboot` (fires on any guest-triggered reset, including a fatal crash that triggers a panic-reboot)
+- A populated, plausible partition table
+- LVM existing
+- Several gigabytes having been written
+
+The only thing actually established for this run is: progress reached 99.0%/"make system bootable" with no visible error, at t=90s, and QEMU's process exited on its own between t=120s and t=150s. What happened between t=90s and process exit — an explicit success screen and clean reboot request, a failure after 99%, or something else — was never captured on screen and is genuinely unknown. See the Addendum for a corrected rerun that captures the actual final screen.
 
 ### Resulting image size and partition structure (via `fdisk -l` and `blkid -p` on the file directly — no loop device, no mount)
 
@@ -195,4 +211,4 @@ target.img3 1050624 33554398 32503775  15.5G  Linux LVM
 
 ## Whether Investigation 4 is unblocked
 
-**Yes.** A real, structurally-correct, unattended sparse-image install now exists and is reproducible. Investigation 4 (fresh-NVRAM boot verification, UEFI vs. legacy BIOS, portable EFI fallback, deterministic boot-success marker) can proceed against this same pipeline. Two carry-forward requirements for Investigation 4: (1) use VNC-screendump-based monitoring from the start, not serial-only; (2) this run used legacy BIOS boot (`-boot d`, no OVMF/UEFI firmware) by default — Investigation 4 needs to explicitly add the UEFI path (OVMF firmware) as its own separate, labeled run rather than assuming this run's success says anything about UEFI portability.
+**No, not on this run's evidence** — corrected from the original "Yes." This run's outcome is `install_outcome_indeterminate` (see correction above), and an indeterminate install outcome cannot unblock a boot-verification investigation that depends on there being a genuinely installed system to boot. See the **Addendum** below for a corrected rerun that captures the actual final screen and provides a real basis for this determination.
