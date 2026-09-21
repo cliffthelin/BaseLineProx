@@ -6,6 +6,8 @@ Depends on: `packaging/baseline-drive-setup/` (v1, shipped as `.deb`), `baseline
 
 ## 0. Revision changelog
 
+**Milestone 0 update (Investigation 5, post-revision-2)**: §5.8 rewritten. The original chroot-vs-`systemd-nspawn` offline-containment question is closed as `defer-to-first-boot`, verified directly against a disposable overlay of the real installed image (Investigation 3/4's pipeline) — no offline package installation, no containment mechanism, exists anywhere in this design. Packages install once, during the destination-hardware first-boot stage, against a real running systemd. See `decision-records/05-offline-staging-containment.md`.
+
 **Revision 2** (this one) closes a second review pass. Architecture and milestone direction are approved; the remaining problems were narrower but load-bearing:
 
 - The PRD assumed a first-boot systemd unit could make consequential network/firewall/tether/restore decisions unattended, then separately required the user confirm the detected subnet — those two statements can't both be true once the Ubuntu-hosted GUI is gone and the drive is booting on its own. §5.6 now specifies a real destination-hardware first-boot TUI on Baseline's own tty1 that does the confirming, with a defined handoff contract from the installer GUI.
@@ -142,12 +144,12 @@ At Milestone 3, physical-drive support is added as a **separately reviewed** new
 
 This is the section the prior revision got structurally wrong: it described a first-boot systemd unit configuring network/firewall/tether/restore decisions automatically, while separately requiring the user confirm the detected subnet. Once the Ubuntu-hosted GUI is gone — which it is, the instant the new drive boots on its own — there is no GUI left to ask that question. The confirmation has to happen somewhere real, and the only place that exists is the target's own console.
 
-**Offline staging** (chroot/containment context immediately after §5.5 succeeds, see §5.8 for containment requirements):
-- Install the five diagnostic tools (§5.9... see below, actually §5.10) noninteractively.
+**Offline staging** (no chroot, no package installation — see §5.8; this stage only copies files):
 - Copy Baseline.
 - Stage the handoff packet's non-secret categories into a quarantine location (not yet applied — see §5.12).
 - Seed authorized public keys into a staged location.
 - Install and enable a Baseline **first-boot state machine** unit, and a **signed/validated setup-intent bundle** produced by the installer GUI containing: the operator's Phase-1 form choices, which handoff categories were selected for staging, whether SSH/tether preconfiguration was requested and with what values, and nothing secret in plaintext beyond what's unavoidable (staged handoff secrets stay encrypted at rest until the destination TUI supplies the passphrase).
+- **The five diagnostic tools are explicitly not installed at this stage** — see §5.8.
 
 **Destination-hardware first boot** (the target itself; a QEMU boot of this stage is a proof exercise for Milestones 1–2, explicitly not claimed equivalent to real hardware):
 - Baseline's first-boot state machine owns tty1, exactly as Baseline already owns tty1 in normal operation. **tty2 remains available throughout** — this is not a mode that locks the operator out of anything.
@@ -171,26 +173,21 @@ Firmware mode is tracked explicitly: an install under virtual UEFI may write onl
 
 **Passing the QEMU boot test proves the disk is structurally bootable. It does not prove destination hardware will boot it.** That claim is only made after §5.6's destination-hardware first boot completes and is confirmed.
 
-### 5.8 Offline package installation containment
+### 5.8 Package installation — deferred to first boot, not staged offline
 
-Running `apt-get install` in a chroot can execute maintainer scripts, attempt to start services, modify boot artifacts, or assume `/proc`, `/sys`, `/dev`, and systemd behavior that a bare chroot doesn't provide. Milestone 0/1 must choose and specify one of:
+**Decision (Milestone 0, Investigation 5): package installation is never done offline.** No chroot, no `systemd-nspawn`, no offline containment mechanism of any kind exists in this design. Offline staging (§5.6) copies files only — Baseline itself, the setup-intent bundle, the first-boot unit, staged (unapplied) handoff/key material. Every package Baseline needs, including the five diagnostic tools (§5.9), installs during the destination-hardware first-boot stage (§5.6), via a normal `apt-get install` against the real, running target OS with a real systemd — the same environment and mechanism any normal Debian/Proxmox system uses for its own package management, with no synthetic sandbox standing between the package and the service manager it expects.
 
-- A controlled chroot with the required bind mounts (`/proc`, `/sys`, `/dev` as needed) and a temporary `policy-rc.d` that refuses all service starts for the duration of the install.
-- `systemd-nspawn` with deliberately constrained behavior.
-- Deferring package installation entirely to the destination-hardware first-boot stage (i.e., staging only the package cache/selection offline, actual `apt-get install` running for real on first boot) — a legitimate alternative to chroot containment, not just a fallback.
+**Why, with evidence**: the original plan required choosing between chroot+`policy-rc.d` and `systemd-nspawn` for offline containment, with the safety property resting on "maintainer scripts can't start services because there's no reachable systemd." Investigation 5 found that reasoning insufficient on its own — a maintainer script can invoke binaries directly, manipulate devices, or depend on mounted host interfaces in ways "systemd isn't PID 1" doesn't cover — and, separately, found that verifying either containment approach on a real development host requires real root, which this project's own architecture deliberately doesn't grant to interactive tooling. Rather than requesting sudo credentials or building a privileged mounting helper to force the comparison, the gap was read as the actual answer: if package installation is going to happen where a real systemd is genuinely running anyway, do it there, once, in the environment the packages already expect — not twice, once fake and once real. This was verified directly, not assumed: the five packages were installed against a disposable overlay of the actual installed image, with listening sockets captured before and after (identical), `iperf3` confirmed `disabled`/`inactive` both immediately after install and again after a full reboot, `dpkg --audit` clean, and no `sensors-detect` or SMART self-test triggered. Full evidence in `docs/design/decision-records/05-offline-staging-containment.md`.
 
-Whichever is chosen must, as hard requirements:
-- Prevent any service from starting against the *host* running the installer.
-- Remove/restore any temporary policy files afterward.
-- Record any maintainer-script failure rather than silently continuing.
-- Verify package database consistency after install.
-- Leave the first-boot state machine unit enabled regardless of containment method.
-- Independently verify no `iperf3` server ends up enabled (§5.10).
-- The run summary explicitly distinguishes **"package installed offline"** from **"capability verified on destination hardware"** — these are different claims and must never be merged into one status line.
+**What this changes structurally**:
+- No `policy-rc.d`, no bind-mounted `/proc`/`/sys`/`/dev`, no chroot/nspawn code path exists anywhere in the shipped tool.
+- The setup-intent bundle (§5.6) carries the package *selection*, not installed packages — the destination-hardware first-boot stage performs the actual install as one of its confirmed, consequential actions.
+- The distinction the prior revision required ("package installed offline" vs. "capability verified on destination hardware") is now moot — there is only one installation event, and it already happens on destination hardware, so there is only one claim to make: installed and verified, together.
+- Package-database consistency (`dpkg --audit`) and the `iperf3`-listener check both happen at the same point, post-install on destination hardware, not split across an offline stage and a later verification stage.
 
 ### 5.9 Five diagnostic tools
 
-Renumbered from prior revision; content unchanged except as noted: fixed set `lm-sensors`, `nvme-cli`, `smartmontools`, `iperf3`, `ethtool`, installed noninteractively under the containment from §5.8. No `sensors-detect`, no triggered SMART self-tests. Verify no `iperf3` listener is enabled/running — checked both immediately after offline install (§5.8's "installed offline" claim) and again after destination-hardware first boot (§5.6's "verified" claim), since a containment method that suppresses service starts offline says nothing about the service's enabled-state once real systemd runs on real hardware.
+Fixed set, no per-tool opt-out: `lm-sensors`, `nvme-cli`, `smartmontools`, `iperf3`, `ethtool`. Installed noninteractively (`DEBIAN_FRONTEND=noninteractive`) during the destination-hardware first-boot stage (§5.6), not offline (§5.8). No `sensors-detect`, no triggered SMART self-tests — confirmed directly in Investigation 5 (no `sensors3.conf` regenerated, no self-test log entries). `iperf3`'s listener/enabled state is verified once, post-install, on destination hardware — confirmed `disabled`/`inactive` in testing, both immediately after install and after a full reboot. `smartmontools` may already be present as part of Proxmox's own base install (confirmed in testing) — the install step must tolerate that (already-installed is not a failure) rather than assuming a clean slate.
 
 ### 5.10 Proxmox web UI firewall — transactional, rollback-protected
 
@@ -356,7 +353,7 @@ def test_handoff_partial_failure_reports_requires_attention():
 
 ### 8.3 Integration tests
 - Full Phase 1 against a throwaway sparse image: answer-file generation → unattended install → static verification → QEMU boot test.
-- Offline staging against the resulting image via the chosen §5.8 containment mechanism: five tools installed, no stray `iperf3` listener, first-boot unit + setup-intent bundle staged, no service actually started against the host.
+- Offline staging against the resulting image: Baseline, first-boot unit, and setup-intent bundle copied — no package installation attempted at this stage (§5.8).
 - Destination-hardware TUI stage, run inside a QEMU VM as a proof exercise (explicitly not claimed equivalent to real hardware): tty1 presents discovered facts and proposed actions, confirmation gate blocks application until acknowledged, tty2 remains responsive throughout, firewall apply/verify/rollback-timer sequence exercised in both the success and induced-failure directions.
 - Interrupted-run recovery: kill mid-install, mid-staging, mid-first-boot, and mid-handoff-transaction; assert each resumes only via fresh, explicit authorization, and that a mid-handoff-transaction kill produces either a verified rollback or `partial_state_requires_attention` — never a silent success.
 
@@ -400,13 +397,13 @@ No physical block-device writes of any kind; no physical-device code path exists
 - QEMU firmware/boot-mode behavior (UEFI NVRAM vs. portable fallback path).
 - Complete storage-ancestry detection logic against real LVM/LUKS/RAID/ZFS test fixtures, via sysfs `holders`/`slaves`.
 - **The exclusive-access design from §5.1a — this is a required output of Milestone 0, not an assumption carried into it.**
-- The offline-install containment approach from §5.8 (chroot+policy-rc.d vs. systemd-nspawn vs. defer-to-first-boot).
+- ~~The offline-install containment approach from §5.8 (chroot+policy-rc.d vs. systemd-nspawn vs. defer-to-first-boot).~~ **Resolved** — see [decision-records/05-offline-staging-containment.md](decision-records/05-offline-staging-containment.md): `defer-to-first-boot` accepted, verified directly against a disposable overlay of the real installed image; no offline containment mechanism exists in this design.
 - Whether Baseline's existing tty1/Textual TUI infrastructure can be reused for the destination-hardware first-boot TUI (§5.6, §8.4), or whether it needs a dedicated first-boot mode.
 - Cancellation semantics at every stage.
 - Prepared-ISO cleanup — confirm nothing with embedded secret material survives a crash.
 
 ### Milestone 1 — Virtual disk installation
-Sparse image files only. Prove: ISO preparation, automated installation, the indeterminate-on-failure contract, static filesystem verification, actual QEMU boot test, first-boot unit + setup-intent bundle staging, offline-install containment (§5.8) with verified no-host-service-start, logs and redaction.
+Sparse image files only. Prove: ISO preparation, automated installation, the indeterminate-on-failure contract, static filesystem verification, actual QEMU boot test, first-boot unit + setup-intent bundle staging (file copy only, no package installation — §5.8), logs and redaction.
 
 ### Milestone 2 — Destination-hardware first-boot TUI
 Run on an actual booted Proxmox VM as a proof exercise for the real thing. Prove: tty1 TUI presents discovered facts and requires confirmation for every consequential action (§5.6), tty2 stays available throughout, firewall transactional apply/verify/rollback-timer (§5.10), SSH/tether application at the confirmation stage, handoff transactional restore including induced-failure rollback and `partial_state_requires_attention` (§5.13), idempotent reruns, first-boot-completion marker preventing automatic re-trigger.
