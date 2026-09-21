@@ -6,6 +6,78 @@ have no access to that Project (it's a claude.ai web feature, not
 reachable from this CLI session), so I can't verify what did or didn't
 transfer - this is the definitive account from this side, not a diff.
 
+## READ THIS FIRST - active drive incident, unresolved
+
+The laptop's boot drive (a 28.7GB USB stick, `/dev/sdb`, holding the
+`pve-root` LVM volume that everything runs from) had a real failure
+event and the situation is **not yet safely resolved**. Whoever
+continues this needs to pick up here before anything else.
+
+**Timeline (2026-09-20):**
+- `16:01:40` - kernel logs `usb 2-1.2: USB disconnect, device number 4`
+  for the boot drive.
+- `16:01:47` - ext4's journal aborts, several `Buffer I/O error`s, the
+  root filesystem (`dm-1`, i.e. `pve-root`) remounts itself read-only
+  (`errors=remount-ro` kernel safety trigger).
+- Since then: the device still shows up in `lsblk` and most small/
+  simple reads succeed (`cat /etc/hostname`, `python3 --version`), but
+  **`/usr/bin/tar` itself fails to execute with a consistent I/O error
+  on every attempt**, and a full filesystem walk (via Python, to avoid
+  the broken `tar` binary) hit **15,372 I/O-error failures out of
+  ~18,338 files attempted (~84% failure rate)**, spread across
+  essentially every directory (`/usr/share`, `/usr/lib/modules`, `/etc`,
+  `/var/log`, `/var/lib`, `/boot` - not localized to one area).
+  Notably, **no new USB disconnect events** were logged during that
+  entire walk - the connection itself held steady throughout, yet most
+  reads still failed. That pattern reads as either (a) ext4/the block
+  layer left in a wedged state by the one disconnect, now
+  short-circuiting most I/O defensively, or (b) genuinely extensive
+  media failure on the drive. Not conclusively distinguished yet.
+- **Two backup attempts, both failed to produce a valid archive**:
+  1. First attempt used Python's `tarfile.add()` directly - corrupted,
+     because it writes the tar header before copying file content, so
+     a read that failed *partway through* a file (not just at open)
+     desynced every entry after it in the stream. Produced a
+     167MB file that's garbage after ~4 entries.
+  2. Second attempt buffered each file fully into memory before ever
+     writing to the tar stream (should have been safe) - **still
+     corrupted**, breaking after 4247 valid-looking entries
+     (`tar tzf` fails with "Skipping to next header" /
+     "Archive contains ... where numeric off_t value expected").
+     Root cause not identified - worth debugging properly with more
+     time than this session has left, or trying a fundamentally
+     different strategy (see below).
+  Both corrupted archives, plus the full failure log (15,372 entries)
+  and a listing of what each attempt did capture, are on the CLI
+  machine's persistent storage at
+  `/run/media/cane/CACHE/baseline_repo/backups/` and were also sent
+  directly to the user via chat - **do not trust either .tar.gz as a
+  real backup**, they're partial/corrupted evidence, not a restore
+  point.
+- **No reboot of the laptop has been attempted.** That's the standard
+  next step to clear an ext4 journal-abort wedge (if that's what this
+  is), but it's a real risk on the *only* boot drive and needs explicit
+  authorization, not an assumption. The user asked to physically check/
+  reseat the USB connection first - unknown whether that happened.
+
+**Recommended next steps for whoever picks this up:**
+1. Confirm with the user whether the physical USB connection was
+   checked/reseated.
+2. If a real backup is still needed before any reboot/fsck attempt,
+   try a fundamentally more robust transfer strategy than a single
+   continuous tar stream - e.g. `rsync -a --partial --ignore-errors`
+   (rsync handles individual file failures without corrupting anything
+   else, since each file is its own independent transfer) copying
+   directly into a local directory tree rather than one archive file,
+   or scp'ing files one at a time. Do not reuse the single-stream-tar
+   approach without first finding why entry ~4247 broke it.
+2. Get explicit authorization before rebooting the laptop - if the
+   drive really is failing physically, a reboot might not come back.
+3. Once the immediate data-preservation question is settled, the
+   NVMe-migration conversation from earlier this session (see "Not
+   done" below) stops being hypothetical - this incident is real
+   evidence for prioritizing it.
+
 ## Do this first (before anything else works)
 
 **SSH access to the laptop needs to be re-established.** The key I've
