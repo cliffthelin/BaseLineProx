@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Baseline Drive Setup - a GTK4 GUI for preparing a new bootable
+BaselineOS drive.
+
+The user picks parameters in an ordinary form. Nothing privileged runs
+until they click "Authorize & Build" - at that point the exact command
+is handed to `pkexec`, which is the OS's own native authentication
+mechanism (PolicyKit): it pops up the desktop's normal graphical
+password prompt, showing which program is asking to run as root. This
+app never asks for or handles the password itself - pkexec/PolicyKit
+does, using standard OS means, same as any other GNOME/KDE system tool.
+
+The exact command that will run is hidden by default - "Show script"
+reveals it before authorizing, for anyone who wants to audit it first.
+Every privileged action goes through boot/baseline-drive-prep-helper,
+a narrowly-scoped, root-only-writable script that re-validates its
+target device by filesystem label before doing anything destructive -
+this app is only the form/authorization layer around it, not where the
+actual safety checks live.
+"""
+import subprocess
+import sys
+import threading
+
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk, GLib, Gio  # noqa: E402
+
+HELPER = "/usr/local/sbin/baseline-drive-prep-helper"
+
+
+def list_candidate_drives():
+    """[(device, label, size, mountpoint), ...] for every block device
+    with a filesystem - the form's drive picker, not a privileged call."""
+    try:
+        out = subprocess.run(
+            ["lsblk", "-J", "-o", "NAME,LABEL,SIZE,TYPE,MOUNTPOINT,PATH"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    import json
+    devices = []
+    try:
+        tree = json.loads(out)
+    except json.JSONDecodeError:
+        return []
+
+    def walk(nodes):
+        for n in nodes:
+            if n.get("type") == "part":
+                devices.append((
+                    n.get("path", ""),
+                    n.get("label") or "",
+                    n.get("size", ""),
+                    n.get("mountpoint") or "",
+                ))
+            for child in n.get("children", []) or []:
+                walk([child])
+
+    walk(tree.get("blockdevices", []))
+    return devices
+
+
+class DriveSetupWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Baseline Drive Setup")
+        self.set_default_size(640, 560)
+
+        toolbar_view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        toolbar_view.add_top_bar(header)
+        self.set_content(toolbar_view)
+
+        scrolled = Gtk.ScrolledWindow(vexpand=True)
+        toolbar_view.set_content(scrolled)
+
+        page = Adw.PreferencesPage()
+        scrolled.set_child(page)
+
+        group = Adw.PreferencesGroup(title="Target drive")
+        page.add(group)
+
+        self.drive_model = Gtk.StringList()
+        self.drives = list_candidate_drives()
+        for dev, label, size, mount in self.drives:
+            display = f"{dev}  [{label or 'no label'}]  {size}"
+            if mount:
+                display += f"  (mounted at {mount})"
+            self.drive_model.append(display)
+        self.drive_row = Adw.ComboRow(title="Device", model=self.drive_model)
+        # Pre-select a device labeled "BaseLine" if one is present.
+        for i, (dev, label, size, mount) in enumerate(self.drives):
+            if label == "BaseLine":
+                self.drive_row.set_selected(i)
+                break
+        group.add(self.drive_row)
+
+        iso_group = Adw.PreferencesGroup(title="Install source")
+        page.add(iso_group)
+        self.iso_row = Adw.EntryRow(title="Prepared Proxmox ISO path")
+        self.iso_row.set_text("/run/media/cane/CACHE/baseline_repo/iso_build/proxmox-ve_9.2-1.iso")
+        iso_group.add(self.iso_row)
+        iso_browse = Gtk.Button(icon_name="document-open-symbolic", valign=Gtk.Align.CENTER)
+        iso_browse.connect("clicked", self.on_browse_iso)
+        self.iso_row.add_suffix(iso_browse)
+
+        handoff_group = Adw.PreferencesGroup(
+            title="Restore from a previous build (optional)",
+            description="Applied by baseline-setup-wizard on first boot of the new drive - not by this tool.",
+        )
+        page.add(handoff_group)
+        self.handoff_row = Adw.EntryRow(title="Encrypted handoff packet path (optional)")
+        handoff_group.add(self.handoff_row)
+
+        action_group = Adw.PreferencesGroup()
+        page.add(action_group)
+
+        self.show_script_switch = Adw.SwitchRow(title="Show script before authorizing")
+        action_group.add(self.show_script_switch)
+
+        self.script_label = Gtk.Label(
+            wrap=True, xalign=0, selectable=True, visible=False,
+            css_classes=["monospace", "dim-label"],
+        )
+        action_group.add(self.script_label)
+        self.show_script_switch.connect("notify::active", self.on_toggle_show_script)
+
+        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
+                              halign=Gtk.Align.END, margin_top=12)
+        page.add(Adw.PreferencesGroup())
+        self.build_button = Gtk.Button(label="Authorize & Build", css_classes=["suggested-action"])
+        self.build_button.connect("clicked", self.on_build_clicked)
+        button_box.append(self.build_button)
+        action_group.add(button_box)
+
+        self.output_view = Gtk.TextView(editable=False, monospace=True, vexpand=True)
+        self.output_buffer = self.output_view.get_buffer()
+        output_frame = Gtk.Frame(child=self.output_view, margin_top=12, height_request=200)
+        action_group.add(output_frame)
+
+    def current_device(self) -> str:
+        idx = self.drive_row.get_selected()
+        if idx is None or idx >= len(self.drives):
+            return ""
+        return self.drives[idx][0]
+
+    def build_command(self):
+        dev = self.current_device()
+        iso = self.iso_row.get_text().strip()
+        return ["pkexec", HELPER, "qemu-install", dev, iso]
+
+    def on_browse_iso(self, _button):
+        dialog = Gtk.FileDialog(title="Select Proxmox ISO")
+        dialog.open(self, None, self._on_iso_chosen)
+
+    def _on_iso_chosen(self, dialog, result):
+        try:
+            f = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        if f:
+            self.iso_row.set_text(f.get_path())
+
+    def on_toggle_show_script(self, switch, _pspec):
+        active = switch.get_active()
+        self.script_label.set_visible(active)
+        if active:
+            cmd = self.build_command()
+            self.script_label.set_text(" ".join(cmd))
+
+    def append_output(self, text: str):
+        end = self.output_buffer.get_end_iter()
+        self.output_buffer.insert(end, text)
+
+    def on_build_clicked(self, _button):
+        dev = self.current_device()
+        if not dev:
+            self.append_output("No drive selected.\n")
+            return
+        self.build_button.set_sensitive(False)
+        cmd = self.build_command()
+        self.append_output(f"Running: {' '.join(cmd)}\n"
+                            f"(the OS will now ask you to authenticate)\n\n")
+        threading.Thread(target=self._run, args=(cmd,), daemon=True).start()
+
+    def _run(self, cmd):
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, bufsize=1)
+            for line in proc.stdout:
+                GLib.idle_add(self.append_output, line)
+            proc.wait()
+            GLib.idle_add(self.append_output, f"\n[exit code {proc.returncode}]\n")
+        except Exception as exc:
+            GLib.idle_add(self.append_output, f"\n[error: {exc}]\n")
+        finally:
+            GLib.idle_add(self.build_button.set_sensitive, True)
+
+
+class DriveSetupApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="os.baseline.DriveSetup")
+
+    def do_activate(self):
+        win = DriveSetupWindow(self)
+        win.present()
+
+
+if __name__ == "__main__":
+    sys.exit(DriveSetupApp().run(sys.argv))
