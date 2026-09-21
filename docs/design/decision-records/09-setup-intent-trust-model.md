@@ -2,7 +2,7 @@
 
 Date: 2026-09-21
 Investigator: Claude Code
-Status: complete — entirely offline/synthetic, no authorization of any kind triggered or attempted.
+Status: complete — entirely offline/synthetic, no authorization of any kind triggered or attempted. See Addendum for an explicit strengthening of the replay-protection limitation, requested and confirmed during Milestone 0 closeout review.
 
 ## Scope discipline
 
@@ -118,3 +118,11 @@ Confirmed by construction, not re-implemented here (Investigation 6 already buil
 ## Whether Milestone 1 is unblocked
 
 Milestone 0's nine investigations are now complete. Real implementation work (Milestone 1) can begin, but per explicit instruction this investigation does not start it, does not implement production key provisioning, and does not touch Investigation 8's still-open physical-device questions — those remain explicitly deferred to Milestone 3 real-hardware validation, not reopened or reframed as solved by anything in this record.
+
+## Addendum: explicit rollback limitation (same day, Milestone 0 closeout review)
+
+Milestone 0 closeout review asked for this record to state the replay-protection limitation more explicitly than the original text's phrasing, rather than leaving it inferable from §6/Remaining uncertainty. Restated directly, with no change to the original evidence or test results above:
+
+**Replay protection as built and tested here is durable against ordinary interruption (a crash mid-write, tested directly in test 9) and against corruption of an existing record (tested directly in test 9b) — it is NOT durable against restoring both the signed intent and the consumed-intent ledger together from an older snapshot.** If an attacker or an accidental restore rolls back the ledger directory to a point before a given intent was consumed — while that same intent (still validly signed, still unexpired if the clock/expiry data is also rolled back or simply not yet passed) is available to resubmit — the existence check in `is_consumed()` will honestly report "not consumed," because from the ledger's perspective that is true again after the rollback. This is not a bug in the tested logic; it is a limitation of an existence-based durable-write mechanism that has no independent, monotonically-advancing trust anchor (e.g., a counter or hash chain anchored somewhere a filesystem-snapshot restore cannot also roll back) to detect that a rollback occurred at all.
+
+This was already listed under "Remaining uncertainty" in the original text above as consumed-intent rollback via snapshot restore — this addendum exists to make sure that limitation cannot be read as a minor caveat: **it is a real gap in the replay-protection guarantee as currently designed**, and any Milestone 1+ implementation that needs replay protection to survive a snapshot-rollback threat model must add an independent monotonic anchor (e.g., a hardware counter, a remote/out-of-band ledger, or a hash-chained record whose head is verified against something outside the rollback boundary) — none of which this investigation implemented, tested, or recommends as already solved.
