@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for the independent repair-rollback executor.
+
+Deliberately separate from `bin/baseline` (the Textual TUI) and kept
+dependency-light - this is what the transient systemd timer armed by
+`repair.reset_interface_to_dhcp` actually calls, and it has to run
+correctly even if `baseline`'s own process is dead. See
+`lib/repair_rollback.py`'s module docstring for what it does and does not
+cover yet (same-boot rollback: yes; a permanent boot-time recovery service
+for the reboot-during-window case: implemented as a function, not yet
+installed as a unit - pending real Proxmox/Debian systemd-ordering
+verification).
+
+Usage:
+    baseline-repair-rollback same-boot <attempt-id>
+    baseline-repair-rollback boot-recovery
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import repair_rollback  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(repair_rollback.main())

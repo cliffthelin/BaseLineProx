@@ -40,7 +40,19 @@ cp "$SRC/baseline/lib/providers.py" /opt/baseline/lib/providers.py
 cp "$SRC/baseline/lib/tether.py" /opt/baseline/lib/tether.py
 cp "$SRC/baseline/lib/handoff.py" /opt/baseline/lib/handoff.py
 cp "$SRC/baseline/bin/baseline-setup-wizard" /opt/baseline/bin/baseline-setup-wizard
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard
+# Host-network repair (docs/design/reset-interface-to-dhcp-plan.md,
+# docs/design/decision-records/11-repair-branch-comparison.md) - the
+# same-boot rollback path only. The permanent boot-time recovery service
+# for the reboot-during-window case is NOT installed here yet; see
+# baseline/lib/repair_rollback.py's module docstring for why.
+cp "$SRC/baseline/lib/ifnet_config.py" /opt/baseline/lib/ifnet_config.py
+cp "$SRC/baseline/lib/topology.py" /opt/baseline/lib/topology.py
+cp "$SRC/baseline/lib/repair.py" /opt/baseline/lib/repair.py
+cp "$SRC/baseline/lib/repair_additive.py" /opt/baseline/lib/repair_additive.py
+cp "$SRC/baseline/lib/repair_rollback.py" /opt/baseline/lib/repair_rollback.py
+cp "$SRC/baseline/lib/firstboot_network_repair.py" /opt/baseline/lib/firstboot_network_repair.py
+cp "$SRC/baseline/bin/baseline-repair-rollback" /opt/baseline/bin/baseline-repair-rollback
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback
 
 echo "=== Installing systemd unit (Baseline takes over tty1) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
