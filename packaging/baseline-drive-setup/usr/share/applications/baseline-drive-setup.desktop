@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Baseline Drive Setup
+Comment=Prepare a new bootable BaselineOS drive
+Exec=/usr/bin/baseline-drive-setup-gui
+Icon=baseline-drive-setup
+Terminal=false
+Type=Application
+Categories=System;Utility;

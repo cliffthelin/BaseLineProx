@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>BaselineOS</vendor>
+  <vendor_url>https://github.com/cliffthelin/baseline</vendor_url>
+  <action id="os.baseline.drive-setup.prep-helper">
+    <description>Prepare a new BaselineOS boot drive</description>
+    <message>Authentication is required to prepare a new BaselineOS boot drive. The selected drive will be erased and reformatted.</message>
+    <icon_name>baseline-drive-setup</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/baseline-drive-setup/baseline-drive-prep-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

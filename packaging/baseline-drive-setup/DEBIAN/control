@@ -1,0 +1,15 @@
+Package: baseline-drive-setup
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: amd64
+Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, polkitd, pkexec, qemu-system-x86
+Maintainer: Cliff Thelin <cliffthelin@gmail.com>
+Description: BaselineOS drive setup GUI
+ A GTK4 application for preparing a new bootable BaselineOS/Proxmox
+ drive. Privileged operations run through PolicyKit (pkexec), the
+ standard OS authentication mechanism used by GNOME/KDE system tools -
+ no custom sudo rules, no NOPASSWD grants. The privileged helper this
+ app authorizes is installed read-only, root-owned, by this package
+ (standard dpkg file-permission handling, the same mechanism that gives
+ /usr/bin/sudo and /usr/bin/pkexec themselves their special permissions).

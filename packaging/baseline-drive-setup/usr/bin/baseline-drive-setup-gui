@@ -18,16 +18,35 @@ target device by filesystem label before doing anything destructive -
 this app is only the form/authorization layer around it, not where the
 actual safety checks live.
 """
+import glob
+import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, GLib, Gio  # noqa: E402
 
-HELPER = "/usr/local/sbin/baseline-drive-prep-helper"
+# Matches where the packaged .deb installs it (see packaging/) - root
+# owned, root-only-writable, applied by dpkg's normal file-permission
+# handling at install time, not by this app.
+HELPER = "/usr/lib/baseline-drive-setup/baseline-drive-prep-helper"
+
+
+def guess_iso_path() -> str:
+    """Best-effort, non-hardcoded search for a Proxmox ISO already on
+    this machine - the user's own Downloads folder and current working
+    directory, nothing specific to any one person's setup. Returns ""
+    if nothing obvious is found; the field stays editable either way."""
+    search_dirs = [str(Path.home() / "Downloads"), os.getcwd()]
+    for d in search_dirs:
+        matches = sorted(glob.glob(os.path.join(d, "proxmox-ve*.iso")), reverse=True)
+        if matches:
+            return matches[0]
+    return ""
 
 
 def list_candidate_drives():
@@ -100,7 +119,7 @@ class DriveSetupWindow(Adw.ApplicationWindow):
         iso_group = Adw.PreferencesGroup(title="Install source")
         page.add(iso_group)
         self.iso_row = Adw.EntryRow(title="Prepared Proxmox ISO path")
-        self.iso_row.set_text("/run/media/cane/CACHE/baseline_repo/iso_build/proxmox-ve_9.2-1.iso")
+        self.iso_row.set_text(guess_iso_path())
         iso_group.add(self.iso_row)
         iso_browse = Gtk.Button(icon_name="document-open-symbolic", valign=Gtk.Align.CENTER)
         iso_browse.connect("clicked", self.on_browse_iso)
@@ -146,10 +165,21 @@ class DriveSetupWindow(Adw.ApplicationWindow):
             return ""
         return self.drives[idx][0]
 
+    def current_label(self) -> str:
+        idx = self.drive_row.get_selected()
+        if idx is None or idx >= len(self.drives):
+            return ""
+        return self.drives[idx][1]
+
     def build_command(self):
         dev = self.current_device()
+        # The label captured *now*, at build time - passed to the
+        # helper so it can refuse if the device's actual label has
+        # changed since this was selected (a different drive swapped
+        # in at the same /dev path, for instance).
+        label = self.current_label()
         iso = self.iso_row.get_text().strip()
-        return ["pkexec", HELPER, "qemu-install", dev, iso]
+        return ["pkexec", HELPER, "qemu-install", dev, label, iso]
 
     def on_browse_iso(self, _button):
         dialog = Gtk.FileDialog(title="Select Proxmox ISO")
