@@ -6,74 +6,89 @@ Depends on: `packaging/baseline-drive-setup/` (v1, shipped as `.deb`), `baseline
 
 ## 0. Revision changelog
 
-This revision replaces the first draft after a review that found several stated guarantees the proposed mechanisms could not actually back up: device-name confirmation, "untouched on failure", chroot-validated networking, and a LAN-connect test standing in for a real inaccessibility proof, among others. Nothing about the product goal changed. What changed:
+**Revision 2** (this one) closes a second review pass. Architecture and milestone direction are approved; the remaining problems were narrower but load-bearing:
 
-- Destructive installation is now **locked to sparse images, virtual disks, and independently-proven-disposable whole physical drives** until a defined set of milestones pass. Preserving existing partitions / installing beside existing data remains explicitly deferred, not attempted behind a checkbox.
-- Device identity, storage-ancestry exclusion, and "blank drive" detection are rebuilt on signature-based, by-id-stable primitives — no reliance on `/dev/sdX` naming or mount-based inspection.
-- "Failed install leaves the drive untouched" is retracted. It doesn't, and the retry contract is rebuilt around that fact.
-- Phase 2 is split into offline staging (package/config staging only) vs. actual first boot on destination hardware (the only place real network/hardware facts exist) vs. post-boot verification.
-- Firewall, secret-handling, and handoff-restore sections were rewritten to state only what the mechanism can actually prove, and to add the trust-tiering the previous draft was missing for private-key restoration.
-- Added an explicit milestone sequence (§9) gating physical-drive writes behind image-based proof.
+- The PRD assumed a first-boot systemd unit could make consequential network/firewall/tether/restore decisions unattended, then separately required the user confirm the detected subnet — those two statements can't both be true once the Ubuntu-hosted GUI is gone and the drive is booting on its own. §5.6 now specifies a real destination-hardware first-boot TUI on Baseline's own tty1 that does the confirming, with a defined handoff contract from the installer GUI.
+- "Independently proven disposable" and "genuinely blank" overstated what signature inspection can show. Renamed throughout to technical-eligibility language with explicit states (§5.3, §6) and a separate, unmerged concept of user attestation.
+- `flock` was asserted as exclusive-access protection; it's advisory only. §5.1a now marks the locking mechanism **unresolved, to be proven at Milestone 0**, and requires `by-id`/serial/WWN identity — `by-path` alone is no longer sufficient.
+- Backend selection previously lived behind one runtime-configurable abstraction. §5.4 now requires the physical-device capability be **structurally absent** from the Milestone 0–2 helper binary and polkit action, not gated by a flag or a milestone check at runtime.
+- "Partial-apply impossible by construction" for handoff restore was incorrect — validation-before-apply doesn't protect against power loss, filesystem failure, or a later category failing after an earlier one committed. §5.12 now specifies a transactional model with a durable journal and an explicit `partial_state_requires_attention` outcome.
+- Added: chroot/offline-install containment requirements (§5.8), firewall application as a transactional, rollback-timer-protected action with a full standalone-host traffic account (§5.9), and treatment of the prepared answer-file ISO as sensitive material with its own Milestone 0 questions (§7.1).
+- Assorted corrections: sysfs `holders`/`slaves` vs. relying solely on `lsblk`'s `HOLDERS` column; USB-disconnect-mid-write is "indeterminate + bounded termination," not "aborts"; automount interference needs active mitigation, not an assumption that a holder check prevents it; firewall unit tests must exercise the actual generated config format; host-key restoration validates private key, public key, *and* directory permissions.
+
+**Revision 1** replaced the first draft's unbacked guarantees (device-name confirmation, "untouched on failure", chroot-validated networking, LAN-connect-proves-global-inaccessibility) with mechanism-honest language and introduced the milestone sequence. See git history for that diff if needed; this document supersedes it.
 
 ## 1. Problem
 
 v1 of `baseline-drive-setup` (the `.deb`, shipped this session) solved *authorization* — a GTK4 app that picks a drive and runs a privileged helper through `pkexec`, no custom sudo, no scary install commands. It does **not** solve *installation*: `qemu-install` boots the raw Proxmox ISO with `-nographic -serial mon:stdio`, which the graphical Proxmox installer cannot drive, so nothing actually completes. Everything past drive selection — a bootable Proxmox install, the five diagnostic tools, LAN-scoped Proxmox web UI, SSH/tether preconfiguration, and handoff-packet restore — is either missing or lives in a disconnected CLI tool (`baseline-setup-wizard`) the GUI never invokes.
 
-This PRD defines what "ready to install" actually means, and — per the review — what it *doesn't* mean yet: a production-quality installer **framework** ships first, with its destructive backend locked to image files until storage identity, boot verification, first-boot configuration, and recovery behavior are proven against those images. Physical-drive writes are the last milestone, not the first.
+This PRD defines a production-quality installer **framework** whose destructive backend is structurally limited to image files through Milestone 2, and whose consequential real-world decisions (network, firewall, tether, secret restoration) are always confirmed by a human at the console that can actually see the real hardware — never inferred by unattended code running somewhere the human isn't looking.
 
 ## 2. Governing architectural principle
 
 > "As much of the setup process as we can should be made available while a full OS is in place, not automating CLI scripts between TUI pages." — user, 2026-09-20
 
-Concretely: the *installer* phase should be as short and standard as possible — Proxmox's own supported unattended-install mechanism (`proxmox-auto-install-assistant` + an answer file), run to completion with zero scripted keystrokes into installer TUI/ncurses screens.
-
-The review sharpens this further: a chroot or a QEMU session cannot truthfully stand in for the destination machine's real network and hardware. So "a full OS is in place" is now explicitly **the target's own first boot on destination hardware**, not the QEMU session or the chroot used to stage it. See §5.
+"A full OS is in place" now has a precise meaning in this document: **the target's own first boot on destination hardware**, with Baseline's existing tty1-ownership model (established earlier in this project) presenting a real, human-facing TUI — not a systemd unit making silent choices, and not the Ubuntu-hosted installer GUI, which no longer exists once the drive is booted on its own.
 
 ## 3. Goals / Non-goals
 
 **Goals**
-- A user with an independently-proven-disposable drive (or, before that milestone, a virtual/sparse-image target) can go from "GUI open" to "drive boots Proxmox, configured" with no manual TUI navigation and no hand-typed shell commands.
-- Every privileged action stays behind `pkexec` + the existing `.policy` file; the "show me the script" toggle from v1 is preserved and extended to every Phase 2 action, as a **redacted execution plan / config diff**, never a secret-bearing command line.
-- Every step that can destroy data requires a stable-identity confirmation the helper independently re-verifies immediately before the destructive write — never a device-path string alone.
-- Local-network-only Proxmox web UI access is the default and the only option this tool configures; the tool states precisely what it can and cannot prove about that boundary (§7).
+- A user with a technically-eligible image, virtual disk, or (at Milestone 3) whole physical drive can go from "GUI open" to "drive boots Proxmox, configured" with no manual TUI navigation *of the Proxmox installer*, while still explicitly confirming every consequential, hardware-dependent decision at the point where real facts exist.
+- Every privileged action stays behind `pkexec` + a polkit action scoped to exactly what that milestone permits; "show me the script" is a redacted execution plan / config diff, never a secret-bearing command.
+- Every step that can destroy data requires a stable-identity confirmation the helper independently re-verifies immediately before the write, plus an explicit user attestation — never a technical signature check alone, and never a bare device path.
+- Local-network-only Proxmox web UI access is the default, applied as a rollback-protected transaction, with claims worded to match exactly what was tested.
 
 **Non-goals (this PRD)**
-- No support for installing alongside an existing OS on the same disk, preserving partitions, shrinking filesystems, dual-boot, installing into free space, or reusing an existing EFI partition. Any operation where losing the whole disk is unacceptable is **Milestone 4, explicitly deferred**, and will need its own risk model — not an extension of this one.
-- No remote/headless operation of this tool over SSH — it's a local GUI, run on a machine with the target drive (or none, for image-only milestones) physically attached.
-- No support for restoring a handoff packet onto a *different* Proxmox major version than it was created on (mismatch is detected and blocked, not reconciled) — and, per §8, no automatic restoration of private key material regardless of version match.
+- No support for installing alongside an existing OS on the same disk, preserving partitions, shrinking filesystems, dual-boot, installing into free space, or reusing an existing EFI partition — Milestone 4, deferred, needs its own risk model.
+- No remote/headless operation over SSH — local GUI for Phase 1/offline staging; local TUI on the target itself for first boot.
+- No cross-major-version Proxmox handoff restore, and no automatic restoration of private key material regardless of version match (§5.12).
+- No physical-device support of any kind before Milestone 3 — see §5.4 for what "structurally absent" requires.
 
 ## 4. Destructive-target policy
 
-Destructive installation (anything that can begin erasing/partitioning) is permitted **only** against:
+Destructive installation is permitted only against:
 
-1. Sparse/raw test image files.
-2. Virtual disks (QEMU-backed).
-3. A whole physical drive that has been **independently proven disposable** per §6 — not merely user-typed confirmation.
+1. Sparse/raw image files created by this tool in its own controlled workspace.
+2. Virtual disks (QEMU-backed), same mechanism as (1).
+3. At Milestone 3 only: a whole physical drive that has passed every technical-eligibility check in §6 **and** received explicit user attestation — the tool proves technical facts about the drive, never the user's intent toward its contents; that judgment stays with the user, stated plainly, not implied by a "disposable" label.
 
-Nothing in this tool preserves existing partitions or installs beside existing data in this version. That capability is Milestone 4 and is out of scope here.
+Nothing in this tool preserves existing partitions or installs beside existing data in this version.
 
 ## 5. Functional requirements
 
 ### 5.1 Drive selection and stable identity
 
-`/dev/sdX`-style paths are not authorization-grade identifiers — they're unstable across reconnection, reboot, and enumeration order changes. The GUI and helper instead key everything off:
+`/dev/sdX` paths are not authorization-grade — unstable across reconnection, reboot, enumeration order. The GUI and helper key off:
 
-- `/dev/disk/by-id/...` (or `by-path`/WWN where `by-id` is unavailable)
+- `/dev/disk/by-id/...`, preferring a WWN or serial-derived identifier
 - Manufacturer, model, capacity
-- Serial/WWN suffix
+- Serial/WWN itself, not just the `by-id` symlink name
 - Connection type (USB/SATA/NVMe)
-- Existing partition-table/filesystem signatures (§5.3)
-- Mounted/in-use status
+- Existing partition-table/filesystem signature state (§5.3)
+- Mounted/in-use status, including sysfs-derived `holders`/`slaves` relationships (§5.1a)
+
+**`by-path` alone is not identity** — it names a connection point, and a different physical drive inserted into the same port would resolve to the same `by-path` entry. A physical drive with no serial, WWN, or other content-independent unique identifier is **ineligible for destructive installation**, full stop — it does not fall back to path-based authorization.
 
 The GUI's confirmation dialog reads back a human-readable identity string, e.g.:
 
 > **ERASE Samsung T7 1TB ending 4C21**
 
-not a bare path. The **helper independently rediscovers the device by its stable identity and re-checks capacity, serial/WWN, and storage-graph position immediately before starting the destructive operation** — it does not trust the GUI's earlier snapshot. If re-discovery finds a mismatch (different serial at that `by-id` path, capacity changed, device now has holders it didn't before), the helper refuses and requires the user to reselect from scratch.
+The helper independently rediscovers the device by its stable identity and re-checks capacity, serial/WWN, and storage-graph position immediately before the destructive operation — it does not trust the GUI's earlier snapshot. A mismatch at this point refuses and requires full reselection.
 
-### 5.2 Storage-ancestry exclusion (replaces "exclude the root device")
+### 5.1a Exclusive access — unresolved at this revision, must be proven at Milestone 0
 
-Excluding only `findmnt -no SOURCE /` is unsafe: that can resolve to an LVM LV, a dm-crypt mapping, a RAID member, or a ZFS dataset, not the physical disk underneath. The helper must resolve the **full live-system storage graph** and exclude every physical ancestor backing:
+`flock` is advisory. QEMU, `udisks`, an automounter, or any other process is free to ignore it. This PRD does **not** claim a working exclusive-access design yet. Milestone 0 must determine one, evaluating some combination of:
+
+- Repeated (not one-shot) mount/swap/holder re-checks across the operation's duration, using sysfs `/sys/block/<dev>/holders/` and `/sys/block/<dev>/slaves/` directly — not solely `lsblk`'s `HOLDERS` column, which is a convenience view over the same data and may not reflect every relationship type.
+- Host automount inhibition for the duration of the operation (e.g. a `udisks2` inhibit lock or equivalent), with restoration afterward.
+- An exclusive block-device open where the kernel/tooling supports it (`O_EXCL`, or `BLKROSET`-style guards as applicable), with the already-open file descriptor passed to the destructive worker rather than reopening the path later.
+- Continuous device-presence and identity monitoring for the duration of the write, aborting immediately if a new holder, mount, or identity change appears.
+
+Whichever combination is chosen, cleanup and automount-inhibition restoration must happen on every exit path (success, failure, cancellation, crash). This section is a research task, not a spec — Milestone 0's output is a decision here, recorded as an update to this PRD before Milestone 1 work depending on it begins.
+
+### 5.2 Storage-ancestry exclusion
+
+Excluding only `findmnt -no SOURCE /` is unsafe — that can resolve to an LVM LV, a dm-crypt mapping, a RAID member, or a ZFS dataset, not the physical disk underneath. The helper resolves the **full live-system storage graph** using sysfs ancestry (`holders`/`slaves`, walked recursively — not assumed to be fully exposed via any single `lsblk` column) plus `pvs`/`vgs`, `dmsetup deps`, `mdadm --detail`, and `zpool status`, and excludes every physical ancestor backing:
 
 - `/`, `/boot`, `/boot/efi`
 - swap
@@ -85,143 +100,205 @@ Excluding only `findmnt -no SOURCE /` is unsafe: that can resolve to an LVM LV, 
 - active loop-backed storage
 - any device with holders or open dependent mappings
 
-**If the relationship cannot be resolved with confidence, the drive is unavailable for selection — not flagged with a warning.** This is a hard exclusion, computed via `lsblk -J -o NAME,PKNAME,TYPE,MOUNTPOINT,HOLDERS`, `pvs`/`vgs`, `dmsetup deps`, `mdadm --detail`, and `zpool status`, cross-referenced, with any ambiguity resolved to "exclude."
+**If the relationship cannot be resolved with confidence, the drive is unavailable for selection — not flagged with a warning.**
 
-### 5.3 "Blank drive" detection (signature-based, no mounting)
+### 5.3 Technical eligibility states (replaces "blank"/"disposable")
 
-The GUI never mounts a candidate partition to check for files. "Looks like it has data" is determined entirely from read-only signature inspection:
+Software can prove technical facts. It cannot prove the user doesn't care about a drive's contents, and it cannot prove a drive is truly free of recoverable data merely because no known signature is present — a wiped signature can still leave recoverable data behind, and `wipefs`/`blkid` only detect signatures they recognize. The tool therefore classifies every candidate device into exactly one state, computed read-only via `lsblk`, `blkid`, `wipefs --no-act`, partition-table parsing, and the §5.2 ancestry tooling — **never** by mounting a filesystem to inspect its files:
 
-- `lsblk` (partition table presence, children)
-- `blkid` (filesystem/RAID/LVM/LUKS signatures)
-- `wipefs --no-act` (every recognized signature, without touching the device)
-- partition-table parsing
-- LVM/RAID/ZFS membership detection (§5.2 tooling, reused here)
+| State | Meaning |
+|---|---|
+| `no_detected_signatures` | No recognized partition table, filesystem, RAID marker, LVM metadata, or encryption header found. **Not** a claim that the drive is blank or that no data is recoverable — only that nothing recognized was found. |
+| `recognized_existing_data` | A recognized signature of some kind is present. |
+| `ambiguous_or_unreadable` | Read errors, partial/corrupt signatures, or anything the tooling can't classify confidently. |
+| `active_or_ineligible` | Mounted, part of an excluded ancestry graph (§5.2), held by another process, or lacking a stable identity (§5.1). Never selectable regardless of signature state. |
 
-Any recognized partition table, filesystem, RAID marker, LVM metadata, encryption signature, or *unrecognized* signature means "contains data or previously contained data." **Only a device with zero recognized signatures, zero partitions, zero holders, and zero mounts is reported blank.** Unrecognized-but-present beats the benefit of the doubt — ambiguous reads as "not blank."
+`ambiguous_or_unreadable` and `active_or_ineligible` are never selectable for destructive installation. `no_detected_signatures` and `recognized_existing_data` are both selectable **only** after the user attestation in §6 — the tool does not treat "no signatures found" as requiring a weaker confirmation than "has data." Both require the same erase-phrase confirmation; the eligibility state is shown to the user as information, not used to relax the confirmation requirement.
 
-### 5.4 Milestone-gated destructive backend
+### 5.4 Backend structure — physical devices structurally absent before Milestone 3
 
-The GUI's device-target abstraction has three interchangeable backends, gated by which milestone (§9) has been reached:
+Through Milestone 2, the shipped privileged helper binary and its polkit action **do not have a code path capable of expressing a block-device target at all**:
 
-- **Image backend** (Milestones 0–2): a sparse file the GUI creates and QEMU treats as `-drive file=...,format=raw`. No real device involved. This is where the entire installer/first-boot/verification pipeline is built and proven.
-- **Virtual-disk backend** (Milestone 1–2, same as above, naming distinction only for clarity in code): identical mechanism, used interchangeably with "image" in this document.
-- **Physical-drive backend** (Milestone 3 only): everything in §5.1–§5.3, plus an exclusive device lock (`flock` on the block device, or equivalent) held for the duration of the operation so nothing else can open it concurrently, and the erase-phrase confirmation from §5.1.
+- The helper's destructive subcommands accept only a path that must resolve, after canonicalization, to a regular file inside a workspace directory the helper itself controls (created by the helper, not user-suppliable) — never a path the caller chose freely, and never anything that `stat` reports as a block device.
+- Any argument that resolves to a block device is rejected by type-check before any other validation runs.
+- The polkit `.policy` file shipped through Milestone 2 authorizes only the image-backed action ID; no `os.baseline.drive-setup.*physical*` action exists in the shipped package.
+- No `--physical`, `--device`, or equivalent dormant flag exists in the helper's argument parser, even disabled or unwired.
+- Milestone 0–2 tests include an explicit **surface test**: enumerate the helper's accepted subcommands and argument shapes and assert none of them can be made to accept a block-device path, by construction (a static assertion over the argument schema, not just a runtime behavioral test).
 
-Milestone 4 (non-disposable/shared drive support) is out of scope for this PRD entirely.
+At Milestone 3, physical-drive support is added as a **separately reviewed** new helper capability and a new, separately scoped polkit action — a genuine new security boundary, reviewed on its own, not an existing flag or milestone check flipped on.
 
-### 5.5 Unattended install (Phase 1)
+### 5.5 Unattended install (Phase 1, image/virtual-disk backend only through Milestone 2)
 
-- GUI form collects only what the Proxmox installer answer file needs: hostname, initial root password (or "generate and show once"), timezone, keyboard layout, network = DHCP. Static IP, firewall, SSH, and tether are first-boot concerns (§5.6), not baked into the installer.
-- Helper subcommand `automated-install` generates a TOML answer file via `proxmox-auto-install-assistant prepare-iso`, producing a self-contained unattended ISO, then boots it under QEMU against the selected backend (§5.4) with a real display (`-vnc` or `-display gtk`), not `-nographic` — the graphical installer needs one to run unattended-but-present.
-- **Failure contract:** once the installer begins, it may erase or partially rewrite the target before failing. The tool never claims the target is untouched on failure. On any failure it reports:
+- GUI form collects only what the Proxmox installer answer file needs: hostname, initial root password (see §7.1 for why this is treated as sensitive material through the whole pipeline), timezone, keyboard layout, network = DHCP. Static IP, firewall, SSH, and tether are first-boot concerns (§5.6).
+- Helper subcommand `automated-install` generates a TOML answer file via `proxmox-auto-install-assistant prepare-iso`, producing a self-contained unattended ISO, then boots it under QEMU against the image/virtual-disk backend with a real display (`-vnc` or `-display gtk`), not `-nographic`.
+- **Failure contract:** once the installer begins, it may erase or partially rewrite the target before failing. The tool states:
 
   > "The previous attempt may have modified this target. It is not known to be in its original state."
 
-  A retry must: rediscover and revalidate the same stable device identity (§5.1) from scratch, display the "may have been modified" notice, and require a fresh destructive-authorization confirmation. **Retry never begins automatically.**
-- Firmware mode (UEFI vs. legacy BIOS) is an explicit, recorded choice, not an accident of QEMU defaults — see §5.7 for why this matters for portability to real hardware.
+  A retry rediscovers and revalidates the same stable device identity from scratch, displays the "may have been modified" notice, and requires fresh destructive-authorization confirmation. **Retry never begins automatically.**
+- Firmware mode (UEFI vs. legacy BIOS) is an explicit, recorded choice — see §5.7.
 
-### 5.6 First-boot configuration (Phase 2, split)
+### 5.6 First-boot configuration — offline staging + destination-hardware TUI
 
-A chroot can stage files and install packages; it cannot observe real NIC names, the real DHCP-assigned subnet, a physical USB tether interface, real firewall behavior, real SSH reachability, or real routing — those only exist once the target hardware actually boots. Phase 2 is therefore three stages, not one:
+This is the section the prior revision got structurally wrong: it described a first-boot systemd unit configuring network/firewall/tether/restore decisions automatically, while separately requiring the user confirm the detected subnet. Once the Ubuntu-hosted GUI is gone — which it is, the instant the new drive boots on its own — there is no GUI left to ask that question. The confirmation has to happen somewhere real, and the only place that exists is the target's own console.
 
-| Stage | Runs where | Appropriate work |
-|---|---|---|
-| **Offline staging** | chroot into the just-installed image/drive, immediately after 5.5 succeeds | Install the five diagnostic tools (noninteractive, see §5.8), copy Baseline, stage the handoff packet's non-secret categories, seed authorized public keys, install a Baseline first-boot systemd unit that performs the next stage automatically on first real boot |
-| **Actual first boot** | the target itself — real hardware, or a QEMU boot used only as a proof step (§5.7) — never claimed equivalent to real hardware | Discover real NIC names and DHCP subnet, configure the firewall rule using the *actually observed* subnet, configure tethering against the *actually present* USB interface, start Proxmox services, attempt SSH/web-UI reachability |
-| **Post-boot verification** | back on the GUI-running machine, or via the first-boot unit reporting a result | Confirm the five tools installed and idle, confirm network config applied, confirm firewall state, confirm Baseline is running, confirm tty1/tty2 behavior, confirm storage/recovery paths are intact |
+**Offline staging** (chroot/containment context immediately after §5.5 succeeds, see §5.8 for containment requirements):
+- Install the five diagnostic tools (§5.9... see below, actually §5.10) noninteractively.
+- Copy Baseline.
+- Stage the handoff packet's non-secret categories into a quarantine location (not yet applied — see §5.12).
+- Seed authorized public keys into a staged location.
+- Install and enable a Baseline **first-boot state machine** unit, and a **signed/validated setup-intent bundle** produced by the installer GUI containing: the operator's Phase-1 form choices, which handoff categories were selected for staging, whether SSH/tether preconfiguration was requested and with what values, and nothing secret in plaintext beyond what's unavoidable (staged handoff secrets stay encrypted at rest until the destination TUI supplies the passphrase).
 
-The GUI never claims LAN access or tethering "works" on the strength of a QEMU session or chroot alone — those claims are only made after the "actual first boot" stage reports success from the real (or real-enough, per milestone) environment.
+**Destination-hardware first boot** (the target itself; a QEMU boot of this stage is a proof exercise for Milestones 1–2, explicitly not claimed equivalent to real hardware):
+- Baseline's first-boot state machine owns tty1, exactly as Baseline already owns tty1 in normal operation. **tty2 remains available throughout** — this is not a mode that locks the operator out of anything.
+- The unit may perform **fact discovery** automatically and silently: real NIC names, link state, DHCP lease/subnet, USB device presence, present storage. Discovery has no side effects and requires no confirmation.
+- Every **consequential** decision — applying network configuration, applying the firewall policy, applying tether configuration, applying any handoff-restore category, especially anything from the private-key tier in §5.12 — is presented on tty1 as a real, human-facing TUI screen showing the discovered facts and the proposed action, and requires explicit local confirmation or correction before it is applied. This mirrors the setup-intent bundle from offline staging: the bundle proposes, the TUI confirms.
+- Each consequential action, once confirmed, is applied through the bounded, rollback-protected mechanisms specified elsewhere in this document (§5.9 for firewall, §5.12 for handoff) — the TUI is the confirmation surface, not a new application mechanism.
+- After the full sequence completes (or the operator explicitly defers a step), Baseline records **first-boot completion** in a durable marker. The state machine does not re-run automatically on subsequent boots; a deferred or re-run pass requires an explicit operator action from within Baseline's normal running state, not an automatic re-trigger.
+
+**Post-boot verification** (back on the GUI-running machine, or reported by the completed first-boot state machine): confirm the five tools installed and idle, confirm applied network config, confirm firewall state matches what was confirmed on tty1, confirm Baseline is running, confirm tty1/tty2 behavior, confirm storage/recovery paths intact.
+
+The GUI never claims LAN access or tethering "works" on the strength of a QEMU session or chroot alone — those claims are only made after the destination-hardware TUI stage reports a *confirmed and verified* result.
 
 ### 5.7 Bootability verification
 
-Two independent checks, neither one alone sufficient:
+Two independent checks:
 
-1. **Static verification** — partition table matches expectation, root filesystem/LV present, Proxmox packages installed, ESP or BIOS-boot structures present, bootloader files present, `fstab` valid, Baseline first-boot unit staged.
-2. **Actual QEMU boot test** — boot from the installed target (image or, at Milestone 3, the physical drive via a QEMU passthrough proof step) and require a deterministic success marker via serial or guest-agent output, then shut down cleanly.
+1. **Static verification** — partition table matches expectation, root filesystem/LV present, Proxmox packages installed, ESP or BIOS-boot structures present, bootloader files present, `fstab` valid, Baseline first-boot unit and setup-intent bundle staged.
+2. **Actual QEMU boot test** — boot from the installed target, require a deterministic success marker via serial or guest-agent output, shut down cleanly.
 
-Firmware mode is tracked explicitly: an install run under virtual UEFI may write only to virtual NVRAM, which doesn't exist on the destination machine. The disk needs a portable/fallback EFI boot path (`/EFI/BOOT/BOOTX64.EFI` or equivalent) if it's meant to move to different hardware — this is validated as part of static verification, not assumed.
+Firmware mode is tracked explicitly: an install under virtual UEFI may write only to virtual NVRAM, which doesn't exist on destination hardware. The disk needs a portable/fallback EFI boot path (`/EFI/BOOT/BOOTX64.EFI` or equivalent) validated as part of static verification, not assumed.
 
-**Passing the QEMU boot test proves the disk is structurally bootable. It does not prove the destination hardware will boot it.** That claim is only made after a real first boot on the destination machine (§5.6), and the GUI's language reflects this distinction everywhere it reports success.
+**Passing the QEMU boot test proves the disk is structurally bootable. It does not prove destination hardware will boot it.** That claim is only made after §5.6's destination-hardware first boot completes and is confirmed.
 
-### 5.8 Five diagnostic tools
+### 5.8 Offline package installation containment
 
-- Fixed set, no per-tool opt-out: `lm-sensors`, `nvme-cli`, `smartmontools`, `iperf3`, `ethtool` (the manifest from `docs/design/current-drive-inventory-plan.md` on `inventory/current-drive-manifest`).
-- Installed noninteractively (`DEBIAN_FRONTEND=noninteractive`, explicit `apt-get -y`, no debconf prompts reaching a TTY that isn't there) during offline staging.
-- **Service-awareness is mandatory, not incidental:** record installed package versions; explicitly verify no `iperf3` listener is enabled/running after install (it can ship an enabled systemd service depending on packaging); do not run `sensors-detect` (it's interactive-oriented and probes hardware in ways not appropriate for unattended staging); do not trigger SMART self-tests. Verify all five tools are present and correctly versioned as part of post-boot verification (§5.6), and record every package/service state change in the run summary.
+Running `apt-get install` in a chroot can execute maintainer scripts, attempt to start services, modify boot artifacts, or assume `/proc`, `/sys`, `/dev`, and systemd behavior that a bare chroot doesn't provide. Milestone 0/1 must choose and specify one of:
 
-### 5.9 Proxmox web UI — local-network-only
+- A controlled chroot with the required bind mounts (`/proc`, `/sys`, `/dev` as needed) and a temporary `policy-rc.d` that refuses all service starts for the duration of the install.
+- `systemd-nspawn` with deliberately constrained behavior.
+- Deferring package installation entirely to the destination-hardware first-boot stage (i.e., staging only the package cache/selection offline, actual `apt-get install` running for real on first boot) — a legitimate alternative to chroot containment, not just a fallback.
 
-What this tool can actually prove, stated precisely:
+Whichever is chosen must, as hard requirements:
+- Prevent any service from starting against the *host* running the installer.
+- Remove/restore any temporary policy files afterward.
+- Record any maintainer-script failure rather than silently continuing.
+- Verify package database consistency after install.
+- Leave the first-boot state machine unit enabled regardless of containment method.
+- Independently verify no `iperf3` server ends up enabled (§5.10).
+- The run summary explicitly distinguishes **"package installed offline"** from **"capability verified on destination hardware"** — these are different claims and must never be merged into one status line.
 
-- **"Allowed from this confirmed subnet"** — a `pve-firewall` datacenter rule permitting TCP/8006 from the detected/confirmed local subnet, covering both IPv4 and IPv6, across every active interface, with `established,related` and loopback explicitly accounted for, and SSH access and future cluster traffic (corosync etc.) not inadvertently blocked by the same policy. No rule ever references `0.0.0.0/0` or `::/0`.
-- **"Denied by host policy from other sources"** — the default-deny posture the rule set implies.
+### 5.9 Five diagnostic tools
 
-What it does **not** claim: that port 8006 is globally unreachable. A successful LAN connect test proves allowed access works; it says nothing about whether something outside the LAN (a misconfigured router, UPnP, a second NIC on a different network) can still reach it. A genuine negative proof requires a probe originating from outside the allowed subnet, which this tool does not have a vantage point to run. The GUI's verification step is described honestly as "the confirmed subnet can reach it" — not "the internet cannot."
+Renumbered from prior revision; content unchanged except as noted: fixed set `lm-sensors`, `nvme-cli`, `smartmontools`, `iperf3`, `ethtool`, installed noninteractively under the containment from §5.8. No `sensors-detect`, no triggered SMART self-tests. Verify no `iperf3` listener is enabled/running — checked both immediately after offline install (§5.8's "installed offline" claim) and again after destination-hardware first boot (§5.6's "verified" claim), since a containment method that suppresses service starts offline says nothing about the service's enabled-state once real systemd runs on real hardware.
 
-The GUI shows the **entire** proposed firewall policy before applying it (every rule, every interface, both address families) — not just the one allowed-subnet line.
+### 5.10 Proxmox web UI firewall — transactional, rollback-protected
 
-### 5.10 SSH preconfiguration
+A malformed firewall policy can cut off the very access being used to verify it. Firewall application follows the same shape as a network-config change, not a fire-and-forget rule push:
 
-- Independent of handoff restore (a user may want fresh SSH setup with nothing to restore from).
-- GUI offers: paste/import a public key to seed `authorized_keys`, and a toggle for password auth (default: **disabled** once a key is present).
-- If a handoff packet's public keys are also selected (§5.11), ordering is explicit and visible in the GUI: handoff-restored public keys apply first, then any keys entered in this step are appended — never silently overwritten.
-- SSH **host** private keys and **user/root** private keys are handled under the stricter trust model in §5.11, not this step.
+1. Preserve the current rule set (so it can be restored verbatim).
+2. Validate the proposed IPv4 and IPv6 policy against the schema of the **detected, installed Proxmox version's actual firewall engine** — not a hardcoded assumption about which engine/version is present.
+3. Show the complete proposed policy on tty1, as part of the §5.6 destination-hardware confirmation step — every rule, every interface, both address families, not just the allowed-subnet line.
+4. Arm an independent rollback timer before applying.
+5. Apply.
+6. Verify allowed LAN access to :8006 **and** every locally-required service (see traffic account below).
+7. Cancel the rollback timer only on verified success.
+8. If verification fails or the timer expires first, restore the preserved rule set automatically.
 
-### 5.11 Tether preconfiguration
+**Traffic account** — the policy is built to keep the host actually functional as a standalone Proxmox node, not just to open :8006:
+- DHCP client traffic
+- DNS
+- IPv6 neighbor discovery and router advertisements
+- ICMP/ICMPv6 required for correct IPv6 operation
+- Loopback
+- Established/related traffic
+- SSH, if enabled
+- Baseline's own local communication needs
+- Only the Proxmox services actually required for **standalone** operation
 
-- Scope: USB tethering from a phone as a network fallback path.
-- Offline staging can only *record intent* (interface alias if known from a handoff packet, preferred-vs-fallback choice) — the actual interface only exists once the real USB device is plugged into the real machine, so the config is written as a udev-matched profile and validated during the **actual first boot** stage, not offline.
-- Implementation target (systemd-networkd `.network` file vs. `/etc/network/interfaces.d/` stanza) must be confirmed against what `boot/provision.sh` actually assumes elsewhere in this repo before implementation — not assumed from general Debian/Proxmox defaults.
+**Cluster traffic is not pre-opened "for the future."** This installer targets a standalone host; enabling cluster membership is a later, separate policy transition with its own review, not bundled into initial setup.
 
-### 5.12 Handoff packet restore, selectable from this GUI, with tiered trust
+What the tool claims after this process, worded precisely: **"allowed from the confirmed subnet, denied by host policy elsewhere."** Not "globally unreachable" — no external-vantage-point probe exists in this design to back that stronger claim.
 
-Restoring SSH host keys or private keys is materially riskier than restoring public keys and non-secret Baseline state — the previous draft treated all categories as equally "selectable," which was wrong. Revised defaults:
+### 5.11 SSH preconfiguration
+
+Unchanged in substance from prior revision: independent of handoff restore; GUI offers public-key import and a password-auth toggle (default disabled once a key is present); if handoff public keys are also selected, handoff keys apply first, GUI-entered keys append, never silently overwrite. SSH host/user private keys are handled under §5.12's tiered model, not here. Application of this configuration happens at the destination-hardware TUI stage (§5.6) like every other consequential action.
+
+### 5.12 Tether preconfiguration
+
+Unchanged in substance: offline staging records intent only (interface alias if known from a handoff packet, preferred-vs-fallback choice); the real interface only exists once the real USB device is present on the real machine, so application and validation happen at the destination-hardware TUI stage. Implementation target (systemd-networkd vs. `/etc/network/interfaces.d/`) must be confirmed against what `boot/provision.sh` actually assumes elsewhere in this repo before implementation.
+
+### 5.13 Handoff packet restore — tiered trust, transactional application
+
+Trust tiers unchanged from prior revision:
 
 | Category | Default |
 |---|---|
 | Baseline configuration | Selectable, on by default |
 | Baseline non-secret state | Selectable, on by default |
 | Authorized public keys | Selectable, on by default |
-| SSH host private keys | **Off** — exceptional-continuity case only, requires a second explicit warning |
-| Root/user private keys | **Off** — strongly discouraged, requires a second explicit warning |
+| SSH host private keys | **Off** — exceptional-continuity case, second explicit warning |
+| Root/user private keys | **Off** — strongly discouraged, second explicit warning |
 | Machine identity (`/etc/machine-id`, hostname) | **Never restored automatically** |
 
-If both an old and new system might coexist with the same SSH host keys, they present duplicate host identities to anything that's connected to both — the second warning for host-key restoration says this explicitly, not just "this is risky."
+Duplicate-host-identity risk from restoring shared host keys is stated explicitly in the second warning.
 
-Additional integrity requirements the previous draft was missing:
-- Authenticated packet integrity (not just "decrypts successfully" — verify the archive wasn't tampered with post-encryption, e.g. AEAD or a signed manifest hash).
-- Schema-version compatibility check, independent of and in addition to the Proxmox-major-version check already specified — a version match on Proxmox alone is not sufficient.
-- Size limits and extraction limits (decompression-bomb protection).
-- Path-traversal and symlink protection on every extracted entry before it touches the filesystem.
-- Staged restoration: extract to a quarantine directory first, validate every category, and only then apply — **all categories are validated before any category is applied.**
-- Exact ownership/mode validation on restored files (host keys must land as `600 root:root`, etc.) — never trust the archive's stored mode blindly.
-- Rollback if application fails partway (the quarantine-then-apply staging above is what makes this possible).
+**Application model corrected.** "Validate all before applying any" prevents validation-time partial changes; it does **not** protect against power loss, filesystem failure, a permission-setting failure, or a later category failing after an earlier one already committed. Restoration is therefore a transaction with a durable journal, not a claim of atomicity across unrelated filesystems and services:
 
-### 5.13 "Show me the script" (extends v1)
+1. Validate all inputs (integrity, schema version, Proxmox-major-version, path-traversal/symlink checks, size/decompression-bomb limits).
+2. Back up every destination path that may change.
+3. Stage replacement files on the destination filesystem (same filesystem as the eventual target, so the next step can be atomic).
+4. Apply each category through atomic rename where the filesystem supports it.
+5. Record each completed transition in a durable, on-disk journal as it completes — not only at the end.
+6. If a later category fails, roll back every already-completed transition using the journal, in reverse order.
+7. Independently verify the post-rollback (or post-success) state matches what was intended — file contents, ownership, and mode, not just presence.
+8. If complete rollback cannot be proven (e.g. a backup itself failed to restore), report **`partial_state_requires_attention`** and stop — never silently present a mixed state as either "succeeded" or "cleanly failed."
 
-Extended to cover every Phase 2 action (tool install, firewall rule, SSH config write, tether config write, handoff restore), and — per §8 — **shown output is a redacted execution plan / configuration diff, never a secret-bearing command line.**
+Additional integrity requirements: authenticated packet integrity (AEAD or a signed manifest hash, not just "decrypts"); schema-version compatibility independent of the Proxmox-major-version check; size/extraction limits; path-traversal and symlink protection on every extracted entry before it touches the filesystem; exact ownership/mode validation on restored files. For SSH host-key restoration specifically, validate the **private key, the matching public key, and the containing directory's permissions** as three separate checks — not `600 root:root` on the private key file alone.
 
-## 6. Disposability proof (Milestone 3 gate)
+Application of selected categories happens at the destination-hardware TUI stage for anything from the private-key tier (per §5.6); non-secret categories may apply during offline staging since they carry no equivalent real-hardware dependency, but still go through the same journaled/transactional mechanism above.
 
-A physical drive is eligible for destructive installation only once, in sequence:
+### 5.14 Prepared ISO — treated as sensitive material
 
-1. Stable identity resolved (§5.1) and displayed to the user in human terms.
-2. Zero-signature blank check (§5.3) **or** an explicit, separately-worded "I know this has data and I accept it will be destroyed" path — the tool does not treat "has data" and "is disposable" as contradictory, but it never conflates them either; a drive with data can still be confirmed disposable, it just requires the stronger of the two confirmation phrasings.
+See §7.1.
+
+### 5.15 "Show me the script" (extends v1)
+
+Covers every action from Phase 1 through the destination-hardware TUI stage. Output is a redacted execution plan / configuration diff, never a secret-bearing command line, per §7.
+
+## 6. Technical-eligibility gate (Milestone 3 physical-drive gate)
+
+Renamed from "disposability proof" — the tool proves technical facts, not the user's intent toward the drive's contents. A physical drive becomes eligible for destructive installation only once, in sequence:
+
+1. Stable identity resolved with a real serial/WWN (§5.1) — no serial/WWN, no eligibility, regardless of other checks.
+2. Technical eligibility state computed (§5.3): must be `no_detected_signatures` or `recognized_existing_data`; `ambiguous_or_unreadable` and `active_or_ineligible` are never eligible.
 3. Full storage-ancestry exclusion passes (§5.2) with no ambiguity.
-4. Exclusive device lock acquired and held.
-5. Erase-phrase confirmation (§5.1's "ERASE <identity>" pattern) typed by the user, immediately before the destructive call.
+4. Exclusive-access mechanism from §5.1a engaged and continuously re-verified.
+5. **Explicit user attestation**, worded to state what it actually is — the user's own judgment that this drive's contents may be destroyed, not a system-generated "disposable" verdict. Erase-phrase confirmation naming the stable identity, e.g. "ERASE Samsung T7 1TB ending 4C21."
 6. Helper re-discovers and re-validates identity/capacity/ancestry one last time inside the privileged context, immediately before the write begins.
 
-Any failure at any step aborts with no partial action.
+Any failure at any step aborts with no partial action. A device that reaches step 6 and is then interrupted (USB disconnect, power loss, crash) is reported as **indeterminate**, not "aborted cleanly" — see §8.5.
 
 ## 7. Security requirements
 
-- No hardcoded secrets. Root passwords and passphrases are never written to disk in plaintext outside a root-only `tmpfs` file at `0600`, created immediately before use and unlinked immediately after — success, failure, signal, or cancellation all reach the same cleanup path. **Passwords and passphrases are never placed on any command line** (they're visible in process listings and diagnostic output) — they cross the `pkexec` boundary via stdin/an inherited file descriptor, or the tmpfs file above only if `proxmox-auto-install-assistant`'s answer-file schema requires a path (confirm this against the tool's actual schema before implementation — do not assume it hashes the password safely on our behalf; verify).
-- All GUI inputs validated against an explicit allow-list before being interpolated into any shell command or config file — hostname, subnet, interface alias.
-- Every helper subcommand takes fixed positional args, never a free-form string executed as-is (as v1 already does).
-- Firewall rule generation is unit-tested to never emit `0.0.0.0/0` or `::/0` (§10).
-- Handoff decryption failures and manifest/schema mismatches fail closed; per §5.12, partial-apply is impossible by construction (validate-all-then-apply-all).
+- No hardcoded secrets. Passwords/passphrases never placed on any command line (visible via process listings). They cross the `pkexec` boundary via stdin or an inherited file descriptor, or a root-only `tmpfs` file at `0600`, created immediately before use and unlinked on every exit path (success/failure/signal/cancel), only if the answer-file mechanism requires a path (§7.1 — confirm this against the actual schema, don't assume).
+- All GUI/TUI inputs validated against an explicit allow-list before interpolation into any shell command or config file.
+- Helper subcommands take fixed, schema-validated argument shapes — never a free-form string executed as-is (§5.4's surface test extends this to a static guarantee, not just a runtime check).
+- Firewall rule generation is unit-tested against the **actual generated configuration format** for the detected Proxmox firewall engine — not merely asserted to lack the string `0.0.0.0/0`, which would pass a rule that's broken in some other way.
+- Handoff failures fail closed per §5.13's transactional model, including the explicit `partial_state_requires_attention` outcome when full recovery can't be proven.
 - Error messages / "show details" panels never leak passphrase or password values, including in stack traces and crash output.
+
+### 7.1 The prepared answer-file ISO is itself sensitive
+
+Even if the temporary answer-file/secret-delivery mechanism above is handled correctly, the **prepared unattended-install ISO** that `proxmox-auto-install-assistant prepare-iso` produces may embed the answer file, and therefore potentially embed password material, inside the ISO itself. This needs its own Milestone 0 findings, recorded before Milestone 1 work depends on the answer:
+
+- Does the answer-file schema accept a pre-hashed password, or does it require plaintext?
+- What exactly ends up embedded in the prepared ISO?
+- Does the prepared ISO constitute reusable authentication material if someone else obtains it?
+- Where is the prepared ISO stored, for how long, and is it safe to reuse across multiple installs (likely not, if it contains a fixed credential)?
+- What is the cleanup behavior after a crash or reboot mid-process — is a stale prepared ISO with embedded secret material left behind?
+
+If plaintext embedding turns out to be unavoidable given the tool's actual schema, the design uses a **generated one-time credential**, not the user's real intended password, and **requires rotation on first boot** before the destination-hardware TUI stage is considered complete. Deleting the ISO from SSD storage afterward is described as *deletion*, not *secure erasure* — SSD wear-leveling means the underlying flash cells aren't reliably overwritten by a simple unlink, and this document does not claim otherwise.
 
 ## 8. Testing strategy (TDD)
 
@@ -230,64 +307,76 @@ Per the project's testing rules: 80% minimum coverage, unit + integration + e2e,
 ### 8.1 Unit tests (Python, `pytest`, `FakeRunner` pattern from `tests/unit/inventory_tests/`)
 
 `tests/unit/drive_setup_tests/`:
-- `test_answer_file.py` — TOML structure from a form dict; rejects invalid hostname/password before the validator exists (write the rejection test first).
-- `test_firewall_rule.py` — generated rule never contains `0.0.0.0/0` or `::/0`; covers IPv4+IPv6, multiple interfaces, established/related, loopback; malformed/oversized subnet input raises.
-- `test_storage_ancestry.py` — **root-on-plain-partition, root-on-LVM, root-on-LUKS-on-LVM, root-on-MD-RAID, root-on-ZFS-pool-member** all correctly resolve to full ancestor exclusion; a device with an unresolvable relationship is excluded, not warned-about.
-- `test_blank_detection.py` — every recognized signature type (partition table, fs, RAID marker, LVM metadata, LUKS header, unrecognized-but-present) reads as "not blank"; only zero-signature/zero-partition/zero-holder/zero-mount reads as blank.
-- `test_stable_identity.py` — same model+capacity but different serial is rejected as a re-discovery mismatch; a `by-id` path resolving to a different device than at selection time is rejected.
-- `test_handoff_integration.py` — against `FakeRunner`/temp dir: wrong passphrase raises, manifest mismatch raises, schema-version mismatch raises, path-traversal/symlink entries are rejected before touching the filesystem, decompression-bomb-sized archive is rejected, validate-all-before-apply-all is enforced (inject a failure in category 2 of 3 and assert category 1 was never applied).
+- `test_answer_file.py` — TOML structure from a form dict; rejects invalid hostname/password before the validator exists.
+- `test_firewall_rule.py` — generated rule set exercised against the **actual target config format**, not string-absence checks alone; never emits `0.0.0.0/0`/`::/0`; covers IPv4+IPv6, multiple interfaces, established/related, loopback, DHCP/DNS/ICMPv6-ND passthrough; malformed/oversized subnet input raises; cluster-traffic rules are never present by default.
+- `test_storage_ancestry.py` — root-on-plain-partition, root-on-LVM, root-on-LUKS-on-LVM, root-on-MD-RAID, root-on-ZFS-pool-member all resolve to full ancestor exclusion via sysfs `holders`/`slaves` walking (not just an `lsblk` column mock); unresolvable relationship excludes rather than warns.
+- `test_eligibility_states.py` — every recognized signature type maps to `recognized_existing_data`; zero-signature/zero-partition/zero-holder/zero-mount maps to `no_detected_signatures` (and the test asserts this state is never rendered to the user as "blank" or "safe"); read errors/partial signatures map to `ambiguous_or_unreadable`; mounted/held/no-stable-identity maps to `active_or_ineligible` regardless of signature state.
+- `test_stable_identity.py` — same model+capacity but different serial is rejected; a device with no serial/WWN is rejected regardless of `by-path` resolution; a `by-id` path resolving to a different device than at selection time is rejected.
+- `test_backend_surface.py` — enumerates the helper's full argument schema and asserts, statically, that no accepted shape can resolve to a block-device path pre-Milestone-3 (the structural-absence guarantee from §5.4).
+- `test_handoff_transaction.py` — against `FakeRunner`/temp dir: wrong passphrase raises; manifest/schema mismatch raises; path-traversal/symlink entries rejected before touching the filesystem; decompression-bomb-sized archive rejected; a simulated failure in category 2 of 3 triggers rollback of category 1 via the journal, and post-rollback state is independently re-verified; a simulated rollback failure produces `partial_state_requires_attention`, not a false "success" or "clean failure."
 - `test_ssh_key_ordering.py` — merged `authorized_keys` preserves handoff keys first, appends new ones, no duplicates.
-- `test_secret_handling.py` — assert no code path places a password/passphrase string into a subprocess `argv` list; assert the tmpfs secret file is unlinked on every exit path including simulated exception/signal.
+- `test_ssh_host_key_restore.py` — validates private key, matching public key, and directory permissions as three independent checks.
+- `test_secret_handling.py` — no code path places a password/passphrase into a subprocess `argv` list; tmpfs secret file unlinked on every exit path including simulated exception/signal; prepared-ISO content is inspected in a fixture to confirm no unexpected plaintext credential ends up embedded beyond what §7.1's findings say is unavoidable.
+- `test_setup_intent_handoff.py` — the signed/validated bundle the installer GUI produces for the destination-hardware TUI round-trips correctly and is rejected if tampered with or malformed.
 
 Example (AAA):
 ```python
-def test_firewall_rule_rejects_wildcard_subnet():
+def test_eligibility_no_signatures_is_not_labeled_blank():
     # Arrange
-    detected_subnet = "0.0.0.0/0"
-
-    # Act / Assert
-    with pytest.raises(ValueError, match="not a private subnet"):
-        build_pveproxy_firewall_rule(detected_subnet)
-
-def test_root_on_luks_on_lvm_excludes_physical_ancestor():
-    # Arrange
-    graph = FakeStorageGraph(root_mount="/dev/mapper/vg-root",
-                              lv_backing="/dev/mapper/luks-pv",
-                              luks_backing="/dev/nvme0n1p3")
+    device = FakeBlockDevice(partition_table=None, filesystems=[], raid_members=[])
 
     # Act
-    excluded = resolve_excluded_physical_devices(graph)
+    state = classify_eligibility(device)
 
     # Assert
-    assert "/dev/nvme0n1p3" in excluded
+    assert state == EligibilityState.NO_DETECTED_SIGNATURES
+    assert "blank" not in render_eligibility_label(state).lower()
+    assert "safe" not in render_eligibility_label(state).lower()
+
+def test_handoff_partial_failure_reports_requires_attention():
+    # Arrange
+    journal = FakeJournal()
+    categories = [ok_category("baseline-config"), ok_category("public-keys"),
+                  failing_category("ssh-host-keys")]
+
+    # Act
+    result = apply_handoff_transaction(categories, journal)
+
+    # Assert
+    assert result.outcome in (Outcome.SUCCESS, Outcome.PARTIAL_STATE_REQUIRES_ATTENTION)
+    if result.outcome is Outcome.PARTIAL_STATE_REQUIRES_ATTENTION:
+        assert journal.rollback_attempted_for(["baseline-config", "public-keys"])
 ```
 
 ### 8.2 Unit tests (bash helper, `bats`)
-- Stable-identity re-discovery rejects a mismatched serial/capacity immediately before the destructive call — **replaces** the old v1 test that expected a matching filesystem *label*, which is incompatible with blank-drive support and is being removed.
-- Every subcommand rejects a missing/malformed positional arg with no partial side effect (nothing mounted, nothing written) before validation completes.
-- Exclusive lock acquisition failure (device already held) aborts cleanly.
+- Stable-identity re-discovery rejects a mismatched serial/capacity immediately before the destructive call.
+- Every subcommand rejects a missing/malformed positional arg with no partial side effect before validation completes.
+- Block-device-shaped argument is rejected by type-check before any other logic runs (pre-Milestone-3 build).
+- Exclusive-access acquisition failure (per whatever §5.1a's Milestone-0 research settles on) aborts cleanly and restores any automount inhibition.
 
 ### 8.3 Integration tests
-- Full Phase 1 against a throwaway sparse image: answer-file generation → unattended install → static verification → QEMU boot test passes. Budgeted as a slower pre-release check, not per-commit.
-- Offline staging against the resulting image via chroot: five tools installed, no stray `iperf3` listener, Baseline first-boot unit staged.
-- Actual-first-boot stage, run inside a QEMU VM (proof-of-concept for the "real boot" stage, understood as *not* equivalent to real hardware — see §5.6): confirm NIC discovery, firewall rule using the observed subnet, SSH reachable with seeded key, password auth rejected.
-- Interrupted-run recovery: kill the process mid-install, mid-staging, and mid-first-boot; assert each resumes only via a fresh, explicit authorization — never automatically.
+- Full Phase 1 against a throwaway sparse image: answer-file generation → unattended install → static verification → QEMU boot test.
+- Offline staging against the resulting image via the chosen §5.8 containment mechanism: five tools installed, no stray `iperf3` listener, first-boot unit + setup-intent bundle staged, no service actually started against the host.
+- Destination-hardware TUI stage, run inside a QEMU VM as a proof exercise (explicitly not claimed equivalent to real hardware): tty1 presents discovered facts and proposed actions, confirmation gate blocks application until acknowledged, tty2 remains responsive throughout, firewall apply/verify/rollback-timer sequence exercised in both the success and induced-failure directions.
+- Interrupted-run recovery: kill mid-install, mid-staging, mid-first-boot, and mid-handoff-transaction; assert each resumes only via fresh, explicit authorization, and that a mid-handoff-transaction kill produces either a verified rollback or `partial_state_requires_attention` — never a silent success.
 
-### 8.4 E2E (GUI)
-- Controller/model layer tested directly via `pytest` (GTK widget code kept thin per the container/presentational split), plus one `Xvfb` smoke test: open window, walk drive picker, confirm "Authorize & Build" enables only after the exact erase-phrase (§6.5) is typed — not a bare path string.
+### 8.4 E2E (GUI + TUI)
+- Installer GUI: controller/model layer tested directly via `pytest`, plus one `Xvfb` smoke test confirming "Authorize & Build" enables only after the exact erase-phrase naming the stable identity is typed.
+- Destination TUI: since this runs on Baseline's existing tty1 infrastructure, extend whatever test harness already covers Baseline's Textual TUI (per `07eda93`/`610fff2` in this repo's history) rather than building a separate one — confirm this reuse is feasible during Milestone 0 rather than assuming it.
 
 ### 8.5 Additional cases from review
-- Device path changes between GUI selection and authorization (simulate reordering) — must be caught by stable-identity re-discovery, not by path comparison.
+- Device path changes between GUI selection and authorization — caught by stable-identity re-discovery.
 - Same model/capacity, different serial — rejected.
-- USB disconnect/reconnect mid-install — detected, aborts, requires fresh authorization.
-- Automounter interference (something auto-mounts a partition mid-operation) — detected via lock/holder check.
-- Cancellation before vs. after the first destructive write — both leave the tool in the "may have been modified" state from §5.5, never silently treated as clean.
-- QEMU crash after partitioning begins — same "indeterminate state" contract.
-- UEFI install with no portable fallback EFI entry — static verification catches it, not discovered only on real hardware.
-- Multiple active LAN interfaces present — firewall rule covers all of them, not just the first discovered.
+- **USB disconnect after the first destructive write begins**: not describable as "aborts." Specify bounded-time process termination (the destructive worker is killed with a timeout if it doesn't exit on its own) and the target is reported **indeterminate**, matching §5.5's failure contract — never silently treated as cleanly stopped.
+- Automount interference: exercised as an active-mitigation test, not assumed prevented by a holder check alone — a test that spins up a fake automount event mid-operation and asserts the operation detects and aborts, given whatever mechanism §5.1a's research settles on.
+- Cancellation before vs. after the first destructive write — both leave the tool in the "may have been modified"/indeterminate state.
+- QEMU crash after partitioning begins — same indeterminate-state contract.
+- UEFI install with no portable fallback EFI entry — caught by static verification.
+- Multiple active LAN interfaces — firewall rule covers all of them.
+- Firewall rollback timer: induced verification failure triggers automatic restore of the preserved rule set within the timer window.
 
 ### 8.6 Coverage target
-80% minimum across `baseline/lib/handoff.py`, the new storage-ancestry/blank-detection/stable-identity/answer-file/firewall-rule/ssh-merge modules, and the bash helper's validation logic. GUI widget wiring is exempted from the numeric target (thin by design, covered by the one `Xvfb` smoke test) — the smoke test supplements the model tests, it does not replace them.
+80% minimum across `baseline/lib/handoff.py`, the new storage-ancestry/eligibility/stable-identity/answer-file/firewall-rule/ssh-merge/transaction-journal modules, the destination-TUI controller layer, and the bash helper's validation logic. GUI/TUI widget wiring is exempted from the numeric target (thin by design), covered instead by the smoke tests in §8.4, which supplement but do not replace the model-layer tests.
 
 ## 9. Recommended implementation sequence
 
@@ -296,50 +385,59 @@ flowchart TD
     A["Milestone 0: Safety and feasibility spike"] --> B["Milestone 1: Sparse-image installer"]
     B --> C["QEMU boot verification"]
     C --> D["Offline staging"]
-    D --> E["Milestone 2: First-boot agent"]
+    D --> E["Milestone 2: Destination-TUI first-boot agent"]
     E --> F["Milestone 3: Disposable physical drive"]
     F --> G["Milestone 4: Advanced disk preservation (deferred, separate PRD)"]
 ```
 
 ### Milestone 0 — Safety and feasibility spike
-No physical block-device writes of any kind. Prove:
-- The exact `proxmox-auto-install-assistant` answer-file format, and whether it accepts a password hash or requires a plaintext path.
-- Secure secret delivery mechanism actually works end-to-end (tmpfs file, permissions, cleanup-on-every-exit-path).
+No physical block-device writes of any kind; no physical-device code path exists to write with (§5.4). Prove:
+- The exact `proxmox-auto-install-assistant` answer-file format, and specifically whether it accepts a password hash or requires a plaintext path (§7.1).
+- What the prepared ISO actually embeds, and the full set of §7.1's questions.
+- Secure secret delivery mechanism works end-to-end, including cleanup on every exit path.
 - ISO signature/checksum verification.
-- Whether `proxmox-auto-install-assistant` can run on this Ubuntu 26.04 development host at all — unresolved from earlier this session, likely needs a minimal Debian chroot/systemd-nspawn without Docker; get a real answer here before Milestone 1 starts.
+- Whether `proxmox-auto-install-assistant` runs on this Ubuntu 26.04 development host at all — unresolved from earlier this session.
 - QEMU firmware/boot-mode behavior (UEFI NVRAM vs. portable fallback path).
-- Complete storage-ancestry detection logic against real LVM/LUKS/RAID/ZFS test fixtures.
-- Exclusive target locking mechanism.
+- Complete storage-ancestry detection logic against real LVM/LUKS/RAID/ZFS test fixtures, via sysfs `holders`/`slaves`.
+- **The exclusive-access design from §5.1a — this is a required output of Milestone 0, not an assumption carried into it.**
+- The offline-install containment approach from §5.8 (chroot+policy-rc.d vs. systemd-nspawn vs. defer-to-first-boot).
+- Whether Baseline's existing tty1/Textual TUI infrastructure can be reused for the destination-hardware first-boot TUI (§5.6, §8.4), or whether it needs a dedicated first-boot mode.
 - Cancellation semantics at every stage.
-- Prepared-ISO cleanup (nothing left behind in `/tmp` or elsewhere with secrets embedded).
+- Prepared-ISO cleanup — confirm nothing with embedded secret material survives a crash.
 
 ### Milestone 1 — Virtual disk installation
-Sparse image files only. Prove: ISO preparation, automated installation, failure handling (the "indeterminate state" contract), static filesystem verification, actual QEMU boot test, Baseline first-boot unit staging, logs and redaction.
+Sparse image files only. Prove: ISO preparation, automated installation, the indeterminate-on-failure contract, static filesystem verification, actual QEMU boot test, first-boot unit + setup-intent bundle staging, offline-install containment (§5.8) with verified no-host-service-start, logs and redaction.
 
-### Milestone 2 — First-boot configuration
-Run on an actual booted Proxmox VM (still virtual, but now testing the "actual first boot" stage's logic, not just staging). Prove: diagnostics installation and service-awareness (§5.8), web UI firewall behavior against observed (virtual) network facts, SSH configuration, tether profile generation logic, handoff transactional restoration (§5.12), idempotent reruns, recovery after interrupted configuration.
+### Milestone 2 — Destination-hardware first-boot TUI
+Run on an actual booted Proxmox VM as a proof exercise for the real thing. Prove: tty1 TUI presents discovered facts and requires confirmation for every consequential action (§5.6), tty2 stays available throughout, firewall transactional apply/verify/rollback-timer (§5.10), SSH/tether application at the confirmation stage, handoff transactional restore including induced-failure rollback and `partial_state_requires_attention` (§5.13), idempotent reruns, first-boot-completion marker preventing automatic re-trigger.
 
 ### Milestone 3 — Whole disposable physical drive
-Only after 0–2 pass. Require: stable by-id identity, full storage-ancestry exclusion, no mounts/swap/holders/RAID/LVM/ZFS membership, exclusive device lock, fresh pre-destruction revalidation, explicit erase phrase, no automatic retries, and — because this is the first point real hardware is involved — a real first-boot-on-destination-hardware test before the tool ever declares the overall process complete.
+Only after 0–2 pass, and only by adding the separately-reviewed physical-device helper capability and polkit action from §5.4. Require: stable identity with real serial/WWN, full technical-eligibility gate (§6), the proven exclusive-access mechanism from §5.1a, explicit user attestation (not a system-generated "disposable" verdict), no automatic retries, and a real first-boot-on-destination-hardware pass before the tool declares the overall process complete.
 
 ### Milestone 4 — Non-disposable or shared drive
-Explicitly deferred. Preserving partitions, shrinking filesystems, dual-boot, installing into free space, reusing an existing EFI partition, or any operation where losing the whole disk is unacceptable. Needs a different risk model and likely a separate installer mode — not an extension of this one.
+Explicitly deferred. Needs its own risk model and likely a separate installer mode.
 
 ## 10. Acceptance criteria
 
-- No code path can write to a physical drive before Milestone 3 is reached; the Milestone 0–2 test suites enforce this structurally (image/virtual backend only), not by convention.
-- A user targeting the currently-running OS's storage — at any depth of LVM/LUKS/RAID/ZFS — cannot select it; the tool does not merely warn.
-- Every destructive action requires a typed erase-phrase naming a stable, helper-reverified device identity — never a bare path.
-- A failed Phase 1 run never claims the target is untouched, and never retries without fresh, explicit, re-validated authorization.
-- Firewall claims are worded to match what was actually tested: "allowed from the confirmed subnet, denied by host policy elsewhere" — never "globally unreachable" without an external-vantage-point probe backing it.
-- SSH host keys and private keys are never restored from a handoff packet without an explicit, separately-worded second confirmation; public keys and non-secret state restore normally.
-- No secret value ever appears in a command-line argument, environment dump, log, or crash report; "show me the script" output is redacted by construction.
+- No code path can express a block-device target before Milestone 3; enforced structurally (§5.4, §8.1's `test_backend_surface.py`), not by convention or a runtime flag.
+- A user targeting the currently-running OS's storage — at any depth of LVM/LUKS/RAID/ZFS — cannot select it.
+- Every destructive action requires: real serial/WWN identity, a technical-eligibility state that isn't `ambiguous_or_unreadable`/`active_or_ineligible`, the proven exclusive-access mechanism engaged, and an explicit user attestation typed as an erase phrase naming the stable identity.
+- No tool output ever labels a drive "blank," "safe," or "disposable" as a system-generated verdict — only the technical states from §5.3, with attestation kept visibly separate as the user's own judgment.
+- A failed or interrupted destructive operation is always reported as indeterminate, never as cleanly aborted, and never retries without fresh explicit authorization.
+- Every consequential real-world decision (network, firewall, tether, handoff restore) is confirmed on the destination-hardware TUI before being applied — none of them are ever applied by unattended first-boot code without that confirmation.
+- Firewall application is transactional: preserved ruleset, rollback timer armed before apply, automatic restore on verification failure.
+- Handoff restoration is transactional with a durable journal; a partial failure is reported as `partial_state_requires_attention`, never silently merged into success or failure.
+- SSH host keys and private keys are never restored without an explicit, separately-worded second confirmation.
+- No secret value ever appears in a command-line argument, environment dump, log, or crash report; the prepared ISO's secret content is accounted for per §7.1.
 - Every privileged action is inspectable via "show me the script" before it runs.
 - All new logic in §8.1–8.3 has tests written first and passing, at ≥80% coverage on the modules listed in §8.6.
 
 ## 11. Open risks / explicit unknowns to resolve at Milestone 0
 
 - Whether `proxmox-auto-install-assistant` is obtainable/runnable on this Ubuntu 26.04 desktop without Docker.
-- Whether Proxmox base install omits NetworkManager (assumed for §5.11) — confirm against a real installed system.
-- The actual answer-file schema's handling of the root password (hash vs. plaintext path) — drives the final shape of §7's secret-delivery mechanism.
-- Whether this session's QEMU raw-disk-passthrough capability against a *real* device (Milestone 3 only) needs to be re-confirmed with the user at that point — it should be, explicitly, even though the mechanism (pkexec + audited helper) doesn't change from v1.
+- Whether Proxmox base install omits NetworkManager (assumed for §5.12) — confirm against a real installed system.
+- The actual answer-file schema's handling of the root password, and what ends up embedded in the prepared ISO (§7.1) — drives the final shape of the secret-delivery mechanism.
+- The exclusive-access design (§5.1a) — genuinely unresolved, not a placeholder.
+- The offline-install containment approach (§5.8).
+- Whether Baseline's existing tty1 TUI infrastructure can host the destination-hardware first-boot flow directly, or needs its own mode.
+- Re-confirm with the user, explicitly, before any Milestone 3 work begins against a real device — the mechanism (pkexec + a separately reviewed helper capability) doesn't change from v1, but the moment itself should be a deliberate go/no-go, not an assumption carried forward from this PRD's approval.
