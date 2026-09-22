@@ -25,6 +25,16 @@ treating removal of stale IPv6 configuration as a separate, later,
 explicitly authorized action, is a deliberate product decision (per
 review), not an oversight: this module never deletes anything.
 
+Correction, decision records 14/15: the second `iface <name> inet dhcp`
+stanza is valid, ifquery-recognized syntax, but real ifupdown2 does NOT
+actually apply it during normal `ifup`/`ifreload -a` bring-up - directly
+confirmed via a verbose trace showing zero DHCP activity for the
+additive stanza. `add_dhcp_to_bridge()` therefore explicitly invokes
+`dhclient <target>` as a supplementary step after `ifreload -a` (see
+its own comment at that call site) - the additive stanza in the file is
+still written (for documentation and to match what `ifquery` shows),
+but this module no longer relies on ifupdown2 alone to bring it up.
+
 Every precondition, the backup, the independent rollback, the write, the
 reload, and the verification reuse repair.py's already-reviewed,
 already-tested machinery directly (imported, not reimplemented) - only
@@ -247,6 +257,52 @@ def add_dhcp_to_bridge(runner: Runner, observed_dev: str, requested_by: str,
             # it with an inline restore.
             raise RepairRefused("apply_failed", f"ifreload -a failed: {apply_res.stderr.strip()}; "
                                                  "independent rollback stays armed")
+
+        # --- 7b: supplementary dhclient invocation (real, confirmed finding,
+        # decision records 13/14/15) ---
+        #
+        # ifreload -a succeeding here does NOT mean the additive `inet dhcp`
+        # stanza was actually applied. Confirmed directly, real host, real
+        # ifupdown2: a verbose `ifup -v vmbr0` trace against exactly this
+        # additive (two-`iface`-stanzas-per-name) shape contains zero
+        # DHCP-related activity anywhere - `ifquery` shows ifupdown2's
+        # parser correctly recognizes both stanzas as separate ifaceobjs,
+        # but its scheduler/dispatch step only ever runs the first one it
+        # finds for a given interface name. This is a real gap in
+        # ifupdown2's own handling of this pattern, not something this
+        # repair action can rely on syntax-check or a successful `ifreload
+        # -a` exit code to rule out.
+        #
+        # The fix, also confirmed directly: `dhclient <target>` run
+        # explicitly against the already-up interface acquires a real
+        # DHCP lease natively (DHCPDISCOVER/OFFER/REQUEST/ACK observed,
+        # `bound to <addr>` confirmed via `ip addr`). This is only needed
+        # for the ADDITIVE path - the replace path's single, unambiguous
+        # `inet dhcp` stanza was separately confirmed to work correctly
+        # through ifupdown2's normal `ifup`/`ifreload -a` bring-up with no
+        # supplementary call needed, so repair.reset_interface_to_dhcp is
+        # intentionally NOT changed to do this too.
+        #
+        # Known, stated limitation, not solved here: this dhclient call
+        # only covers the CURRENT invocation. It does not make the
+        # additive DHCP address survive a reboot, since ifupdown2 will
+        # exhibit the exact same gap on every subsequent boot - a
+        # persistent fix needs a boot-time unit that re-invokes dhclient
+        # for this interface after networking.service brings up the
+        # static family, matching this codebase's existing precedent for
+        # a similar, explicitly-deferred boot-time gap
+        # (repair_rollback.py's boot_time_recovery() is implemented and
+        # unit-tested but not yet installed as a systemd unit, pending
+        # real boot-ordering verification - see reset-interface-to-dhcp-
+        # plan.md). Reboot-persistence for the additive path remains
+        # unresolved after this fix, not silently assumed solved.
+        dhclient_res = runner.run(["dhclient", target.name], timeout=30)
+        repair.log_event(runner, attempt_id, "dhclient_supplementary", "pass" if dhclient_res.returncode == 0 else "fail",
+                          dhclient_res.stderr.strip() if dhclient_res.returncode else f"dhclient {target.name} completed")
+        if dhclient_res.returncode != 0:
+            raise RepairRefused("dhclient_failed",
+                                 f"supplementary dhclient {target.name} failed: {dhclient_res.stderr.strip()}; "
+                                 "independent rollback stays armed")
 
         # --- 8: verify lifeline, target-bound (address/route/gateway/DNS/HTTPS) ---
         verification = verify_target_extended(runner, target.name)

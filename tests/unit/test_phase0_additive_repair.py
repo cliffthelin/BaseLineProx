@@ -336,7 +336,8 @@ def broken_facts_fixture_a():
 
 def make_additive_runner(files=None, target="vmbr0", new_addr="10.0.2.20/24", gateway="10.0.2.2",
                           clustered=False, protected_session=False, syntax_ok=True, apply_ok=True,
-                          verify_ok=True, dns_ok=True, https_ok=True, syntax_advisory_only=False):
+                          verify_ok=True, dns_ok=True, https_ok=True, syntax_advisory_only=False,
+                          dhclient_ok=True):
     files = files if files is not None else {"/etc/network/interfaces": FIXTURE_A_IPV6_ONLY}
     r = FakeRunner(files=files)
     r.script(lambda a: a == ["ip", "route", "show", "default"], FakeProc(0, "", ""))
@@ -362,6 +363,10 @@ def make_additive_runner(files=None, target="vmbr0", new_addr="10.0.2.20/24", ga
                  FakeProc(0, "", "") if syntax_ok else FakeProc(1, "", "syntax error"))
     r.script(lambda a: a == ["ifreload", "-a"],
              FakeProc(0, "", "") if apply_ok else FakeProc(1, "", "ifreload: apply failed"))
+    # Supplementary dhclient call (decision records 14/15) - real ifupdown2
+    # does not bring up the additive stanza on its own, confirmed directly.
+    r.script(lambda a: a[:1] == ["dhclient"],
+             FakeProc(0, "", "") if dhclient_ok else FakeProc(2, "", "dhclient: no lease obtained"))
     if verify_ok:
         r.script(lambda a: a[:5] == ["ip", "-4", "-o", "addr", "show"],
                  FakeProc(0, f"3: {target}    inet {new_addr} brd 10.0.2.255 scope global {target}\\"
@@ -503,6 +508,49 @@ def test_successful_dhcp_verifies_address_route_gateway_dns_and_https():
     assert result.ok
     assert any(c[:2] == ["getent", "hosts"] for c in r.calls)
     assert any(c[:1] == ["curl"] for c in r.calls)
+
+
+def test_supplementary_dhclient_is_invoked_after_apply():
+    # Real, confirmed finding (decision records 14/15): ifreload -a
+    # succeeding does not mean the additive stanza was actually applied -
+    # a supplementary dhclient call is required. This test locks in that
+    # the pipeline actually makes that call, in the right order (after
+    # apply, before verification).
+    r = make_additive_runner()
+    result = repair_additive.add_dhcp_to_bridge(r, "vmbr0", "test-operator", operator_present=True,
+                                                  check_lifeline_fn=broken_facts_fixture_a)
+    assert result.ok
+    dhclient_calls = [c for c in r.calls if c[:1] == ["dhclient"]]
+    assert dhclient_calls == [["dhclient", "vmbr0"]]
+    apply_index = r.calls.index(["ifreload", "-a"])
+    dhclient_index = r.calls.index(["dhclient", "vmbr0"])
+    assert apply_index < dhclient_index
+
+
+def test_dhclient_failure_refuses_and_leaves_rollback_armed():
+    r = make_additive_runner(dhclient_ok=False)
+    result = repair_additive.add_dhcp_to_bridge(r, "vmbr0", "test-operator", operator_present=True,
+                                                  check_lifeline_fn=broken_facts_fixture_a)
+    assert not result.ok
+    assert result.outcome == "refused"
+    assert "dhclient_failed" in result.detail
+    # Rollback stays armed per spec - a systemd-run call was made and
+    # this path never cancels it.
+    assert any(c[:1] == ["systemd-run"] for c in r.calls)
+    # No inline restore raced against the still-armed rollback: the
+    # additive stanza is still present in the file at this point.
+    assert "iface vmbr0 inet dhcp" in r.files["/etc/network/interfaces"]
+
+
+def test_replace_path_does_not_invoke_supplementary_dhclient():
+    # Confirmed directly (decision record 15): the replace path's single,
+    # unambiguous inet dhcp stanza works natively through ifupdown2's own
+    # ifup/ifreload bring-up - no supplementary call needed or made.
+    r = make_additive_runner(files={"/etc/network/interfaces": FIXTURE_B_IPV4_FALLBACK})
+    result = repair.reset_interface_to_dhcp(r, "vmbr0", "test-operator", operator_present=True,
+                                             check_lifeline_fn=broken_facts_fixture_a)
+    assert result.ok
+    assert not any(c[:1] == ["dhclient"] for c in r.calls)
 
 
 def test_dns_failure_fails_verification_even_with_address_and_route_present():

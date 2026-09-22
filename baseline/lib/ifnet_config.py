@@ -310,8 +310,15 @@ def add_dhcp_stanza(cfg: ParsedConfig, target_name: str) -> dict:
     `target_name` has no `inet` stanza at all yet (only a non-inet, e.g.
     `inet6 static`, one) - see topology.derive_additive_target. Never
     deletes or rewrites the existing stanza; the two families coexist as
-    separate `iface` blocks, which is standard, valid ifupdown2 syntax
-    for dual-stack configuration.
+    separate `iface` blocks - `ifquery` recognizes and displays both as
+    distinct ifaceobjs, confirmed directly. **This is NOT, however,
+    sufficient by itself for real ifupdown2 to actually bring up the
+    added family** - confirmed directly (decision records 14/15) that a
+    verbose `ifup -v` trace shows zero DHCP activity for the additive
+    stanza, even though it parses and syntax-checks cleanly. The caller
+    (repair_additive.add_dhcp_to_bridge) must explicitly invoke
+    `dhclient` as a supplementary step; this function only produces the
+    on-disk text, it makes no claim about what ifupdown2 will do with it.
 
     Placement matters and was fixed after real evidence, not assumed:
     an earlier version appended the new stanza at the absolute end of
