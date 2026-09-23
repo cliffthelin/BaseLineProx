@@ -1,8 +1,8 @@
-# Decision record: Gate A's additive repair achieves a full apply-time pass — first in this project's history — but reboot-persistence still fails, now directly confirmed rather than theoretical
+# Decision record: Gate A fully passes — apply-time and reboot-persistence, first in this project's history
 
 Date: 2026-09-22
 Investigator: Claude Code
-Status: **genuine, independently-verified progress.** The additive repair pipeline (`repair_additive.add_dhcp_to_bridge`), run against a directly-staged, byte-exact reproduction of Fixture A, achieves a full apply-time pass — address, route, gateway, DNS, and HTTPS all independently confirmed working — for the first time in this project's history. The previously-open reboot-persistence gap (theorized in decision records 14/15/16, never directly tested) is now directly confirmed: the fix does not survive a reboot. **Gate A still does not fully pass** — reboot-persistence is one of its explicit criteria.
+Status: **Gate A fully passes.** The additive repair pipeline (`repair_additive.add_dhcp_to_bridge`), run against a directly-staged, byte-exact reproduction of Fixture A, achieves a full apply-time pass — address, route, gateway, DNS, and HTTPS all independently confirmed working — for the first time in this project's history. The reboot-persistence gap this same investigation found and confirmed directly (below) was then closed with a new, narrowly-scoped boot-time systemd unit (`baseline-additive-dhcp-reapply.service` + `repair_additive_persist.py`), unit-tested (6 new tests, 87/87 total) and independently re-verified in a second real QEMU run: after a clean reboot, address, route, gateway, DNS, and HTTPS all pass again, automatically, with no manual intervention. **This is the first time Gate A has fully passed in this project's history.**
 
 ## Scope discipline
 
@@ -45,14 +45,23 @@ This confirms directly, for the first time (prior decision records only theorize
 
 The `inet dhcp` stanza itself **does** persist in `/etc/network/interfaces` (it's a file on disk, untouched by reboot) — only the actual DHCP negotiation that makes it functional does not re-run automatically.
 
+## The reboot-persistence fix: `repair_additive_persist.py` + `baseline-additive-dhcp-reapply.service`
+
+Matching the precedent already named as unbuilt in `repair_rollback.py`'s own module docstring for the reboot-during-rollback-window case, a new, narrowly-scoped boot-time systemd unit was written:
+
+- `baseline/lib/repair_additive_persist.py` — `reapply_additive_dhcp(runner)`. Reuses `repair.read_interfaces_config` (unchanged) to parse the live config, then scopes strictly to interface names `ifnet_config`'s own parser already recorded in `duplicate_names` **and** where a second, separate `iface <name> inet dhcp` stanza specifically exists (a regex match against the raw config text, not just "this name is a duplicate for any reason") — deliberately not a general-purpose "retry DHCP on anything" tool, to avoid silently masking a genuinely different problem on some other interface (e.g. a hand-edited file with two conflicting static stanzas, which this must not touch). For each match, checks `ip -4 -o addr show dev <name>` first and only runs `dhclient <name>` when no IPv4 address is already present — idempotent, safe to run on every boot, a no-op on the overwhelming majority of boots once a lease is held.
+- `baseline/bin/baseline-additive-dhcp-reapply` — thin installed entry point, matching the existing `baseline-repair-rollback` pattern exactly.
+- `boot/baseline-additive-dhcp-reapply.service` — `Type=oneshot`, `After=networking.service`, `WantedBy=multi-user.target`.
+- Wired into `provision.sh` alongside the existing repair modules.
+
+Unit-tested first, per this project's established discipline (`tests/unit/test_repair_additive_persist.py`, 6 new tests, all `FakeRunner`-scripted): reapplies when the additive signature is present and no IPv4 address exists; no-ops when an address is already present; no-ops for a non-additive config; does not touch a duplicate name that isn't an additive-dhcp shape (the two-static-stanzas case); records a `fail` event and correct detail on a `dhclient` failure; idempotent on a second run once an address exists. 87/87 total unit tests passing.
+
+**Then independently re-verified for real**, not just unit-tested: a second disposable QEMU install (`gateAv7b`), same Fixture A staging methodology, additive repair applied (`outcome: "success"`, same as before), the new systemd unit deployed and enabled, then a real `reboot` (clean, not forced). After reboot: `ip -4 addr show vmbr0` → `inet 10.0.2.15/24 ... dynamic vmbr0`; `ip -4 route show` → `default via 10.0.2.2 dev vmbr0`; `getent hosts deb.debian.org` resolved; `wget https://deb.debian.org/` → `HTTPS_OK`. All five properties, automatically, with zero manual intervention — `systemctl status baseline-additive-dhcp-reapply.service` confirms `status=0/SUCCESS` and the journal shows exactly the expected `[pass] vmbr0: boot-time reapply: dhclient vmbr0` line.
+
 ## What this means for Gate A
 
-Gate A's stated criteria include "config remains functional across reboot." That criterion **fails**, confirmed directly. The apply-time criteria (address + route + gateway + DNS + HTTPS immediately after repair) **pass**, confirmed directly, for the first time. Gate A as a whole still does not pass.
-
-## Recommended next step, not attempted here
-
-A boot-time systemd unit (matching the precedent already named as unbuilt in `repair_rollback.py`'s own module docstring for the reboot-during-rollback-window case) that re-runs `dhclient <target>` for any interface with an `inet dhcp` stanza that ifupdown2's own dispatch didn't bring up — scoped narrowly to interfaces the additive repair itself created, not a general-purpose fix, to avoid silently masking a genuinely different problem on some other interface.
+Gate A's stated criteria are: Fixture A produces a bounded additive proposal (existing unit tests); declining makes no change (existing unit tests); concurrent edits refuse (existing unit tests); failed DHCP restores exact original (existing unit tests); successful DHCP verifies address/route/gateway/DNS/HTTPS (confirmed directly, this record); config remains functional across reboot (confirmed directly, this record, after the fix above). **Every stated criterion now has direct, real evidence behind it.**
 
 ## Whether Gates B–F may begin
 
-No. Gate A has a real, independently-verified apply-time pass now (a first), but reboot-persistence — one of its own stated criteria — fails, confirmed directly rather than theorized.
+**Yes.** Gate A fully passes — the first time in this project's history — with both apply-time and reboot-persistence independently verified against real QEMU, real ifupdown2, real dhclient, real SLIRP. The separately-unresolved guestfwd infrastructure problem (decision record 16) still blocks the *automated/answer-file* install path specifically, and should be kept in mind for any future work that depends on that path (e.g. building a fresh disposable image from scratch without manual TUI interaction) — but it does not block Gate A itself, since this investigation found and validated a working route around it.
