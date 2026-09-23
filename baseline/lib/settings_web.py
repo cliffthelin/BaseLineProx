@@ -457,7 +457,47 @@ class JsonFileStore:
                     "tether": {"enabled": False},
                     "ssh": {"password_auth": False},
                     "handoff": {"restored_categories": []},
-                    "diagnostics": {"tools_installed": []},
+                    "diagnostics": {
+                        # Per decision record 22: all 5 install and run cleanly
+                        # via apt on a real automated-install target. Fields
+                        # below are what an operator actually needs to
+                        # configure/select for each tool's *use*, not its
+                        # install (install itself needs no fields - plain
+                        # noninteractive apt-get). lm-sensors/nvme-cli need
+                        # no fields at all - pure passive discovery.
+                        "lm-sensors": {"install": "automatic", "fields": []},
+                        "nvme-cli": {"install": "automatic", "fields": []},
+                        "smartmontools": {
+                            "install": "automatic",
+                            "fields": [
+                                {"name": "device", "type": "select", "source": "smartctl --scan-open",
+                                 "label": "Device to inspect"},
+                                {"name": "self_test_type", "type": "select", "options": ["short", "long"],
+                                 "label": "Self-test type", "requires_explicit_confirm": True},
+                            ],
+                        },
+                        "ethtool": {
+                            "install": "automatic",
+                            "fields": [
+                                {"name": "interface", "type": "select", "source": "network.list_interfaces()",
+                                 "label": "Interface to inspect"},
+                            ],
+                        },
+                        "iperf3": {
+                            "install": "automatic",
+                            "fields": [
+                                {"name": "role", "type": "select", "options": ["client", "server"],
+                                 "label": "This host's role"},
+                                {"name": "peer_address", "type": "text", "label": "Peer address"},
+                                {"name": "port", "type": "number", "default": 5201, "label": "Port"},
+                            ],
+                            "requires_explicit_confirm": True,
+                            "note": "Active network test with real side effects (PRD SS5.9a) - "
+                                    "never auto-triggered, always operator-confirmed with both "
+                                    "endpoints explicitly chosen.",
+                        },
+                        "tools_installed": [],
+                    },
                 },
                 "pending_accounts": {},
                 "rebuild_log": [],
