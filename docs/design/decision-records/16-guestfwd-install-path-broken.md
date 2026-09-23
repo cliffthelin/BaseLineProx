@@ -6,7 +6,15 @@ Status: root cause not found; conclusively demonstrated as real, reproducible, a
 
 ## Scope discipline
 
-No push to `cliffthelin/baseline`. No physical device. No host package installation or removal. No privilege escalation (packet capture via `tcpdump` was attempted and refused for lack of `CAP_NET_RAW`; not worked around). No authorization-triggering host call. Four disposable QEMU install attempts (`experiments/m1-gateA-v4/runs/gateAv5-*`, `gateAv5b-*`, `gateAv5c-*`, `gateAv5d-*`), all cleaned up per retention policy (canary-leak grep before deletion, each workspace reduced to under 260KB of logs/screenshots/state).
+No push to `cliffthelin/baseline`. No physical device. No host package installation or removal. No privilege escalation (packet capture via `tcpdump` was attempted and refused for lack of `CAP_NET_RAW`; not worked around). No authorization-triggering host call. Five disposable QEMU install attempts (`experiments/m1-gateA-v4/runs/gateAv5-*`, `gateAv5b-*`, `gateAv5c-*`, `gateAv5d-*`, `gateAv6-*`), all cleaned up per retention policy (canary-leak grep before deletion, each workspace reduced to under 260KB of logs/screenshots/state).
+
+## Update: confirmed persistent after extensive real outbound SLIRP activity (attempt 5, `gateAv6`)
+
+Between the original four attempts and this fifth one, this host ran many additional QEMU/SLIRP sessions for an unrelated real hardware-replacement install (`experiments/real-install/`) — including several successful full boots with genuine, heavy outbound network activity through the identical `-netdev user` SLIRP backend: `apt-get update`/`install` against real Debian/Proxmox mirrors, a full `git clone` from GitHub, an `npm install`, and a `wget` HTTPS fetch, all succeeding normally. If the guestfwd hang were caused by stale state in one bad SLIRP/QEMU process, that volume of subsequent successful activity across many fresh QEMU processes would be expected to have cleared it.
+
+It did not. A fifth fresh disposable install attempt (`gateAv6`, no `restrict=on`, host load normal at the time), using the exact same `gateAv4_prep.py`-derived guestfwd pattern, failed identically: `Sending POST request to 'https://10.0.2.100:8443/answer/...'` immediately followed by `Fetching answer file via HTTP failed: timeout: global` and `ERROR: Aborting: Could not find any answer file!`.
+
+This sharpens the finding: **outbound** SLIRP connectivity (guest-initiated connections to the real internet) is demonstrably fine and has been exercised heavily and successfully on this host tonight. **Inbound** `guestfwd` port-forwarding (host-mapped connections arriving at a guest-visible address) is what's broken, specifically and consistently, across five independent QEMU processes spanning several hours and a great deal of intervening successful network activity of the other kind. This is not a one-off or stale-state artifact — it is a stable, reproducible condition of this host's current QEMU/SLIRP guestfwd path, unresolved without either root-level packet capture or the still-untried host reboot.
 
 ## Original goal
 
