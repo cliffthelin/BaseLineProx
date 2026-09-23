@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for the boot-time additive-DHCP reapply.
+
+Runs at every boot, after networking is up. Idempotent and narrowly
+scoped - see `lib/repair_additive_persist.py`'s module docstring for
+exactly what it does and does not touch. Closes the reboot-persistence
+gap confirmed directly in decision record 17: ifupdown2's own dispatch
+never brings up the additive repair's second `iface <name> inet dhcp`
+stanza on its own.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import repair_additive_persist  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(repair_additive_persist.main())

@@ -49,16 +49,23 @@ cp "$SRC/baseline/lib/ifnet_config.py" /opt/baseline/lib/ifnet_config.py
 cp "$SRC/baseline/lib/topology.py" /opt/baseline/lib/topology.py
 cp "$SRC/baseline/lib/repair.py" /opt/baseline/lib/repair.py
 cp "$SRC/baseline/lib/repair_additive.py" /opt/baseline/lib/repair_additive.py
+cp "$SRC/baseline/lib/repair_additive_persist.py" /opt/baseline/lib/repair_additive_persist.py
 cp "$SRC/baseline/lib/repair_rollback.py" /opt/baseline/lib/repair_rollback.py
 cp "$SRC/baseline/lib/firstboot_network_repair.py" /opt/baseline/lib/firstboot_network_repair.py
 cp "$SRC/baseline/bin/baseline-repair-rollback" /opt/baseline/bin/baseline-repair-rollback
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback
+cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline-additive-dhcp-reapply
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply
 
 echo "=== Installing systemd unit (Baseline takes over tty1) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
+
+echo "=== Installing systemd unit (additive-repair DHCP reapply, decision record 17) ==="
+cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
+
 systemctl daemon-reload
 systemctl disable --now getty@tty1.service
 systemctl enable --now baseline.service
+systemctl enable baseline-additive-dhcp-reapply.service
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox

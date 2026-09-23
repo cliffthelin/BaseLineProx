@@ -1,0 +1,12 @@
+[Unit]
+Description=Baseline additive-repair DHCP reapply (decision record 17)
+After=networking.service
+Wants=networking.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-additive-dhcp-reapply
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
