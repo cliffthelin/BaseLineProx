@@ -316,6 +316,24 @@ See §7.1.
 
 Covers every action from Phase 1 through the destination-hardware TUI stage. Output is a redacted execution plan / configuration diff, never a secret-bearing command line, per §7.
 
+### 5.16 Post-install settings — always editable, never a forced reinstall
+
+**Requirement, stated plainly (user, 2026-09-23): an update or upgrade must never force a user to redo their entire setup.** Everything §5.6 confirms on tty1 during first boot is confirmed exactly once by construction — there is currently no path back into that same review after first-boot completion is recorded. This section adds one: a persistent, re-enterable settings surface, reachable for the life of the installation, not a one-shot wizard.
+
+**Login and review**:
+- A browser page, served locally by Baseline (same LAN-scoped access model as §5.10's Proxmox web UI — no new exposure surface), accepts the **existing** root username and password already confirmed during first boot. No separate credential scheme.
+- On successful login, the page shows **every** setting §5.6 through §5.13 cover — network, firewall, tether, SSH, handoff-restored categories, diagnostic-tool state — on one efficient page, not scattered across a rediscovery flow. This is a read surface first: the operator sees the system's actual current configuration, not a blank form.
+- Any section can be opened and changed. Confirming a change re-walks **only that section's** existing confirm-then-apply mechanism (§5.6's "the bundle proposes, the TUI confirms" pattern, reused here for post-install edits) — the transactional/rollback-protected application already specified per subsystem (§5.10's firewall transaction, §5.13's handoff transaction) applies unchanged. Editing one setting never re-runs installation, never re-partitions, never touches subsystems the operator didn't select.
+
+**Fresh setup and rebuild — the one path that is allowed to be destructive**:
+- From the same login page, an operator may instead **create a new account** and, under that new identity, build a complete setup from a blank form (not the current system's settings) — mirroring the original Phase 1 GUI flow, but reachable from a running system rather than only pre-install.
+- Only after that full setup is completed can the operator **explicitly initiate a rebuild** from it. This is the only user-reachable trigger in this section for a destructive install, and it inherits §4's destructive-target policy and §6's technical-eligibility gate unchanged — in particular, **this path is limited to disposable targets for now** (the same image/virtual-disk boundary §4 already enforces through Milestone 2; extending it to a real physical drive still requires §6's full eligibility gate and attestation, not a shortcut through this page). This section grants no new destructive capability — it is a second front door onto the same gate.
+
+**Everything else hands off — it does not get completed for the user**:
+- These two flows (edit-in-place under existing credentials; fresh setup + explicit rebuild under a new account, disposable-target only) are the only ones this page carries to completion automatically. Any other selection — anything ambiguous, anything that would need to target a non-disposable or not-yet-eligible drive, anything ambiguous about which identity's settings are in scope — is **not silently refused and not force-completed either**. The page hands off at that exact point: it stops, shows the operator precisely what was selected and why it isn't one of the two safe paths, and requires the **human** to take the next, riskier action explicitly (through §6's full attestation flow, or by direct hand-on-keyboard access) rather than the tool inferring intent and finishing the job on the operator's behalf. This is the same principle §2 and §6 step 5 already state elsewhere in this document — an explicit human decision for anything consequential, never a tool-inferred one — applied here to the boundary between "safe to automate" and "not this tool's decision to make."
+
+**Open, not yet designed**: the concrete page layout, which settings genuinely need a re-walked confirm step vs. a direct apply, and how "new account" scoping interacts with Baseline's existing single-root-account model are all unresolved — this section fixes the *policy* (never force a reinstall; two safe automated paths; everything else hands off to the human), not the implementation. Sequencing (which milestone owns this) is not yet assigned; it depends on §5.6's destination-hardware TUI landing first, since this section reuses that TUI's confirm-then-apply mechanism rather than inventing a second one.
+
 ## 6. Technical-eligibility gate (Milestone 3 physical-drive gate)
 
 Renamed from "disposability proof" — the tool proves technical facts, not the user's intent toward the drive's contents. A physical drive becomes eligible for destructive installation only once, in sequence:
