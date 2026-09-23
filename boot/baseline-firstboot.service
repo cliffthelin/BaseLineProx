@@ -1,0 +1,20 @@
+[Unit]
+Description=Baseline first-boot network-repair authorization (Gate E)
+Conflicts=getty@tty1.service
+After=getty@tty1.service network-online.target
+Before=baseline.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/baseline/bin/baseline-firstboot
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for the first-boot state machine (Gate E).
+
+Runs once, before `baseline.service` claims tty1 for the normal
+console (see `boot/baseline-firstboot.service`'s `Before=baseline.service`
+ordering) - deliberately separate from `bin/baseline` so the normal
+console app never has to know about first-boot state, and so this can
+be re-run safely (it's a no-op after its own completion marker exists)
+without touching the main console process at all.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import firstboot_statemachine  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(firstboot_statemachine.main())

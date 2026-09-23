@@ -54,7 +54,14 @@ cp "$SRC/baseline/lib/repair_rollback.py" /opt/baseline/lib/repair_rollback.py
 cp "$SRC/baseline/lib/firstboot_network_repair.py" /opt/baseline/lib/firstboot_network_repair.py
 cp "$SRC/baseline/bin/baseline-repair-rollback" /opt/baseline/bin/baseline-repair-rollback
 cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline-additive-dhcp-reapply
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply
+# Gate E: first-boot state machine (docs/design/decision-records/06,
+# 24-gateF is a separate record; this is the durable completion-marker
+# wrapper around firstboot_network_repair.py's already-real CONFIRM-gated
+# flow - see baseline/lib/firstboot_statemachine.py's module docstring).
+cp "$SRC/baseline/lib/setup_intent.py" /opt/baseline/lib/setup_intent.py
+cp "$SRC/baseline/lib/firstboot_statemachine.py" /opt/baseline/lib/firstboot_statemachine.py
+cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot
 
 echo "=== Installing systemd unit (Baseline takes over tty1) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -62,8 +69,12 @@ cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 echo "=== Installing systemd unit (additive-repair DHCP reapply, decision record 17) ==="
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
 
+echo "=== Installing systemd unit (first-boot network-repair authorization, Gate E) ==="
+cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
+
 systemctl daemon-reload
 systemctl disable --now getty@tty1.service
+systemctl enable baseline-firstboot.service
 systemctl enable --now baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 

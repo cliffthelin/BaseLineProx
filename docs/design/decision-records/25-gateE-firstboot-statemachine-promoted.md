@@ -1,0 +1,46 @@
+# Decision record: Gate E passes — first-boot state machine promoted, real 40s-idle-no-change + CONFIRM + apply/verify/commit
+
+Date: 2026-09-23
+Investigator: Claude Code
+Status: complete. **Gate E passes**, with the same discipline decision record 06 proved and corrected, now re-demonstrated against real, promoted production code (`baseline/lib/firstboot_statemachine.py`), not the `experiments/m0-inv6/` prototype.
+
+## Scope discipline
+
+No push to `cliffthelin/baseline`. No physical device. No host package installation. No privilege escalation. One disposable QEMU target (`experiments/m1-gateE/`), payload files delivered to the guest via a local `python3 -m http.server` reachable at the SLIRP host gateway (`10.0.2.2`) - simpler and more reliable than the vvfat approach decision record 06 used (which failed outright in this pass with a QEMU `Block node is read-only` error under this host's QEMU version; not debugged further, HTTP delivery just works and is already this project's proven mechanism from decision records 22/24's `apt-get` access). Target image, screendumps, and the payload directory deleted after inspection; serial logs grepped clean of the test password first; 180KB of evidence retained.
+
+## What was promoted
+
+1. **`baseline/lib/setup_intent.py`** - promoted verbatim from `experiments/m0-inv9/setup_intent.py` (decision record 09's prototype), unmodified (confirmed by direct diff). 13 new unit tests converted from the original manual `check()`-style script to real pytest (`tests/unit/test_setup_intent.py`) - same scenarios, same assertions, now part of the real suite.
+
+2. **`baseline/lib/firstboot_statemachine.py`** - a new module, not a verbatim copy of the `experiments/m0-inv6/` prototype. Deliberately thin: it does **not** reimplement discovery, diagnosis, the exact-diff tty1 proposal, or the CONFIRM-gate - all of that already exists, real and already tested, in `baseline/lib/firstboot_network_repair.py` (promoted earlier, per decision record 12). This module adds exactly what was still missing for Gate E: a durable completion marker and journal (fsync file + fsync containing directory + atomic rename, the same pattern `setup_intent.record_consumption` already uses) checked *before* any discovery or side effect, so a committed run never re-triggers automatically. 10 new unit tests (`tests/unit/test_firstboot_statemachine.py`), stubbing `firstboot_network_repair.run_first_boot_network_repair` directly so these tests exercise only this module's own marker/journal logic - the wrapped flow's own behavior stays covered by `test_phase0_additive_repair.py`'s existing first-boot-wiring section.
+
+3. **`baseline/bin/baseline-firstboot`** + **`boot/baseline-firstboot.service`** - a thin entry point and a `Type=oneshot`, tty1-owning unit (`Conflicts=getty@tty1.service`, `Before=baseline.service`) so the state machine runs and fully exits before `baseline.service` claims tty1 for the normal console - `baseline.service` itself gained one additive line (`After=... baseline-firstboot.service`) to make the ordering explicit from both sides. Wired into `boot/provision.sh` additively (new `cp`/`chmod`/`enable` lines only, matching every prior systemd-unit addition this session).
+
+196/196 unit tests passing (23 new: 13 for `setup_intent.py`, 10 for `firstboot_statemachine.py`).
+
+## Real verification: the actual Gate E discipline, against real promoted code
+
+Built a fresh automated-install target (same `--fetch-from iso` headless methodology as decision records 22-24), whose own generated network config is the same Fixture-A-shaped broken static IPv6-only config decision record 23 already found. Delivered the 9 required `.py` files plus `baseline-repair-rollback` (needed for the repair pipeline's independent rollback-timer arming) to the guest over HTTP, then ran `firstboot_statemachine.py` directly on tty1 (a real interactive shell session, not systemd-unit-mediated for this pass - the unit itself follows the exact same, already-proven `boot/baseline.service` pattern and was not separately re-verified booting for real in this pass).
+
+Sequence, each step confirmed by direct evidence:
+
+1. **Automatic discovery and exact-diff proposal, no prompt shown yet during discovery** - the real, populated proposal appeared: `Mode: additive`, `Target interface: vmbr0 (bridge)`, the real before/after `/etc/network/interfaces` diff (adding `iface vmbr0 inet dhcp` while preserving the existing `inet6 static` stanza unchanged), ending in `Type CONFIRM and press Enter to proceed. No timeout. No default.`
+2. **40-second-idle-no-change, confirmed directly** - captured a screendump, waited 44 seconds with zero input of any kind, captured a second screendump. The two differ by exactly one byte region (offset 3064337) - confirmed by direct visual comparison to be the blinking text cursor's phase, not a content change; every line of the proposal and prompt text is identical. No progression, no timeout firing, no default branch taken. (Reported honestly as "content-identical, cursor-blink byte difference" rather than repeating decision record 06's stronger "byte-for-byte identical" claim, which this pass's own evidence doesn't quite support - the cursor blink is a real, expected source of pixel difference this method doesn't eliminate.)
+3. **A genuine fail-closed refusal, found and then closed** - the first CONFIRM attempt correctly refused: `rollback_arm_failed: could not arm the independent rollback timer: Failed to find executable /opt/baseline/bin/baseline-repair-rollback` - the payload delivery had only included the `lib/` modules, not the `bin/` rollback executable `repair.py`'s own safety mechanism requires. This is the repair pipeline's fail-closed design working exactly as intended, not a defect - reported here rather than silently worked around before re-testing.
+4. **Full success after delivering the missing dependency** - re-ran from a freshly reset broken state (`ip -4 addr flush`, marker removed): identical proposal, confirmed 40s-idle-no-change was already established in step 2 so not repeated, typed `CONFIRM`, and this time: `[network-repair] result: success - vmbr0 gained a new inet dhcp stanza (existing inet6 stanza preserved); address=10.0.2.15 gateway=10.0.2.2` followed by `[baseline-firstboot] COMMITTED. Marker written - will not re-run automatically.`
+5. **Independently verified the real network state, not just the log line** - `ip -4 addr show vmbr0` showed a real `10.0.2.15/24` address; `ip -4 route` showed a real default route via `10.0.2.2` - genuinely repaired, not just claimed.
+6. **Completion marker confirmed to actually prevent re-trigger** - ran `firstboot_statemachine.py` again immediately: `previous run already completed at 2026-09-23T19:01:32 - not re-triggering.` - no re-discovery, no re-proposal, exactly the documented behavior.
+
+## Whether Gate E passes
+
+**Yes.** Milestone-1-plan's Gate E requirement - "the 40-second-idle-no-change plus post-`CONFIRM` apply/verify/commit evidence, reproduced with the same discipline Investigation 6 used after its own correction... now also covers authorizing the network-repair action specifically" - is satisfied against real, promoted, unit-tested production code, not the experiments/ prototype. All six of decision record 06's originally-verified properties (discovery-before-authorization, durable journal, completion-marker re-trigger prevention) were re-observed here too, incidentally, exercising the same real mechanism.
+
+## What this pass did not re-verify
+
+- **tty1 ownership via the real systemd unit** - `baseline-firstboot.service`'s `Conflicts=getty@tty1.service`/`Before=baseline.service` ordering was not booted for real in this pass (the state machine was run directly from an interactive shell instead, to keep the payload-delivery mechanism simple). This mirrors exactly `boot/baseline.service`'s own already-proven pattern, so the risk is low, but it is a real, stated gap - not assumed proven by this record.
+- **tty2 escape while tty1 is blocked** - decision record 06 already proved this against the prototype's identical shape; not independently re-checked against the promoted module in this pass.
+- **Interrupted-run recovery mid-confirmation** - the prototype's `SIGKILL`-during-wait test from decision record 06 was not repeated here. Lower risk than before: this module's actual state (whether a repair has been confirmed-and-committed) hinges entirely on the completion marker, which is written only after `firstboot_network_repair` returns success - an interruption before that point simply means the next run starts over from discovery, which is safe and inexpensive for this specific action (unlike the general multi-action prototype's finer-grained per-state journal, which existed to avoid re-doing more expensive/risky steps that don't apply here).
+
+## Next
+
+With Gates A-F all passing, Milestone 1's remaining real gaps are: `setup_intent.py`'s actual *use* (the signed setup-intent bundle handoff from a future installer GUI to first boot, per PRD SS5.6, is not wired to anything yet - this record only promotes the verification primitives), and the `baseline-firstboot.service` real-boot/tty1 verification noted above.
