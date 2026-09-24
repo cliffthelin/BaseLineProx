@@ -1,7 +1,6 @@
 # PRD: TestPersistence — synthetic persistent-storage architecture experiment
 
 Status: draft, design-only. No implementation in this pass.
-Owner: Cliff Thelin
 Depends on: nothing - self-contained synthetic experiment.
 Blocked by: nothing. Explicitly **not** blocked by the pending real-world identity-scan gate (see [physical-phase-p0-p1-plan.md](physical-phase-p0-p1-plan.md)'s `identity_scan: pending_operator_verification`) - that gate concerns this repository's own tracked content/history for real-world identifiers, and TestPersistence never introduces any (see §0).
 
@@ -11,7 +10,7 @@ TestPersistence is a design exercise, and eventually a QEMU-only experiment, for
 
 **Every identifier anywhere in this document, and every fixture/test/example this PRD's later milestones produce, is synthetic**, drawn from this fixed set (extend the pattern, never depart from it):
 
-`TestPerson-001`, `TestPersistence` / `TestPersistence-001`, `TestSystem-A`, `TestSystem-B`, `TestApplication-A`, `TestApplication-B`, `TestDocuments`, `TestMemory`, `TestGrant-001`, `TestPersistenceDisk-001`.
+`TestPerson-001`, `TestPersistence` (the experiment/volume name) / `TestPersistence-001` (logical-store identity, §4) / `TestPersistenceDisk-001` (carrier identity, §4), `TestSystem-A`, `TestSystem-B`, `TestApplication-A`, `TestApplication-B`, `TestDocuments`, `TestMemory`, `TestGrant-001`.
 
 No real name, hostname, serial number, email address, or any other real-world identifier may appear in this PRD, its tests, its fixtures, or any evidence it produces. This is a structural property of the experiment (§6's `test_only: true` manifest field is the machine-checkable version of this same rule), not merely a writing convention - see acceptance case 20 (§14).
 
@@ -68,7 +67,7 @@ Evidence layers are preserved **separately**, never merged into one identifier:
 - **GPT/partition identifiers** - disk GUID, partition GUID.
 - **LUKS identifiers** - LUKS UUID, key-slot metadata, header generation counter.
 - **Filesystem identifiers** - filesystem UUID/label.
-- **Logical store identity** - Baseline's own concept, a `TestPersistenceDisk-001`-style identifier recorded *inside* the encrypted manifest itself (§6), never derived from any layer below it.
+- **Logical store identity** - Baseline's own concept, a `TestPersistence-001`-style identifier recorded *inside* the encrypted manifest itself (§6), never derived from any layer below it. This is distinct from **carrier identity** (`TestPersistenceDisk-001`-style, §6's manifest example) - the identifier for the specific virtual/physical disk currently carrying the store. A logical store's carrier changes on migration (§4 below); its logical identity does not. Conflating the two - naming the logical store after the disk that happens to carry it today - reintroduces exactly the hardware/logical coupling this model exists to break, so the manifest records both, separately, and nothing in this PRD equates them.
 
 `/dev/sdX` (or `/dev/vdX` in QEMU) is an **attachment alias only** - never persisted as identity anywhere, never compared for equality, re-derived fresh on every attachment.
 
@@ -78,6 +77,8 @@ Real WWN/serial/model/capacity evidence **travels with physical hardware**: when
 
 **Conflicting evidence produces an explicit ambiguous/refusal state** - e.g. a logical identifier matches but the LUKS generation counter doesn't correspond to any previously-recorded generation, or two attached stores both claim the same logical identifier (a cloned volume, §13). This is never resolved by a best guess; it routes to `requires_recovery` (§7) with the conflict described, for a human decision.
 
+**Manifest and authority-ledger authenticity is a separate property from LUKS encryption, and must be defined explicitly.** LUKS2 provides confidentiality (and, via its own AEAD cipher, tamper-evidence at the block-device level) but nothing above the block layer proves that the *manifest and ledger content itself* - once decrypted - was written only by an authorized Baseline instance and not altered by a compromised or buggy authorized writer, silent corruption, or an offline edit of the decrypted image. This PRD therefore requires a second, independent integrity layer inside the volume: every `authority_ledger` entry and every manifest write is authenticated with a MAC (or signature) derived from a key that is cryptographically separate from the LUKS bulk-encryption key - domain-separated the same way this project's inventory redactor already separates its `key_id` hash from its value-tokenization HMAC (`baseline/lib/inventory/redact.py`'s `_KEY_ID_DOMAIN`) - so that decrypting the volume alone is never sufficient to produce a validly-authenticated new entry. Ledger entries are additionally chained (each entry's authentication covers the previous entry's identifier), so a dropped or reordered entry is detectable even by an authorized-key holder acting outside the normal append path. The exact key-derivation scheme (a subkey derived from the same passphrase/keyfile via a separate KDF domain, vs. a wholly independent signing key) is deferred to Milestone 2 (§16) as a schema decision, not resolved here - but "define authenticated manifest/ledger integrity and select its key derivation" is itself a Milestone-2 blocker, not an implementation detail to improvise later.
+
 ## 5. Bootstrap trust
 
 - **Fresh Baseline installation** - no persistence store exists yet. Baseline offers to create one (§6's two-virtual-disk design). This is the only path that creates a brand-new logical identity.
@@ -85,14 +86,15 @@ Real WWN/serial/model/capacity evidence **travels with physical hardware**: when
 - **User-held recovery authority** - the passphrase/keyfile/recovery mechanism is held only by the person, never auto-derived from machine state, never cached beyond what one unlock operation needs without explicit, separately-designed configuration.
 - **Explicit local import authorization** - attaching a store belonging to a *different* logical identity than the host's currently-active one requires an explicit, described, one-time authorization step (the `import_proposed` state, §7) - never silent, never inferred from mere attachment.
 - **No automatic inheritance of machine-specific trust** - a grant, credential, or trust decision tied to one physical host/session is never silently extended to a different host/session just because the same store is attached there. Re-establishing trust on new hardware is itself an explicit, ledgered event (§9).
-- **Cloned-store detection** - two attachments presenting identical logical-identity evidence (e.g. a byte-for-byte cloned LUKS volume) is a distinguishable, explicit failure state (§13), detected via generation-counter/attachment-ledger divergence, never resolved by arbitrarily picking one.
+- **Cloned-store detection - scoped to what is actually demonstrable.** Two clones **simultaneously attached** (to the same host, or to different hosts that can compare notes) are reliably detectable: both present the same logical identity at the same recorded generation, which the state machine (§7) treats as an explicit ambiguous/refusal state, never resolved by picking one. A byte-for-byte clone that is instead used **separately and never simultaneously observed** cannot necessarily be distinguished from the original *until the two histories diverge* - i.e. until one of them is written to and its generation counter/ledger advances past what the other records, or until some external, independent, monotonic observation (a prior attachment-ledger entry recorded elsewhere, a human noticing two physical drives) surfaces the duplication. This PRD does not claim clone detection is possible from the store's own internal evidence alone in the separately-used case; §13's "Cloned" failure mode and acceptance case 15 (§14) are scoped to the simultaneous/diverged case only.
+- **Ownership and recovery authority are separate from application access.** Store-level ownership - who can recover, re-key, or authorize import of the store itself - is tracked in its own layer, not created or implied by an application's access grant. See §8 for the resulting split between the (store-level) authority ledger and (application-level) grants.
 
 ## 6. Initial storage design (this experiment's own scope)
 
 - **Two virtual disks**: `disposable-system` (the substrate, class 1, freely rebuildable) and `TestPersistence` (the encrypted, retained store - classes 2 through 6, combined behind one volume for this experiment).
 - **LUKS2** is the encryption engine for *this experiment specifically* - not a production commitment, chosen so the attachment state machine (§7) can be proven against a real (if synthetic) encrypted volume.
 - **Independently versioned internal manifest** - the manifest living inside the encrypted volume carries its own `schema_version`, separate from Baseline's own software version and separate from the outer LUKS/GPT/filesystem versions, so a manifest can be read and migrated independently of whatever Baseline build currently runs.
-- **Mandatory `test_only: true`** at the top of every manifest this experiment produces - a structural, machine-checkable guard. A real manifest reader should refuse anything without this flag correctly set for its intended context, so nothing this experiment generates could be mistaken for production data even if a file escaped its sandbox.
+- **Domain-separated test authority, not a mutable boolean.** A bare `test_only: true` field is not a sufficient production boundary - it is a single mutable value inside a JSON object that anything writing the manifest could flip, accidentally or otherwise, so its absence in a real store proves nothing. This experiment instead uses a **separately domain-scoped test format and authenticating key**: test manifests are authenticated (per §4's ledger-authenticity requirement) under a key/format domain string distinct from production's (e.g. `baseline-manifest-test-v1:` vs. `baseline-manifest-production-v1:`, mirroring `redact.py`'s existing `_KEY_ID_DOMAIN` pattern). A production-mode reader must **structurally reject** anything authenticated under the test domain - not merely warn - and a test-mode reader must equally reject anything authenticated under the production domain. Neither mode falls back to trusting a bare boolean field. `test_only: true` is retained in the illustrative manifest below purely as a human-readable label; the domain-separated authentication is the actual, enforced boundary.
 - **Separated namespaces** within the manifest: `person`, `preferences`, `application_state`, `grants`, `authority_ledger`, `secrets`, `snapshots`, `quarantine` - each its own top-level namespace, never comingled, mirroring §3's class separation and enforced structurally in the schema, not merely by convention.
 - **Final filesystem selection** for what lives atop the LUKS2 volume (ext4, btrfs, zfs, or something else) is explicitly **deferred** - this PRD does not commit to one. Milestone 3 (§16) may use whatever is simplest to prove the state machine; that choice is not a production decision.
 
@@ -102,16 +104,20 @@ Real WWN/serial/model/capacity evidence **travels with physical hardware**: when
 {
   "schema_version": 1,
   "test_only": true,
-  "logical_identity": "TestPersistenceDisk-001",
+  "manifest_domain": "baseline-manifest-test-v1",
+  "logical_identity": "TestPersistence-001",
+  "carrier_identity": "TestPersistenceDisk-001",
   "generation": 1,
   "created_at": "2026-09-24T00:00:00Z",
   "namespaces": {
     "person": {"TestPerson-001": {"documents_ref": "TestDocuments"}},
     "preferences": {},
     "application_state": {"TestApplication-A": {}, "TestApplication-B": {}},
+    "recovery_authority": {"held_by": "TestPerson-001", "mechanism": "test-passphrase-placeholder"},
     "grants": {"TestGrant-001": {"person": "TestPerson-001", "application": "TestApplication-A",
                                    "collection": "TestDocuments", "access_mode": "read",
-                                   "duration": "until_revoked", "authorized_by": "bootstrap"}},
+                                   "duration": "until_revoked", "authorized_by": "bootstrap",
+                                   "effective": true}},
     "authority_ledger": [],
     "secrets": {},
     "snapshots": [],
@@ -120,9 +126,13 @@ Real WWN/serial/model/capacity evidence **travels with physical hardware**: when
 }
 ```
 
+Note `recovery_authority` (store-level ownership/recovery, §5/§8) is a namespace distinct from `grants` (application-level access, §8) - the two are never derived from one another. `grants["TestGrant-001"].effective` reflects §10's automatic suspension while an application is disabled or uninstalled, independent of the grant's own retained history.
+
 ## 7. Attachment state machine
 
 **Governing invariant: detection must never automatically unlock, import, migrate, format, or attach writable.** Every state below that could plausibly be mistaken for an all-clear is explicitly read-only-of-metadata until a human or an already-established authorization advances it.
+
+**Unlocked-but-untrusted content is never mounted into Baseline's normal namespace.** Between `unlocked_untrusted` and a decision to trust the store (`inspection_ready`/`authorized`), Baseline inspects the decrypted content only through an **isolated, read-only inspection mount**: `ro`, `nodev`, `nosuid`, `noexec`, mounted in a namespace separate from Baseline's own running mount tree (a private mount namespace or an equivalent isolation mechanism - the exact primitive is a Milestone-2/3 implementation choice, not fixed here). Manifest parsing at this stage is strict: an unrecognized structure, an unparseable `schema_version`, or a failed authenticity check (§4) is treated as a parse failure, not partial data - there is no best-effort interpretation of untrusted content. Only after the manifest parses under a known `schema_version` and its authenticity check passes does the store advance to `inspection_ready`; nothing executable is ever run from the inspection mount, and nothing is written to it.
 
 ```mermaid
 stateDiagram-v2
@@ -180,13 +190,13 @@ Three classes of settings that might otherwise be carried across a substrate reb
 | Operation | Application state (class 4) | Referenced person data (class 3, via grant) |
 |---|---|---|
 | install | Created fresh | Unaffected (no grant yet) |
-| disable | Retained, application inactive | Grants remain valid but unused |
-| re-enable | Restored to active | Grants resume effect |
+| disable | Retained, application inactive | Grants remain in **grant history** but their runtime `effective` flag (§6's manifest example) is automatically suspended - a disabled application cannot exercise a grant it still nominally holds |
+| re-enable | Restored to active | Grants become `effective` again only per **explicit policy** - reactivation is not automatic-by-default just because the application is active again; the policy decision (always reactivate vs. require re-confirmation) is a Milestone-2 schema question, not resolved here |
 | upgrade | Migrated per §9's adapter rules | Unaffected |
 | rollback | Reverted to a prior application-state snapshot (§11) | Unaffected - never rolled back by an application rollback |
 | clone | A new, independent application-state copy created | New grants required - not inherited automatically |
 | move | Reassociated to a different logical store via authorized import (§5) | Grants re-authorized on the destination, not carried blind |
-| uninstall | **Retained by default** - moved to a "retained, uninstalled" sub-state | Grants remain until separately revoked |
+| uninstall | **Retained by default** - moved to a "retained, uninstalled" sub-state | Grants remain **recorded** (history preserved, §11) but are automatically suspended (`effective: false`) the moment the application is uninstalled - suspension is automatic and immediate; only *revocation* (removing the grant from the ledger entirely) is a separate, explicit operation |
 | retain state | (the default outcome of uninstall - named explicitly so it's a decision, not an accident) | Unaffected |
 | delete state | Application state moved to `quarantine` (§6) for a retention window, then actually removed | Grants explicitly revoked as part of this operation |
 | export | Application state (and, if explicitly requested, grant-referenced data) serialized out | Only included if explicitly requested - never bundled silently |
@@ -194,12 +204,14 @@ Three classes of settings that might otherwise be carried across a substrate reb
 
 **Uninstall must not delete persistence by default.** Only the separate, explicit `delete state` operation removes application persistence, and even then it first passes through `quarantine` rather than disappearing immediately.
 
+**Disabled or uninstalled applications must not retain active runtime access.** Retaining a grant's *history* (so it can be audited, restored, or re-confirmed later) is not the same as leaving it *effective* - an application that cannot currently run must not be able to exercise a grant while inactive. Suspension is automatic on disable/uninstall; re-enabling requires an explicit reactivation decision per policy, never an implicit resumption.
+
 ## 11. Snapshot and recovery semantics
 
 - **System rollback must not roll person data backward.** Rolling back the disposable substrate (class 1) or Baseline's own control-plane state (class 2) is independent of the `TestPersistence` store's own timeline - the two are never snapshotted or rolled back as one atomic unit by default.
 - **Application rollback is scoped to application state.** Rolling `TestApplication-A` back to a previous version's state must not touch `TestApplication-B`'s state or any person data outside the grants `TestApplication-A` itself held at that point.
-- **Revoked grants cannot silently return through snapshot restoration.** Restoring an older snapshot of the `grants`/`authority_ledger` namespaces must not resurrect a grant explicitly revoked after that snapshot was taken - restoration is checked against the *current* authority ledger's revocation records, never blindly applied.
-- **Restoration creates a new ledger event.** Every snapshot restore is itself recorded as a new, forward-moving `authority_ledger` entry - never an edit to history in place - matching this project's established durable, append-only journal discipline (`setup_intent.py`'s consumption ledger, `firstboot_statemachine.py`'s journal).
+- **Revoked grants cannot silently return through snapshot restoration - stated honestly, this requires a mechanism this PRD has not yet chosen.** If a snapshot restore brought back both the `grants` namespace *and* the `authority_ledger` that would otherwise catch the resurrected grant, the very revocation record needed to reject it disappears along with everything else restored - the checking mechanism and the thing it's supposed to check cannot both live inside the same rolled-back snapshot. This is the same limitation already identified in this project's setup-intent work (a consumption ledger cannot validate against itself if it's part of what gets rolled back). Preventing it requires one of: (a) a **non-rollback authority domain** - the authority ledger (or at minimum its revocation records) lives in a namespace that snapshot restore never touches, only ever appends to, independent of which snapshot generation the rest of the store is restored to; or (b) an **independent monotonic anchor** - a counter or timestamp source outside the snapshot mechanism entirely (e.g. Baseline's own control-plane state, class 2, which is never rolled back together with class 3/4 data) against which a restored ledger's currency can be checked. **Selecting between these two mechanisms (or another that achieves the same property) is a Milestone-2 blocker** (§16) - Milestone 2's schema/state-machine unit tests must prove revocation survives a rollback scenario before Milestone 3's QEMU experiment is built on top of an unproven assumption.
+- **Restoration creates a new ledger event.** Every snapshot restore is itself recorded as a new, forward-moving `authority_ledger` entry - never an edit to history in place - matching this project's established durable, append-only journal discipline (`setup_intent.py`'s consumption ledger, `firstboot_statemachine.py`'s journal). This append-only property is necessary but not sufficient on its own to solve the bullet above - it records that a restore happened, but only the non-rollback-domain or monotonic-anchor mechanism actually prevents a stale revocation state from being trusted.
 
 ## 12. Secrets and AI memory
 
@@ -213,14 +225,16 @@ Three classes of settings that might otherwise be carried across a substrate reb
 |---|---|---|
 | Missing | Store was previously attached but isn't present now | Explicit tty1 message; no auto-recreate of an empty replacement |
 | Locked | LUKS present, not yet unlocked | Normal, expected pre-authorization state (§7) - not itself a failure, but persistence unavailable until unlocked |
-| Unknown | Attached, but no recognizable Baseline manifest | Stays at `inspection_ready` at most; never auto-formatted |
+| Unknown | Attached, but no recognizable Baseline manifest | Cannot reach `inspection_ready` - a manifest that doesn't parse under a known `schema_version` and authenticity check (§7) stays at `unlocked_untrusted` if still under inspection, or routes to `requires_recovery` once inspection concludes it's unrecoverable; never auto-formatted |
 | Cloned | Identity-evidence collision (§4/§5) | Explicit ambiguous-identity report; refuses to pick one |
 | Corrupted | A namespace fails its own internal consistency check | Explicit corruption report; refuses to silently drop the damaged namespace |
 | Read-only | Underlying medium/filesystem is read-only | Documented read-only mode; writes refused explicitly, never silently discarded |
-| Full | No space left for a write | Write refused explicitly; never silently truncated or dropped |
+| Full | No space left for a write | Write refused explicitly; never silently truncated or dropped - see reserved capacity note below |
 | Newer-schema | Manifest's `schema_version` is newer than this Baseline build understands | Refuses to guess-parse; explicit "needs a newer Baseline" message; never partially interprets an unrecognized schema |
 
 **No silent creation of an empty replacement store.** Under any failure mode above, Baseline must never auto-create a fresh, empty `TestPersistence`-shaped store as if that were normal recovery - doing so would silently destroy the ability to recognize the real store if it's later found, and could mask real data loss as if nothing had happened. Every failure mode above routes toward `requires_recovery` (§7) for an explicit human decision, not an automatic one.
+
+**Reserved recovery/ledger capacity.** A completely full filesystem can otherwise prevent Baseline from appending the very failure/ledger record needed to explain the full condition (§4/§11's authority-ledger append-only discipline is useless if the append itself fails for lack of space). The storage design (§6) therefore reserves or preallocates a small, fixed capacity exclusively for `authority_ledger` and diagnostic-record appends, separate from the general-purpose space application/person data consumes - so a full-store condition can always be recorded, even when no further ordinary write can succeed. Sizing that reservation is a Milestone-2 schema decision, not fixed here.
 
 ## 14. Twenty-case acceptance matrix
 
@@ -229,23 +243,23 @@ Three classes of settings that might otherwise be carried across a substrate reb
 | 1 | Fresh creation | `TestSystem-A` | `disposable-system` + `TestPersistence` created; logical identity assigned; manifest carries `test_only: true` |
 | 2 | Person data + preference write, immediate readback | `TestSystem-A` | `TestPerson-001`'s `TestDocuments` and preferences written and read back correctly |
 | 3 | Application install + grant + state write | `TestSystem-A` | `TestApplication-A` installed, `TestGrant-001` issued to `TestPerson-001`, app state written |
-| 4 | **Destruction/replacement of the disposable system disk only** | `TestSystem-A` | `disposable-system` rebuilt (simulating `provision.sh`); `TestPersistence` untouched; reattach shows expected continuity (generation counter unchanged aside from a normal increment) |
+| 4 | **Destruction/replacement of the disposable system disk only** | `TestSystem-A` | `disposable-system` rebuilt (simulating `provision.sh`); `TestPersistence` untouched. On reattach: the **logical-store generation counter** (§4, inside the manifest) is unchanged from its value immediately before the rebuild - no write to `TestPersistence` occurred during the rebuild, so nothing incremented it. Only the **attachment-ledger entry count** increases by exactly one (a new "reattached" event, per §11's append-only discipline) - that is the one expected, normal-increment change. Physical/carrier-layer evidence for `disposable-system` (its own GPT/filesystem identifiers) is regenerated and is expected to differ; `TestPersistence`'s carrier identity (`TestPersistenceDisk-001`, §4) and all its identifiers remain byte-identical throughout, since that virtual disk was never touched |
 | 5 | **Recovery on a different system** | `TestSystem-A` → `TestSystem-B` | `TestPersistence` detached from A, attached to B (different synthetic hardware identity); same logical identity recognized despite different WWN/serial; explicit import authorization required and granted |
 | 6 | Attach without authorization | `TestSystem-B` | Stays at `import_proposed`; never silently attaches |
 | 7 | **Application isolation** | `TestSystem-A` | `TestApplication-A` cannot read `TestApplication-B`'s namespace, even though both are attached under the same store |
 | 8 | **Grant revocation** | `TestSystem-A` | `TestGrant-001` revoked; access denied afterward; `TestDocuments` still present |
-| 9 | Revoked grant does not return via snapshot restore | `TestSystem-A` | Restoring a snapshot taken *before* case 8's revocation does not resurrect access; a new ledger event is recorded |
+| 9 | Revoked grant does not return via snapshot restore | `TestSystem-A` | Restoring a snapshot taken *before* case 8's revocation does not resurrect access; a new ledger event is recorded. This case is the direct proof obligation for §11's non-rollback-authority-domain (or monotonic-anchor) mechanism - it cannot be marked passing until Milestone 2 has actually chosen and implemented one of those two mechanisms |
 | 10 | **Missing-store boot** | `TestSystem-A` | Boots with `TestPersistence` physically absent; degraded state; explicit message; no auto-recreate |
 | 11 | **Read-only behavior** | `TestSystem-A` | `TestPersistence` attached read-only (simulated); writes refused explicitly; reads succeed |
 | 12 | Full-store behavior | `TestSystem-A` | Small synthetic volume filled to capacity; further writes refused explicitly; no silent truncation |
 | 13 | Corrupted manifest | `TestSystem-A` | One namespace's data intentionally corrupted; Baseline reports corruption; does not drop or ignore it |
 | 14 | Newer-schema refusal | `TestSystem-A` | Manifest declares a `schema_version` newer than this build understands; refuses to parse; explicit message |
-| 15 | **Clone detection** | `TestSystem-A` + a byte-identical copy | Two attachments present identical logical-identity evidence; ambiguous/refusal state; no silent pick-one |
+| 15 | **Clone detection (simultaneous-attachment case)** | `TestSystem-A` + a byte-identical copy, both attached where they can be compared | Two attachments present identical logical-identity evidence at the same generation; ambiguous/refusal state; no silent pick-one. This case deliberately does **not** attempt to prove detection of a clone used separately and never simultaneously observed - §5 states plainly that case is undecidable from the store's own evidence alone until the two histories diverge |
 | 16 | **Application rollback without person-data rollback** | `TestSystem-A` | `TestApplication-A` rolled back one version; `TestPerson-001`'s documents and `TestApplication-B`'s state unaffected |
 | 17 | System rollback without person-data rollback | `TestSystem-A` | `disposable-system` rolled back to an earlier snapshot; `TestPersistence`'s own timeline untouched |
 | 18 | Uninstall retains state by default | `TestSystem-A` | `TestApplication-A` uninstalled; state retained (not deleted); separate `delete state` operation actually removes it, via `quarantine` |
 | 19 | Portable vs. machine-specific settings on export/import | `TestSystem-A` → `TestSystem-B` | Portable preferences transfer; machine-specific settings (§9) do not, even though the same logical store is now on different synthetic hardware |
-| 20 | **Complete absence of real identifiers** | All of the above | Every fixture, manifest, log, and retained artifact this experiment produced is scanned; only the declared `TestX-NNN`-pattern synthetic identifiers appear anywhere |
+| 20 | **Absence of prohibited real identifiers** | All of the above | Every fixture, manifest, log, and retained artifact this experiment produced is scanned for real-world identifiers (real names, hostnames, serials, emails, and similar) and none are found. This is **not** exclusive-use-of-the-fixed-`TestX-NNN`-list, which is impossible to satisfy as written - QEMU boot logs, package names, generated UUIDs, synthetic IP addresses, and other ordinary infrastructure noise will legitimately appear outside that list and are not themselves findings. The check is specifically for the *prohibited* category (real-world personal/organizational identity), using this repository's own external-identity scanner (`tools/scan_denylist.py`) run in synthetic mode, not a literal grep for only the nine named tokens |
 
 ## 15. Cloud boundary
 
@@ -256,7 +270,7 @@ Three classes of settings that might otherwise be carried across a substrate reb
 ## 16. Milestone sequence
 
 1. **PRD approval** - this document, reviewed and accepted before any code.
-2. **Pure schema/state-machine unit tests** - dataclasses/enums for the storage classes, identity model, attachment state machine, and grant records, fully unit-tested with no disk I/O, no LUKS, no QEMU - matching this project's existing "parsing stays pure" discipline (`ifnet_config.py`'s own module docstring).
+2. **Pure schema/state-machine unit tests** - dataclasses/enums for the storage classes, identity model, attachment state machine, and grant records, fully unit-tested with no disk I/O, no LUKS, no QEMU - matching this project's existing "parsing stays pure" discipline (`ifnet_config.py`'s own module docstring). **Blocking decisions that must be resolved within this milestone, not deferred past it**: the manifest/ledger authentication key-derivation scheme (§4), and the non-rollback-authority-domain vs. independent-monotonic-anchor mechanism for preventing rollback-resurrected revocations (§11) - proven by a passing unit test for acceptance case 9 (§14) before Milestone 3 begins.
 3. **Two-disk QEMU experiment** - `disposable-system` and `TestPersistence` actually created and booted, proving the attachment state machine against a real (if synthetic) LUKS2 volume for the first time.
 4. **Destroy/rebuild/reattach proof** - acceptance case 4: `TestSystem-A`'s disposable-system disk destroyed and rebuilt while `TestPersistence` is preserved and correctly reattached.
 5. **Application grant proof** - acceptance cases 3, 7, 8: a real (synthetic) `TestApplication-A`/`TestApplication-B` pair, grants issued and revoked, isolation verified end-to-end.
@@ -272,3 +286,5 @@ Milestones 3 onward are the first point at which this PRD's scope touches QEMU a
 - Whether the attachment state machine (§7) needs a formal specification language, or stays as documented Python enum-plus-tests, as this project's other state machines do (`firstboot_statemachine.py`).
 - Whether `TestMemory`'s retention policy (§12) needs a per-entry TTL or a single collection-wide policy - affects the schema, not the architecture.
 - Whether "application rollback" (§10/§11) needs its own generation counter independent of the store's overall generation counter (§4), to let two applications roll back independently without interfering with each other's continuity evidence.
+- **Identity-evidence record encoding** (§4): each piece of evidence used in an equivalence/continuity/ownership/authorization decision should itself carry - not just its raw value, but: **source** (which layer/mechanism produced it - LUKS header, filesystem UUID, manifest field, external observation), **observation time** (when this evidence was last actually read, not assumed current), **scope** (what it claims to establish - carrier identity, logical identity, a specific generation), **confidence** (directly read vs. inferred vs. externally reported), and **corroborating/contradictory status** (does it agree or conflict with other currently-held evidence for the same claim). Whether this becomes a formal per-evidence-item record type in the Milestone-2 schema, or stays informal/textual in early experiments, is undecided.
+- The non-rollback-authority-domain vs. independent-monotonic-anchor choice for §11's rollback-cannot-resurrect-revocation problem is a Milestone-2 blocker (§11, §16) rather than a fully open question - it must be decided, not indefinitely deferred, but which of the two (or a third option) is chosen is not settled by this PRD.
