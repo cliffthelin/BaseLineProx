@@ -65,7 +65,16 @@ cp "$SRC/baseline/lib/diagnostics.py" /opt/baseline/lib/diagnostics.py
 cp "$SRC/baseline/lib/setup_intent.py" /opt/baseline/lib/setup_intent.py
 cp "$SRC/baseline/lib/firstboot_statemachine.py" /opt/baseline/lib/firstboot_statemachine.py
 cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot
+# Physical Phase P0: read-only current-drive inventory collector, ported
+# from cliffthelin/baseline's inventory/current-drive-manifest branch
+# (docs/design/current-drive-inventory-plan.md) - never invoked by
+# provision.sh or any other automated path; deployed so it is present
+# for an operator to run by hand (`baseline-drive-inventory collect`)
+# on demand. Collects only; never repairs, reconfigures, or restarts
+# anything.
+cp -r "$SRC/baseline/lib/inventory" /opt/baseline/lib/inventory
+cp "$SRC/baseline/bin/baseline-drive-inventory" /opt/baseline/bin/baseline-drive-inventory
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
