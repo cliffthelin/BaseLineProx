@@ -157,6 +157,80 @@ def test_symlink_target_is_recorded_for_symlinks():
     entry = next(e for e in result["entries"] if e["path"] == "/etc/resolv.conf")
     assert entry["file_type"] == "symbolic link"
     assert entry["symlink_target"] == "/run/systemd/resolve/stub-resolv.conf"
+    assert entry["symlink_approved"] is True
+
+
+def test_unexpected_symlink_target_is_never_recorded_raw():
+    """A symlink at /etc/resolv.conf pointing somewhere NOT on the
+    approved-prefix list must never leak its literal target path into
+    the manifest - only a tokenized identity and an explicit flag."""
+    r = _base_runner()
+    r.existing_paths.add("/etc/resolv.conf")
+    r.dirs["/etc/sysctl.d"] = []
+    r.dirs["/etc/modprobe.d"] = []
+    r.dirs["/etc/modules-load.d"] = []
+    r.dirs["/etc/apt/sources.list.d"] = []
+    r.dirs["/etc/baseline"] = []
+    r.dirs["/opt/baseline/bin"] = []
+    r.dirs["/opt/baseline/lib"] = []
+    r.files["/etc/network/interfaces"] = "auto lo\niface lo inet loopback\n"
+    r.script(lambda a: a[:1] == ["stat"],
+             CommandResult(ok=True, stdout=_stat_line("/etc/resolv.conf", target="/root/.ssh/id_rsa")))
+    r.script(lambda a: a[:1] == ["sha256sum"], CommandResult(ok=True, stdout=""))
+    r.script(lambda a: a[:2] == ["dpkg", "-S"], CommandResult(ok=False, unavailable=True, reason="n/a"))
+
+    redactor = Redactor(key=b"k")
+    result = collect_config_files(r, redactor)
+    entry = next(e for e in result["entries"] if e["path"] == "/etc/resolv.conf")
+    assert entry["symlink_approved"] is False
+    assert entry["unexpected_symlink_target"] is True
+    assert entry["symlink_target"] is None
+    assert entry["symlink_target_identity"] == redactor.tokenize("/root/.ssh/id_rsa", "symlink-target")
+    # The raw target must not appear anywhere in the entry's values.
+    assert "/root/.ssh/id_rsa" not in str(entry.values())
+
+
+def test_hostname_hosts_baseline_and_unit_paths_have_no_approved_symlink_targets():
+    """/etc/hostname, /etc/hosts, Baseline-managed paths, and unit
+    paths must never have an approved symlink destination - any
+    symlink there is always flagged, never silently trusted."""
+    from inventory.collectors.config_files import _is_approved_symlink_target
+    for source_path in ("/etc/hostname", "/etc/hosts", "/opt/baseline/bin/baseline",
+                         "/etc/systemd/system/baseline.service"):
+        assert _is_approved_symlink_target(source_path, "/anything/at/all") is False
+        assert _is_approved_symlink_target(source_path, "/run/systemd/resolve/stub-resolv.conf") is False
+
+
+def test_symlink_target_content_is_never_hashed_even_when_approved():
+    """Even an approved symlink's target is never read for content -
+    only file_type=='regular file' entries ever get a sha256sum call,
+    so no symlink (approved or not) can be used to redirect this
+    collector's content-hashing step anywhere."""
+    r = _base_runner()
+    r.existing_paths.add("/etc/resolv.conf")
+    r.dirs["/etc/sysctl.d"] = []
+    r.dirs["/etc/modprobe.d"] = []
+    r.dirs["/etc/modules-load.d"] = []
+    r.dirs["/etc/apt/sources.list.d"] = []
+    r.dirs["/etc/baseline"] = []
+    r.dirs["/opt/baseline/bin"] = []
+    r.dirs["/opt/baseline/lib"] = []
+    r.files["/etc/network/interfaces"] = "auto lo\niface lo inet loopback\n"
+    r.script(lambda a: a[:1] == ["stat"],
+             CommandResult(ok=True, stdout=_stat_line("/etc/resolv.conf",
+                                                        target="/run/systemd/resolve/stub-resolv.conf")))
+    r.script(lambda a: a[:1] == ["sha256sum"], CommandResult(ok=True, stdout=""))
+    r.script(lambda a: a[:2] == ["dpkg", "-S"], CommandResult(ok=False, unavailable=True, reason="n/a"))
+
+    result = collect_config_files(r, Redactor(key=b"k"))
+    # /etc/resolv.conf is the only allowlisted path in this test and it
+    # is a symlink - sha256sum must never be invoked on it (or its
+    # approved target) at all, since only file_type=='regular file'
+    # entries are ever passed to the batched hash call.
+    sha_calls = [c for c in r.run_calls if c[:1] == ["sha256sum"]]
+    assert not sha_calls
+    entry = next(e for e in result["entries"] if e["path"] == "/etc/resolv.conf")
+    assert "content_identity" not in entry
 
 
 def test_baseline_deployed_files_are_classified_baseline_managed():

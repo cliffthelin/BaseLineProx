@@ -1,6 +1,6 @@
 # Physical validation plan: Phase P0 (read-only preservation) and Phase P1 (disposable-drive install)
 
-Status: **planning only - the three implementation gaps that previously blocked an authoritative P0 capture are now closed** (`config_files[]` population, Deb822 APT source collection, and an offline comparator with explicit cross-run comparison-key support - see the "P0 implementation gaps closed" section below). Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to. This document is the reviewed procedure to run later, plus the exact commands it will use, not a record of anything already executed.
+Status: **planning only - the three original implementation gaps and four follow-on security hardening items are now closed** (`config_files[]` population, Deb822 APT source collection, and an offline comparator with explicit cross-run comparison-key support - see "P0 implementation gaps closed"; secure-erasure claims removed, hardened key-file loading, symlink-constrained `config_files[]`, and a generic external-identity denylist scanner - see "Security hardening before an authoritative P0 capture"). Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to. This document is the reviewed procedure to run later, plus the exact commands it will use, not a record of anything already executed. The real external-identity scan (with the actual protected denylist, supplied separately) is the one remaining manual step before the first P0 capture - see that section for why this repository never embeds that list itself.
 
 ## P0 implementation gaps closed (2026-09-24)
 
@@ -11,27 +11,72 @@ Three concrete gaps were identified after this plan's first version and are now 
 3. **A pure, offline comparator exists** (`baseline/lib/inventory/diff.py`): takes two already-collected manifests, never touches a host, never mutates either input, never emits anything executable. Every difference gets exactly one of the five established classifications (`suggested_required`, `suggested_machine_specific`, `detected_secret_identity`, `candidate_obsolete`, `unknown`) via narrow, explicit rules - `candidate_obsolete` is applied only to Baseline's own deployed-file list, where "no longer present" has an authoritative source of truth; everything else defaults to `suggested_required` (reference-only) or `unknown` (new-build-only or a same-path value difference), reusing `validate.py`'s own secret-shape patterns for the `detected_secret_identity` safety check.
 4. **Cross-run HMAC comparison is now explicit, not accidental.** `redact.Redactor` gained a `key_id` property (a non-secret SHA-256 fingerprint of the key, recorded in every manifest's `redaction_report`) so `diff.compare_manifests()` can tell whether two manifests were tokenized under the same key without ever seeing the key itself - an HMAC-tokenized value (recognized by shape, `kind:12-hex-chars`, not a hardcoded field list) is only ever compared when both manifests' `key_id` match; otherwise it is skipped, never silently treated as equal or reported as a false difference. `baseline-drive-inventory collect` gained `--key-file <path>` (must be mode `0600`, refused otherwise) and `--key-fd <N>` - **never** an argv value or environment variable, both of which can leak via `ps`, shell history, or a crash dump. A new `compare` subcommand runs the comparator and prints (or writes) its JSON report. Standalone runs with neither flag keep the original ephemeral-random-key behavior unchanged.
 
+## Security hardening before an authoritative P0 capture (2026-09-24)
+
+Four narrow corrections, none of them a design change or a QEMU rerun - unit/full-suite validation only, nothing run against a physical host:
+
+1. **`shred -u` and any secure-erasure claim removed.** This project already established (`drive-setup-gui-v2-prd.md` §7) that deleting a file from SSD/flash storage is *deletion*, not *secure erasure* - wear-leveling means the underlying flash cells aren't reliably overwritten by a simple unlink, `shred`, or any other single-pass tool, and the same holds for a journaled filesystem. The comparison-key workflow below now says exactly that: retire the key (best-effort delete, or destroy the key of an encrypted container it lived in for a real crypto-erasure boundary), never "securely erase" it.
+2. **Comparison-key loading hardened** (`baseline/lib/inventory/keysource.py`): a `--key-file` is opened exactly once with `O_NOFOLLOW|O_CLOEXEC` (a symlink is refused outright, never followed), and every check - regular file, owned by the effective user, mode exactly `0600`, exactly one hard link, exact `KEY_LENGTH_BYTES=32` (256-bit) length after stripping one trailing newline - runs via `fstat()` on that single already-open descriptor, never a path-based `stat()` before a separate `open()` (closing the TOCTOU window that pattern would otherwise leave). Key material is never printed, logged, or included in any error message. `--key-fd` remains the preferred form for real P0/P1 collection, since a descriptor never touches a directory entry at all. `redact.Redactor.key_id` is now explicitly domain-separated (a fixed, purpose-tagged prefix mixed into its hash input) from `tokenize()`'s HMAC-of-value, so the two can never be confused or collide by construction, not merely by happening to look different.
+3. **`config_files[]` can no longer be redirected by a symlink at an allowlisted path.** An allowlisted filename that has itself been replaced with a symlink is recorded as a symlink (never followed for content - content hashing only ever applies to `file_type == "regular file"` entries, symlink or not, approved or not), and its target is disclosed in the clear only for a small, explicit allowlist of expected targets (currently: `/etc/resolv.conf` → known `systemd-resolved`/`NetworkManager` stub paths). Every other symlink target - including at `/etc/hosts`, any Baseline-managed path, or any systemd unit path, none of which have any approved target at all - is flagged `unexpected_symlink_target: true` with only an HMAC-tokenized link identity recorded, never the raw destination path. `/etc/pve` remains untouched by any of this, still its own separately allowlisted collector.
+4. **A generic external-identity denylist scanner exists** (`tools/scan_denylist.py`, dev/CI-only, never deployed to a host or imported by `baseline/lib`). Prohibited terms are supplied only through a protected file descriptor (`--denylist-fd`), never argv, an environment variable, or a committed file - this repository contains no real identifiers itself, by construction, since the scanner that checks for them never carries any. A match is never printed - only the affected path (or commit, for the separate `scan-history` mode) and a generic category. `scan-tree` covers every git-tracked file (source, tests, fixtures, example manifests, docs) plus any `--extra-dir` of retained artifacts; `scan-history` walks `git log --all -p` read-only - it reports a finding for a human remediation decision and never rewrites, amends, or filters history. Repository/remote ownership metadata (this project's own GitHub account name as it appears in a remote URL, `README.md`, `LICENSE`) is excluded by an explicit path list, never by content, so that exclusion can't be used to hide anything else. A separate, always-on, no-FD-needed check (`tests/unit/test_no_persistence_typo.py`) rejects a common one-letter (a-for-e) misspelling of "persistence" anywhere in tracked content, case-insensitively - the correct spelling is the only one used throughout this project.
+5. **The scanner's own resource use is bounded, after a real, observed failure.** An early version of `scan-tree` read each candidate file's full content into memory at once; pointed at this repository's own `experiments/` directory (which, independent of this work, still holds a leftover 7.1GB disposable artifact from an earlier session that was never cleaned up), it was OOM-killed by the kernel - and, in the same window, the same memory pressure contributed to Claude Desktop itself being OOM-killed (72.8GB peak, per `journalctl`). Fixed at two levels:
+   - **Bounded, chunked, constant-memory reads** (`_file_contains_any_term`): every file is read in `CHUNK_BYTES`-sized pieces with a small overlap window (so a term straddling a chunk boundary is never missed), capped per-file at `MAX_SCAN_BYTES_PER_FILE` and overall at `OVERALL_SCAN_BUDGET_BYTES` across the whole run - proven with a 2GB *sparse* file (near-zero real disk/memory, but a real multi-gigabyte logical size) that the actual bytes read stay bounded by the cap regardless of the file's apparent size. `scan-history`'s `git log -p` output is now streamed line-by-line (never captured whole), under its own `HISTORY_LINE_BUDGET`. Either budget being exhausted produces a clean, explicit `scan_incomplete` result (with a `reason`) instead of either hanging or silently truncating - a CI/pre-P0 gate should treat `scan_incomplete` as a hard stop, same as a real finding.
+   - **Isolated worker subprocess with a memory ceiling** (`run_scan_isolated`, the default for the CLI unless `--no-isolation` is passed): the actual scan runs in a child process spawned under `RLIMIT_AS` (an address-space limit, applied best-effort where the platform supports it), so an unexpected resource blowup can only take the worker down - reported back to the parent as `scan_incomplete: resource_limit_exceeded`, never propagated as a crash. The denylist reaches the worker via a dedicated pipe fd (never argv/env, matching the external-scanner discipline throughout), and the result comes back as one bounded JSON blob over a second dedicated pipe (capped at `MAX_WORKER_RESULT_BYTES`) - never an unbounded captured stdout/stderr stream.
+   - **Bounded, deduplicated operational logging** (`tools/bounded_log.py`, a small reusable primitive - a repeated condition must consume bounded resources regardless of how long it continues): every operational event the scanner logs internally (a file-read error, a per-file cap being hit, an overall-budget skip) goes through `BoundedEventLog` - the first occurrence and a small number of early repetitions are recorded in full, further identical repetitions are suppressed (only an in-memory counter advances), and `finalize()` produces exactly one summary per distinct signature regardless of how many times it actually occurred. Proven directly with 100,000 synthetic repeated failures: total emitted records stay under 200, never anywhere near 100,000. This is offered as the template for any future Baseline diagnostic ledger with the same shape of problem - a diagnostic control plane cannot stay trustworthy if its own diagnostics can become a resource-exhaustion condition - though wiring it into Baseline's own runtime logging is not part of this pass's scope.
+
+   Re-run against this repository's real `experiments/` directory (including the 7.1GB leftover) after the fix: both `scan-tree` and `scan-history` complete in seconds, well within a 512MB worker memory ceiling, with no OOM and no hang. The 7.1GB leftover itself is a pre-existing retention-policy violation from an earlier session, unrelated to this work - flagged here, not deleted, since it predates this pass and cleanup wasn't requested.
+
+**Running the scan before an authoritative P0 capture:** the actual list of prohibited real-world identifiers is not, and must never be, embedded in this repository or in any conversation transcript about it - it has to come from whoever holds that list, via the same protected-fd discipline the tool enforces. The mechanism itself was verified end-to-end during this hardening pass (`tests/unit/test_scan_denylist.py` and `tests/unit/test_bounded_log.py`, 33 tests combined: fd-only loading, bounded/chunked reads including the sparse-file proof, overall-budget exhaustion, streamed history scanning, isolated-worker execution surviving a worker that exceeds its memory ceiling, the never-print-a-match guarantee, the ownership-metadata exclusion, and the 100,000-repetition bounded-logging proof). Before the real P0 capture, run both modes for real:
+
+```bash
+# scan-tree: everything currently tracked, plus any retained artifact dirs
+exec 3< /path/to/protected/denylist.txt   # one prohibited term per line
+python3 tools/scan_denylist.py scan-tree --denylist-fd 3 --repo-root . \
+    --extra-dir experiments   # if retained evidence lives there
+exec 3<&-
+
+# scan-history: every ref, read-only - a finding here is reported, not fixed automatically
+exec 3< /path/to/protected/denylist.txt
+python3 tools/scan_denylist.py scan-history --denylist-fd 3 --repo-root .
+exec 3<&-
+```
+
+A non-zero exit from either mode is a stop: read the reported paths/commits (never the match text itself, which this tool withholds by design), and decide remediation as a separate step - `scan-history` finding something real is explicitly out of scope for automatic history rewriting, per instruction.
+
 **The workflow for an actual P0-vs-P1 comparison, once both phases run for real:**
 
 ```bash
 # Once, before either collection - outside both drives being examined:
-head -c 32 /dev/urandom > /root/comparison.key
-chmod 600 /root/comparison.key
+head -c 32 /dev/urandom > comparison.key   # exactly 32 bytes (256 bits) - keysource.py enforces this length
+chmod 600 comparison.key
+# Store comparison.key inside an encrypted administrative volume/vault
+# outside both examined drives (e.g. a LUKS-backed container on the
+# reviewing machine) - not bare on either drive's filesystem, and not
+# copied into this repository.
 
-# P0, on the current drive:
-baseline-drive-inventory collect --source current-drive --out /root/p0-manifest.json --key-file /root/comparison.key
+# P0, on the current drive - prefer --key-fd over --key-file where the
+# calling shell/orchestration can hold the descriptor open, since a
+# descriptor never touches a directory entry at all:
+exec 3< comparison.key
+baseline-drive-inventory collect --source current-drive --out /root/p0-manifest.json --key-fd 3
+exec 3<&-
 
 # P1, on the new build, once that phase actually runs:
-baseline-drive-inventory collect --source disposable-vm --out /root/p1-manifest.json --key-file /root/comparison.key
+exec 3< comparison.key
+baseline-drive-inventory collect --source disposable-vm --out /root/p1-manifest.json --key-fd 3
+exec 3<&-
 
 # After both are exported off their respective drives, on a reviewing machine:
 baseline-drive-inventory compare --manifest-a p0-manifest.json --manifest-b p1-manifest.json --require-matching-key
-
-# Once the comparison report has been reviewed:
-shred -u /root/comparison.key   # or the reviewing machine's copy - never left behind
 ```
 
-The key is never written into either manifest (only its non-secret `key_id` fingerprint is), never committed to this repository, and is deleted once the final reviewed comparison report exists - exactly the workflow this plan's first version could only describe as a manual fallback procedure.
+**Key retirement, not secure erasure - stated precisely, not overclaimed.** This project already established (drive-setup-gui-v2-prd.md §7) that deleting a file from SSD/flash storage is *deletion*, not *secure erasure*: wear-leveling means the underlying flash cells aren't reliably overwritten by a simple unlink, `shred`, or any other single-pass tool operating above the flash translation layer - and that holds just as much for a journaled filesystem, where an overwrite can land on a different physical block entirely. Nothing in this plan claims otherwise for the comparison key either. The defensible sequence, once the final comparison report has been reviewed:
+
+1. Delete the key file (`rm comparison.key`) - a best-effort operation, described as retirement, not verified erasure.
+2. If the key lived inside its own encrypted container (recommended - see above) with a key of its own, destroying *that* container key is the stronger, more defensible crypto-erasure boundary: the comparison key becomes permanently unrecoverable ciphertext even if the underlying flash cells are never actually overwritten.
+3. Nothing about this key's retirement is load-bearing for security going forward regardless: it only ever protected the *linkability* of two manifests' tokenized fields against each other, never any host credential or persistent secret. A retired key that somehow survived on a flash cell would let someone compare two already-reviewed, already-exported manifests against each other - not access the current drive, the new build, or anything not already captured in those manifests.
+
+The key is never written into either manifest (only its non-secret `key_id` fingerprint is, itself domain-separated from any content-identity token - see `redact.py`) and is never committed to this repository - exactly the workflow this plan's first version could only describe as a manual fallback procedure.
 
 62 new tests cover this work (`test_config_files.py`, `test_apt_sources.py`, `test_diff.py`, `test_keysource.py`, plus `test_redact.py` and `test_baseline_config.py` additions) - missing/mismatched/matching comparison keys, deterministic same-key tokenization across two independent collection runs, malformed-manifest robustness, and every named comparison category. 344/344 full suite passes.
 
@@ -122,7 +167,7 @@ No `sudo`, `pkexec`, `polkit`, `mount`, package install, service change, or bloc
    - `unknown` - everything else: a real difference, no narrow rule confident enough to classify it further. Requires the most human judgment.
 5. **Every finding is a suggestion for human review, never automatic restoration** - enforced by construction, not merely by convention: `compare_manifests()` has no code path that writes to a host, generates a command, or mutates either input manifest (see `test_diff.py`'s `test_neither_input_manifest_is_mutated` and `test_findings_never_contain_executable_or_command_shaped_fields`). This is not a policy choice invented for this procedure - it is the same posture [drive-setup-gui-v2-prd.md](drive-setup-gui-v2-prd.md) already established for `machine-id` (never auto-restored), generalized: a manifest diff is evidence a human looks at, never a trigger for code to act on unattended.
 6. **Never copy machine-specific network, boot, or Proxmox identity settings blindly**, even when classified `suggested_machine_specific` - that classification exists so a reviewer can *recognize* an expected-to-differ category at a glance, not so it can be skipped past. Different NIC, different disk topology, a fresh `/etc/pve` cluster identity are all legitimate reasons these categories differ between an old and a new drive.
-7. Delete the shared comparison key (`shred -u`) once the report has been reviewed - it has no further purpose after that, and every manifest it touched already carries only its non-secret `key_id` fingerprint, never the key.
+7. Retire the shared comparison key once the report has been reviewed - it has no further purpose after that. Delete the key file as a best-effort operation (never described as verified secure erasure - see the key-lifecycle note above) and, if it lived in its own encrypted container, destroy that container's key for a real crypto-erasure boundary. Every manifest it touched already carries only its non-secret `key_id` fingerprint, never the key itself.
 
 ## 5. Physical Phase P1 validation plan
 

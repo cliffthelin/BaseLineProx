@@ -52,6 +52,27 @@ _GLOB_DIRS = [
 
 _BASELINE_UNITS = ("baseline.service", "baseline-additive-dhcp-reapply.service", "baseline-firstboot.service")
 
+# An allowlisted path may itself have been replaced with a symlink -
+# this collector must never let that redirect it to an arbitrary
+# target. Only these specific (source path -> allowed target prefixes)
+# pairs are trusted enough to record the target in the clear; every
+# other symlink at an allowlisted path is flagged, and its target text
+# is HMAC-tokenized rather than stored raw - see collect_config_files.
+# Deliberately narrow: /etc/hostname, /etc/hosts, every Baseline-managed
+# path, and every systemd unit path have NO approved targets at all, so
+# a symlink appearing at any of them is always flagged, never silently
+# followed or trusted.
+_APPROVED_SYMLINK_TARGET_PREFIXES = {
+    "/etc/resolv.conf": ("/run/systemd/resolve/", "/run/NetworkManager/resolv.conf", "/etc/resolv.conf.dhcp"),
+}
+
+
+def _is_approved_symlink_target(source_path, target):
+    if not target:
+        return False
+    return any(target == prefix or target.startswith(prefix)
+               for prefix in _APPROVED_SYMLINK_TARGET_PREFIXES.get(source_path, ()))
+
 
 def _baseline_managed(path):
     return (path.startswith("/opt/baseline/") or path.startswith("/etc/baseline/")
@@ -321,7 +342,6 @@ def collect_config_files(runner, redactor):
             continue
         entry.update({
             "file_type": st["file_type"],
-            "symlink_target": st.get("symlink_target"),
             "owner": st["owner"],
             "group": st["group"],
             "mode": st["mode"],
@@ -329,6 +349,23 @@ def collect_config_files(runner, redactor):
             "owning_package": owner_map.get(path),
             "conffile_modified": conffile_status.get(path),
         })
+        raw_target = st.get("symlink_target")
+        if st["file_type"] == "symbolic link":
+            if _is_approved_symlink_target(path, raw_target):
+                entry["symlink_target"] = raw_target
+                entry["symlink_approved"] = True
+            else:
+                # Record that a symlink exists and its link identity
+                # (HMAC-tokenized, so a repeat run with the same
+                # comparison key can still detect "the target changed"
+                # without this manifest ever holding the literal,
+                # possibly-sensitive path) - never the raw target text.
+                entry["symlink_target"] = None
+                entry["symlink_approved"] = False
+                entry["unexpected_symlink_target"] = True
+                entry["symlink_target_identity"] = redactor.tokenize(raw_target, "symlink-target") if raw_target else None
+        else:
+            entry["symlink_target"] = None
         if path in hash_map:
             entry["content_identity"] = redactor.tokenize(hash_map[path], "content")
         entries.append(entry)

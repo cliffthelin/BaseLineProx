@@ -22,13 +22,26 @@ process memory (see redact.py) - correct for a single, standalone
 inventory run, but two manifests collected under two different
 ephemeral keys can never have their identity-bearing fields (Proxmox
 node names, interface addresses, etc.) meaningfully compared. For a
-real current-drive-vs-new-build comparison, generate ONE random key,
-store it outside both examined drives at mode 0600, pass it to BOTH
-`collect` invocations via --key-file or --key-fd (never --key-value,
-never an environment variable - either can leak via `ps`, shell
-history, or a crash dump), and delete it once the final reviewed
-comparison report exists. Each manifest records only a non-secret
-key_id (a fingerprint, not the key) so `compare` can refuse to treat
+real current-drive-vs-new-build comparison: generate ONE random
+256-bit key, keep it inside an encrypted administrative volume/vault
+outside both examined drives, and pass it to BOTH `collect`
+invocations - **prefer --key-fd** (an already-open descriptor never
+touches a directory entry at all) over --key-file (still hardened -
+see keysource.py's module docstring for the exact checks: single
+O_NOFOLLOW|O_CLOEXEC open, fstat()-based regular-file/ownership/
+exact-0600/single-hard-link/exact-length checks) - and never
+--key-value, never an environment variable (either can leak via `ps`,
+shell history, or a crash dump). After the final reviewed comparison,
+retire the key: delete the key file as a best-effort operation (this
+project does not claim `shred` or any unlink-based deletion is secure
+erasure on SSD/flash/journaled storage - see
+docs/design/drive-setup-gui-v2-prd.md §7 and
+docs/design/physical-phase-p0-p1-plan.md's key-lifecycle note), and if
+the key lived in its own encrypted container, destroying that
+container's key is the stronger, defensible crypto-erasure boundary.
+Each manifest records only a non-secret, domain-separated key_id (a
+fingerprint, not the key, and never derivable from or confusable with
+any content-identity token) so `compare` can refuse to treat
 mismatched-key manifests' tokenized fields as comparable.
 """
 import argparse

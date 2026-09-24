@@ -360,7 +360,6 @@
       "baseline_managed": false,
       "category": "identity",
       "conffile_modified": null,
-      "content_identity": "content:2b7e3f0a91cd",
       "exists": true,
       "file_type": "symbolic link",
       "group": "root",
@@ -369,7 +368,25 @@
       "owning_package": null,
       "path": "/etc/resolv.conf",
       "size": 39,
+      "symlink_approved": true,
       "symlink_target": "/run/systemd/resolve/stub-resolv.conf"
+    },
+    {
+      "baseline_managed": false,
+      "category": "identity",
+      "conffile_modified": null,
+      "exists": true,
+      "file_type": "symbolic link",
+      "group": "root",
+      "mode": "777",
+      "owner": "root",
+      "owning_package": null,
+      "path": "/etc/hosts",
+      "size": 512,
+      "symlink_approved": false,
+      "symlink_target": null,
+      "symlink_target_identity": "symlink-target:6e1f4a8bcd02",
+      "unexpected_symlink_target": true
     },
     {
       "baseline_managed": false,

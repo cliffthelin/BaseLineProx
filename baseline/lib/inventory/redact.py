@@ -19,17 +19,26 @@ class Redactor:
         self.key = key if key is not None else os.urandom(32)
         self._seen = {}
 
+    # A fixed, unique-to-this-purpose prefix mixed into key_id's hash
+    # input - explicit domain separation, not merely "happens to look
+    # different because it's a different code path." Even if
+    # tokenize()'s own format ever changed, key_id's hash input could
+    # never collide with a content/value HMAC's input, because the
+    # literal bytes hashed are drawn from disjoint, tagged domains.
+    _KEY_ID_DOMAIN = b"baseline-inventory-redactor-key-id-v1:"
+
     @property
     def key_id(self):
         """A non-secret fingerprint of the key - safe to store in a
         manifest (it does not let anyone reconstruct the key), used
         only so a comparator (inventory/diff.py) can tell whether two
         manifests were tokenized under the same key without ever
-        seeing the key itself. Deliberately a *different* hash
-        (SHA-256 of the raw key) from tokenize()'s HMAC-of-value - the
-        two answer different questions and must never be derivable
-        from one another."""
-        return hashlib.sha256(self.key).hexdigest()[:16]
+        seeing the key itself. Domain-separated from tokenize()'s
+        HMAC-of-value (a different hash - plain SHA-256 of a tagged
+        domain string plus the raw key, never HMAC keyed by the key
+        itself, and never fed a value a caller controls) so the two
+        can never be confused or made to collide, by construction."""
+        return hashlib.sha256(self._KEY_ID_DOMAIN + self.key).hexdigest()[:16]
 
     def tokenize(self, value, kind):
         """Same (kind, value) pair always maps to the same token within
