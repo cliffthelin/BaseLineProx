@@ -1,15 +1,35 @@
 #!/usr/bin/env python3
 """CLI wrapper for the current-drive inventory collector.
 
-    baseline-drive-inventory collect --source current-drive --out <path> [--overwrite] [--node NAME ...]
+    baseline-drive-inventory collect --source current-drive --out <path> [--overwrite] [--node NAME ...] \
+        [--key-file <path> | --key-fd <N>]
     baseline-drive-inventory validate --manifest <path>
+    baseline-drive-inventory compare --manifest-a <path> --manifest-b <path> [--require-matching-key] [--out <path>]
 
 The only write `collect` ever performs is the explicitly selected output
 manifest file - no host configuration or operational state is modified.
 `validate` only reads; it never writes anything, including to the
-manifest it checks. Passing validate is defense in depth, not upload
+manifest it checks. `compare` only reads its two input manifests and
+(optionally) writes one comparison-report file - it never touches a
+host, never mutates either input manifest, and never emits anything
+executable. Passing validate/compare is defense in depth, not upload
 authorization - a human still reviews the manifest directly before
 sharing it anywhere (see docs/design/current-drive-inventory-plan.md).
+
+Comparison key (`collect --key-file`/`--key-fd`): by default every
+`collect` run uses a fresh, ephemeral, random HMAC key held only in
+process memory (see redact.py) - correct for a single, standalone
+inventory run, but two manifests collected under two different
+ephemeral keys can never have their identity-bearing fields (Proxmox
+node names, interface addresses, etc.) meaningfully compared. For a
+real current-drive-vs-new-build comparison, generate ONE random key,
+store it outside both examined drives at mode 0600, pass it to BOTH
+`collect` invocations via --key-file or --key-fd (never --key-value,
+never an environment variable - either can leak via `ps`, shell
+history, or a crash dump), and delete it once the final reviewed
+comparison report exists. Each manifest records only a non-secret
+key_id (a fingerprint, not the key) so `compare` can refuse to treat
+mismatched-key manifests' tokenized fields as comparable.
 """
 import argparse
 import json
@@ -19,15 +39,24 @@ sys.path.insert(0, "/opt/baseline/lib")
 from inventory.runner import RealRunner  # noqa: E402
 from inventory import manifest as manifest_mod  # noqa: E402
 from inventory import validate as validate_mod  # noqa: E402
+from inventory import diff as diff_mod  # noqa: E402
+from inventory import keysource  # noqa: E402
+from inventory.redact import Redactor  # noqa: E402
 
 
 def _collect(args):
+    try:
+        key = keysource.load_comparison_key(key_file=args.key_file, key_fd=args.key_fd)
+    except keysource.KeySourceError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    redactor = Redactor(key=key) if key is not None else None
     runner = RealRunner()
     result = manifest_mod.collect_all(
-        runner, source=args.source, host_label=args.host_label, node_names=args.node,
+        runner, source=args.source, host_label=args.host_label, node_names=args.node, redactor=redactor,
     )
     path = manifest_mod.write_manifest(result, args.out, repo_root=args.repo_root, overwrite=args.overwrite)
-    print(f"wrote {path}")
+    print(f"wrote {path} (key_id={result['redaction_report']['key_id']})")
     return 0
 
 
@@ -37,6 +66,27 @@ def _validate(args):
     report = validate_mod.validate_manifest(manifest, output_path=args.manifest)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["passed"] else 1
+
+
+def _compare(args):
+    with open(args.manifest_a, "rb") as f:
+        manifest_a = json.load(f)
+    with open(args.manifest_b, "rb") as f:
+        manifest_b = json.load(f)
+    try:
+        report = diff_mod.compare_manifests(manifest_a, manifest_b, require_matching_key=args.require_matching_key)
+    except diff_mod.ComparisonKeyError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if args.out:
+        from inventory import pathsafety
+        resolved = pathsafety.validate_output_path(args.out, args.repo_root, args.overwrite)
+        pathsafety.atomic_write(resolved, (text + "\n").encode(), args.overwrite)
+        print(f"wrote {resolved}")
+    else:
+        print(text)
+    return 0
 
 
 def main(argv=None):
@@ -51,15 +101,31 @@ def main(argv=None):
     collect_p.add_argument("--node", action="append", default=[],
                             help="Proxmox node name(s) to inventory under /etc/pve/nodes/")
     collect_p.add_argument("--repo-root", default="/opt/baseline")
+    collect_p.add_argument("--key-file", default=None,
+                            help="path to a mode-0600 file holding a comparison key (see module docstring) - "
+                                 "never pass the key itself as an argument")
+    collect_p.add_argument("--key-fd", type=int, default=None,
+                            help="an already-open file descriptor number to read the comparison key from")
 
     validate_p = sub.add_parser("validate")
     validate_p.add_argument("--manifest", required=True, help="path to a manifest written by `collect`")
+
+    compare_p = sub.add_parser("compare")
+    compare_p.add_argument("--manifest-a", required=True, help="the reference manifest (normally current-drive)")
+    compare_p.add_argument("--manifest-b", required=True, help="the manifest to compare against it")
+    compare_p.add_argument("--require-matching-key", action="store_true",
+                            help="refuse to produce a report at all unless both manifests share a key_id")
+    compare_p.add_argument("--out", default=None, help="write the JSON report here instead of stdout")
+    compare_p.add_argument("--overwrite", action="store_true")
+    compare_p.add_argument("--repo-root", default="/opt/baseline")
 
     args = parser.parse_args(argv)
     if args.command == "collect":
         return _collect(args)
     if args.command == "validate":
         return _validate(args)
+    if args.command == "compare":
+        return _compare(args)
     return 1
 
 

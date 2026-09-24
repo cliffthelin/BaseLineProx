@@ -3,8 +3,48 @@
     "apt": {
       "_collection_notes": [],
       "policy_available": true,
-      "policy_summary": "500 http://deb.debian.org/debian bookworm/main amd64 Packages\n",
-      "sources_list": "deb http://deb.debian.org/debian bookworm main\n"
+      "policy_summary": "500 http://deb.debian.org/debian trixie/main amd64 Packages\n",
+      "repositories": [
+        {
+          "architectures": [],
+          "channel": "distro",
+          "components": ["main", "contrib", "non-free-firmware"],
+          "enabled": true,
+          "format": "list",
+          "signed_by": null,
+          "source_file": "/etc/apt/sources.list",
+          "suites": ["trixie"],
+          "type": "deb",
+          "uri": "http://deb.debian.org/debian"
+        },
+        {
+          "architectures": ["amd64"],
+          "channel": "no-subscription",
+          "components": ["pve-no-subscription"],
+          "enabled": true,
+          "format": "list",
+          "signed_by": "/usr/share/keyrings/proxmox-archive-keyring.gpg",
+          "source_file": "/etc/apt/sources.list.d/pve-no-subscription.list",
+          "suites": ["trixie"],
+          "type": "deb",
+          "uri": "http://download.proxmox.com/debian/pve"
+        },
+        {
+          "architectures": [],
+          "channel": "enterprise",
+          "components": ["pve-enterprise"],
+          "enabled": false,
+          "format": "deb822",
+          "signed_by": "/usr/share/keyrings/proxmox-archive-keyring.gpg",
+          "source_file": "/etc/apt/sources.list.d/pve-enterprise.sources",
+          "suites": ["trixie"],
+          "type": "deb",
+          "uri": "https://enterprise.proxmox.com/debian/pve"
+        }
+      ]
+    },
+    "config_files_collection": {
+      "_collection_notes": []
     },
     "baseline_config": {
       "_collection_notes": [],
@@ -300,11 +340,88 @@
       "systemd_delta_findings": "No extensions or masks found.\n"
     }
   },
-  "config_files": [],
+  "config_files": [
+    {
+      "baseline_managed": false,
+      "category": "identity",
+      "conffile_modified": false,
+      "content_identity": "content:9f2a1c8b4e6d",
+      "exists": true,
+      "file_type": "regular file",
+      "group": "root",
+      "mode": "644",
+      "owner": "root",
+      "owning_package": "hostname",
+      "path": "/etc/hostname",
+      "size": 9,
+      "symlink_target": null
+    },
+    {
+      "baseline_managed": false,
+      "category": "identity",
+      "conffile_modified": null,
+      "content_identity": "content:2b7e3f0a91cd",
+      "exists": true,
+      "file_type": "symbolic link",
+      "group": "root",
+      "mode": "777",
+      "owner": "root",
+      "owning_package": null,
+      "path": "/etc/resolv.conf",
+      "size": 39,
+      "symlink_target": "/run/systemd/resolve/stub-resolv.conf"
+    },
+    {
+      "baseline_managed": false,
+      "category": "network",
+      "conffile_modified": false,
+      "content_identity": "content:5c8d4a2f77ee",
+      "exists": true,
+      "file_type": "regular file",
+      "group": "root",
+      "mode": "644",
+      "owner": "root",
+      "owning_package": "ifupdown2",
+      "path": "/etc/network/interfaces",
+      "size": 214,
+      "symlink_target": null
+    },
+    {
+      "baseline_managed": true,
+      "category": "baseline",
+      "conffile_modified": null,
+      "content_identity": "content:a1b2c3d4e5f6",
+      "exists": true,
+      "file_type": "regular file",
+      "group": "root",
+      "mode": "755",
+      "owner": "root",
+      "owning_package": null,
+      "path": "/opt/baseline/bin/baseline",
+      "size": 4096,
+      "symlink_target": null
+    },
+    {
+      "baseline_managed": false,
+      "category": "boot",
+      "conffile_modified": true,
+      "content_identity": "content:77aabbccddee",
+      "exists": true,
+      "file_type": "regular file",
+      "group": "root",
+      "mode": "644",
+      "owner": "root",
+      "owning_package": "grub2-common",
+      "path": "/etc/default/grub",
+      "size": 1071,
+      "symlink_target": null
+    }
+  ],
   "generated_at": "2026-09-20T23:00:00Z",
   "host_label": "dell-latitude-5290-synthetic-example",
   "redaction_report": {
-    "fields_redacted": 12
+    "fields_redacted": 12,
+    "key_id": "8f3c1a9e2b7d4f60"
   },
   "schema_version": 2,
   "source": "current-drive"

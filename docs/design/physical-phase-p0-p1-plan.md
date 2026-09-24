@@ -1,6 +1,39 @@
 # Physical validation plan: Phase P0 (read-only preservation) and Phase P1 (disposable-drive install)
 
-Status: **planning only**. Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to. This document is the reviewed procedure to run later, plus the exact commands it will use, not a record of anything already executed.
+Status: **planning only - the three implementation gaps that previously blocked an authoritative P0 capture are now closed** (`config_files[]` population, Deb822 APT source collection, and an offline comparator with explicit cross-run comparison-key support - see the "P0 implementation gaps closed" section below). Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to. This document is the reviewed procedure to run later, plus the exact commands it will use, not a record of anything already executed.
+
+## P0 implementation gaps closed (2026-09-24)
+
+Three concrete gaps were identified after this plan's first version and are now resolved in code (not just documented as future work), each with unit tests and a full-suite run - no QEMU rerun, per instruction:
+
+1. **`config_files[]` is now populated**, not hardcoded empty. `baseline/lib/inventory/collectors/config_files.py` walks a fixed allowlist (never arbitrary discovery) covering `/etc/network/interfaces` and its full resolved source closure, legacy and Deb822 APT source files, `/etc/default/grub`/`/etc/kernel/cmdline`, Baseline's own deployed files and units, `/etc/hostname`/`/etc/hosts`/`/etc/resolv.conf`, and allowlisted `modprobe.d`/`modules-load.d`/`sysctl.d`/`sysctl.conf` files. Each entry records path, file/symlink type and target, owner/group/mode/size, owning package, dpkg conffile-modified status, Baseline-managed classification, and an HMAC-backed content-identity token - never raw content. `/etc/pve` stays its own separately allowlisted collector (`collectors/proxmox.py`), untouched by this module, still never recursing into or reading `priv/`.
+2. **Deb822 `.sources` repositories are now collected alongside legacy `.list` files** (`baseline/lib/inventory/collectors/apt_sources.py`), preserving URI, suites, components, enabled state, Signed-By, architecture restrictions, source filename, and a best-effort channel classification (no-subscription/enterprise/test/distro/unknown) for both formats. Credentials embedded in a repository URI are redacted. `system.py`'s `collect_apt()` now exposes a structured `repositories` list instead of a raw `sources_list` text blob.
+3. **A pure, offline comparator exists** (`baseline/lib/inventory/diff.py`): takes two already-collected manifests, never touches a host, never mutates either input, never emits anything executable. Every difference gets exactly one of the five established classifications (`suggested_required`, `suggested_machine_specific`, `detected_secret_identity`, `candidate_obsolete`, `unknown`) via narrow, explicit rules - `candidate_obsolete` is applied only to Baseline's own deployed-file list, where "no longer present" has an authoritative source of truth; everything else defaults to `suggested_required` (reference-only) or `unknown` (new-build-only or a same-path value difference), reusing `validate.py`'s own secret-shape patterns for the `detected_secret_identity` safety check.
+4. **Cross-run HMAC comparison is now explicit, not accidental.** `redact.Redactor` gained a `key_id` property (a non-secret SHA-256 fingerprint of the key, recorded in every manifest's `redaction_report`) so `diff.compare_manifests()` can tell whether two manifests were tokenized under the same key without ever seeing the key itself - an HMAC-tokenized value (recognized by shape, `kind:12-hex-chars`, not a hardcoded field list) is only ever compared when both manifests' `key_id` match; otherwise it is skipped, never silently treated as equal or reported as a false difference. `baseline-drive-inventory collect` gained `--key-file <path>` (must be mode `0600`, refused otherwise) and `--key-fd <N>` - **never** an argv value or environment variable, both of which can leak via `ps`, shell history, or a crash dump. A new `compare` subcommand runs the comparator and prints (or writes) its JSON report. Standalone runs with neither flag keep the original ephemeral-random-key behavior unchanged.
+
+**The workflow for an actual P0-vs-P1 comparison, once both phases run for real:**
+
+```bash
+# Once, before either collection - outside both drives being examined:
+head -c 32 /dev/urandom > /root/comparison.key
+chmod 600 /root/comparison.key
+
+# P0, on the current drive:
+baseline-drive-inventory collect --source current-drive --out /root/p0-manifest.json --key-file /root/comparison.key
+
+# P1, on the new build, once that phase actually runs:
+baseline-drive-inventory collect --source disposable-vm --out /root/p1-manifest.json --key-file /root/comparison.key
+
+# After both are exported off their respective drives, on a reviewing machine:
+baseline-drive-inventory compare --manifest-a p0-manifest.json --manifest-b p1-manifest.json --require-matching-key
+
+# Once the comparison report has been reviewed:
+shred -u /root/comparison.key   # or the reviewing machine's copy - never left behind
+```
+
+The key is never written into either manifest (only its non-secret `key_id` fingerprint is), never committed to this repository, and is deleted once the final reviewed comparison report exists - exactly the workflow this plan's first version could only describe as a manual fallback procedure.
+
+62 new tests cover this work (`test_config_files.py`, `test_apt_sources.py`, `test_diff.py`, `test_keysource.py`, plus `test_redact.py` and `test_baseline_config.py` additions) - missing/mismatched/matching comparison keys, deterministic same-key tokenization across two independent collection runs, malformed-manifest robustness, and every named comparison category. 344/344 full suite passes.
 
 ## Why P0 must happen before P1
 
@@ -76,21 +109,20 @@ No `sudo`, `pkexec`, `polkit`, `mount`, package install, service change, or bloc
 
 ## 4. Current-drive versus new-build comparison procedure
 
-**Honest scope note, carried over from the ported branch's own design doc and confirmed during the port review: no comparison/classification code exists yet.** `inventory/current-drive-manifest` implements collection only; `diff.py` was named as future work in its own design doc and was never built, on that branch or this one. This section is therefore the *procedure* to follow - today, manually, until a dedicated diff tool is built as a small, separate follow-on - not a description of an existing automated step.
+**The comparator now exists** (`baseline/lib/inventory/diff.py`, wired into the CLI as `baseline-drive-inventory compare` - see the "P0 implementation gaps closed" section above). This section is the procedure for using it, not a manual fallback.
 
-Until that tool exists, the comparison procedure is:
-
-1. Produce two manifests with the same collector, one per host: `--source current-drive` for the preserved reference (section 1-2 above), `--source disposable-vm` for a fresh QEMU or physical build (the CLI already accepts and records this distinction - `manifest["source"]` - specifically so two manifests are never accidentally compared as if they were the same kind of thing).
+1. Produce two manifests with the same collector, one per host: `--source current-drive` for the preserved reference (sections 1-2 above), `--source disposable-vm` for a fresh QEMU or physical build - both collected with `--key-file` pointed at the same, purpose-generated comparison key (see the workflow above), never with two independent ephemeral keys.
 2. Run `baseline-drive-inventory validate` against each independently first - a manifest that fails its own validity/permission/secret-shape checks should not be trusted as an input to any comparison.
-3. Compare category-by-category (a manual `diff` of the two JSON files' `categories` object is sufficient today given `schema.to_json()`'s sorted-key, deterministic serialization - the two files are byte-comparable line by line where nothing changed):
-   - `packages`: new-build package set vs. current-drive's, and vice versa (present-only-on-one-side in either direction).
-   - `tools`: does the new build have all five diagnostic tools at parity.
-   - `baseline_config.deployed_file_sha256`: any Baseline source file whose hash differs between drives is either a legitimate version change (this repo moved forward) or a real drift signal - context, not the manifest alone, decides which.
-   - `network`/`boot`: expected to differ (see below) - review for plausibility, not equality.
-   - `proxmox`: `storage.cfg`/`datacenter.cfg` differences, VM/CT config presence.
-   - `scheduling`, `security`: cron/timer/sysctl differences.
-4. **Differences produce suggestions for human review, never automatic restoration.** This is not a policy choice this procedure is inventing - it is the only posture consistent with everything this project has already established: [drive-setup-gui-v2-prd.md](drive-setup-gui-v2-prd.md) already documents that `machine-id` must never be auto-restored, and the same reasoning generalizes - a manifest diff is *evidence a human should look at*, never a trigger for code to act on unattended. A future `diff.py` should emit a labeled list (e.g. `missing_on_new`, `present_only_on_new`, `hash_changed`, `config_drift`) for a person to read, not a patch to apply.
-5. **Never copy machine-specific network, boot, or Proxmox identity settings blindly.** `network.interfaces_text` (redacted address/gateway/DNS), `boot.kernel_cmdline`, and `proxmox`'s node names/UUIDs are expected to legitimately differ between the old physical drive and a new physical drive or VM - different NIC, different disk topology, a fresh `/etc/pve` cluster identity. These categories exist in the comparison for *awareness*, not as fields to reconcile toward equality.
+3. Run `baseline-drive-inventory compare --manifest-a <current-drive.json> --manifest-b <new-build.json> --require-matching-key`. `--require-matching-key` makes the comparator refuse outright (rather than silently skip) if the two manifests weren't tokenized under the same key - the identity-sensitive categories (`proxmox`, `boot`, `scheduling`, `network`) are otherwise meaningless to compare. Drop that flag only for a deliberately coarser pass over non-identity categories (packages, repositories, services, config-file metadata, diagnostic tools, sysctls) when a shared key genuinely isn't available.
+4. Read the report's `findings` list, grouped by `findings_by_classification`:
+   - `suggested_required` - present on the current drive, missing on the new build, no stronger signal either way. The most actionable category - review each one and decide whether it belongs on the new build.
+   - `suggested_machine_specific` - an identity/hardware-bound difference (network addressing, boot cmdline, Proxmox node/vmid identity) found under a matching key. Expected to differ; reviewed for plausibility, not reconciled toward equality.
+   - `detected_secret_identity` - a compared value matched one of `validate.py`'s own secret-shape patterns. Treat as a safety finding first, a drift finding second - investigate why a raw-looking secret/identity value reached a manifest at all.
+   - `candidate_obsolete` - currently applied only to Baseline's own deployed-file list (`baseline_config.deployed_files`): present on the current drive, not part of what the new build actually deploys. A real signal that a file is no longer shipped, not a request to delete anything.
+   - `unknown` - everything else: a real difference, no narrow rule confident enough to classify it further. Requires the most human judgment.
+5. **Every finding is a suggestion for human review, never automatic restoration** - enforced by construction, not merely by convention: `compare_manifests()` has no code path that writes to a host, generates a command, or mutates either input manifest (see `test_diff.py`'s `test_neither_input_manifest_is_mutated` and `test_findings_never_contain_executable_or_command_shaped_fields`). This is not a policy choice invented for this procedure - it is the same posture [drive-setup-gui-v2-prd.md](drive-setup-gui-v2-prd.md) already established for `machine-id` (never auto-restored), generalized: a manifest diff is evidence a human looks at, never a trigger for code to act on unattended.
+6. **Never copy machine-specific network, boot, or Proxmox identity settings blindly**, even when classified `suggested_machine_specific` - that classification exists so a reviewer can *recognize* an expected-to-differ category at a glance, not so it can be skipped past. Different NIC, different disk topology, a fresh `/etc/pve` cluster identity are all legitimate reasons these categories differ between an old and a new drive.
+7. Delete the shared comparison key (`shred -u`) once the report has been reviewed - it has no further purpose after that, and every manifest it touched already carries only its non-secret `key_id` fingerprint, never the key.
 
 ## 5. Physical Phase P1 validation plan
 

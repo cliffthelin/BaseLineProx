@@ -42,3 +42,30 @@ def test_fields_redacted_counts_unique_tokenized_values():
     r.tokenize("10.0.0.5", "ip")  # same value again - not a new field
     r.tokenize("10.0.0.6", "ip")
     assert r.fields_redacted == 2
+
+
+def test_key_id_is_stable_for_the_same_key():
+    r1 = Redactor(key=b"same-key")
+    r2 = Redactor(key=b"same-key")
+    assert r1.key_id == r2.key_id
+
+
+def test_key_id_differs_for_different_keys():
+    r1 = Redactor(key=b"key-one")
+    r2 = Redactor(key=b"key-two")
+    assert r1.key_id != r2.key_id
+
+
+def test_key_id_never_contains_the_raw_key():
+    r = Redactor(key=b"a-fairly-long-comparison-key-value")
+    assert b"a-fairly-long-comparison-key-value" not in r.key_id.encode()
+
+
+def test_key_id_is_independent_of_tokenize_digest():
+    """key_id (SHA-256 of the raw key) must not be derivable from, or
+    reused as, any per-value HMAC token - the two answer different
+    questions and must use unrelated hash inputs."""
+    r = Redactor(key=b"fixed-key")
+    token = r.tokenize("10.0.0.5", "ip")
+    assert r.key_id not in token
+    assert token.split(":", 1)[1] not in r.key_id

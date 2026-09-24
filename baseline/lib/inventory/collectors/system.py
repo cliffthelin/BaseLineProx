@@ -16,6 +16,7 @@ didn't come through and why (not installed, timed out, permission
 denied, truncated) - never a silent None/[]/{} that looks the same as
 "genuinely nothing found" (pre-run-safeguard requirement).
 """
+from . import apt_sources
 from .status_notes import notes as _notes
 
 DMI_BIOS_ALLOWED = {"Vendor": "bios_vendor", "Version": "bios_version", "Release Date": "bios_release_date"}
@@ -66,16 +67,17 @@ def collect_packages(runner):
 
 
 def collect_apt(runner):
-    sources = runner.read_text("/etc/apt/sources.list")
+    """Legacy `.list` AND Deb822 `.sources` repositories, both fully
+    parsed - see apt_sources.py's module docstring for why reading only
+    the legacy format is a real drift-hiding gap on a modern install,
+    not a stylistic preference."""
+    repos = apt_sources.collect(runner)
     policy = runner.run(["apt-cache", "policy"])
     return {
-        "sources_list": sources.stdout if sources.ok else None,
+        "repositories": repos["entries"],
         "policy_available": policy.ok,
         "policy_summary": policy.stdout[:4000] if policy.ok else None,
-        "_collection_notes": _notes(
-            (sources, "read /etc/apt/sources.list"),
-            (policy, "apt-cache policy"),
-        ),
+        "_collection_notes": repos["_collection_notes"] + _notes((policy, "apt-cache policy")),
     }
 
 

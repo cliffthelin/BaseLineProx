@@ -19,6 +19,18 @@ class Redactor:
         self.key = key if key is not None else os.urandom(32)
         self._seen = {}
 
+    @property
+    def key_id(self):
+        """A non-secret fingerprint of the key - safe to store in a
+        manifest (it does not let anyone reconstruct the key), used
+        only so a comparator (inventory/diff.py) can tell whether two
+        manifests were tokenized under the same key without ever
+        seeing the key itself. Deliberately a *different* hash
+        (SHA-256 of the raw key) from tokenize()'s HMAC-of-value - the
+        two answer different questions and must never be derivable
+        from one another."""
+        return hashlib.sha256(self.key).hexdigest()[:16]
+
     def tokenize(self, value, kind):
         """Same (kind, value) pair always maps to the same token within
         one Redactor instance (one run); a different key (a different

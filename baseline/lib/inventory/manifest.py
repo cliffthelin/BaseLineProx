@@ -7,7 +7,7 @@ tests pass a fixed key and a fixed clock function instead.
 """
 from . import pathsafety, schema
 from .redact import Redactor
-from .collectors import baseline_config, network, proxmox, scheduling, security, storage, system, tools
+from .collectors import baseline_config, config_files, network, proxmox, scheduling, security, storage, system, tools
 
 
 def collect_all(runner, source, host_label, node_names=None, fw_paths=None,
@@ -48,9 +48,13 @@ def collect_all(runner, source, host_label, node_names=None, fw_paths=None,
         "diagnostic_tools": tools.collect(runner, tools_manifest),
     }
 
+    cf = config_files.collect_config_files(runner, redactor)
+    categories["config_files_collection"] = {"_collection_notes": cf["_collection_notes"]}
+
     return schema.build_manifest(
         source=source, host_label=host_label, categories=categories,
-        config_files=[], redaction_report={"fields_redacted": redactor.fields_redacted},
+        config_files=cf["entries"],
+        redaction_report={"fields_redacted": redactor.fields_redacted, "key_id": redactor.key_id},
         clock=clock,
     )
 
