@@ -100,11 +100,51 @@ def _category_for(rel_path: str) -> str:
     return "source"
 
 
+def _finalize_result(result):
+    """Attaches the one authoritative final_status field every result
+    (scan_tree, scan_history, run_scan_isolated, run_full_scan's
+    per-scope results) carries, computed the same way everywhere:
+    findings win over incomplete, incomplete always wins over clean -
+    a scan that could not fully complete is NEVER reported as clean,
+    regardless of whether it happened to find nothing before running
+    out of budget."""
+    if result.get("findings"):
+        result["final_status"] = "findings"
+    elif result.get("scan_incomplete"):
+        result["final_status"] = "incomplete"
+    else:
+        result["final_status"] = "clean"
+    result.setdefault("peak_rss_kb", None)
+    return result
+
+
+def _file_physical_stats(full_path):
+    """(logical_bytes, allocated_bytes, is_sparse) from a single
+    os.stat() - st_blocks is in 512-byte units per POSIX, independent
+    of the filesystem's actual block size, so this is portable. Returns
+    (None, None, False) if the file can't be stat'd (caller treats that
+    as excluded, not silently zero)."""
+    try:
+        st = os.stat(full_path)
+    except OSError:
+        return None, None, False
+    logical = st.st_size
+    allocated = getattr(st, "st_blocks", None)
+    allocated_bytes = allocated * 512 if allocated is not None else logical
+    # A small fixed slack accounts for filesystem metadata/rounding on
+    # tiny files - only a real, multi-block gap counts as "sparse".
+    is_sparse = logical > 0 and allocated_bytes < logical - 4096
+    return logical, allocated_bytes, is_sparse
+
+
 def _file_contains_any_term(full_path, denylist, log, max_bytes=MAX_SCAN_BYTES_PER_FILE):
     """Chunked, bounded, constant-memory read - never `f.read()` on the
-    whole file. Returns (matched: bool, bytes_scanned: int). Any read
-    error or an oversized file is a bounded, deduplicated log event,
-    never a per-file log line and never a raised exception."""
+    whole file. Returns (matched: bool, bytes_scanned: int, capped:
+    bool) - capped is True iff the budget was exhausted before EOF, the
+    signal the caller uses to classify the file as "incomplete" rather
+    than "fully scanned". Any read error or an oversized file is a
+    bounded, deduplicated log event, never a per-file log line and
+    never a raised exception."""
     longest_term = max((len(t) for t in denylist if t), default=0)
     overlap = max(_OVERLAP_BYTES, longest_term - 1)
     try:
@@ -120,15 +160,16 @@ def _file_contains_any_term(full_path, denylist, log, max_bytes=MAX_SCAN_BYTES_P
                 text = window.decode("utf-8", errors="ignore")
                 for term in denylist:
                     if term and term in text:
-                        return True, scanned
+                        return True, scanned, False
                 carry = window[-overlap:] if overlap else b""
             else:
                 # Loop exhausted the budget without exhausting the file.
                 log.record("file_scan_capped", detail={"cap_bytes": max_bytes})
+                return False, scanned, True
     except (OSError, IsADirectoryError) as exc:
         log.record(f"file_read_error:{type(exc).__name__}")
-        return False, 0
-    return False, scanned
+        return False, 0, False
+    return False, scanned, False
 
 
 def scan_tree(repo_root, denylist, extra_dirs=(), overall_budget_bytes=OVERALL_SCAN_BUDGET_BYTES, clock=time.time):
@@ -142,31 +183,69 @@ def scan_tree(repo_root, denylist, extra_dirs=(), overall_budget_bytes=OVERALL_S
                 candidates.append((os.path.relpath(full, repo_root), full))
 
     total_bytes = 0
-    files_scanned = 0
+    logical_bytes_total = 0
+    allocated_bytes_total = 0
+    files_fully_scanned = 0
+    files_incomplete = 0
+    files_excluded = 0
+    sparse_files_encountered = 0
     scan_incomplete = False
     for rel_path, full_path in candidates:
         if rel_path in OWNERSHIP_METADATA_FILES:
+            files_excluded += 1
             continue
         if total_bytes >= overall_budget_bytes:
             log.record("overall_budget_exhausted_skip", detail={"path_category": _category_for(rel_path)})
             scan_incomplete = True
+            files_excluded += 1
             continue
+
+        logical, allocated, is_sparse = _file_physical_stats(full_path)
+        if logical is None:
+            files_excluded += 1  # unstat-able (e.g. a race, a broken symlink) - not silently "fully scanned"
+            continue
+        logical_bytes_total += logical
+        allocated_bytes_total += allocated
+        if is_sparse:
+            sparse_files_encountered += 1
+
         remaining = overall_budget_bytes - total_bytes
-        matched, scanned = _file_contains_any_term(full_path, denylist, log,
-                                                     max_bytes=min(MAX_SCAN_BYTES_PER_FILE, remaining))
+        matched, scanned, capped = _file_contains_any_term(full_path, denylist, log,
+                                                             max_bytes=min(MAX_SCAN_BYTES_PER_FILE, remaining))
         total_bytes += scanned
-        files_scanned += 1
+        if capped:
+            files_incomplete += 1
+            scan_incomplete = True
+        else:
+            files_fully_scanned += 1
         if matched:
             findings.append({"path": rel_path, "category": _category_for(rel_path)})
 
-    return {
+    if files_incomplete and files_excluded and log.count("overall_budget_exhausted_skip"):
+        reason = "per_file_cap_and_overall_budget_exhausted"
+    elif log.count("overall_budget_exhausted_skip"):
+        reason = "overall_budget_exhausted"
+    elif files_incomplete:
+        reason = "per_file_cap_exceeded"
+    else:
+        reason = None
+
+    return _finalize_result({
         "findings": findings,
         "scan_incomplete": scan_incomplete,
-        "reason": "overall_budget_exhausted" if scan_incomplete else None,
-        "stats": {"files_scanned": files_scanned, "bytes_scanned": total_bytes,
-                   "candidates_total": len(candidates)},
+        "reason": reason,
+        "stats": {
+            "candidates_total": len(candidates),
+            "logical_bytes_present": logical_bytes_total,
+            "allocated_bytes": allocated_bytes_total,
+            "bytes_actually_read": total_bytes,
+            "files_fully_scanned": files_fully_scanned,
+            "files_excluded": files_excluded,
+            "files_incomplete": files_incomplete,
+            "sparse_files_encountered": sparse_files_encountered,
+        },
         "log_summary": log.finalize(),
-    }
+    })
 
 
 def scan_history(repo_root, denylist, line_budget=HISTORY_LINE_BUDGET, clock=time.time):
@@ -211,13 +290,13 @@ def scan_history(repo_root, denylist, line_budget=HISTORY_LINE_BUDGET, clock=tim
             proc.kill()
             proc.wait()
 
-    return {
+    return _finalize_result({
         "findings": findings,
         "scan_incomplete": scan_incomplete,
         "reason": "history_line_budget_exhausted" if scan_incomplete else None,
         "stats": {"lines_read": lines_read, "commits_with_findings": len(findings)},
         "log_summary": log.finalize(),
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -285,19 +364,34 @@ def run_scan_isolated(mode, denylist, repo_root, extra_dirs=(),
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
-        return {"findings": [], "scan_incomplete": True, "reason": "worker_timeout",
-                "stats": {}, "log_summary": []}
+        return _finalize_result({"findings": [], "scan_incomplete": True, "reason": "worker_timeout",
+                                  "stats": {}, "log_summary": []})
 
     raw = b"".join(chunks)
     if not raw:
-        return {"findings": [], "scan_incomplete": True,
-                "reason": "resource_limit_exceeded" if returncode != 0 else "worker_produced_no_result",
-                "returncode": returncode, "stats": {}, "log_summary": []}
+        return _finalize_result({
+            "findings": [], "scan_incomplete": True,
+            "reason": "resource_limit_exceeded" if returncode != 0 else "worker_produced_no_result",
+            "returncode": returncode, "stats": {}, "log_summary": []})
     try:
-        return json.loads(raw.decode("utf-8", errors="ignore"))
+        result = json.loads(raw.decode("utf-8", errors="ignore"))
+        result.setdefault("final_status", None)
+        return result if result["final_status"] else _finalize_result(result)
     except json.JSONDecodeError:
-        return {"findings": [], "scan_incomplete": True, "reason": "worker_result_unparseable",
-                "stats": {}, "log_summary": []}
+        return _finalize_result({"findings": [], "scan_incomplete": True, "reason": "worker_result_unparseable",
+                                  "stats": {}, "log_summary": []})
+
+
+def _peak_rss_kb():
+    """Peak resident set size of THIS process so far, in KB (Linux:
+    ru_maxrss is already KB; this module only ever runs the worker path
+    on Linux in practice, so no cross-platform unit conversion is
+    attempted - documented rather than silently wrong on another OS)."""
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except (ImportError, OSError):
+        return None
 
 
 def _run_worker(args) -> int:
@@ -311,10 +405,78 @@ def _run_worker(args) -> int:
         result = scan_tree(args.repo_root, denylist, tuple(args.extra_dir))
     else:
         result = scan_history(args.repo_root, denylist)
+    result["peak_rss_kb"] = _peak_rss_kb()  # scan_tree/scan_history already set final_status
     payload = json.dumps(result).encode("utf-8")[:MAX_WORKER_RESULT_BYTES]
     with os.fdopen(args.result_fd, "wb") as f:
         f.write(payload)
     return 1 if (result["findings"] or result["scan_incomplete"]) else 0
+
+
+# ---------------------------------------------------------------------------
+# The real pre-P0 check: three independently-scoped, independently
+# isolated scans in one report. A scope that could not be fully
+# scanned is NEVER reported as clean - see _finalize_result.
+# ---------------------------------------------------------------------------
+
+SCOPE_NOT_IN_SCOPE = "not_in_scope"
+
+
+def _not_in_scope_result(reason):
+    return {"findings": [], "scan_incomplete": False, "reason": reason,
+            "stats": {}, "log_summary": [], "final_status": SCOPE_NOT_IN_SCOPE, "peak_rss_kb": None}
+
+
+def run_full_scan(denylist, repo_root, retained_evidence_dirs=(),
+                   memory_limit_bytes=DEFAULT_WORKER_MEMORY_LIMIT_BYTES, timeout_s=DEFAULT_WORKER_TIMEOUT_S):
+    """current_tracked (git-tracked files only), retained_evidence (only
+    if at least one directory is explicitly declared in scope - never
+    assumed), and git_history - each run in its own isolated worker
+    under its own memory ceiling, so one scope's resource use can never
+    affect another's, or the caller."""
+    current_tracked = run_scan_isolated("scan-tree", denylist, repo_root, extra_dirs=(),
+                                         memory_limit_bytes=memory_limit_bytes, timeout_s=timeout_s)
+
+    if retained_evidence_dirs:
+        retained_evidence = run_scan_isolated("scan-tree", denylist, repo_root, extra_dirs=retained_evidence_dirs,
+                                               memory_limit_bytes=memory_limit_bytes, timeout_s=timeout_s)
+    else:
+        retained_evidence = _not_in_scope_result("no retained-evidence directory was declared in scope")
+
+    git_history = run_scan_isolated("scan-history", denylist, repo_root,
+                                     memory_limit_bytes=memory_limit_bytes, timeout_s=timeout_s)
+
+    scopes = {"current_tracked": current_tracked, "retained_evidence": retained_evidence,
+              "git_history": git_history}
+
+    rows = []
+    for name, result in scopes.items():
+        incomplete_count = result["stats"].get("files_incomplete")
+        if incomplete_count is None:
+            incomplete_count = 1 if result.get("scan_incomplete") else 0
+        rows.append({
+            "scope": name,
+            "status": result["final_status"],
+            "findings": len(result["findings"]),
+            "incomplete": incomplete_count,
+        })
+
+    statuses = {r["status"] for r in rows}
+    if "findings" in statuses:
+        overall_status = "findings"
+    elif "incomplete" in statuses:
+        overall_status = "incomplete"
+    else:
+        overall_status = "clean"  # not_in_scope alone (no findings/incomplete anywhere) is still an overall clean pass
+
+    return {"rows": rows, "overall_status": overall_status, "scopes": scopes}
+
+
+def format_full_scan_report(report):
+    lines = [f"{'scope':<22}{'status':<14}{'findings':>10}{'incomplete':>12}"]
+    for row in report["rows"]:
+        lines.append(f"{row['scope']:<22}{row['status']:<14}{row['findings']:>10}{row['incomplete']:>12}")
+    lines.append(f"\noverall_status: {report['overall_status']}")
+    return "\n".join(lines)
 
 
 def main(argv=None) -> int:

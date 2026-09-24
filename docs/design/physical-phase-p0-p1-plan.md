@@ -1,6 +1,6 @@
 # Physical validation plan: Phase P0 (read-only preservation) and Phase P1 (disposable-drive install)
 
-Status: **planning only - the three original implementation gaps and four follow-on security hardening items are now closed** (`config_files[]` population, Deb822 APT source collection, and an offline comparator with explicit cross-run comparison-key support - see "P0 implementation gaps closed"; secure-erasure claims removed, hardened key-file loading, symlink-constrained `config_files[]`, and a generic external-identity denylist scanner - see "Security hardening before an authoritative P0 capture"). Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to. This document is the reviewed procedure to run later, plus the exact commands it will use, not a record of anything already executed. The real external-identity scan (with the actual protected denylist, supplied separately) is the one remaining manual step before the first P0 capture - see that section for why this repository never embeds that list itself.
+Status: **planning and implementation preparation complete.** The three original implementation gaps, four security hardening corrections, and both remaining verification items (coverage accounting, and a local-only interactive runner for the real external-identity scan) are closed - see "P0 implementation gaps closed", "Security hardening before an authoritative P0 capture", and "Coverage accounting and the interactive local-only scan runner" below. Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to. **The one remaining action before the first P0 capture is for the operator to run the interactive scanner locally** (`python3 tools/interactive_denylist_scan.py`) and type the three real protected values at its hidden prompts - Claude never sees them, never asks for them in chat, and the mechanism is designed so they cannot reach any log, transcript, file, or fixture. See that section for the exact command and why this repository never embeds that list itself.
 
 ## P0 implementation gaps closed (2026-09-24)
 
@@ -26,22 +26,31 @@ Four narrow corrections, none of them a design change or a QEMU rerun - unit/ful
 
    Re-run against this repository's real `experiments/` directory (including the 7.1GB leftover) after the fix: both `scan-tree` and `scan-history` complete in seconds, well within a 512MB worker memory ceiling, with no OOM and no hang. The 7.1GB leftover itself is a pre-existing retention-policy violation from an earlier session, unrelated to this work - flagged here, not deleted, since it predates this pass and cleanup wasn't requested.
 
-**Running the scan before an authoritative P0 capture:** the actual list of prohibited real-world identifiers is not, and must never be, embedded in this repository or in any conversation transcript about it - it has to come from whoever holds that list, via the same protected-fd discipline the tool enforces. The mechanism itself was verified end-to-end during this hardening pass (`tests/unit/test_scan_denylist.py` and `tests/unit/test_bounded_log.py`, 33 tests combined: fd-only loading, bounded/chunked reads including the sparse-file proof, overall-budget exhaustion, streamed history scanning, isolated-worker execution surviving a worker that exceeds its memory ceiling, the never-print-a-match guarantee, the ownership-metadata exclusion, and the 100,000-repetition bounded-logging proof). Before the real P0 capture, run both modes for real:
+## Coverage accounting and the interactive local-only scan runner (2026-09-24)
+
+Two verification items closed out the scanner before it's trusted for the real P0 capture - neither required any architecture change.
+
+**Coverage accounting** (`scan_tree`'s `stats`, and every result's new `final_status`/`peak_rss_kb` fields) - "the directory traversal completed" is no longer conflated with "fully scanned". Every `scan_tree`/`run_full_scan` result now reports:
+
+- `logical_bytes_present` / `allocated_bytes` (from one `os.stat()` per candidate - `st_blocks * 512`, POSIX-portable, independent of the filesystem's actual block size) and `bytes_actually_read` - so a sparse or excluded file is never silently counted as "fully scanned" just because the walk reached it.
+- `files_fully_scanned` (read to EOF within budget) vs. `files_incomplete` (capped by `MAX_SCAN_BYTES_PER_FILE` or the overall budget before reaching EOF) vs. `files_excluded` (ownership metadata, un-stat-able, or skipped once the overall budget was already exhausted) - three disjoint counts, not one blended "files processed" number.
+- `sparse_files_encountered` - a file whose allocated bytes are more than 4KB less than its logical size (a real gap, not filesystem rounding noise).
+- `peak_rss_kb` - only ever a real number when the scan ran through `run_scan_isolated` (`resource.getrusage(RUSAGE_SELF).ru_maxrss` read inside the worker itself, right after scanning); `None` for a direct in-process call, never a fabricated value.
+- `final_status` - computed the same way everywhere by one shared function (`_finalize_result`): `findings` beats `incomplete` beats `clean`. A scan that couldn't fully complete is never reported as `clean`, regardless of whether it happened to find nothing before running out of budget - directly answers "should partial scanning ever be described as clean" (no).
+
+**`run_full_scan()`** ties the three required scopes together in one call, each in its own isolated worker (so one scope's resource use can never affect another's): `current_tracked` (git-tracked files only), `retained_evidence` (only scanned, and only reported as anything other than `not_in_scope`, if at least one directory is explicitly declared - never assumed), and `git_history` (streamed, read-only, a finding is reported for separate remediation, never auto-fixed or rewritten). `format_full_scan_report()` renders exactly the requested table shape - scope / status / findings count / incomplete count - and nothing else; per-finding paths and commit ids stay in the full result dict for separate, deliberate inspection, never in the printed summary.
+
+**The interactive local-only runner** (`tools/interactive_denylist_scan.py`) is what actually closes the real blocker: the three protected values were never going to be safely enterable through this conversation, since a chat transcript is itself exactly the kind of log this whole design exists to keep them out of. The runner reads them one at a time via `getpass.getpass()` - the same standard-library mechanism a password prompt uses, which opens `/dev/tty` directly (not stdin) and disables terminal echo via `termios` for the duration of each prompt. The values are never accepted or exposed through chat, command-line arguments, environment variables, shell history, a repository file, a test fixture, an ordinary temporary file, or the printed report - they live only in this process's memory and the anonymous pipe fd each isolated worker subprocess receives (`run_full_scan`'s existing mechanism, unchanged). Fewer than three non-empty values aborts before scanning anything, rather than silently scanning against a short list.
+
+Tested exclusively with synthetic identifiers, via an injectable `prompt_fn` parameter (`collect_denylist_interactively(prompt_fn=...)`) that lets tests supply fake values without ever touching a real terminal - the real `getpass`-based path is exercised only when a human runs the script directly. One test confirms by source inspection that the default path genuinely calls `getpass.getpass` (never the plain `input()` builtin, which would echo to the screen).
+
+**Run this yourself, locally - Claude does not run it and does not see the values:**
 
 ```bash
-# scan-tree: everything currently tracked, plus any retained artifact dirs
-exec 3< /path/to/protected/denylist.txt   # one prohibited term per line
-python3 tools/scan_denylist.py scan-tree --denylist-fd 3 --repo-root . \
-    --extra-dir experiments   # if retained evidence lives there
-exec 3<&-
-
-# scan-history: every ref, read-only - a finding here is reported, not fixed automatically
-exec 3< /path/to/protected/denylist.txt
-python3 tools/scan_denylist.py scan-history --denylist-fd 3 --repo-root .
-exec 3<&-
+python3 tools/interactive_denylist_scan.py --retained-evidence-dir experiments
 ```
 
-A non-zero exit from either mode is a stop: read the reported paths/commits (never the match text itself, which this tool withholds by design), and decide remediation as a separate step - `scan-history` finding something real is explicitly out of scope for automatic history rewriting, per instruction.
+It will prompt three times, hidden, for the protected values, then print the scope/status/findings/incomplete table and exit non-zero if anything is `findings` or `incomplete` (never zero on an incomplete scan). A `findings` or `incomplete` result is a stop: read the reported scope(s), and use the full result (`report["scopes"][<name>]["findings"]`, e.g. via a short Python REPL session run the same way, never printed to a shared log) for the actual remediation decision - `git_history` findings are never rewritten automatically, matching `scan_history`'s own contract.
 
 **The workflow for an actual P0-vs-P1 comparison, once both phases run for real:**
 
@@ -78,7 +87,7 @@ baseline-drive-inventory compare --manifest-a p0-manifest.json --manifest-b p1-m
 
 The key is never written into either manifest (only its non-secret `key_id` fingerprint is, itself domain-separated from any content-identity token - see `redact.py`) and is never committed to this repository - exactly the workflow this plan's first version could only describe as a manual fallback procedure.
 
-62 new tests cover this work (`test_config_files.py`, `test_apt_sources.py`, `test_diff.py`, `test_keysource.py`, plus `test_redact.py` and `test_baseline_config.py` additions) - missing/mismatched/matching comparison keys, deterministic same-key tokenization across two independent collection runs, malformed-manifest robustness, and every named comparison category. 344/344 full suite passes.
+62 new tests cover the comparison-key/comparator work (`test_config_files.py`, `test_apt_sources.py`, `test_diff.py`, `test_keysource.py`, plus `test_redact.py` and `test_baseline_config.py` additions) - missing/mismatched/matching comparison keys, deterministic same-key tokenization across two independent collection runs, malformed-manifest robustness, and every named comparison category. The coverage-accounting and interactive-runner work above adds 24 more (`test_scan_denylist.py`'s coverage-accounting and `run_full_scan` tests, `test_interactive_denylist_scan.py`'s 11 synthetic-value tests). 418/418 full suite passes; the real scan (with the actual protected values, run locally per the command above) has not been executed by this session.
 
 ## Why P0 must happen before P1
 
