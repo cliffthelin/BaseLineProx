@@ -1,6 +1,16 @@
 # Physical validation plan: Phase P0 (read-only preservation) and Phase P1 (disposable-drive install)
 
-Status: **planning and implementation preparation complete.** The three original implementation gaps, four security hardening corrections, and both remaining verification items (coverage accounting, and a local-only interactive runner for the real external-identity scan) are closed - see "P0 implementation gaps closed", "Security hardening before an authoritative P0 capture", and "Coverage accounting and the interactive local-only scan runner" below. Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to. **The one remaining action before the first P0 capture is for the operator to run the interactive scanner locally** (`python3 tools/interactive_denylist_scan.py`) and type the three real protected values at its hidden prompts - Claude never sees them, never asks for them in chat, and the mechanism is designed so they cannot reach any log, transcript, file, or fixture. See that section for the exact command and why this repository never embeds that list itself.
+Status: **planning and implementation preparation complete; the real privacy verification gate is pending operator action, not passed.**
+
+```
+identity_scan:                pending_operator_verification
+development_blocked:          false
+physical_P0_closeout_blocked: true
+```
+
+The three original implementation gaps, four security hardening corrections, and both remaining verification items (coverage accounting, and a local-only interactive runner for the real external-identity scan) are closed - see "P0 implementation gaps closed", "Security hardening before an authoritative P0 capture", and "Coverage accounting and the interactive local-only scan runner" below. Nothing in this document has been run against any physical host. No physical drive has been touched, mounted, written to, or installed to.
+
+**The one remaining action before the first P0 capture is for the operator to run the interactive scanner locally** (`python3 tools/interactive_denylist_scan.py`) and type the three real protected values at its hidden prompts - Claude never sees them, never asks for them in chat, and the mechanism is designed so they cannot reach any log, transcript, file, or fixture. This has **not** been run by any session as of this writing - `identity_scan` stays `pending_operator_verification`, never `passed`, until an operator runs it and reports a clean result back. A `findings` or `scan_incomplete` result reopens the privacy gate regardless of anything else in this document; it does not invalidate unrelated architecture or planning work done in the meantime. Blocked by the pending gate: final P0 privacy closeout, physical Phase P1, production identity enrollment, and publication of any retained evidence as privacy-clean. Not blocked: documentation, schema/unit-test-only design work, and synthetic (no real hardware, no real identity) experimentation - see [testpersistence-prd.md](testpersistence-prd.md) for the current instance of that.
 
 ## P0 implementation gaps closed (2026-09-24)
 
