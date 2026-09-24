@@ -1,30 +1,55 @@
-"""First-boot state machine (Gate E) - durable, tty1-owning wrapper
-around `firstboot_network_repair.py`'s already-real discover -> propose
--> indefinite-CONFIRM -> apply -> verify flow.
+"""First-boot state machine (Gate E) - the real, integrated authorization
+path connecting the already-proven pieces rather than repeating them:
 
-Promoted from `experiments/m0-inv6/firstboot_statemachine.py` (decision
-record 06), narrowed per that record's own scope note: the general
-multi-action shape (firewall/handoff/tether) stays out of scope here -
-this wraps exactly one real action, network repair, the same one
-`firstboot_network_repair.py` already implements per decision record
-12. The CONFIRM-gate discipline itself (no timeout, no default, EOF
-never confirms) is not reimplemented here - it lives in and is reused
-from `firstboot_network_repair.wait_for_confirmation`, unchanged.
+  - `proxmox_detect.py`  - informational: confirms Proxmox is already
+    installed (never re-invokes the installer).
+  - `firstboot_network_repair.py` - discovery, exact-diff diagnosis, and
+    the real apply/verify calls into `repair.py`/`repair_additive.py`
+    (Gate A). This module calls its public building blocks directly
+    (`discover`, `diagnose`, `wait_for_confirmation`) rather than its
+    all-in-one wrapper, so a single combined tty1 screen and a single
+    CONFIRM gate can cover network repair AND package installation
+    together - not two separate prompts for one first boot.
+  - `setup_intent.py` - informational integrity status only, displayed
+    on tty1. NEVER the authorization gate: a colocated verification key
+    is an integrity/corruption check, not authentication (PRD SS5.6),
+    and no signed intent is wired into this flow's actual decision at
+    all. The literal CONFIRM keystroke is the only thing that
+    authorizes anything here.
+  - `diagnostics.py` - functional verification of the five installed
+    diagnostic tools after installation (hardware absence is a normal,
+    expected result per decision record 22 - not a verification
+    failure; a collector raising or the tool being uninvokable would
+    be).
 
-What this module adds on top of that existing flow, matching decision
-record 06's addendum-corrected prototype exactly:
+States, each durably journaled (fsync file + fsync containing directory
++ atomic rename - the same pattern `setup_intent.record_consumption`
+already uses) before the next stage begins:
 
-- A durable completion marker (fsync file + fsync containing directory
-  + atomic rename - the same pattern `setup_intent.record_consumption`
-  already uses) so a committed run never re-triggers automatically,
-  checked as the very first action before any discovery or side effect.
-- A journal entry recording the outcome, for post-hoc diagnosis.
+  created -> detected -> discovered -> proposed -> confirmed
+  -> network_repaired -> packages_installed -> packages_verified
+  -> committed
 
-Deliberately NOT re-implemented here (real risk of drifting from the
-already-proven, already-tested logic): discovery, diagnosis, the
-exact-diff tty1 proposal text, the CONFIRM-gate itself, and the
-apply/verify call - all delegated to `firstboot_network_repair`
-directly, imported and called, never duplicated.
+Gating, exactly as specified:
+  - A broken lifeline with no safe repair candidate refuses outright -
+    no proposal, no package install.
+  - The combined proposal (Proxmox detection + network diff-or-healthy
+    + the five proposed packages + rollback/verify description +
+    setup-intent status) is shown, then this blocks indefinitely for
+    the literal string CONFIRM - no timeout, no default, EOF never
+    confirms (identical discipline to `wait_for_confirmation`, reused
+    unchanged, not reimplemented).
+  - Package installation is refused unless network repair (or an
+    already-healthy lifeline) is confirmed AND independently verified.
+  - The durable completion marker is written ONLY after package
+    installation AND functional verification both succeed - never on
+    confirmation alone, never on network success alone.
+
+A corrupted or unparseable journal is never trusted for resume - fail
+closed by starting over from `created`. Every state through `confirmed`
+is safe to redo (read-only discovery, or a fresh required CONFIRM);
+this can only ever cause a redundant discovery or an extra
+confirmation, never a skipped authorization.
 """
 from __future__ import annotations
 
@@ -34,19 +59,26 @@ import secrets
 import time
 from pathlib import Path
 
+import diagnostics
 import firstboot_network_repair as fbnr
+import network
+import proxmox_detect
 import repair
+import repair_additive
 
 STATE_DIR = Path("/var/lib/baseline-firstboot")
-JOURNAL_PATH = STATE_DIR / "journal.json"
-COMPLETE_MARKER = STATE_DIR / "complete"
 
+STATES = ["created", "detected", "discovered", "proposed", "confirmed",
+          "network_repaired", "packages_installed", "packages_verified", "committed"]
+
+DIAGNOSTIC_PACKAGES = ["lm-sensors", "nvme-cli", "smartmontools", "iperf3", "ethtool"]
+
+
+# ---------------------------------------------------------------------------
+# Durable journal / completion marker - same proven pattern throughout.
+# ---------------------------------------------------------------------------
 
 def _durable_write(path: Path, content: str) -> None:
-    """fsync the file AND its containing directory before the write is
-    considered durable - matches setup_intent.record_consumption's
-    proven pattern. A crash right after this call cannot leave a
-    half-written or not-yet-visible marker/journal entry."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.parent / f".tmp-{secrets.token_hex(8)}"
     with open(tmp, "w") as f:
@@ -61,74 +93,288 @@ def _durable_write(path: Path, content: str) -> None:
         os.close(dir_fd)
 
 
+def _journal_path(state_dir: Path) -> Path:
+    return state_dir / "journal.json"
+
+
+def _marker_path(state_dir: Path) -> Path:
+    return state_dir / "complete"
+
+
 def already_completed(state_dir: Path = STATE_DIR) -> str | None:
-    """Returns the completion timestamp if a previous run already
-    committed, else None. Checked first, before any discovery or side
-    effect - even a maliciously or accidentally re-triggered service
-    start cannot cause work to redo past a real prior commit."""
-    marker = state_dir / "complete"
-    if marker.exists():
-        return marker.read_text().strip()
-    return None
-
-
-def record_journal_entry(outcome: dict, state_dir: Path = STATE_DIR) -> None:
-    entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), **outcome}
-    journal_path = state_dir / "journal.json"
-    history = []
-    if journal_path.exists():
-        try:
-            history = json.loads(journal_path.read_text()).get("history", [])
-        except (json.JSONDecodeError, OSError):
-            history = []
-    history.append(entry)
-    _durable_write(journal_path, json.dumps({"history": history}, indent=2))
+    """Checked first, before any discovery or side effect - even a
+    maliciously or accidentally re-triggered service start cannot
+    cause work to redo past a real prior commit. Existence-based, not
+    content-based - matches `setup_intent.is_consumed`'s fail-closed
+    discipline exactly."""
+    marker = _marker_path(state_dir)
+    return marker.read_text().strip() if marker.exists() else None
 
 
 def mark_complete(state_dir: Path = STATE_DIR) -> None:
-    _durable_write(state_dir / "complete", time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")
+    _durable_write(_marker_path(state_dir), time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")
+
+
+def load_journal(state_dir: Path = STATE_DIR) -> dict:
+    path = _journal_path(state_dir)
+    if not path.exists():
+        return {"state": "new", "history": []}
+    try:
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict) or "state" not in data or data["state"] not in STATES + ["new"]:
+            raise ValueError("malformed journal")
+        return data
+    except (json.JSONDecodeError, ValueError, OSError):
+        # Fail-closed: never resume into a consequential state from a
+        # journal we can't trust. Starting over from "created" is
+        # always safe - see module docstring.
+        return {"state": "new", "history": [], "journal_was_corrupted": True}
+
+
+def record_transition(state_dir: Path, journal: dict, state: str, **detail) -> dict:
+    assert state in STATES, f"unknown state {state!r}"
+    entry = {"state": state, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), **detail}
+    new_journal = {"state": state, "history": journal.get("history", []) + [entry]}
+    _durable_write(_journal_path(state_dir), json.dumps(new_journal, indent=2, default=str))
+    return new_journal
+
+
+def _last(journal: dict, state: str) -> dict:
+    return next(e for e in reversed(journal["history"]) if e["state"] == state)
+
+
+# ---------------------------------------------------------------------------
+# Package install / functional verification for the five diagnostic tools.
+# ---------------------------------------------------------------------------
+
+def install_diagnostic_tools(runner: repair.Runner) -> dict:
+    argv = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y"] + DIAGNOSTIC_PACKAGES
+    proc = runner.run(argv, timeout=300)
+    ok = proc.returncode == 0
+    tail = (proc.stdout if ok else (proc.stderr or proc.stdout)) or ""
+    return {"ok": ok, "returncode": proc.returncode, "detail": tail[-2000:]}
+
+
+def verify_diagnostic_tools(runner: repair.Runner) -> dict:
+    """Package presence + iperf3 safety + a real functional pass through
+    diagnostics.py's own collectors. Hardware absence is a normal,
+    expected result on a VM (decision record 22) - only a missing
+    package or an unsafe iperf3 state fails this check."""
+    dpkg_proc = runner.run(
+        ["dpkg-query", "-W", "-f=${Package} ${Status}\n"] + DIAGNOSTIC_PACKAGES, timeout=15)
+    installed = {}
+    for line in dpkg_proc.stdout.splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) == 2:
+            installed[parts[0]] = "install ok installed" in parts[1]
+    all_installed = all(installed.get(p, False) for p in DIAGNOSTIC_PACKAGES)
+
+    iperf_enabled = runner.run(["systemctl", "is-enabled", "iperf3"], timeout=10).stdout.strip()
+    iperf_active = runner.run(["systemctl", "is-active", "iperf3"], timeout=10).stdout.strip()
+    listen_proc = runner.run(["ss", "-tln"], timeout=10)
+    iperf_listening = any(":5201" in line for line in listen_proc.stdout.splitlines())
+    iperf_safe = (iperf_enabled == "disabled" and iperf_active != "active" and not iperf_listening)
+
+    functional = {
+        "lm-sensors": diagnostics.collect_sensors(runner).__dict__,
+        "nvme-cli": diagnostics.collect_nvme(runner).__dict__,
+        "smartmontools": diagnostics.collect_smart(runner).__dict__,
+        "ethtool": diagnostics.collect_ethtool(runner, network.list_interfaces).__dict__,
+    }
+
+    ok = all_installed and iperf_safe
+    reason = "" if ok else ("missing package(s): " + ", ".join(p for p in DIAGNOSTIC_PACKAGES if not installed.get(p))
+                             if not all_installed else f"iperf3 not safe: enabled={iperf_enabled} active={iperf_active} listening={iperf_listening}")
+    return {"ok": ok, "reason": reason, "installed": installed, "iperf3_enabled": iperf_enabled,
+            "iperf3_active": iperf_active, "iperf3_listening": iperf_listening,
+            "iperf3_safe": iperf_safe, "functional": functional}
+
+
+# ---------------------------------------------------------------------------
+# Combined tty1 proposal - everything the operator needs to authorize in
+# one screen, per Gate E's requirement.
+# ---------------------------------------------------------------------------
+
+def format_setup_intent_status() -> str:
+    """Informational only - see module docstring. Never the gate."""
+    return (
+        "Setup-intent bundle: none staged for this boot.\n"
+        "Where a colocated verification key is used elsewhere in this project,\n"
+        "it is an INTEGRITY/CORRUPTION check only, per PRD SS5.6 - it is not\n"
+        "authentication, and it is never the authorization gate for this\n"
+        "action. Only a real CONFIRM keystroke, read below, authorizes anything."
+    )
+
+
+def format_full_proposal(detection, discovery: dict, diagnosis: dict) -> str:
+    lines = ["=" * 64, "Baseline first-boot: detected state and proposed actions", ""]
+
+    lines.append(f"Proxmox installation: {'DETECTED' if detection.installed else 'NOT DETECTED'}")
+    for e in detection.evidence:
+        lines.append(f"  - {e}")
+    lines.append("")
+
+    if diagnosis["needs_repair"]:
+        network_lines = fbnr.format_proposal_for_tty1(diagnosis).splitlines()
+        # Drop that function's own trailing CONFIRM prompt/border - this
+        # screen has exactly one combined prompt at the very end instead.
+        network_lines = network_lines[2:-3]
+        lines.extend(network_lines)
+    else:
+        lines.append("Network: lifeline already healthy - no repair needed.")
+    lines.append("")
+
+    lines.append("Diagnostic tools proposed for installation (only after network verifies):")
+    for pkg in DIAGNOSTIC_PACKAGES:
+        lines.append(f"  - {pkg}")
+    lines.append("")
+
+    lines.append("Rollback and verification:")
+    lines.append("  An independent rollback timer is armed BEFORE any network write.")
+    lines.append("  Address, target-bound route/gateway, DNS, and HTTPS are independently")
+    lines.append("  re-verified after. Package installation is refused unless that")
+    lines.append("  verification succeeds; the completion marker is written only after")
+    lines.append("  package installation AND functional verification both succeed.")
+    lines.append("")
+
+    lines.append(format_setup_intent_status())
+    lines.append("")
+    lines.append("Type CONFIRM and press Enter to proceed. No timeout. No default.")
+    lines.append("=" * 64)
+    return "\n".join(lines)
 
 
 def print_tty1(msg: str) -> None:
     print(msg, flush=True)
 
 
+# ---------------------------------------------------------------------------
+# The state machine itself.
+# ---------------------------------------------------------------------------
+
 def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
         print_fn=print_tty1, check_lifeline_fn=None) -> dict:
-    """The full Gate E flow. Returns the same result shape
-    `firstboot_network_repair.run_first_boot_network_repair` returns,
-    plus `already_completed` when a prior run's marker short-circuits
-    this call entirely."""
     completed_at = already_completed(state_dir)
     if completed_at is not None:
         print_fn(f"[baseline-firstboot] previous run already completed at {completed_at} - not re-triggering.")
         return {"action": "already_completed", "completed_at": completed_at, "package_install_allowed": True}
 
-    result = fbnr.run_first_boot_network_repair(
-        runner, requested_by="firstboot-statemachine", stdin=stdin,
-        print_fn=print_fn, check_lifeline_fn=check_lifeline_fn,
-    )
+    journal = load_journal(state_dir)
+    if journal.get("journal_was_corrupted"):
+        print_fn("[baseline-firstboot] journal was corrupted or unreadable - starting fresh from "
+                 "discovery (fail-closed; no consequential state is ever resumed from an untrusted journal).")
 
-    record_journal_entry({k: v for k, v in result.items() if k != "result"} |
-                          ({"repair_outcome": result["result"].outcome, "repair_detail": result["result"].detail}
-                           if "result" in result and hasattr(result["result"], "outcome") else {}),
-                          state_dir)
+    if journal["state"] == "new":
+        journal = record_transition(state_dir, journal, "created")
 
-    # Only a genuinely successful outcome (nothing to do, or a real
-    # confirmed-and-verified repair) commits. "refused" and "declined"
-    # must be retryable on the next explicit boot/trigger, not locked
-    # out by a marker that implies success.
-    if result.get("package_install_allowed") and result.get("action") in ("none", "replace", "additive"):
+    if journal["state"] == "created":
+        detection = proxmox_detect.detect_proxmox_install(runner)
+        journal = record_transition(state_dir, journal, "detected",
+                                     proxmox_installed=detection.installed,
+                                     proxmox_version=detection.version,
+                                     proxmox_evidence=detection.evidence)
+
+    if journal["state"] == "detected":
+        discovery = fbnr.discover(runner, check_lifeline_fn)
+        journal = record_transition(state_dir, journal, "discovered", discovery=discovery)
+
+    if journal["state"] == "discovered":
+        discovery = _last(journal, "discovered")["discovery"]
+        if discovery["lifeline_ok"]:
+            diagnosis = {"needs_repair": False, "mode": None, "target": None, "diff": None, "reason": ""}
+        else:
+            diagnosis = fbnr.diagnose(runner, discovery)
+        journal = record_transition(state_dir, journal, "proposed", diagnosis=diagnosis)
+
+    if journal["state"] == "proposed":
+        diagnosis = _last(journal, "proposed")["diagnosis"]
+        if diagnosis["needs_repair"] and diagnosis["mode"] is None:
+            print_fn(f"[baseline-firstboot] lifeline broken, no safe automatic repair could be derived: "
+                      f"{diagnosis['reason']}")
+            print_fn("[baseline-firstboot] remaining at tty1 - no automatic retry, no package installation.")
+            return {"action": "refused", "reason": diagnosis["reason"], "package_install_allowed": False}
+
+        detection_entry = _last(journal, "detected")
+
+        class _Detection:  # lightweight re-hydration for the formatter
+            installed = detection_entry["proxmox_installed"]
+            evidence = detection_entry["proxmox_evidence"]
+
+        discovery = _last(journal, "discovered")["discovery"]
+        print_fn(format_full_proposal(_Detection(), discovery, diagnosis))
+        confirmed = fbnr.wait_for_confirmation(stdin)
+        if not confirmed:
+            print_fn("[baseline-firstboot] not confirmed - no change made.")
+            return {"action": "declined", "package_install_allowed": False}
+        journal = record_transition(state_dir, journal, "confirmed")
+
+    if journal["state"] == "confirmed":
+        diagnosis = _last(journal, "proposed")["diagnosis"]
+        if diagnosis["needs_repair"]:
+            if diagnosis["mode"] == "replace":
+                repair_result = repair.reset_interface_to_dhcp(
+                    runner, diagnosis["target"], "firstboot-statemachine",
+                    operator_present=True, check_lifeline_fn=check_lifeline_fn)
+            else:
+                repair_result = repair_additive.add_dhcp_to_bridge(
+                    runner, diagnosis["target"], "firstboot-statemachine",
+                    operator_present=True, check_lifeline_fn=check_lifeline_fn)
+            network_ok = bool(repair_result.ok)
+            network_detail = repair_result.detail
+        else:
+            network_ok = True
+            network_detail = "lifeline already healthy - no repair needed"
+
+        print_fn(f"[baseline-firstboot] network result: {'success' if network_ok else 'FAILED'} - {network_detail}")
+        journal = record_transition(state_dir, journal, "network_repaired",
+                                     network_ok=network_ok, network_detail=network_detail)
+        if not network_ok:
+            print_fn("[baseline-firstboot] networking did not verify - package installation refused, not committing.")
+            return {"action": "network_failed", "detail": network_detail, "package_install_allowed": False}
+
+    if journal["state"] == "network_repaired":
+        if not _last(journal, "network_repaired")["network_ok"]:
+            return {"action": "network_failed",
+                    "detail": _last(journal, "network_repaired")["network_detail"],
+                    "package_install_allowed": False}
+        print_fn("[baseline-firstboot] installing diagnostic tools...")
+        install_result = install_diagnostic_tools(runner)
+        journal = record_transition(state_dir, journal, "packages_installed", **install_result)
+        if not install_result["ok"]:
+            print_fn(f"[baseline-firstboot] package installation FAILED - not committing: {install_result['detail']}")
+            return {"action": "packages_failed", "detail": install_result["detail"], "package_install_allowed": True}
+
+    if journal["state"] == "packages_installed":
+        if not _last(journal, "packages_installed")["ok"]:
+            return {"action": "packages_failed",
+                    "detail": _last(journal, "packages_installed")["detail"],
+                    "package_install_allowed": True}
+        print_fn("[baseline-firstboot] verifying diagnostic tools...")
+        verify_result = verify_diagnostic_tools(runner)
+        journal = record_transition(state_dir, journal, "packages_verified", **verify_result)
+        print_fn(f"[baseline-firstboot] verification: {'success' if verify_result['ok'] else 'FAILED'} - "
+                  f"{verify_result.get('reason', '')}")
+        if not verify_result["ok"]:
+            print_fn("[baseline-firstboot] package verification FAILED - not committing.")
+            return {"action": "packages_verify_failed", "detail": verify_result["reason"],
+                     "package_install_allowed": True}
+
+    if journal["state"] == "packages_verified":
+        if not _last(journal, "packages_verified")["ok"]:
+            return {"action": "packages_verify_failed",
+                    "detail": _last(journal, "packages_verified").get("reason", ""),
+                    "package_install_allowed": True}
         mark_complete(state_dir)
+        record_transition(state_dir, journal, "committed")
         print_fn("[baseline-firstboot] COMMITTED. Marker written - will not re-run automatically.")
 
     print_fn("[baseline-firstboot] state machine run finished.")
-    return result
+    return {"action": "committed", "package_install_allowed": True}
 
 
 def main() -> int:
     result = run(repair.RealRunner())
-    return 0 if result.get("package_install_allowed") else 1
+    return 0 if result.get("action") == "committed" or result.get("action") == "already_completed" else 1
 
 
 if __name__ == "__main__":

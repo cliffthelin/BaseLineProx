@@ -54,10 +54,14 @@ cp "$SRC/baseline/lib/repair_rollback.py" /opt/baseline/lib/repair_rollback.py
 cp "$SRC/baseline/lib/firstboot_network_repair.py" /opt/baseline/lib/firstboot_network_repair.py
 cp "$SRC/baseline/bin/baseline-repair-rollback" /opt/baseline/bin/baseline-repair-rollback
 cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline-additive-dhcp-reapply
-# Gate E: first-boot state machine (docs/design/decision-records/06,
-# 24-gateF is a separate record; this is the durable completion-marker
-# wrapper around firstboot_network_repair.py's already-real CONFIRM-gated
-# flow - see baseline/lib/firstboot_statemachine.py's module docstring).
+# Gate E: the real, integrated first-boot authorization state machine
+# (docs/design/decision-records/25) - connects proxmox_detect.py
+# (informational), firstboot_network_repair.py's already-real Gate A
+# repair pipeline, and package install/verification for the five
+# diagnostic tools behind one durable completion marker + one CONFIRM
+# gate. See baseline/lib/firstboot_statemachine.py's module docstring.
+cp "$SRC/baseline/lib/proxmox_detect.py" /opt/baseline/lib/proxmox_detect.py
+cp "$SRC/baseline/lib/diagnostics.py" /opt/baseline/lib/diagnostics.py
 cp "$SRC/baseline/lib/setup_intent.py" /opt/baseline/lib/setup_intent.py
 cp "$SRC/baseline/lib/firstboot_statemachine.py" /opt/baseline/lib/firstboot_statemachine.py
 cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
