@@ -1,7 +1,6 @@
 # PRD: BaselineOS Drive Setup GUI v2 — bootable install + first-boot configuration
 
 Status: draft (revised — see §0 changelog)
-Owner: Cliff Thelin
 Depends on: `packaging/baseline-drive-setup/` (v1, shipped as `.deb`), `baseline/lib/handoff.py`, `baseline/bin/baseline-setup-wizard`
 
 ## 0. Revision changelog
