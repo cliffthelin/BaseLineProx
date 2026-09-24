@@ -30,6 +30,18 @@ already uses) before the next stage begins:
   -> network_repaired -> packages_installed -> packages_verified
   -> committed
 
+  confirmed -> network_repair_failed  (terminal; network did not verify)
+
+`network_repaired` is a success-only state: it is entered if and only if
+the repair applied AND independently verified (or the lifeline was
+already healthy). A refused or failed repair is recorded as the
+distinct `network_repair_failed` state instead of `network_repaired`
+with a false outcome flag - a state named "repaired" must never mean
+"not repaired". `record_transition` enforces this as a hard invariant,
+not just a convention: writing `network_repaired` with `network_ok`
+False raises. Recovery branches on which of these two states is
+recorded, never by inferring success from a shared phase name.
+
 Gating, exactly as specified:
   - A broken lifeline with no safe repair candidate refuses outright -
     no proposal, no package install.
@@ -69,7 +81,8 @@ import repair_additive
 STATE_DIR = Path("/var/lib/baseline-firstboot")
 
 STATES = ["created", "detected", "discovered", "proposed", "confirmed",
-          "network_repaired", "packages_installed", "packages_verified", "committed"]
+          "network_repaired", "network_repair_failed",
+          "packages_installed", "packages_verified", "committed"]
 
 DIAGNOSTIC_PACKAGES = ["lm-sensors", "nvme-cli", "smartmontools", "iperf3", "ethtool"]
 
@@ -133,6 +146,10 @@ def load_journal(state_dir: Path = STATE_DIR) -> dict:
 
 def record_transition(state_dir: Path, journal: dict, state: str, **detail) -> dict:
     assert state in STATES, f"unknown state {state!r}"
+    if state == "network_repaired" and detail.get("network_ok") is False:
+        raise ValueError(
+            "invariant violation: 'network_repaired' must never record network_ok=False - "
+            "a refused or failed repair belongs in the 'network_repair_failed' state instead")
     entry = {"state": state, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), **detail}
     new_journal = {"state": state, "history": journal.get("history", []) + [entry]}
     _durable_write(_journal_path(state_dir), json.dumps(new_journal, indent=2, default=str))
@@ -326,17 +343,27 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
             network_detail = "lifeline already healthy - no repair needed"
 
         print_fn(f"[baseline-firstboot] network result: {'success' if network_ok else 'FAILED'} - {network_detail}")
-        journal = record_transition(state_dir, journal, "network_repaired",
-                                     network_ok=network_ok, network_detail=network_detail)
-        if not network_ok:
+        if network_ok:
+            journal = record_transition(state_dir, journal, "network_repaired", network_detail=network_detail)
+        else:
+            journal = record_transition(state_dir, journal, "network_repair_failed",
+                                         network_ok=False, network_detail=network_detail)
             print_fn("[baseline-firstboot] networking did not verify - package installation refused, not committing.")
             return {"action": "network_failed", "detail": network_detail, "package_install_allowed": False}
 
+    if journal["state"] == "network_repair_failed":
+        # Resuming directly into a recorded failure - branch on the
+        # recorded state, never redo the repair attempt or the
+        # diagnosis that led here.
+        return {"action": "network_failed",
+                "detail": _last(journal, "network_repair_failed")["network_detail"],
+                "package_install_allowed": False}
+
     if journal["state"] == "network_repaired":
-        if not _last(journal, "network_repaired")["network_ok"]:
-            return {"action": "network_failed",
-                    "detail": _last(journal, "network_repaired")["network_detail"],
-                    "package_install_allowed": False}
+        # Reaching this state at all - fresh or resumed - already means
+        # the repair succeeded (or the lifeline was already healthy);
+        # see record_transition's invariant guard and the module
+        # docstring. No network_ok re-check needed or possible here.
         print_fn("[baseline-firstboot] installing diagnostic tools...")
         install_result = install_diagnostic_tools(runner)
         journal = record_transition(state_dir, journal, "packages_installed", **install_result)

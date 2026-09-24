@@ -120,6 +120,9 @@ def test_network_verification_failure_blocks_package_installation(tmp_path):
     assert result["package_install_allowed"] is False
     assert not (tmp_path / "complete").exists()
     assert not any(c[:2] == ["apt-get", "install"] for c in r.calls)
+    journal = json.loads((tmp_path / "journal.json").read_text())
+    assert journal["state"] == "network_repair_failed"
+    assert not any(e["state"] == "network_repaired" for e in journal["history"])
 
 
 def test_network_apply_failure_blocks_package_installation(tmp_path):
@@ -128,6 +131,9 @@ def test_network_apply_failure_blocks_package_installation(tmp_path):
                       check_lifeline_fn=broken_facts_fixture_a)
     assert result["action"] == "network_failed"
     assert not any(c[:2] == ["apt-get", "install"] for c in r.calls)
+    journal = json.loads((tmp_path / "journal.json").read_text())
+    assert journal["state"] == "network_repair_failed"
+    assert not any(e["state"] == "network_repaired" for e in journal["history"])
 
 
 # --------------------------------------------------------------------------
@@ -218,7 +224,7 @@ def test_resumes_from_network_repaired_state_without_reapplying(tmp_path):
         {"state": "discovered", "ts": "x", "discovery": {"lifeline_ok": False, "facts": broken_facts_fixture_a()}},
         {"state": "proposed", "ts": "x", "diagnosis": diagnosis},
         {"state": "confirmed", "ts": "x"},
-        {"state": "network_repaired", "ts": "x", "network_ok": True, "network_detail": "already applied"},
+        {"state": "network_repaired", "ts": "x", "network_detail": "already applied"},
     ]
     (tmp_path / "journal.json").write_text(json.dumps({"state": "network_repaired", "history": history}))
 
@@ -227,6 +233,64 @@ def test_resumes_from_network_repaired_state_without_reapplying(tmp_path):
     # The repair pipeline itself was never re-invoked on resume - no
     # ifreload apply call happened in this run.
     assert not any(c == ["ifreload", "-a"] for c in r.calls)
+
+
+def test_resumes_from_network_repair_failed_state_without_retrying(tmp_path):
+    r = full_runner()
+    # Hand-construct a journal exactly at "network_repair_failed" -
+    # matching a real interruption right after that transition was
+    # durably written but before the run() call that wrote it had a
+    # chance to return. Recovery must branch on this recorded outcome
+    # directly, never re-run diagnosis/apply, and never install packages.
+    diagnosis = {"needs_repair": True, "mode": "additive", "target": "vmbr0",
+                 "target_kind": "bridge", "physical_devices": ["ens3"],
+                 "diff": {"action": "add", "file": "/etc/network/interfaces",
+                          "before": [], "after": ["iface vmbr0 inet dhcp"]}, "reason": ""}
+    history = [
+        {"state": "created", "ts": "x"},
+        {"state": "detected", "ts": "x", "proxmox_installed": True, "proxmox_version": "8.2", "proxmox_evidence": []},
+        {"state": "discovered", "ts": "x", "discovery": {"lifeline_ok": False, "facts": broken_facts_fixture_a()}},
+        {"state": "proposed", "ts": "x", "diagnosis": diagnosis},
+        {"state": "confirmed", "ts": "x"},
+        {"state": "network_repair_failed", "ts": "x", "network_ok": False,
+         "network_detail": "already_healthy: refusing to change a device that isn't actually broken"},
+    ]
+    (tmp_path / "journal.json").write_text(json.dumps({"state": "network_repair_failed", "history": history}))
+
+    result = fsm.run(r, state_dir=tmp_path, print_fn=lambda *a: None)
+    assert result["action"] == "network_failed"
+    assert result["package_install_allowed"] is False
+    assert not (tmp_path / "complete").exists()
+    assert r.calls == []  # neither the repair pipeline nor apt-get was ever invoked on resume
+
+
+# --------------------------------------------------------------------------
+# network_repaired / network_repair_failed state invariant
+# --------------------------------------------------------------------------
+
+def test_network_repaired_state_can_never_record_network_ok_false(tmp_path):
+    """record_transition itself must refuse this, not just the callers
+    that happen to avoid it - a state named "repaired" must never be
+    writable with a false outcome flag, by construction."""
+    journal = {"state": "confirmed", "history": []}
+    with pytest.raises(ValueError, match="network_repaired"):
+        fsm.record_transition(tmp_path, journal, "network_repaired", network_ok=False, network_detail="x")
+
+
+def test_network_repaired_state_never_carries_network_ok_false_in_practice(tmp_path):
+    """End-to-end: across every failure-inducing scenario this suite
+    exercises, no journal ever records network_ok: False under the
+    network_repaired state - failures land in network_repair_failed
+    instead."""
+    for kwargs in ({"verify_ok": False}, {"apply_ok": False}):
+        r = full_runner(**kwargs)
+        state_dir = tmp_path / f"case-{kwargs}"
+        fsm.run(r, state_dir=state_dir, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                check_lifeline_fn=broken_facts_fixture_a)
+        journal = json.loads((state_dir / "journal.json").read_text())
+        for entry in journal["history"]:
+            if entry["state"] == "network_repaired":
+                assert entry.get("network_ok", True) is not False
 
 
 # --------------------------------------------------------------------------
