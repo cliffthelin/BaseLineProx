@@ -320,10 +320,17 @@ def add_dhcp_to_bridge(runner: Runner, observed_dev: str, requested_by: str,
         repair.clear_pending_manifest(runner)
         repair.close_attempt(runner, attempt_id, "success")
         repair.log_event(runner, attempt_id, "cancelled_rollback", "info", "verification succeeded")
+        # verify_target_extended only returns ok=True after address,
+        # route/gateway, DNS, and outbound HTTPS all passed (see its
+        # docstring) - dns/https are genuinely True here, not assumed;
+        # the control flow above already returned early on any failure.
         return RepairResult(True, attempt_id, "success",
                              f"{target.name} gained a new inet dhcp stanza (existing "
                              f"{target.stanza.family} stanza preserved); "
-                             f"address={verification.address} gateway={verification.gateway}")
+                             f"address={verification.address} gateway={verification.gateway}",
+                             verification={"address": bool(verification.address),
+                                           "gateway": bool(verification.gateway),
+                                           "dns": True, "https": True})
 
     except RepairRefused as refusal:
         repair.log_event(runner, attempt_id, "refused", "fail", refusal.detail, code=refusal.code)

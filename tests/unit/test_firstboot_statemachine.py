@@ -294,6 +294,109 @@ def test_network_repaired_state_never_carries_network_ok_false_in_practice(tmp_p
 
 
 # --------------------------------------------------------------------------
+# network_repaired requires explicit positive verification evidence, not
+# merely the absence of network_ok=False (false/null/omitted/malformed
+# verification, and omitted/false/malformed network_ok or target_interface,
+# must all be refused).
+# --------------------------------------------------------------------------
+
+VALID_VERIFICATION = {"address": True, "gateway": True, "dns": True, "https": True}
+
+
+def test_network_repaired_requires_network_ok_true_not_merely_non_false(tmp_path):
+    """Omitting network_ok entirely (a caller forgetting the keyword)
+    must be refused exactly as loudly as passing False - the previous,
+    weaker guard only checked `is False`, which a simple omission or a
+    None/truthy-but-wrong value could slip past."""
+    journal = {"state": "confirmed", "history": []}
+    for bad_network_ok in ({}, {"network_ok": None}, {"network_ok": 1}, {"network_ok": "true"}):
+        with pytest.raises(ValueError, match="network_ok=True"):
+            fsm.record_transition(tmp_path, journal, "network_repaired",
+                                   target_interface="vmbr0", verification=dict(VALID_VERIFICATION),
+                                   **bad_network_ok)
+
+
+def test_network_repaired_requires_nonempty_target_interface(tmp_path):
+    journal = {"state": "confirmed", "history": []}
+    for bad_target in ({}, {"target_interface": ""}, {"target_interface": None}):
+        with pytest.raises(ValueError, match="target_interface"):
+            fsm.record_transition(tmp_path, journal, "network_repaired", network_ok=True,
+                                   verification=dict(VALID_VERIFICATION), **bad_target)
+
+
+def test_network_repaired_requires_verification_dict_present_and_nonempty(tmp_path):
+    """Omitted, None, empty-dict, and non-dict verification must all be
+    refused - "absence of evidence" must never be treated as evidence."""
+    journal = {"state": "confirmed", "history": []}
+    for bad_verification in ({}, {"verification": None}, {"verification": {}}, {"verification": "yes"},
+                              {"verification": ["address"]}):
+        with pytest.raises(ValueError, match="verification"):
+            fsm.record_transition(tmp_path, journal, "network_repaired", network_ok=True,
+                                   target_interface="vmbr0", **bad_verification)
+
+
+def test_network_repaired_requires_every_verification_value_exactly_true(tmp_path):
+    """False, None, and truthy-but-not-True (e.g. the string "true", or
+    1) values must all be refused - a malformed or failed individual
+    check must not be able to hide inside an otherwise-plausible dict."""
+    journal = {"state": "confirmed", "history": []}
+    for bad_value in (False, None, "true", 1, 0):
+        with pytest.raises(ValueError, match="exactly True"):
+            fsm.record_transition(tmp_path, journal, "network_repaired", network_ok=True,
+                                   target_interface="vmbr0",
+                                   verification={"address": True, "gateway": bad_value})
+
+
+def test_network_repaired_accepts_genuine_complete_evidence(tmp_path):
+    """The positive case: network_ok=True, a real target_interface, and
+    a non-empty verification dict with every value exactly True is
+    accepted and durably written."""
+    journal = {"state": "confirmed", "history": []}
+    result = fsm.record_transition(tmp_path, journal, "network_repaired", network_ok=True,
+                                    target_interface="vmbr0", verification=dict(VALID_VERIFICATION),
+                                    network_detail="applied and verified")
+    assert result["state"] == "network_repaired"
+    entry = result["history"][-1]
+    assert entry["network_ok"] is True
+    assert entry["target_interface"] == "vmbr0"
+    assert entry["verification"] == VALID_VERIFICATION
+
+
+def test_successful_completion_journal_carries_genuine_verification_evidence(tmp_path):
+    """End-to-end: the real production path (not a hand-constructed
+    fixture) must itself supply valid network_ok/target_interface/
+    verification - proving repair.py/repair_additive.py's
+    RepairResult.verification threading actually works, not just that
+    the guard rejects bad input in isolation."""
+    r = full_runner()
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                      check_lifeline_fn=broken_facts_fixture_a)
+    assert result["action"] == "committed"
+    journal = json.loads((tmp_path / "journal.json").read_text())
+    entry = next(e for e in journal["history"] if e["state"] == "network_repaired")
+    assert entry["network_ok"] is True
+    assert entry["target_interface"] == "vmbr0"
+    assert entry["verification"], "verification must be non-empty"
+    assert all(v is True for v in entry["verification"].values())
+
+
+def test_already_healthy_lifeline_journal_carries_genuine_verification_evidence(tmp_path):
+    """Same guarantee for the already-healthy fast path, which has no
+    RepairResult to draw from - it must still supply real evidence
+    (reused from discover()'s own facts), not a fabricated placeholder."""
+    r = full_runner()
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                      check_lifeline_fn=healthy_facts)
+    assert result["action"] == "committed"
+    journal = json.loads((tmp_path / "journal.json").read_text())
+    entry = next(e for e in journal["history"] if e["state"] == "network_repaired")
+    assert entry["network_ok"] is True
+    assert entry["target_interface"]
+    assert entry["verification"], "verification must be non-empty"
+    assert all(v is True for v in entry["verification"].values())
+
+
+# --------------------------------------------------------------------------
 # Corrupted journal - fail closed, never resume into a consequential state
 # --------------------------------------------------------------------------
 

@@ -33,6 +33,20 @@ import repair_additive
 import topology
 
 
+def facts_verification(facts: list) -> dict:
+    """{"address": bool, "gateway": bool} derived directly from
+    check_lifeline()'s own facts. Reused both to compute discover()'s
+    lifeline_ok below and, when the lifeline was already healthy at
+    confirmation time, as firstboot_statemachine.py's genuine (never
+    fabricated) verification evidence before it records a
+    "network_repaired" state - see that module's record_transition
+    invariant."""
+    fact_map = {f["fact"]: f for f in facts}
+    gw_ok = fact_map.get("gateway_reachable", {}).get("ok", True)
+    addr_ok = fact_map.get("address_assigned", {}).get("ok", True)
+    return {"address": bool(addr_ok), "gateway": bool(gw_ok)}
+
+
 def discover(runner, check_lifeline_fn=None) -> dict:
     """Read-only. No prompt, no side effects. Always safe to call
     unattended - matches the PRD's "discovery has no side effects and
@@ -40,13 +54,11 @@ def discover(runner, check_lifeline_fn=None) -> dict:
     specific action."""
     check_lifeline_fn = check_lifeline_fn or network.check_lifeline
     facts = check_lifeline_fn()
-    fact_map = {f["fact"]: f for f in facts}
-    gw_ok = fact_map.get("gateway_reachable", {}).get("ok", True)
-    addr_ok = fact_map.get("address_assigned", {}).get("ok", True)
-    return {"facts": facts, "lifeline_ok": bool(gw_ok and addr_ok)}
+    v = facts_verification(facts)
+    return {"facts": facts, "lifeline_ok": bool(v["address"] and v["gateway"])}
 
 
-def _observed_dev(runner, facts) -> str | None:
+def observed_dev(runner, facts) -> str | None:
     """The device name network.py's lifeline check attributed the
     failure to. network.py's own default-route lookup is IPv4-only
     (`ip -4 route show default`) and returns no device at all when only
@@ -78,12 +90,12 @@ def diagnose(runner, discovery: dict) -> dict:
     if discovery["lifeline_ok"]:
         return {"needs_repair": False, "mode": None, "target": None, "diff": None, "reason": ""}
 
-    observed_dev = _observed_dev(runner, discovery["facts"])
-    if observed_dev is None:
+    dev = observed_dev(runner, discovery["facts"])
+    if dev is None:
         return {"needs_repair": True, "mode": None, "target": None, "diff": None,
                 "reason": "lifeline is broken but no default-route device (IPv4 or IPv6) could be identified"}
 
-    mode, derivation = repair_additive.plan_and_derive(runner, observed_dev)
+    mode, derivation = repair_additive.plan_and_derive(runner, dev)
     if not derivation.ok:
         return {"needs_repair": True, "mode": None, "target": None, "diff": None,
                 "reason": f"{derivation.reason or 'no repair candidate found'}",

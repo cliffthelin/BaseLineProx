@@ -174,6 +174,15 @@ class RepairResult:
     outcome: str  # "success" | "refused" | "declined" | "rolled_back" | "rollback_failed"
     detail: str = ""
     events: list = field(default_factory=list)
+    # Structured, genuine target-bound verification evidence (only the
+    # checks this repair path actually performed) - populated on success
+    # only. Never fabricated: a key is present iff that check ran and
+    # passed. Consumed by firstboot_statemachine.py's record_transition
+    # invariant, which refuses to record a "network_repaired" state
+    # without non-empty, all-True evidence here - see that module's
+    # docstring for why a state named "repaired" must never be entered
+    # on the mere absence of a False flag.
+    verification: dict = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
@@ -751,7 +760,9 @@ def reset_interface_to_dhcp(runner: Runner, observed_dev: str, requested_by: str
         log_event(runner, attempt_id, "cancelled_rollback", "info", "verification succeeded")
         return RepairResult(True, attempt_id, "success",
                              f"{target.name} reset to DHCP; address={verification.address} "
-                             f"gateway={verification.gateway}")
+                             f"gateway={verification.gateway}",
+                             verification={"address": bool(verification.address),
+                                           "gateway": bool(verification.gateway)})
 
     except RepairRefused as refusal:
         log_event(runner, attempt_id, "refused", "fail", refusal.detail, code=refusal.code)

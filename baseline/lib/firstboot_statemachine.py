@@ -38,9 +38,19 @@ already healthy). A refused or failed repair is recorded as the
 distinct `network_repair_failed` state instead of `network_repaired`
 with a false outcome flag - a state named "repaired" must never mean
 "not repaired". `record_transition` enforces this as a hard invariant,
-not just a convention: writing `network_repaired` with `network_ok`
-False raises. Recovery branches on which of these two states is
-recorded, never by inferring success from a shared phase name.
+not just a convention, and not just by rejecting an explicit False:
+writing `network_repaired` requires ALL of `network_ok is True`
+(exactly - omitted, `None`, or any other value is refused identically
+to an explicit `False`), a non-empty `target_interface`, and a
+non-empty `verification` dict whose every value is exactly `True` -
+see `_require_genuine_network_repaired_evidence`. The evidence is
+never fabricated: `RepairResult.verification` (repair.py/
+repair_additive.py) is populated only from checks the repair pipeline
+itself genuinely ran and passed, and the already-healthy path reuses
+`firstboot_network_repair.facts_verification`'s real address/gateway
+facts rather than inventing them. Recovery branches on which of the
+two states is recorded, never by inferring success from a shared
+phase name.
 
 Gating, exactly as specified:
   - A broken lifeline with no safe repair candidate refuses outright -
@@ -144,12 +154,50 @@ def load_journal(state_dir: Path = STATE_DIR) -> dict:
         return {"state": "new", "history": [], "journal_was_corrupted": True}
 
 
+def _require_genuine_network_repaired_evidence(detail: dict) -> None:
+    """Enforced on every attempt to write the 'network_repaired' state -
+    never bypassable by a caller forgetting a keyword. A state named
+    "repaired" must never be enterable on the mere absence of an
+    explicit network_ok=False; it must carry its own positive proof:
+
+      - network_ok must be exactly True (not merely not-False; a caller
+        that forgets to pass it at all is refused just as loudly as one
+        that passes False, None, or a truthy-but-wrong value).
+      - target_interface must be a genuine, non-empty interface name.
+      - verification must be a non-empty dict whose every value is
+        exactly True - no False, no None, no truthy strings, no empty
+        dict. Each key reflects a check that pipeline genuinely ran and
+        passed (see RepairResult.verification's docstring) - the set of
+        keys is allowed to vary by repair mode (replace-mode only ever
+        checks address/gateway today; additive-mode also checks
+        dns/https), but every value present must be real and positive.
+    """
+    if detail.get("network_ok") is not True:
+        raise ValueError(
+            "invariant violation: 'network_repaired' requires network_ok=True explicitly - "
+            "a refused, failed, or omitted-outcome repair belongs in the "
+            "'network_repair_failed' state instead")
+    if not detail.get("target_interface"):
+        raise ValueError(
+            "invariant violation: 'network_repaired' requires a genuine, non-empty "
+            "target_interface - the interface this verification evidence is bound to")
+    verification = detail.get("verification")
+    if not isinstance(verification, dict) or not verification:
+        raise ValueError(
+            "invariant violation: 'network_repaired' requires non-empty explicit "
+            "target-bound verification evidence (a 'verification' dict) - not merely "
+            "the absence of network_ok=False")
+    if not all(v is True for v in verification.values()):
+        raise ValueError(
+            "invariant violation: 'network_repaired' requires every verification check "
+            "to be exactly True - a False, None, or otherwise malformed value means the "
+            "repair was not genuinely verified")
+
+
 def record_transition(state_dir: Path, journal: dict, state: str, **detail) -> dict:
     assert state in STATES, f"unknown state {state!r}"
-    if state == "network_repaired" and detail.get("network_ok") is False:
-        raise ValueError(
-            "invariant violation: 'network_repaired' must never record network_ok=False - "
-            "a refused or failed repair belongs in the 'network_repair_failed' state instead")
+    if state == "network_repaired":
+        _require_genuine_network_repaired_evidence(detail)
     entry = {"state": state, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), **detail}
     new_journal = {"state": state, "history": journal.get("history", []) + [entry]}
     _durable_write(_journal_path(state_dir), json.dumps(new_journal, indent=2, default=str))
@@ -327,6 +375,7 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
 
     if journal["state"] == "confirmed":
         diagnosis = _last(journal, "proposed")["diagnosis"]
+        discovery = _last(journal, "discovered")["discovery"]
         if diagnosis["needs_repair"]:
             if diagnosis["mode"] == "replace":
                 repair_result = repair.reset_interface_to_dhcp(
@@ -338,13 +387,26 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
                     operator_present=True, check_lifeline_fn=check_lifeline_fn)
             network_ok = bool(repair_result.ok)
             network_detail = repair_result.detail
+            # Only genuinely-checked evidence, never fabricated - see
+            # RepairResult.verification's docstring. Empty on failure,
+            # by construction (repair.py/repair_additive.py only
+            # populate it on their own success return).
+            verification = dict(repair_result.verification)
+            target_interface = diagnosis["target"]
         else:
             network_ok = True
             network_detail = "lifeline already healthy - no repair needed"
+            # Still genuine, not fabricated: the same address/gateway
+            # facts discover() already used to decide the lifeline was
+            # healthy, reused as this path's verification evidence.
+            verification = fbnr.facts_verification(discovery["facts"])
+            target_interface = fbnr.observed_dev(runner, discovery["facts"]) or ""
 
         print_fn(f"[baseline-firstboot] network result: {'success' if network_ok else 'FAILED'} - {network_detail}")
         if network_ok:
-            journal = record_transition(state_dir, journal, "network_repaired", network_detail=network_detail)
+            journal = record_transition(state_dir, journal, "network_repaired", network_ok=True,
+                                         target_interface=target_interface, verification=verification,
+                                         network_detail=network_detail)
         else:
             journal = record_transition(state_dir, journal, "network_repair_failed",
                                          network_ok=False, network_detail=network_detail)
