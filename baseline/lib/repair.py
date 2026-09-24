@@ -238,8 +238,16 @@ def detect_ifupdown2(runner: Runner) -> Ifupdown2Capability:
 # cluster's non-TCP dependencies, and multi-node Proxmox is out of scope.
 # --------------------------------------------------------------------------
 
+# Named so inventory/collectors/proxmox.py's read-only cluster-presence
+# check can import the exact same two paths instead of re-deriving them -
+# the two checks answer different questions (this one refuses a repair
+# action; that one just records a fact) but must never drift apart on
+# which paths mean "clustered".
+COROSYNC_CONFIG_PATHS = ("/etc/pve/corosync.conf", "/etc/corosync/corosync.conf")
+
+
 def check_standalone_host(runner: Runner) -> None:
-    for path in ("/etc/pve/corosync.conf", "/etc/corosync/corosync.conf"):
+    for path in COROSYNC_CONFIG_PATHS:
         if runner.path_exists(path):
             raise RepairRefused("cluster_member",
                                  f"{path} exists - this host appears to belong to a Proxmox cluster; "

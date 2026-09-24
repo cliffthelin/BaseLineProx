@@ -1,0 +1,311 @@
+{
+  "categories": {
+    "apt": {
+      "_collection_notes": [],
+      "policy_available": true,
+      "policy_summary": "500 http://deb.debian.org/debian bookworm/main amd64 Packages\n",
+      "sources_list": "deb http://deb.debian.org/debian bookworm main\n"
+    },
+    "baseline_config": {
+      "_collection_notes": [],
+      "config_key_summaries": {
+        "network_preference.json": {
+          "keys": [
+            "fallback",
+            "primary"
+          ]
+        }
+      },
+      "deployed_file_sha256": {
+        "/opt/baseline/bin/baseline": "3f2504e04f8964...",
+        "/opt/baseline/lib/repair.py": "9c1185a5c5e9fc..."
+      },
+      "deployed_files": [
+        "/opt/baseline/bin/baseline",
+        "/opt/baseline/lib/repair.py"
+      ],
+      "etc_baseline_files": [
+        "network_preference.json"
+      ],
+      "unit_status_available": {
+        "baseline-additive-dhcp-reapply.service": true,
+        "baseline-firstboot.service": true,
+        "baseline.service": true
+      },
+      "var_lib_baseline_layout": [
+        "repair/attempt-0001.json",
+        "repair/attempt-0002.json"
+      ],
+      "var_lib_baseline_truncated": false
+    },
+    "boot": {
+      "_collection_notes": [
+        {
+          "command": "proxmox-boot-tool status",
+          "reason": "proxmox-boot-tool not on PATH",
+          "status": "unavailable"
+        }
+      ],
+      "efi_boot_entry_count": 3,
+      "efi_present": false,
+      "grub_default": "GRUB_TIMEOUT=5\n",
+      "kernel_cmdline": "BOOT_IMAGE=/vmlinuz root=cmdline-arg:3146c1f11d19 ro quiet",
+      "proxmox_boot_tool_status": null
+    },
+    "diagnostic_tools": {
+      "ethtool": {
+        "available": false,
+        "reason": "ethtool not on PATH"
+      },
+      "iperf3": {
+        "available": false,
+        "reason": "iperf3 not on PATH"
+      },
+      "lm-sensors": {
+        "available": false,
+        "reason": "sensors not on PATH"
+      },
+      "nvme-cli": {
+        "available": false,
+        "reason": "nvme not on PATH"
+      },
+      "smartmontools": {
+        "available": false,
+        "reason": "smartctl not on PATH"
+      }
+    },
+    "firewall_sysctl_dns_time": {
+      "_collection_notes": [],
+      "dns_available": true,
+      "firewall": {
+        "_collection_notes": [],
+        "backend": "nft",
+        "summary_available": true
+      },
+      "journald": {
+        "_collection_notes": [],
+        "config": "[Journal]\nStorage=persistent\n",
+        "disk_usage_summary": "Archived and active journals take up 128.0M."
+      },
+      "sysctl": {
+        "_collection_notes": [],
+        "discovered_keys": [
+          "net.ipv4.ip_forward"
+        ],
+        "reviewed_keys_queried": [
+          "net.ipv4.ip_forward",
+          "net.ipv6.conf.all.disable_ipv6"
+        ],
+        "skipped_malformed_lines": [],
+        "values": {
+          "net.ipv4.ip_forward": "net.ipv4.ip_forward = 1",
+          "net.ipv6.conf.all.disable_ipv6": "net.ipv4.ip_forward = 1"
+        }
+      },
+      "time_status": "Time zone: UTC\nNTP service: active\n"
+    },
+    "firmware_drivers": {
+      "_collection_notes": [],
+      "bios_summary": {
+        "bios_release_date": "03/15/2026",
+        "bios_vendor": "Dell Inc.",
+        "bios_version": "1.22.0",
+        "system_manufacturer": "Dell Inc.",
+        "system_product": "Latitude 5290"
+      },
+      "modules": [
+        "i915 3000000 4"
+      ],
+      "pci_driver_bindings": "00:02.0 VGA: Intel i915 [8086:5917]\n"
+    },
+    "kernel_modules_udev": {
+      "_collection_notes": [],
+      "modprobe_d": [],
+      "modules_load_d": [],
+      "udev_rules": []
+    },
+    "network": {
+      "_collection_notes": [],
+      "dns_available": true,
+      "interfaces_closure": "auto vmbr0\niface vmbr0 inet static\n address <redacted>\n gateway <redacted>\n bridge-ports eno1"
+    },
+    "packages": {
+      "_collection_notes": [],
+      "architecture": "amd64",
+      "conffile_state_by_package": {
+        "ifupdown2": "/etc/network/interfaces abc123"
+      },
+      "foreign_architectures": [],
+      "items": [
+        {
+          "held": false,
+          "name": "ifupdown2",
+          "status": "install ok installed",
+          "version": "3.2.0"
+        },
+        {
+          "held": false,
+          "name": "lm-sensors",
+          "status": "install ok installed",
+          "version": "1:3.6.0"
+        }
+      ]
+    },
+    "platform_versions": {
+      "_collection_notes": [],
+      "debian": "12.8",
+      "kernel": "Linux dell-latitude 6.8.12-pve #1 SMP x86_64 GNU/Linux",
+      "proxmox": "pve-manager/9.2.1"
+    },
+    "proxmox": {
+      "cluster": {
+        "clustered": false,
+        "membership": null
+      },
+      "datacenter_cfg": {
+        "available": true,
+        "fields": {
+          "keyboard": "en-us"
+        },
+        "unknown_fields": {
+          "count": 1,
+          "names": [
+            "some_future_key"
+          ]
+        }
+      },
+      "firewall": {
+        "/etc/pve/firewall/cluster.fw": [
+          {
+            "dest": "cidr:18f9cc9bb94e",
+            "dport": "22",
+            "proto": "tcp",
+            "rule": "IN ACCEPT",
+            "source": "cidr:99fb663b9c2a"
+          }
+        ],
+        "_collection_notes": []
+      },
+      "nodes": {
+        "_collection_notes": [],
+        "host:3c800c31d75e": {
+          "lxc": [],
+          "qemu": [
+            {
+              "fields": {
+                "cores": "4",
+                "memory": "8192",
+                "net0": {
+                  "bridge": "vmbr0"
+                },
+                "ostype": "l26"
+              },
+              "vmid_token": "vmid:469f6f42de6a"
+            }
+          ]
+        }
+      },
+      "repo_and_subscription": {
+        "_collection_notes": [],
+        "enterprise_repo_enabled": false,
+        "no_subscription_repo_enabled": true,
+        "subscription_status": "unavailable",
+        "subscription_status_reason": "pvesubscription get is not run - no confirmed safe, field-specific query exists that cannot return the subscription key; needs validating against a real host before this can change"
+      },
+      "storage_cfg": {
+        "available": true,
+        "entries": [
+          {
+            "fields": {
+              "content": "images"
+            },
+            "type": "dir"
+          },
+          {
+            "fields": {
+              "content": "backup"
+            },
+            "type": "nfs"
+          }
+        ]
+      },
+      "storage_status": {
+        "available": true,
+        "storages": [
+          {
+            "enabled": true,
+            "name_token": "storage:8160832cb99d",
+            "total_capacity": "500000",
+            "type": "dir"
+          }
+        ]
+      }
+    },
+    "runtimes": {
+      "_collection_notes": [
+        {
+          "command": "node --version",
+          "reason": "node not on PATH",
+          "status": "unavailable"
+        }
+      ],
+      "node": null,
+      "python": "Python 3.11.2"
+    },
+    "scheduling": {
+      "_collection_notes": [
+        {
+          "command": "systemctl list-timers --all",
+          "reason": "no script for ['systemctl', 'list-timers', '--all']",
+          "status": "unavailable"
+        }
+      ],
+      "allowlisted_service_crontabs": {
+        "baseline": [
+          "*/5 * * * * cron-arg:b13e65956d71"
+        ]
+      },
+      "etc_crontab": [
+        "17 * * * * root cd cron-arg:161f45ce3b55 && run-parts cron-arg:e38f44c8ce01"
+      ],
+      "other_user_crontabs_count": 1,
+      "other_user_crontabs_tokenized": [
+        "user:bf777844adb7"
+      ],
+      "root_crontab": [
+        "17 3 * * * cron-arg:278f7cb720f1 cron-arg:a601b6570554"
+      ],
+      "system_cron_dirs": {
+        "cron.d": [],
+        "cron.daily": [
+          "apt-compat"
+        ],
+        "cron.hourly": [],
+        "cron.monthly": [],
+        "cron.weekly": []
+      },
+      "systemd_timers": null
+    },
+    "storage": {
+      "_collection_notes": [],
+      "block_devices": "nvme0n1 ext4\n",
+      "mounts": "/ /dev/mapper/pve-root ext4\n"
+    },
+    "systemd": {
+      "_collection_notes": [],
+      "enabled_units": [
+        "baseline.service enabled",
+        "networking.service enabled"
+      ],
+      "systemd_delta_findings": "No extensions or masks found.\n"
+    }
+  },
+  "config_files": [],
+  "generated_at": "2026-09-20T23:00:00Z",
+  "host_label": "dell-latitude-5290-synthetic-example",
+  "redaction_report": {
+    "fields_redacted": 12
+  },
+  "schema_version": 2,
+  "source": "current-drive"
+}

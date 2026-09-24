@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "tools": [
+    {
+      "name": "lm-sensors",
+      "debian_package": "lm-sensors",
+      "detect": {"binary": "sensors", "version_command": ["sensors", "-v"]},
+      "package_version_command": ["dpkg-query", "-W", "-f=${Version}", "lm-sensors"]
+    },
+    {
+      "name": "nvme-cli",
+      "debian_package": "nvme-cli",
+      "detect": {"binary": "nvme", "version_command": ["nvme", "version"]},
+      "package_version_command": ["dpkg-query", "-W", "-f=${Version}", "nvme-cli"]
+    },
+    {
+      "name": "smartmontools",
+      "debian_package": "smartmontools",
+      "detect": {"binary": "smartctl", "version_command": ["smartctl", "--version"]},
+      "package_version_command": ["dpkg-query", "-W", "-f=${Version}", "smartmontools"]
+    },
+    {
+      "name": "iperf3",
+      "debian_package": "iperf3",
+      "detect": {"binary": "iperf3", "version_command": ["iperf3", "--version"]},
+      "package_version_command": ["dpkg-query", "-W", "-f=${Version}", "iperf3"]
+    },
+    {
+      "name": "ethtool",
+      "debian_package": "ethtool",
+      "detect": {"binary": "ethtool", "version_command": ["ethtool", "--version"]},
+      "package_version_command": ["dpkg-query", "-W", "-f=${Version}", "ethtool"]
+    }
+  ]
+}

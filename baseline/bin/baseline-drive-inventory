@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""CLI wrapper for the current-drive inventory collector.
+
+    baseline-drive-inventory collect --source current-drive --out <path> [--overwrite] [--node NAME ...]
+    baseline-drive-inventory validate --manifest <path>
+
+The only write `collect` ever performs is the explicitly selected output
+manifest file - no host configuration or operational state is modified.
+`validate` only reads; it never writes anything, including to the
+manifest it checks. Passing validate is defense in depth, not upload
+authorization - a human still reviews the manifest directly before
+sharing it anywhere (see docs/design/current-drive-inventory-plan.md).
+"""
+import argparse
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+from inventory.runner import RealRunner  # noqa: E402
+from inventory import manifest as manifest_mod  # noqa: E402
+from inventory import validate as validate_mod  # noqa: E402
+
+
+def _collect(args):
+    runner = RealRunner()
+    result = manifest_mod.collect_all(
+        runner, source=args.source, host_label=args.host_label, node_names=args.node,
+    )
+    path = manifest_mod.write_manifest(result, args.out, repo_root=args.repo_root, overwrite=args.overwrite)
+    print(f"wrote {path}")
+    return 0
+
+
+def _validate(args):
+    with open(args.manifest, "rb") as f:
+        manifest = json.load(f)
+    report = validate_mod.validate_manifest(manifest, output_path=args.manifest)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["passed"] else 1
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="baseline-drive-inventory")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    collect_p = sub.add_parser("collect")
+    collect_p.add_argument("--source", required=True, choices=["current-drive", "disposable-vm"])
+    collect_p.add_argument("--host-label", default="")
+    collect_p.add_argument("--out", required=True)
+    collect_p.add_argument("--overwrite", action="store_true")
+    collect_p.add_argument("--node", action="append", default=[],
+                            help="Proxmox node name(s) to inventory under /etc/pve/nodes/")
+    collect_p.add_argument("--repo-root", default="/opt/baseline")
+
+    validate_p = sub.add_parser("validate")
+    validate_p.add_argument("--manifest", required=True, help="path to a manifest written by `collect`")
+
+    args = parser.parse_args(argv)
+    if args.command == "collect":
+        return _collect(args)
+    if args.command == "validate":
+        return _validate(args)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
