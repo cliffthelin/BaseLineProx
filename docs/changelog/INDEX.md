@@ -25,7 +25,7 @@ overwritten in place - it's a pointer, not a record.
 | [hardware](hardware/001.md) | hardware/001.md | 7 | 2026-09-20 | Display fact added, then reverted (caused console garble) |
 | [network](network/001.md) | network/001.md | 6 | 2026-09-20 | ConnectionModal: bridged identity, alias, enable/disable, lifeline position |
 | [ui](ui/001.md) | ui/001.md | 11 | 2026-09-20 | Down arrow as sole navigation unreliable on bare console (Shift+Tab fallback) |
-| [chat](chat/001.md) | chat/001.md | 2 | 2026-09-26 | Warm per-process session implemented; write-ability scope decided separately |
+| [chat](chat/001.md) | chat/001.md | 3 | 2026-09-26 | Write-scope grant implemented: session-only, operator-named, tested against traversal |
 
 Categories are named after the part of the system a change touches, not
 the UI tab (e.g. a fix to the Hardware *tab's* focus handling is logged
