@@ -540,6 +540,11 @@ class BaselineApp(App):
                 yield DataTable(id="hw_table", cursor_type="row")
             with TabPane("Network", id="network_tab"):
                 yield DataTable(id="net_table", cursor_type="row")
+                yield Static(
+                    "Browser settings UI: http://<this-machine's-LAN-address>:8100/ "
+                    "(log in with your Baseline account)",
+                    classes="sparkline_label",
+                )
             with TabPane("Sensors", id="sensors_tab"):
                 yield DataTable(id="sensors_table", cursor_type="row")
                 yield Static("Temperature trend (last hour, highest-reading chip):", classes="sparkline_label")

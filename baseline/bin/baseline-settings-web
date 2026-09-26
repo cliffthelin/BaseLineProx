@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for the browser settings UI
+(baseline-settings-web.service, PRD SS5.16). See
+lib/settings_web.py's module docstring.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import settings_web  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(settings_web.main())

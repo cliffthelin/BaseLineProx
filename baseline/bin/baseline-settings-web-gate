@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for baseline-settings-web.service's
+ExecStartPre gate. See lib/settings_web_gate.py's module docstring.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import settings_web_gate  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(settings_web_gate.main())

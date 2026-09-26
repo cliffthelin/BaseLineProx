@@ -217,3 +217,14 @@ def test_logging_rebuild_trigger_records_a_real_observable_entry(tmp_path):
     assert result.applied is True
     log = store._read()["rebuild_log"]
     assert log == [{"target": "/tmp/x.img", "config": {"a": 1}, "at": 42.0}]
+
+
+def test_resolve_data_path_defaults_to_tmp_when_env_unset():
+    from pathlib import Path
+    assert sw.resolve_data_path({}) == Path("/tmp/baseline-settings-web/store.json")
+
+
+def test_resolve_data_path_honors_env_override():
+    from pathlib import Path
+    env = {"BASELINE_SETTINGS_WEB_DATA": "/var/lib/baseline/settings-web/store.json"}
+    assert sw.resolve_data_path(env) == Path("/var/lib/baseline/settings-web/store.json")

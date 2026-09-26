@@ -92,7 +92,19 @@ cp "$SRC/baseline/bin/baseline-sensors-collect" /opt/baseline/bin/baseline-senso
 # so the kiosk can never appear before the machine is actually configured.
 cp "$SRC/baseline/lib/kiosk_gate.py" /opt/baseline/lib/kiosk_gate.py
 cp "$SRC/baseline/bin/baseline-kiosk-gate" /opt/baseline/bin/baseline-kiosk-gate
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate
+# Browser settings UI (PRD SS5.16): settings_web.py already existed,
+# tested, and was never wired to a systemd unit - this stages it for
+# real, gated on firstboot the same way the kiosk GUI is, so it can't
+# appear before the machine is actually configured. Data store moved
+# from settings_web.py's own /tmp default to /var/lib/baseline so it
+# survives a reboot, matching every other persistent-state location
+# this project uses.
+mkdir -p /var/lib/baseline/settings-web
+cp "$SRC/baseline/lib/settings_web.py" /opt/baseline/lib/settings_web.py
+cp "$SRC/baseline/lib/settings_web_gate.py" /opt/baseline/lib/settings_web_gate.py
+cp "$SRC/baseline/bin/baseline-settings-web" /opt/baseline/bin/baseline-settings-web
+cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-settings-web-gate
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -101,6 +113,7 @@ cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot
 cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sensors-collect.service
 cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-sensors-collect.timer
 cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
+cp "$SRC/boot/baseline-settings-web.service" /etc/systemd/system/baseline-settings-web.service
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
@@ -138,16 +151,20 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/proxmox_detect.py /opt/baseline/lib/diagnostics.py /opt/baseline/lib/setup_intent.py \
          /opt/baseline/lib/repair.py /opt/baseline/lib/repair_additive.py /opt/baseline/lib/network.py \
          /opt/baseline/lib/proxmox_vm_metrics.py /opt/baseline/lib/sensors_history.py /opt/baseline/lib/sensors_collect.py \
-         /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate; do
+         /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate \
+         /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
+         /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
-         baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service; do
+         baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
+         baseline-settings-web.service; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
-         /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate; do
+         /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate \
+         /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
@@ -159,11 +176,12 @@ systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service
+systemctl enable baseline-settings-web.service
 
-for u in baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service; do
+for u in baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
-echo "PASS: all five units confirmed enabled."
+echo "PASS: all six units confirmed enabled."
 
 echo
 echo "Done. Nothing on this tty/session was touched or disabled - this"

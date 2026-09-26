@@ -767,11 +767,27 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
     )
 
 
+def resolve_data_path(env: dict) -> Path:
+    """The real deployment's store must survive a reboot
+    (`/var/lib/baseline`, matching every other persistent-state
+    location this project uses) - the `/tmp` default in
+    `build_real_server` exists only for standalone, no-install local
+    evaluation and is deliberately kept as the fallback here so that
+    use case is unaffected."""
+    override = env.get("BASELINE_SETTINGS_WEB_DATA")
+    if override:
+        return Path(override)
+    return Path("/tmp/baseline-settings-web/store.json")
+
+
 def main() -> int:
+    import os
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8100
-    server = build_real_server(bind_port=port)
+    data_path = resolve_data_path(os.environ)
+    server = build_real_server(bind_port=port, data_path=data_path)
     print(f"Baseline settings web UI on http://0.0.0.0:{port}/  (login: root / baseline)")
+    print(f"Data store: {data_path}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

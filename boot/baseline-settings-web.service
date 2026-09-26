@@ -1,0 +1,17 @@
+[Unit]
+Description=Baseline browser settings UI (PRD SS5.16) - LAN-scoped, login-gated
+After=network-online.target baseline-firstboot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/opt/baseline/bin/baseline-settings-web-gate
+ExecStart=/opt/baseline/bin/baseline-settings-web 8100
+Restart=on-failure
+RestartSec=5
+Environment=BASELINE_SETTINGS_WEB_DATA=/var/lib/baseline/settings-web/store.json
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
