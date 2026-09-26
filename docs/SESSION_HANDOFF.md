@@ -397,9 +397,10 @@ file for what changed and why):
    - `-p --output-format stream-json` for real incremental streaming -
      not started.
    - A visible header item showing the live-granted scope (session
-     id/started state, active write grant if any) - the underlying
-     data now exists (`HarnessSession`/`WriteGrant`); no UI reads it
-     yet.
+     id/started state, active write grant if any): **done** (decision
+     record 37, `harness.describe_session`, Chat tab's `#harness_status`
+     line) - not yet verified live on a real boot, no real hardware
+     access this session.
    - The condensed one-line header bar (`BaselineOS | tabs | access
      scope | memory | copy | datetime`) - not started.
    - Real clipboard "copy" via OSC 52 - not started, not verified as
