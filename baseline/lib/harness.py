@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
 import network  # noqa: E402
+import stream_json  # noqa: E402
 
 ENV_FILE = "/etc/baseline/harness.env"
 
@@ -51,11 +52,27 @@ class Runner:
     def run(self, argv, timeout=60):
         raise NotImplementedError
 
+    def stream(self, argv, timeout=60):
+        """Yields decoded stdout lines as they arrive in real time -
+        unlike run(), which blocks until the whole process exits.
+        Only ask_streaming() needs this; run()-only fakes elsewhere in
+        this codebase are unaffected by its default NotImplementedError."""
+        raise NotImplementedError
+
 
 class RealRunner(Runner):
     def run(self, argv, timeout=60):
         return subprocess.run(argv, capture_output=True, text=True,
                                timeout=timeout, env={**os.environ})
+
+    def stream(self, argv, timeout=60):
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, env={**os.environ})
+        try:
+            for line in proc.stdout:
+                yield line
+        finally:
+            proc.wait(timeout=timeout)
 
 
 @dataclass
@@ -211,6 +228,57 @@ def ask(prompt: str, *, runner: Runner = None, session: HarnessSession = None) -
     if proc.returncode != 0:
         return f"[ask] harness exited {proc.returncode}: {proc.stderr.strip()[:400]}"
     return proc.stdout.strip() or "[ask] empty response from harness"
+
+
+def build_stream_argv(full_prompt: str, session: HarnessSession) -> list:
+    """Same session/tools logic as build_ask_argv, plus the two flags
+    real incremental streaming needs. Confirmed directly against the
+    real installed CLI (decision record 41): --output-format
+    stream-json and --verbose are required *together* under -p -
+    omitting --verbose fails fast with "Error: When using --print,
+    --output-format=stream-json requires --verbose", before any
+    request is even sent."""
+    base = build_ask_argv(full_prompt, session)
+    return base[:3] + ["--output-format", "stream-json", "--verbose"] + base[3:]
+
+
+def ask_streaming(prompt: str, on_text, *, runner: Runner = None, session: HarnessSession = None) -> str:
+    """Like ask(), but calls on_text(text) as soon as the assistant's
+    own message event lands in the NDJSON stream, instead of blocking
+    until the whole process exits - real incremental feedback (item 3,
+    docs/design/v0.1-work-queue.md), not simulated token-by-token
+    typing. Returns the final answer text, same contract as ask()."""
+    if not _load_env():
+        message = (f"[ask] no CLAUDE_CODE_OAUTH_TOKEN found ({ENV_FILE} or env). "
+                    "Set it yourself, outside Baseline, then retry.")
+        on_text(message)
+        return message
+
+    runner = runner if runner is not None else RealRunner()
+    session = session if session is not None else _default_session
+    full_prompt = f"{_context_blob()}\nQuestion: {prompt}\n"
+    argv = build_stream_argv(full_prompt, session)
+    final_text = ""
+    try:
+        for line in runner.stream(argv, timeout=60):
+            event = stream_json.parse_event(line)
+            if event is None:
+                continue
+            text = stream_json.extract_assistant_text(event)
+            if text:
+                on_text(text)
+                final_text = text
+            result_text = stream_json.extract_final_result(event)
+            if result_text is not None:
+                final_text = result_text
+    except subprocess.TimeoutExpired:
+        return "[ask] harness timed out after 60s"
+    except FileNotFoundError:
+        return "[ask] claude CLI not found on this host"
+    finally:
+        session.started = True
+
+    return final_text.strip() or "[ask] empty response from harness"
 
 
 if __name__ == "__main__":
