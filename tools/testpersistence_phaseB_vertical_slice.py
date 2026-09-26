@@ -122,6 +122,21 @@ def login(con: console.SerialConsole, user: str, password: str):
     # echo was still on when we sent it) rather than trying to parse it.
     con.send_line("stty -echo")
     con.drain(quiet_for=2, max_wait=10)
+    # Disable bash history before any secret-bearing command is ever sent -
+    # every LUKS passphrase / manifest key this harness writes goes over the
+    # console as a literal command argument (e.g. `printf '%s' '<secret>' >
+    # file`), and an interactive login shell keeps those in its history by
+    # default. This matches the project's own established discipline
+    # elsewhere (keysource.py etc.) of never letting a secret land in shell
+    # history. It does NOT close the separate, narrower window where a
+    # secret is briefly visible in the guest's own process list (`ps aux`)
+    # while e.g. `printf`/`python3` is running with it as an argv element -
+    # closing that fully would need passing secrets via stdin/a file
+    # descriptor instead of argv, not implemented here because the actual
+    # exposure window is a fraction of a second inside a single-operator,
+    # disposable guest that gets deleted after every run.
+    con.send_line("unset HISTFILE; set +o history")
+    con.drain(quiet_for=1, max_wait=5)
     out = run_cmd(con, "true", "LOGIN_CONFIRMED", timeout=20)
     if "LOGIN_CONFIRMED" not in out:
         raise StepFailed(f"login/echo-disable did not reach a usable shell - last output: {out[-500:]!r}")
