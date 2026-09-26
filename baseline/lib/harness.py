@@ -106,6 +106,16 @@ class HarnessSession:
 _default_session = HarnessSession()
 
 
+def new_session() -> HarnessSession:
+    """The HarnessAdapter contract's session factory
+    (harness_adapter.py) - a thin, named wrapper so callers going
+    through harness_registry never need to know this adapter's
+    session type is specifically `HarnessSession`, only that
+    `new_session()` returns *something* to pass back into `ask`/
+    `ask_streaming`/`describe_session`."""
+    return HarnessSession()
+
+
 def grant_write_scope(session: HarnessSession, scope_path: str, *, authorized_by: str, now: float) -> WriteGrant:
     """The only way a `WriteGrant` comes into existence. Refuses a
     scope that isn't a real, existing directory - fail-closed rather

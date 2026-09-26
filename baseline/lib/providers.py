@@ -81,11 +81,21 @@ def check_providers():
 # "implemented" means baseline/lib has a real HarnessAdapter for it -
 # selecting anything else in the TUI shows "not implemented" rather than
 # silently failing or faking a response.
+#
+# "adapter_module" names the importable module implementing the
+# HarnessAdapter contract (see harness_adapter.py) - harness_registry.py
+# is the only thing that reads this field; bin/baseline dispatches
+# through the registry rather than hardcoding a specific adapter
+# module, so selecting a different harness in the Chat tab actually
+# changes which module runs. Must always agree with "implemented":
+# True needs a real adapter_module, False must have none - a harness
+# claiming to be implemented with nothing to import would be a lie the
+# dropdown tells the operator, not a shortcut worth taking.
 HARNESSES = [
-    {"id": "claude", "name": "Claude Code", "implemented": True},
-    {"id": "opencode", "name": "OpenCode", "implemented": False},
-    {"id": "hermes", "name": "Hermes", "implemented": False},
-    {"id": "pi", "name": "Pi", "implemented": False},
-    {"id": "deepseek", "name": "DeepSeek", "implemented": False},
-    {"id": "grokbot", "name": "GrokBot", "implemented": False},
+    {"id": "claude", "name": "Claude Code", "implemented": True, "adapter_module": "harness"},
+    {"id": "opencode", "name": "OpenCode", "implemented": False, "adapter_module": None},
+    {"id": "hermes", "name": "Hermes", "implemented": False, "adapter_module": None},
+    {"id": "pi", "name": "Pi", "implemented": False, "adapter_module": None},
+    {"id": "deepseek", "name": "DeepSeek", "implemented": False, "adapter_module": None},
+    {"id": "grokbot", "name": "GrokBot", "implemented": False, "adapter_module": None},
 ]

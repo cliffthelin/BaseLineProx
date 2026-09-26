@@ -37,7 +37,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Log
 sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
 import network  # noqa: E402
-import harness  # noqa: E402
+import harness_registry  # noqa: E402
 import tether  # noqa: E402
 import providers  # noqa: E402
 import netpref  # noqa: E402
@@ -588,15 +588,35 @@ class BaselineApp(App):
         self.query_one("#console_log", RichLog).write("Baseline console. Type 'help' for commands.")
         self._refresh_harness_status()
 
+    def _session_for(self, harness_id: str):
+        # The App is the one true owner of "which session goes with
+        # which harness selection" - not a hidden module-global inside
+        # one specific adapter. Each adapter's own session type stays
+        # opaque here (harness_adapter.py's contract); switching the
+        # Chat tab's dropdown gets or lazily creates that harness's own
+        # session, and switching back preserves whatever was already
+        # there.
+        adapter = harness_registry.get_adapter(harness_id)
+        if adapter is None:
+            return None
+        self._adapter_sessions = getattr(self, "_adapter_sessions", {})
+        if harness_id not in self._adapter_sessions:
+            self._adapter_sessions[harness_id] = adapter.new_session()
+        return self._adapter_sessions[harness_id]
+
     def _refresh_harness_status(self) -> None:
         # The one place session/access-scope state gets read into the
-        # UI - harness._default_session is process-global, one session
-        # per Baseline run, so this is called after every action that
+        # UI - dispatched through harness_registry rather than a
+        # hardcoded module, so this is called after every action that
         # could change it (mount, ask, grant/revoke), not just once at
         # startup. Updates both the Chat-tab-local line and the
         # app-wide status bar - related but different audiences, not a
         # duplicate to collapse into one.
-        desc = harness.describe_session(harness._default_session)
+        adapter = harness_registry.get_adapter(self.current_harness)
+        if adapter is None:
+            desc = "no harness adapter selected"
+        else:
+            desc = adapter.describe_session(self._session_for(self.current_harness))
         try:
             self.query_one("#harness_status", Static).update(desc)
         except NoMatches:
@@ -808,8 +828,13 @@ class BaselineApp(App):
 
     @work(thread=True, exit_on_error=False)
     def run_console_ask(self, question: str) -> None:
-        answer = harness.ask(question)
-        self.call_from_thread(self.query_one("#console_log", RichLog).write, answer)
+        adapter = harness_registry.get_adapter(self.current_harness)
+        console = self.query_one("#console_log", RichLog)
+        if adapter is None:
+            self.call_from_thread(console.write, "[red]No adapter for the currently selected harness.[/red]")
+            return
+        answer = adapter.ask(question, session=self._session_for(self.current_harness))
+        self.call_from_thread(console.write, answer)
         self.call_from_thread(self._refresh_harness_status)
 
     def run_console_grant_write(self, path: str) -> None:
@@ -818,12 +843,16 @@ class BaselineApp(App):
         # long-running operation. The operator names the boundary
         # (decision record 32); nothing here infers or guesses one.
         console = self.query_one("#console_log", RichLog)
+        adapter = harness_registry.get_adapter(self.current_harness)
+        if not harness_registry.supports_write_grant(adapter):
+            console.write(f"[red]The current harness ({self.current_harness}) doesn't support a write grant.[/red]")
+            return
         if not path:
             console.write("[red]usage: grant write <directory>[/red]")
             return
         try:
-            grant = harness.grant_write_scope(
-                harness._default_session, path,
+            grant = adapter.grant_write_scope(
+                self._session_for(self.current_harness), path,
                 authorized_by="operator via console", now=time.time(),
             )
         except ValueError as exc:
@@ -837,8 +866,13 @@ class BaselineApp(App):
 
     def run_console_revoke_write(self) -> None:
         console = self.query_one("#console_log", RichLog)
-        had_grant = harness._default_session.write_grant is not None
-        harness.revoke_write_scope(harness._default_session)
+        adapter = harness_registry.get_adapter(self.current_harness)
+        if not harness_registry.supports_write_grant(adapter):
+            console.write(f"[red]The current harness ({self.current_harness}) doesn't support a write grant.[/red]")
+            return
+        session = self._session_for(self.current_harness)
+        had_grant = session.write_grant is not None
+        adapter.revoke_write_scope(session)
         if had_grant:
             console.write("[green]Write access revoked for this session.[/green]")
         else:
@@ -1101,19 +1135,30 @@ class BaselineApp(App):
     def ask_harness(self, question: str) -> None:
         # ask_streaming (decision record 41) surfaces the answer as
         # soon as the assistant's own message event lands in the
-        # NDJSON stream, rather than blocking until the whole claude
+        # NDJSON stream, rather than blocking until the whole harness
         # process exits (rate-limit/summary bookkeeping events still
         # follow it). on_text fires zero times on an error path
         # (missing credentials, timeout, CLI not found) - printed
         # tracks that so the return value still gets shown exactly
-        # once either way, never twice.
+        # once either way, never twice. Dispatched through
+        # harness_registry (item 5, docs/design/v0.1-work-queue.md) -
+        # _handle_chat_input already refuses to call this unless the
+        # selected harness is "implemented", so adapter is never None
+        # in practice, but this stays defensive rather than assuming
+        # that guard can never drift out of sync.
+        adapter = harness_registry.get_adapter(self.current_harness)
+        if adapter is None:
+            self.call_from_thread(self._append_chat_line, f"[no adapter for {self.current_harness!r}]")
+            self.call_from_thread(self._finish_chat_turn, "")
+            return
+
         printed = []
 
         def on_text(text: str) -> None:
             printed.append(text)
             self.call_from_thread(self._append_chat_line, text)
 
-        answer = harness.ask_streaming(question, on_text)
+        answer = adapter.ask_streaming(question, on_text, session=self._session_for(self.current_harness))
         if not printed:
             self.call_from_thread(self._append_chat_line, answer)
         self.call_from_thread(self._finish_chat_turn, answer)
