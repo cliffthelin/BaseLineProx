@@ -25,7 +25,7 @@ overwritten in place - it's a pointer, not a record.
 | [hardware](hardware/001.md) | hardware/001.md | 7 | 2026-09-20 | Display fact added, then reverted (caused console garble) |
 | [network](network/001.md) | network/001.md | 6 | 2026-09-20 | ConnectionModal: bridged identity, alias, enable/disable, lifeline position |
 | [ui](ui/001.md) | ui/001.md | 11 | 2026-09-20 | Down arrow as sole navigation unreliable on bare console (Shift+Tab fallback) |
-| [chat](chat/001.md) | chat/001.md | 10 | 2026-09-26 | Real HarnessAdapter contract + registry, replacing hardcoded dispatch |
+| [chat](chat/001.md) | chat/001.md | 11 | 2026-09-26 | OpenCode as the second HarnessAdapter, normalized through real ACP |
 | [proxmox](proxmox/001.md) | proxmox/001.md | 4 | 2026-09-26 | docker_provision.py: compatibility beyond LXC, real-hardware verification still blocked |
 
 Categories are named after the part of the system a change touches, not

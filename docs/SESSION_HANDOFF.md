@@ -462,16 +462,18 @@ file for what changed and why):
      to phone... still needs the file and script exchanges") confirms
      this is still the right v0.2 scoping, not superseded by anything
      built since.
-   - Only the `claude` harness is implemented; OpenCode/Hermes/Pi/
-     DeepSeek/GrokBot remain listed-but-honestly-marked-unimplemented in
-     the Chat tab's harness selector. **The dispatch layer is now real**
-     (decision record 43, `harness_adapter.py`/`harness_registry.py`) -
-     adding any of these five is now a matter of writing one conforming
-     module and setting its `adapter_module` field, not rewriting
-     `bin/baseline`. Which one (if any) to actually build is still an
-     open question for the user - none of their CLIs have been checked
-     for availability the way `claude` turned out to be in this
-     environment.
+   - **OpenCode is now implemented** (decision record 44) - the second
+     real `HarnessAdapter`, normalized through real ACP (Agent Client
+     Protocol, an open standard OpenCode's own `opencode acp` speaks
+     natively). A real, live round trip was confirmed against the
+     actual binary, including a real discrepancy caught between ACP's
+     own docs and its actual wire bytes. Has no write-grant support -
+     honestly absent, not guessed at, since ACP's own permission
+     mechanism hasn't been checked against decision record 32's
+     specific shape. Hermes/Pi/DeepSeek/GrokBot remain listed-but-
+     unimplemented; the dispatch layer (decision record 43) makes any
+     of them a drop-in whenever the user names one and its CLI turns
+     out to be checkable the way `claude`/`opencode` both were.
 7. **Real-hardware verification is blocked for three provisioning
    modules; the chat harness half is NOT blocked and has now been
    checked for real.** `vm_provision.py`/`pct_provision.py`/
