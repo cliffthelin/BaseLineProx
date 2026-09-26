@@ -1,12 +1,16 @@
 """Unit tests for harness.py's real incremental streaming
-(ask_streaming, decision record 41): text arrives as soon as the
+(ask_streaming, decision records 41/44): normalized events
+(harness_events.AgentMessageChunk/TurnEnd) arrive as soon as the
 assistant's own message event lands in the NDJSON stream, not only
-after the whole process exits. The fake streaming runner yields the
+after the whole process exits. on_event never receives Claude's raw
+NDJSON shape - that's the HarnessAdapter contract's normalization
+boundary (harness_adapter.py). The fake streaming runner yields the
 same real, previously-captured NDJSON lines stream_json.py's own tests
 use - not a guessed shape."""
 import pytest
 
 import harness
+import harness_events as he
 
 
 class FakeStreamingRunner(harness.Runner):
@@ -46,11 +50,11 @@ def test_build_stream_argv_continues_a_started_session_like_build_ask_argv():
                      "-c", "--tools", ""]
 
 
-def test_ask_streaming_calls_on_text_as_the_assistant_event_arrives():
+def test_ask_streaming_emits_a_normalized_chunk_then_a_normalized_turn_end():
     runner = FakeStreamingRunner([REAL_ASSISTANT_LINE, REAL_RESULT_LINE])
     seen = []
     result = harness.ask_streaming("hi", seen.append, runner=runner, session=harness.HarnessSession())
-    assert seen == ["hello world"]
+    assert seen == [he.AgentMessageChunk(text="hello world"), he.TurnEnd(text="hello world", is_error=False)]
     assert result == "hello world"
 
 
@@ -58,18 +62,18 @@ def test_ask_streaming_skips_malformed_lines_without_crashing():
     runner = FakeStreamingRunner(["not json at all", REAL_ASSISTANT_LINE, REAL_RESULT_LINE])
     seen = []
     result = harness.ask_streaming("hi", seen.append, runner=runner, session=harness.HarnessSession())
-    assert seen == ["hello world"]
+    assert seen == [he.AgentMessageChunk(text="hello world"), he.TurnEnd(text="hello world", is_error=False)]
     assert result == "hello world"
 
 
 def test_ask_streaming_marks_session_started():
     runner = FakeStreamingRunner([REAL_RESULT_LINE])
     session = harness.HarnessSession(session_id="fixed-id")
-    harness.ask_streaming("hi", lambda t: None, runner=runner, session=session)
+    harness.ask_streaming("hi", lambda e: None, runner=runner, session=session)
     assert session.started is True
 
 
-def test_ask_streaming_reports_no_credentials_without_calling_the_runner(monkeypatch):
+def test_ask_streaming_reports_no_credentials_as_a_normalized_error_turn_end(monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setattr(harness, "ENV_FILE", "/nonexistent/harness.env")
     runner = FakeStreamingRunner([])
@@ -77,3 +81,6 @@ def test_ask_streaming_reports_no_credentials_without_calling_the_runner(monkeyp
     result = harness.ask_streaming("hi", seen.append, runner=runner)
     assert "no CLAUDE_CODE_OAUTH_TOKEN" in result
     assert runner.calls == []
+    assert len(seen) == 1
+    assert isinstance(seen[0], he.TurnEnd)
+    assert seen[0].is_error is True

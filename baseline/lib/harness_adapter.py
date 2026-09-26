@@ -18,7 +18,17 @@ A conforming module exposes:
   Opaque to every caller outside the adapter itself: never inspected,
   only ever passed back into `ask`/`ask_streaming`/`describe_session`.
 - `ask(prompt: str, *, session=None, runner=None) -> str`
-- `ask_streaming(prompt: str, on_text, *, session=None, runner=None) -> str`
+- `ask_streaming(prompt: str, on_event, *, session=None, runner=None) -> str` -
+  `on_event` receives instances of `harness_events.AgentMessageChunk`/
+  `TurnEnd` (see harness_events.py), never a bare string and never an
+  adapter-specific event shape. This is the actual normalization
+  boundary ("channeled through a common layer that normalizes harness
+  IO," per the request that created this file): whatever wire format
+  a harness's own CLI speaks - Claude Code's `--output-format
+  stream-json` NDJSON, OpenCode's real Agent Client Protocol (ACP)
+  `session/update` notifications, or anything else - gets translated
+  into these same two event types inside the adapter, before
+  bin/baseline ever sees it.
 - `describe_session(session) -> str` - a short, human-readable status
   line (memory/access-scope state) shown in the Chat tab's status bar.
 

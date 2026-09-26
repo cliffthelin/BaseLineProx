@@ -6,6 +6,7 @@ REAL, captured output of a real `claude -p "Say exactly: hello world"
 directly against the installed CLI during this work (decision record
 41) - not a guessed shape, the actual bytes the real binary emitted.
 """
+import harness_events as he
 import stream_json as sj
 
 # Real captured line: the assistant's own message event.
@@ -89,3 +90,32 @@ def test_is_error_result_true_when_is_error_is_true():
 def test_is_error_result_false_for_non_result_events():
     event = sj.parse_event(REAL_ASSISTANT_LINE)
     assert sj.is_error_result(event) is False
+
+
+# -- to_normalized(): the bridge into Baseline's ACP-inspired IR (harness_events.py) --
+
+def test_to_normalized_maps_a_real_assistant_event_to_agent_message_chunk():
+    event = sj.parse_event(REAL_ASSISTANT_LINE)
+    normalized = sj.to_normalized(event)
+    assert normalized == he.AgentMessageChunk(text="hello world")
+
+
+def test_to_normalized_maps_a_real_result_event_to_turn_end():
+    event = sj.parse_event(REAL_RESULT_LINE)
+    normalized = sj.to_normalized(event)
+    assert normalized == he.TurnEnd(text="hello world", is_error=False)
+
+
+def test_to_normalized_maps_an_error_result_event_to_turn_end_with_is_error_true():
+    event = {"type": "result", "is_error": True, "result": "boom"}
+    normalized = sj.to_normalized(event)
+    assert normalized == he.TurnEnd(text="boom", is_error=True)
+
+
+def test_to_normalized_is_none_for_bookkeeping_events():
+    event = sj.parse_event(REAL_RATE_LIMIT_LINE)
+    assert sj.to_normalized(event) is None
+
+
+def test_to_normalized_is_none_for_none():
+    assert sj.to_normalized(None) is None

@@ -36,6 +36,7 @@ sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
 import network  # noqa: E402
 import stream_json  # noqa: E402
+import harness_events  # noqa: E402
 
 ENV_FILE = "/etc/baseline/harness.env"
 
@@ -252,16 +253,19 @@ def build_stream_argv(full_prompt: str, session: HarnessSession) -> list:
     return base[:3] + ["--output-format", "stream-json", "--verbose"] + base[3:]
 
 
-def ask_streaming(prompt: str, on_text, *, runner: Runner = None, session: HarnessSession = None) -> str:
-    """Like ask(), but calls on_text(text) as soon as the assistant's
+def ask_streaming(prompt: str, on_event, *, runner: Runner = None, session: HarnessSession = None) -> str:
+    """Like ask(), but calls on_event(...) as soon as the assistant's
     own message event lands in the NDJSON stream, instead of blocking
     until the whole process exits - real incremental feedback (item 3,
     docs/design/v0.1-work-queue.md), not simulated token-by-token
-    typing. Returns the final answer text, same contract as ask()."""
+    typing. `on_event` receives harness_events.AgentMessageChunk/
+    TurnEnd instances (the HarnessAdapter contract's normalization
+    boundary - see harness_adapter.py), never Claude's own raw NDJSON
+    shape. Returns the final answer text, same contract as ask()."""
     if not _load_env():
         message = (f"[ask] no CLAUDE_CODE_OAUTH_TOKEN found ({ENV_FILE} or env). "
                     "Set it yourself, outside Baseline, then retry.")
-        on_text(message)
+        on_event(harness_events.TurnEnd(text=message, is_error=True))
         return message
 
     runner = runner if runner is not None else RealRunner()
@@ -271,16 +275,14 @@ def ask_streaming(prompt: str, on_text, *, runner: Runner = None, session: Harne
     final_text = ""
     try:
         for line in runner.stream(argv, timeout=60):
-            event = stream_json.parse_event(line)
-            if event is None:
+            raw_event = stream_json.parse_event(line)
+            if raw_event is None:
                 continue
-            text = stream_json.extract_assistant_text(event)
-            if text:
-                on_text(text)
-                final_text = text
-            result_text = stream_json.extract_final_result(event)
-            if result_text is not None:
-                final_text = result_text
+            normalized = stream_json.to_normalized(raw_event)
+            if normalized is None:
+                continue
+            on_event(normalized)
+            final_text = normalized.text
     except subprocess.TimeoutExpired:
         return "[ask] harness timed out after 60s"
     except FileNotFoundError:

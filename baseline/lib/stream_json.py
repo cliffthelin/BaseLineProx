@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 
+import harness_events
+
 
 def parse_event(line: str):
     """One NDJSON line -> its parsed event dict, or None for a blank
@@ -50,3 +52,19 @@ def extract_final_result(event):
 
 def is_error_result(event) -> bool:
     return bool(event) and event.get("type") == "result" and event.get("is_error") is True
+
+
+def to_normalized(event):
+    """Bridge into Baseline's ACP-inspired internal event schema
+    (harness_events.py) - the one place Claude's own NDJSON shape gets
+    translated into the same normalized events any other conforming
+    adapter (e.g. a real ACP-speaking one) also produces. Returns None
+    for bookkeeping events (rate_limit_event, post_turn_summary, the
+    system/init event, etc.) that carry nothing the UI needs."""
+    text = extract_assistant_text(event)
+    if text is not None:
+        return harness_events.AgentMessageChunk(text=text)
+    result_text = extract_final_result(event)
+    if result_text is not None:
+        return harness_events.TurnEnd(text=result_text, is_error=is_error_result(event))
+    return None

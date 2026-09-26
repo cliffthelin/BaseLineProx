@@ -93,7 +93,7 @@ def check_providers():
 # dropdown tells the operator, not a shortcut worth taking.
 HARNESSES = [
     {"id": "claude", "name": "Claude Code", "implemented": True, "adapter_module": "harness"},
-    {"id": "opencode", "name": "OpenCode", "implemented": False, "adapter_module": None},
+    {"id": "opencode", "name": "OpenCode", "implemented": True, "adapter_module": "opencode_adapter"},
     {"id": "hermes", "name": "Hermes", "implemented": False, "adapter_module": None},
     {"id": "pi", "name": "Pi", "implemented": False, "adapter_module": None},
     {"id": "deepseek", "name": "DeepSeek", "implemented": False, "adapter_module": None},

@@ -38,6 +38,7 @@ sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
 import network  # noqa: E402
 import harness_registry  # noqa: E402
+import harness_events  # noqa: E402
 import tether  # noqa: E402
 import providers  # noqa: E402
 import netpref  # noqa: E402
@@ -1133,19 +1134,26 @@ class BaselineApp(App):
 
     @work(thread=True, exit_on_error=False)
     def ask_harness(self, question: str) -> None:
-        # ask_streaming (decision record 41) surfaces the answer as
-        # soon as the assistant's own message event lands in the
-        # NDJSON stream, rather than blocking until the whole harness
-        # process exits (rate-limit/summary bookkeeping events still
-        # follow it). on_text fires zero times on an error path
-        # (missing credentials, timeout, CLI not found) - printed
-        # tracks that so the return value still gets shown exactly
-        # once either way, never twice. Dispatched through
-        # harness_registry (item 5, docs/design/v0.1-work-queue.md) -
-        # _handle_chat_input already refuses to call this unless the
-        # selected harness is "implemented", so adapter is never None
-        # in practice, but this stays defensive rather than assuming
-        # that guard can never drift out of sync.
+        # ask_streaming (decision records 41/44) surfaces the answer as
+        # soon as the assistant's own message event lands, rather than
+        # blocking until the whole harness process exits. on_event
+        # receives normalized harness_events.AgentMessageChunk/TurnEnd
+        # instances (the HarnessAdapter contract's normalization
+        # boundary, harness_adapter.py) - never an adapter-specific
+        # shape. A successful turn today fires one AgentMessageChunk
+        # with the full text, then one non-error TurnEnd carrying the
+        # same text (Claude's own event without
+        # --include-partial-messages) - only the chunk is printed in
+        # that case, so the answer isn't shown twice; an error TurnEnd
+        # (no credentials, timeout, CLI missing) is printed since no
+        # chunk ever fired for it. `printed` tracks whether anything
+        # was shown at all, as a last-resort fallback. Dispatched
+        # through harness_registry (item 5,
+        # docs/design/v0.1-work-queue.md) - _handle_chat_input already
+        # refuses to call this unless the selected harness is
+        # "implemented", so adapter is never None in practice, but this
+        # stays defensive rather than assuming that guard can never
+        # drift out of sync.
         adapter = harness_registry.get_adapter(self.current_harness)
         if adapter is None:
             self.call_from_thread(self._append_chat_line, f"[no adapter for {self.current_harness!r}]")
@@ -1154,11 +1162,14 @@ class BaselineApp(App):
 
         printed = []
 
-        def on_text(text: str) -> None:
-            printed.append(text)
-            self.call_from_thread(self._append_chat_line, text)
+        def on_event(event) -> None:
+            printed.append(event)
+            if isinstance(event, harness_events.AgentMessageChunk):
+                self.call_from_thread(self._append_chat_line, event.text)
+            elif isinstance(event, harness_events.TurnEnd) and event.is_error:
+                self.call_from_thread(self._append_chat_line, event.text)
 
-        answer = adapter.ask_streaming(question, on_text, session=self._session_for(self.current_harness))
+        answer = adapter.ask_streaming(question, on_event, session=self._session_for(self.current_harness))
         if not printed:
             self.call_from_thread(self._append_chat_line, answer)
         self.call_from_thread(self._finish_chat_turn, answer)
