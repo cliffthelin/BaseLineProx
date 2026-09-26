@@ -46,6 +46,7 @@ import proxmox_vm_metrics  # noqa: E402
 import repair  # noqa: E402
 import sensors_history  # noqa: E402
 import clipboard_osc52  # noqa: E402
+import status_bar  # noqa: E402
 
 SNAPSHOT_PATH = Path("/var/lib/baseline/hardware_snapshot.json")
 UI_ERROR_LOG = Path("/var/log/baseline/ui_errors.log")
@@ -487,6 +488,7 @@ class BaselineApp(App):
     #sensors_table, #vms_table { height: 1fr; border: solid #0087af; }
     #sensors_sparkline, #vms_sparkline { height: 3; margin: 1 0; }
     .sparkline_label { height: 1; margin-top: 1; color: #87afd7; }
+    #status_bar { dock: top; height: 1; background: #005f87; color: #ffffff; padding: 0 1; }
     DataTable > .datatable--odd-row {
         background: #1c1c1c;
         color: #e4e4e4;
@@ -537,6 +539,7 @@ class BaselineApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield Static("", id="status_bar")
         with TabbedContent(initial="hardware_tab"):
             with TabPane("Hardware", id="hardware_tab"):
                 yield DataTable(id="hw_table", cursor_type="row")
@@ -586,13 +589,20 @@ class BaselineApp(App):
         self._refresh_harness_status()
 
     def _refresh_harness_status(self) -> None:
-        # The one place the Chat tab's header reads HarnessSession/
-        # WriteGrant state - grant/revoke happen from the Console tab
-        # (harness._default_session is process-global, one session per
-        # Baseline run), so this is called after every action that
-        # could change it, not just once at startup.
+        # The one place session/access-scope state gets read into the
+        # UI - harness._default_session is process-global, one session
+        # per Baseline run, so this is called after every action that
+        # could change it (mount, ask, grant/revoke), not just once at
+        # startup. Updates both the Chat-tab-local line and the
+        # app-wide status bar - related but different audiences, not a
+        # duplicate to collapse into one.
+        desc = harness.describe_session(harness._default_session)
         try:
-            self.query_one("#harness_status", Static).update(harness.describe_session(harness._default_session))
+            self.query_one("#harness_status", Static).update(desc)
+        except NoMatches:
+            pass
+        try:
+            self.query_one("#status_bar", Static).update(status_bar.format_status_bar(desc))
         except NoMatches:
             pass
 
