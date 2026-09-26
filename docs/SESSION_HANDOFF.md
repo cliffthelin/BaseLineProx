@@ -1,5 +1,47 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-26 status refresh - V0.1 remaining-work audit; starting V0.2
+
+**Requested via chat:** "Note it in unfinished work but I want to
+focus remaining 0.1 work and start onto 0.2 the revisions of 0.1 as
+needed."
+
+**What changed:** the "Not done" list below was six days stale
+relative to this session's own work (Track A1-A5 real-hardware
+Proxmox/persistence/kiosk/dashboard, Track B1-B3 GUI investigation,
+harness session/write-grant decision records 31-33, and Track A6's
+provisioning modules 34-36) and relative to Track A/B's still-earlier
+completion in this same conversation. Re-audited item by item, in
+place, rather than left to mislead the next session:
+
+- **Done since the original note:** chat-tab multi-turn memory
+  (record 31), a scoped/session-only write-access grant (records
+  32-33), the real storage migration this project actually needed
+  (Track A1/A2's two real NVMe drives), and the static-IP first-boot
+  repair path (already solved by `repair.py`'s `reset_interface_to_dhcp`,
+  proven live in Track A1 - the old note just predated knowing that).
+- **Still genuinely open:** chat-tab streaming, the visible access-
+  scope header, the condensed header bar, OSC 52 clipboard copy, the
+  80x24 layout floor, additional harness adapters, and - new this
+  session - real-hardware verification for `vm_provision.py`/
+  `pct_provision.py`/`docker_provision.py` (blocked: no reachable
+  Proxmox host, no Docker daemon installed in this dev environment).
+- **Flagged as unclear rather than guessed at:** the old "LVM-reclaim
+  manual fix" note names nothing specific enough to act on; may
+  already be subsumed by Track A1/A2's real LVM work, may not be -
+  ask directly before spending effort on it.
+- **Confirmed still correctly scoped as V0.2, unchanged:** the phone-
+  tether file/script exchange channel - the user's own current
+  framing of it matches this doc's original 2026-09-20 scoping
+  exactly.
+
+**What this means going forward, per the user's own framing:** finish
+what's genuinely still open under V0.1 (the list above) before
+starting new V0.2-scoped work, and treat V0.2 as including *revisions
+to V0.1 itself* as they're found to be needed - not only new features
+layered on top. See the "Not done" section below for the current,
+accurate list this applies to.
+
 ## 2026-09-24 session handoff - TestPersistence PRD + privacy-scan scope correction
 
 **Repository state**
@@ -337,51 +379,87 @@ list, before assuming SSH will connect.
 
 ## Not done - open items for the new Project
 
-1. **Chat tab quality** - the biggest open item, discussed at length but
-   **no code written yet**. Current state: `harness.ask()` is a single
-   stateless `claude -p <prompt> --tools ""` call per message - no
-   memory, no streaming, full hardware/network re-scan before every
-   message. The agreed direction (confirmed against the real installed
-   `claude --help`, flags genuinely exist):
-   - `--session-id <uuid>` + `-c/--continue` for real multi-turn memory
-   - `-p --output-format stream-json` for real incremental streaming
-   - `--allowedTools`/`--disallowedTools` as a real, named, auditable
-     access-scope control, exposed as a visible/toggleable header item
-     rather than the current hardcoded empty string
-   - Explicitly **rejected**: embedding the actual interactive `claude`
-     CLI in a raw PTY widget (real effort, reintroduces a "how do I get
-     keyboard focus back" problem the chosen approach avoids entirely
-     since Baseline stays the only terminal renderer).
-   - Also wanted: a condensed one-line header bar (`BaselineOS | tabs |
-     access scope | memory | copy | datetime`) with the header/footer
-     frozen (already true today via Textual's normal dock behavior,
-     just needs the new content added), and a real clipboard "copy"
-     action (OSC 52 escape sequence is the standard mechanism for a TUI
-     to reach the *local* clipboard of whatever's attached - not yet
-     verified as working over this specific console/SSH path).
+**Re-audited 2026-09-26** (this section was stale relative to the
+Track A/B and harness-session work done since 2026-09-24; edited in
+place against current reality rather than left to mislead the next
+session - see the 2026-09-26 status-refresh entry near the top of this
+file for what changed and why):
+
+1. **Chat tab quality** - partially done. `--session-id <uuid>` +
+   `-c/--continue` for real multi-turn memory: **done** (decision
+   record 31, `harness.HarnessSession`/`build_ask_argv`). A named,
+   auditable, scoped write-access control: **done, but narrower than
+   originally proposed** - not a general `--allowedTools`/
+   `--disallowedTools` toggle, but an explicit, operator-initiated,
+   session-only `WriteGrant` (decision records 32/33; `grant write
+   <directory>`/`revoke write` console commands). Genuinely still
+   open:
+   - `-p --output-format stream-json` for real incremental streaming -
+     not started.
+   - A visible header item showing the live-granted scope (session
+     id/started state, active write grant if any) - the underlying
+     data now exists (`HarnessSession`/`WriteGrant`); no UI reads it
+     yet.
+   - The condensed one-line header bar (`BaselineOS | tabs | access
+     scope | memory | copy | datetime`) - not started.
+   - Real clipboard "copy" via OSC 52 - not started, not verified as
+     working over this console/SSH path.
+   - Embedding the actual interactive `claude` CLI in a raw PTY widget
+     remains explicitly **rejected**, unchanged from the original
+     reasoning.
    - See `docs/changelog/chat/001.md` for the full decision record.
-2. **Screen-size-appropriate layout** - verified live that the console
-   is already running best-case (i915 KMS, native 1366x768 panel,
-   170x48 character grid - not a degraded fallback), but the header/
-   toggle-bar design should still target an 80x24 floor for hardware
-   where KMS isn't available. Not designed yet.
-3. **Storage migration** - brand new ask, not started: a 512GB NVMe
-   (tested at 1.2GB/s on the user's main machine) as a candidate
-   replacement for the current persistent storage, pending a real speed
-   test from the laptop's own USB-C port (Thunderbolt support assumed,
-   not confirmed).
-4. Older, still-open items from earlier in the project (carried
-   forward, not reconfirmed this session):
-   - Provider "configuration forms" deliberately still not built
-     (credential handling stays out of Baseline's own hands by design -
-     see `baseline/lib/harness.py`'s docstring for the reasoning).
-   - Static-IP and LVM-reclaim manual fixes documented but not folded
-     into `provision.sh`.
+2. **Screen-size-appropriate layout** - still not designed. Unchanged
+   from the original note: the console runs best-case today (170x48),
+   but the header/toggle-bar design should still target an 80x24 floor
+   for hardware where KMS isn't available.
+3. **Storage migration** - **superseded, not open.** This 2026-09-20
+   note (a candidate 512GB NVMe, pending a speed test) is the same
+   role Track A1/A2 (2026-09-26) filled for real: `/dev/sdd` (Proxmox
+   substrate) and `/dev/sdb` (shared LVM-thin persistence backend) are
+   both real 512GB NVMe drives, installed, validated
+   (`physical_device_safety.py`), and verified live. No further
+   speed-test/migration action is needed.
+4. **Static-IP first-boot repair** - **done, not open.** The 2026-09-20
+   note ("documented but not folded into `provision.sh`") predates the
+   actual architectural resolution: Milestone 1's Gates A-F (decision
+   records 20-27) deliberately did **not** fix this in `provision.sh`
+   at all - `docs/design/decision-records/11-repair-branch-comparison.md`
+   found `repair.py`'s `reset_interface_to_dhcp()` already solved this
+   fault class as a first-boot discovery+repair action, integrated into
+   `firstboot_statemachine.py` and proven live on real hardware in
+   Track A1 (2026-09-26). Nothing further is needed here.
+5. **"LVM-reclaim manual fix" note** - **unclear, likely stale.** No
+   other document in this repo names what specific reclaim step this
+   2026-09-20 note referred to. Track A1/A2 (2026-09-26) did extensive
+   real LVM work on both drives (deactivating a stale duplicate `pve`
+   VG by exact UUID, wiping signatures, building an LVM-thin pool) -
+   this note may already be subsumed by that, or may refer to
+   something else entirely. Flagged rather than guessed at; ask the
+   user directly if this still means something specific before
+   spending effort on it.
+6. Older, still-open items, carried forward unchanged:
+   - Provider "configuration forms" deliberately still not built - by
+     design, not an oversight (credential handling stays out of
+     Baseline's own hands - see `baseline/lib/harness.py`'s docstring).
    - File-transfer/shared-folder capability for the phone-tether rescue
-     channel (scoped as v0.2, not started).
+     channel - **still scoped as v0.2, still not started.** The user's
+     own framing in this project's 2026-09-26 conversation ("the tether
+     to phone... still needs the file and script exchanges") confirms
+     this is still the right v0.2 scoping, not superseded by anything
+     built since.
    - Only the `claude` harness is implemented; OpenCode/Hermes/Pi/
      DeepSeek/GrokBot remain listed-but-honestly-marked-unimplemented in
      the Chat tab's harness selector.
+7. **New as of 2026-09-26: real-hardware verification is blocked for
+   three new modules.** `vm_provision.py`, `pct_provision.py`, and
+   `docker_provision.py` (decision records 34-36, Track A6) are all
+   unit-tested against fakes only. Checked directly this session: no
+   `qm`/`pct`/`pvesh` and no reachable Proxmox host at all from this
+   dev environment, and Docker's daemon isn't installed here (client
+   only, no `docker.service` unit). Needs either real Proxmox host
+   access from a session that can reach it, or explicit permission to
+   install/start a Docker daemon here for that module's own
+   verification.
 
 ## Where to look for more detail
 
