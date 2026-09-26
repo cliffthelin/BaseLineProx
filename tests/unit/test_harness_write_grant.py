@@ -88,9 +88,15 @@ def test_build_ask_argv_with_no_grant_stays_fully_tool_disabled():
 
 
 def test_build_ask_argv_with_an_active_grant_scopes_write_instead_of_disabling_everything(tmp_path):
+    # Edit(...) + --permission-mode acceptEdits, not Write(...) alone -
+    # verified against the real installed claude CLI (decision record
+    # 40): Write(...) is refused outright as an unmatched rule name,
+    # and --allowedTools alone (without acceptEdits) still refuses the
+    # edit non-interactively even when the rule matches.
     session = harness.HarnessSession(session_id="fixed-id")
     harness.grant_write_scope(session, str(tmp_path), authorized_by="operator", now=1.0)
     argv = harness.build_ask_argv("hello", session)
     assert argv == ["claude", "-p", "hello", "--session-id", "fixed-id",
-                     "--allowedTools", f"Write({tmp_path.resolve()}/**)"]
+                     "--allowedTools", f"Edit({tmp_path.resolve()}/**)",
+                     "--permission-mode", "acceptEdits"]
     assert "--tools" not in argv

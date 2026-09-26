@@ -140,13 +140,20 @@ def build_ask_argv(full_prompt: str, session: HarnessSession) -> list:
     argv = ["claude", "-p", full_prompt]
     argv += ["--session-id", session.session_id] if not session.started else ["-c"]
     if session.write_grant is not None:
-        # NOT yet verified against the real Claude Code CLI's actual
-        # --allowedTools pattern syntax for a path-scoped Write tool -
-        # see decision record 32's "explicitly not decided here". Pin
-        # this exact shape in tests so a real-CLI verification pass
-        # has one concrete thing to confirm or correct, rather than
-        # leaving the mapping unspecified.
-        argv += ["--allowedTools", f"Write({session.write_grant.scope_path}/**)"]
+        # Verified against the real installed claude CLI (decision
+        # record 40), against the original guess this replaced: (1)
+        # "Write(...)" is not a valid permission rule at all - the CLI
+        # itself refuses it ("only Edit(path) rules are [matched]");
+        # the correct tool name for file-editing scope is Edit. (2)
+        # --allowedTools alone is not sufficient non-interactively -
+        # --permission-mode acceptEdits is also required, or the edit
+        # is refused even though the rule matches. (3) With both
+        # present, a real adversarial prompt asking for a write
+        # outside the granted scope_path was still correctly refused -
+        # the glob-scoped rule genuinely holds, not just in the
+        # unmatched-path-rejected case but under a real edit attempt.
+        argv += ["--allowedTools", f"Edit({session.write_grant.scope_path}/**)",
+                 "--permission-mode", "acceptEdits"]
     else:
         argv += ["--tools", ""]
     return argv
