@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Baseline host-sensor collection every 30s (Track A5 dashboard)
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

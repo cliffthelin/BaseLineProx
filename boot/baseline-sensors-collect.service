@@ -1,0 +1,7 @@
+[Unit]
+Description=Baseline host-sensor collection cycle (Track A5 dashboard)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-sensors-collect
+RemainAfterExit=no

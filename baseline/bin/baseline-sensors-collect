@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for one host-sensor collection cycle
+(Track A5's sensors + per-VM dashboard). Invoked every 30s by
+`baseline-sensors-collect.timer` - deliberately separate from `bin/baseline`
+(the Textual TUI), matching this project's existing timer-invoked
+entry-point pattern (`baseline-repair-rollback`). See
+`lib/sensors_collect.py`'s module docstring for what one cycle does.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import sensors_collect  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(sensors_collect.main())

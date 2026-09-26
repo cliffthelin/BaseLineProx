@@ -32,7 +32,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.markup import escape as escape_markup
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Log, RadioButton, RadioSet, RichLog, Select, Static, Switch, Tabs, TabbedContent, TabPane
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Log, RadioButton, RadioSet, RichLog, Select, Sparkline, Static, Switch, Tabs, TabbedContent, TabPane
 
 sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
@@ -41,10 +41,22 @@ import harness  # noqa: E402
 import tether  # noqa: E402
 import providers  # noqa: E402
 import netpref  # noqa: E402
+import diagnostics  # noqa: E402
+import proxmox_vm_metrics  # noqa: E402
+import repair  # noqa: E402
+import sensors_history  # noqa: E402
 
 SNAPSHOT_PATH = Path("/var/lib/baseline/hardware_snapshot.json")
 UI_ERROR_LOG = Path("/var/log/baseline/ui_errors.log")
 NETWORK_AUTOREFRESH_SECONDS = 15
+# Track A5 dashboard: the sensors-history DB is written by the independent
+# baseline-sensors-collect.timer (every 30s), never by this TUI process -
+# this file only ever reads it. Same real device path sensors_collect.py
+# writes to; see that module's docstring for why only host sensors (not
+# per-VM stats, which reuse Proxmox's own RRD data) need a store at all.
+SENSORS_DB_PATH = Path("/var/lib/baseline/sensors_history.db")
+SENSORS_HISTORY_WINDOW_S = 3600
+DASHBOARD_AUTOREFRESH_SECONDS = 30
 CATEGORY_ORDER = ["Network", "AI Provider"]
 STATUS_ORDER = ["Active", "Reachable", "Available", "Unreachable"]
 STATUS_STYLE = {"Active": "#87ff87", "Reachable": "#5faf5f", "Available": "#ffd700", "Unreachable": "#ff5f5f"}
@@ -454,7 +466,9 @@ class BaselineApp(App):
     header row, including the padding between columns. */
     DataTable > .datatable--header,
     #hw_table > .datatable--header,
-    #net_table > .datatable--header {
+    #net_table > .datatable--header,
+    #sensors_table > .datatable--header,
+    #vms_table > .datatable--header {
         background: #005f87;
         color: #ffffff;
         text-style: bold underline;
@@ -463,10 +477,15 @@ class BaselineApp(App):
     not immediately on switching tabs, so it can't be mistaken for "this
     row is active" before the operator has actually navigated into it. */
     #hw_table:focus > .datatable--cursor,
-    #net_table:focus > .datatable--cursor {
+    #net_table:focus > .datatable--cursor,
+    #sensors_table:focus > .datatable--cursor,
+    #vms_table:focus > .datatable--cursor {
         background: #00005f;
         color: #ffffff;
     }
+    #sensors_table, #vms_table { height: 1fr; border: solid #0087af; }
+    #sensors_sparkline, #vms_sparkline { height: 3; margin: 1 0; }
+    .sparkline_label { height: 1; margin-top: 1; color: #87afd7; }
     DataTable > .datatable--odd-row {
         background: #1c1c1c;
         color: #e4e4e4;
@@ -521,6 +540,14 @@ class BaselineApp(App):
                 yield DataTable(id="hw_table", cursor_type="row")
             with TabPane("Network", id="network_tab"):
                 yield DataTable(id="net_table", cursor_type="row")
+            with TabPane("Sensors", id="sensors_tab"):
+                yield DataTable(id="sensors_table", cursor_type="row")
+                yield Static("Temperature trend (last hour, highest-reading chip):", classes="sparkline_label")
+                yield Sparkline([], id="sensors_sparkline")
+            with TabPane("VMs", id="vms_tab"):
+                yield DataTable(id="vms_table", cursor_type="row")
+                yield Static("CPU trend (last hour, first running VM):", classes="sparkline_label")
+                yield Sparkline([], id="vms_sparkline")
             with TabPane("Chat", id="chat_tab"):
                 with Horizontal(classes="toolbar"):
                     yield Static("Harness:")
@@ -538,14 +565,22 @@ class BaselineApp(App):
     def on_mount(self) -> None:
         self.query_one("#hw_table", DataTable).add_columns("Group", "Field", "Value")
         self.query_one("#net_table", DataTable).add_columns("Group", "Connections", "Status", "Detail")
+        self.query_one("#sensors_table", DataTable).add_columns("Source", "Key", "Value", "Unit")
+        self.query_one("#vms_table", DataTable).add_columns("VMID", "Name", "Type", "Status", "CPU %", "Mem", "Uptime")
         self.collect_hardware()
         self.collect_network()
+        self.collect_sensors()
+        self.collect_vms()
         self.set_interval(NETWORK_AUTOREFRESH_SECONDS, self.collect_network)
+        self.set_interval(DASHBOARD_AUTOREFRESH_SECONDS, self.collect_sensors)
+        self.set_interval(DASHBOARD_AUTOREFRESH_SECONDS, self.collect_vms)
         self.query_one("#console_log", RichLog).write("Baseline console. Type 'help' for commands.")
 
     def action_manual_refresh(self) -> None:
         self.collect_hardware()
         self.collect_network()
+        self.collect_sensors()
+        self.collect_vms()
 
     def action_run_tether(self) -> None:
         self.run_tether()
@@ -780,6 +815,94 @@ class BaselineApp(App):
         table = self.query_one("#hw_table", DataTable)
         table.clear()
         table.add_row("error", "collection failed", escape_markup(err))
+
+    # -- Sensors: Track A5 dashboard, host-hardware half. Live readings
+    # come straight from diagnostics.py's collectors (same discipline as
+    # hardware.py - absence of a chip/tool is a normal result, not an
+    # error); the trend line reads from sensors_history.db, which this
+    # process never writes to - baseline-sensors-collect.timer is the
+    # sole writer, running independently every 30s regardless of whether
+    # this TUI is even open. --
+    @work(thread=True, exclusive=True, group="sensors", exit_on_error=False)
+    def collect_sensors(self) -> None:
+        runner = repair.RealRunner()
+        rows = []  # (source, key, value, unit)
+        sensors_result = diagnostics.collect_sensors(runner)
+        for chip in sensors_result.chips:
+            for feature in chip["features"]:
+                rows.append(("sensors", f"{chip['chip']}/{feature['label']}", feature["value"], feature.get("unit", "")))
+        nvme_result = diagnostics.collect_nvme(runner)
+        for device in nvme_result.devices:
+            health = device.get("health") or {}
+            for field_name in ("temperature", "percentage_used"):
+                if isinstance(health.get(field_name), (int, float)):
+                    rows.append(("nvme", f"{device['path']}/{field_name}", health[field_name], "C" if field_name == "temperature" else "%"))
+        smart_result = diagnostics.collect_smart(runner)
+        for device in smart_result.devices:
+            if isinstance(device.get("temperature"), (int, float)):
+                rows.append(("smart", f"{device['device']}/temperature", device["temperature"], "C"))
+
+        history = []
+        temp_rows = [r for r in rows if r[3] == "C" and isinstance(r[2], (int, float))]
+        if temp_rows and SENSORS_DB_PATH.exists():
+            hottest = max(temp_rows, key=lambda r: r[2])
+            try:
+                conn = sensors_history.open_db(str(SENSORS_DB_PATH))
+                try:
+                    since = time.time() - SENSORS_HISTORY_WINDOW_S
+                    history = sensors_history.query_history(conn, source=hottest[0], key=hottest[1], since_ts=since)
+                finally:
+                    conn.close()
+            except Exception:
+                history = []
+        self.call_from_thread(self._render_sensors, rows, [v for _, v in history])
+
+    @_safe
+    def _render_sensors(self, rows: list, history_values: list) -> None:
+        table = self.query_one("#sensors_table", DataTable)
+        table.clear()
+        if not rows:
+            table.add_row("-", "no sensors/NVMe/SMART data available", "-", "-")
+        for source, key, value, unit in rows:
+            try:
+                table.add_row(escape_markup(source), escape_markup(key), escape_markup(str(value)), escape_markup(unit))
+            except Exception as exc:
+                _log_ui_error(f"_render_sensors row {key!r}", exc)
+        self.query_one("#sensors_sparkline", Sparkline).data = history_values
+
+    # -- VMs: Track A5 dashboard, per-VM half. Live status and history
+    # both come straight from Proxmox's own already-running collection
+    # (proxmox_vm_metrics.py) - no storage of our own for this half.
+    # Works correctly with zero VMs (empty table, no history query). --
+    @work(thread=True, exclusive=True, group="vms", exit_on_error=False)
+    def collect_vms(self) -> None:
+        runner = repair.RealRunner()
+        vms = proxmox_vm_metrics.list_vms(runner)
+        history_values = []
+        running = next((v for v in vms if v.status == "running"), None)
+        if running is not None:
+            since = time.time() - SENSORS_HISTORY_WINDOW_S
+            for sample in proxmox_vm_metrics.vm_rrd_history(runner, "localhost", running.vmid, vm_type=running.type):
+                if sample.get("time", 0) >= since and isinstance(sample.get("cpu"), (int, float)):
+                    history_values.append(sample["cpu"])
+        self.call_from_thread(self._render_vms, vms, history_values)
+
+    @_safe
+    def _render_vms(self, vms: list, history_values: list) -> None:
+        table = self.query_one("#vms_table", DataTable)
+        table.clear()
+        if not vms:
+            table.add_row("-", "no VMs or containers yet", "-", "-", "-", "-", "-")
+        for vm in vms:
+            mem_label = f"{vm.mem // (1 << 20)} MiB" if vm.mem else "-"
+            cpu_label = f"{vm.cpu * 100:.1f}%" if vm.status == "running" else "-"
+            uptime_label = f"{vm.uptime // 3600}h{(vm.uptime % 3600) // 60}m" if vm.uptime else "-"
+            try:
+                table.add_row(str(vm.vmid), escape_markup(vm.name), escape_markup(vm.type),
+                               escape_markup(vm.status), cpu_label, mem_label, uptime_label, key=f"vm:{vm.vmid}")
+            except Exception as exc:
+                _log_ui_error(f"_render_vms row {vm.vmid!r}", exc)
+        self.query_one("#vms_sparkline", Sparkline).data = history_values
 
     # -- Network: same off-thread treatment; also drives the header
     # subtitle so lifeline status is visible from any tab. --

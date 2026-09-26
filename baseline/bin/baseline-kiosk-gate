@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for baseline-kiosk.service's ExecStartPre
+gate (Track A3). See lib/kiosk_gate.py's module docstring.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import kiosk_gate  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(kiosk_gate.main())

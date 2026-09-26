@@ -20,6 +20,9 @@ apt-get update
 echo "=== Installing base packages ==="
 apt-get install -y inxi python3-rich python3-textual tmux gnupg
 
+echo "=== Installing kiosk GUI packages (Track A3 - cage + stock Chromium) ==="
+apt-get install -y cage chromium
+
 echo "=== Installing Node.js 22 (NodeSource - Debian's own package is too old) ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
@@ -74,12 +77,30 @@ cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
 # anything.
 cp -r "$SRC/baseline/lib/inventory" /opt/baseline/lib/inventory
 cp "$SRC/baseline/bin/baseline-drive-inventory" /opt/baseline/bin/baseline-drive-inventory
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory
+# Track A5: unified sensors + per-VM dashboard. proxmox_vm_metrics.py
+# queries Proxmox's own pvesh for live/historical per-VM stats (no
+# storage of our own); sensors_history.py + sensors_collect.py are the
+# host-sensor half's small periodic store, since diagnostics.py's
+# collectors have no equivalent existing history source to reuse. See
+# baseline/lib/sensors_collect.py's module docstring.
+cp "$SRC/baseline/lib/proxmox_vm_metrics.py" /opt/baseline/lib/proxmox_vm_metrics.py
+cp "$SRC/baseline/lib/sensors_history.py" /opt/baseline/lib/sensors_history.py
+cp "$SRC/baseline/lib/sensors_collect.py" /opt/baseline/lib/sensors_collect.py
+cp "$SRC/baseline/bin/baseline-sensors-collect" /opt/baseline/bin/baseline-sensors-collect
+# Track A3: kiosk GUI (cage + stock Chromium) onto Proxmox's own web UI.
+# kiosk_gate.py reuses firstboot_statemachine.already_completed() unchanged
+# so the kiosk can never appear before the machine is actually configured.
+cp "$SRC/baseline/lib/kiosk_gate.py" /opt/baseline/lib/kiosk_gate.py
+cp "$SRC/baseline/bin/baseline-kiosk-gate" /opt/baseline/bin/baseline-kiosk-gate
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
+cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sensors-collect.service
+cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-sensors-collect.timer
+cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
@@ -112,16 +133,21 @@ verify_fail() { echo "VERIFY FAILED: $1" >&2; exit 1; }
 
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
+         /opt/baseline/bin/baseline-sensors-collect \
          /opt/baseline/lib/firstboot_statemachine.py /opt/baseline/lib/firstboot_network_repair.py \
          /opt/baseline/lib/proxmox_detect.py /opt/baseline/lib/diagnostics.py /opt/baseline/lib/setup_intent.py \
-         /opt/baseline/lib/repair.py /opt/baseline/lib/repair_additive.py /opt/baseline/lib/network.py; do
+         /opt/baseline/lib/repair.py /opt/baseline/lib/repair_additive.py /opt/baseline/lib/network.py \
+         /opt/baseline/lib/proxmox_vm_metrics.py /opt/baseline/lib/sensors_history.py /opt/baseline/lib/sensors_collect.py \
+         /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
-for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service; do
+for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
+         baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
-         /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply; do
+         /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
+         /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
@@ -131,11 +157,13 @@ systemctl daemon-reload
 systemctl enable baseline-firstboot.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
+systemctl enable baseline-sensors-collect.timer
+systemctl enable baseline-kiosk.service
 
-for u in baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service; do
+for u in baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
-echo "PASS: all three units confirmed enabled."
+echo "PASS: all five units confirmed enabled."
 
 echo
 echo "Done. Nothing on this tty/session was touched or disabled - this"
