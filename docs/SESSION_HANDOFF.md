@@ -401,8 +401,11 @@ file for what changed and why):
      record 37, `harness.describe_session`, Chat tab's `#harness_status`
      line) - not yet verified live on a real boot, no real hardware
      access this session.
-   - The condensed one-line header bar (`BaselineOS | tabs | access
-     scope | memory | copy | datetime`) - not started.
+   - The condensed one-line header bar: **done, narrowed** (decision
+     record 39) - `BaselineOS | <access scope + memory> | c=copy`;
+     `tabs` and `datetime` deliberately not duplicated since
+     `TabbedContent`'s own tab strip and `Header`'s own clock already
+     show them. Not yet verified live on a real boot.
    - Real clipboard "copy" via OSC 52: **done** (decision record 38,
      `clipboard_osc52.build_osc52_copy_sequence`, Chat tab's `c`
      binding) - sends the sequence, does not and cannot confirm a
