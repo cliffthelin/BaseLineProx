@@ -394,8 +394,13 @@ file for what changed and why):
    session-only `WriteGrant` (decision records 32/33; `grant write
    <directory>`/`revoke write` console commands). Genuinely still
    open:
-   - `-p --output-format stream-json` for real incremental streaming -
-     not started.
+   - `-p --output-format stream-json` for real incremental streaming:
+     **done, scope stated precisely** (decision record 41) - the
+     answer is available as soon as the assistant event lands rather
+     than blocking until the process exits; NOT per-token typing
+     (that needs `--include-partial-messages`, deliberately not
+     tested this pass to limit real API cost). Not yet verified live
+     on a real boot.
    - A visible header item showing the live-granted scope (session
      id/started state, active write grant if any): **done** (decision
      record 37, `harness.describe_session`, Chat tab's `#harness_status`
