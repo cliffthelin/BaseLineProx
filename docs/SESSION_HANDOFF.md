@@ -420,10 +420,13 @@ file for what changed and why):
      remains explicitly **rejected**, unchanged from the original
      reasoning.
    - See `docs/changelog/chat/001.md` for the full decision record.
-2. **Screen-size-appropriate layout** - still not designed. Unchanged
-   from the original note: the console runs best-case today (170x48),
-   but the header/toggle-bar design should still target an 80x24 floor
-   for hardware where KMS isn't available.
+2. **Screen-size-appropriate layout** - partially done. The status
+   bar (decision record 42) now provably never exceeds an 80-column
+   budget for any write-grant scope path length - the one concrete,
+   self-inflicted floor risk found in this pass. Other widgets
+   (`DataTable`s already use flexible `1fr` heights and Textual's own
+   scrolling) weren't individually audited for the same floor - not
+   yet verified on a real 80x24 terminal either way.
 3. **Storage migration** - **superseded, not open.** This 2026-09-20
    note (a candidate 512GB NVMe, pending a speed test) is the same
    role Track A1/A2 (2026-09-26) filled for real: `/dev/sdd` (Proxmox
