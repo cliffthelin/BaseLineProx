@@ -49,6 +49,28 @@ def test_expired_grant_is_also_not_reactivated_by_reactivate():
     assert grant.state == GrantState.EXPIRED
 
 
+def test_expire_is_terminal_like_revoke_cannot_un_revoke_a_grant():
+    """A revoked grant must stay revoked - expire() must never silently
+    overwrite that terminal state into EXPIRED, which would erase the
+    fact it was revoked."""
+    grant = _grant()
+    grant.revoke()
+    grant.expire()
+    assert grant.state == GrantState.REVOKED
+    assert not grant.effective
+
+
+def test_expire_acts_on_active_or_suspended_grants():
+    active = _grant("TestGrant-001")
+    active.expire()
+    assert active.state == GrantState.EXPIRED
+
+    suspended = _grant("TestGrant-002")
+    suspended.suspend()
+    suspended.expire()
+    assert suspended.state == GrantState.EXPIRED
+
+
 # --- application lifecycle --------------------------------------------------
 
 def test_disable_suspends_all_grants_automatically():

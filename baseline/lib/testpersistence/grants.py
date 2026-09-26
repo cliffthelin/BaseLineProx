@@ -2,7 +2,8 @@
 (ownership.py). A grant's `effective` flag reflects automatic
 suspension on application disable/uninstall; only explicit revocation
 removes access permanently, and revocation is terminal - it never
-returns to active or suspended, including via reactivate()."""
+returns to active or suspended, including via reactivate() or
+expire()."""
 import dataclasses
 import enum
 
@@ -50,4 +51,11 @@ class Grant:
         self.state = GrantState.REVOKED
 
     def expire(self) -> None:
-        self.state = GrantState.EXPIRED
+        """Terminal, like revoke() - never overwrites an already-
+        revoked grant. A grant can expire while ACTIVE or SUSPENDED;
+        once REVOKED (or already EXPIRED), this is a no-op. Without
+        this guard, expire() would silently un-revoke a REVOKED grant
+        into EXPIRED, contradicting this module's own "revocation is
+        terminal" invariant."""
+        if self.state in (GrantState.ACTIVE, GrantState.SUSPENDED):
+            self.state = GrantState.EXPIRED
