@@ -403,8 +403,11 @@ file for what changed and why):
      access this session.
    - The condensed one-line header bar (`BaselineOS | tabs | access
      scope | memory | copy | datetime`) - not started.
-   - Real clipboard "copy" via OSC 52 - not started, not verified as
-     working over this console/SSH path.
+   - Real clipboard "copy" via OSC 52: **done** (decision record 38,
+     `clipboard_osc52.build_osc52_copy_sequence`, Chat tab's `c`
+     binding) - sends the sequence, does not and cannot confirm a
+     terminal actually applied it; still not verified over this
+     console/SSH path, no real hardware access this session.
    - Embedding the actual interactive `claude` CLI in a raw PTY widget
      remains explicitly **rejected**, unchanged from the original
      reasoning.
