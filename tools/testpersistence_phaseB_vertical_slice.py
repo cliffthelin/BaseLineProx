@@ -506,13 +506,33 @@ package_upgrade: false
     return 0 if overall_ok else 1
 
 
+def sanitized_failure_message(exc: BaseException, ev) -> str:
+    """Renders an exception's message through the same sanitization
+    Evidence.record() uses, for safe re-raising. A bare `raise` of the
+    original exception would print its raw, unsanitized str() via the
+    default excepthook - and several exceptions in this module
+    (ConsoleTimeout, StepFailed) embed raw console buffer tails that
+    may still contain secret-bearing text if it arrived before
+    `stty -echo` took effect or a timeout fired mid-command. This
+    function is the single place that text passes through before ever
+    reaching stderr."""
+    raw = f"{type(exc).__name__}: {exc}"
+    deny = ev.deny_substrings if ev is not None else ()
+    return h.sanitize_evidence_text(raw, deny_substrings=deny)
+
+
 if __name__ == "__main__":
     try:
         _rc = main()
     except Exception as _exc:
         _ev = _EVIDENCE_HOLDER.get("ev")
+        _safe_message = sanitized_failure_message(_exc, _ev)
         if _ev is not None:
-            _ev.record("unhandled_exception", False, f"{type(_exc).__name__}: {_exc}")
+            _ev.record("unhandled_exception", False, _safe_message)
             _ev.write(os.path.join(EXPERIMENT_ROOT, "evidence.json"))
-        raise
+        # Raise a FRESH exception carrying only the sanitized text, with
+        # `from None` to suppress chaining - the original exception object
+        # (and its unsanitized message) is deliberately discarded here so
+        # it can never reach the default excepthook.
+        raise SystemExit(f"FAILED (sanitized): {_safe_message}") from None
     raise SystemExit(_rc)

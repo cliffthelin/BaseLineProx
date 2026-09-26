@@ -22,9 +22,16 @@ tests/unit/test_qemu_harness_safety.py for the corresponding proof):
    different device than the experiment root's own filesystem) are
    rejected.
 4. Existence checks use os.lstat (never following a symlink) and,
-   where a path must be opened, os.O_NOFOLLOW.
+   where a path must be opened BY THIS MODULE, os.O_NOFOLLOW
+   (hash_small_evidence_file, delete_validated_image). This does
+   *not* cover QEMU's own open() of a disk/ISO path (see the TOCTOU
+   note below) - QEMU opens that path itself, fresh, after this
+   module has already returned a plain path string.
 5. build_qemu_args() rejects anything /dev/*-shaped or block/char-
-   device-shaped before it can ever reach an argument list.
+   device-shaped before it can ever reach an argument list, and
+   rejects any path separator ("/") in extra_args entirely - the only
+   parameters that may carry a path are system_disk, persistence_disk,
+   and iso, each independently validated.
 6. QEMU_ALLOWED_BINARIES is the only set of binaries this module will
    ever invoke - no sudo, pkexec, polkit, mount, losetup, udisks, or
    any other host tool appears anywhere in this module.
@@ -36,6 +43,23 @@ tests/unit/test_qemu_harness_safety.py for the corresponding proof):
 9. sanitize_evidence_text() strips absolute host paths and other
    caller-supplied sensitive substrings before any evidence is
    retained or printed.
+
+KNOWN RESIDUAL LIMITATION (not fixed, documented honestly rather than
+overclaimed): validate_image_path() proves a path is safe at the
+moment it is checked, but returns a plain path *string* - it does not
+hand QEMU an already-open, race-proof file descriptor. Between that
+validation and the moment qemu-system-x86_64 itself calls open() on
+that path (after this module's own Popen() call has already returned
+control here), the file at that path could in principle be swapped
+out from under it by a second process with write access to the same
+experiment root. Closing this gap for real requires passing QEMU an
+already-validated, already-open file descriptor (e.g. via os.open()
+in this process plus `pass_fds` and a `/dev/fd/N`-style reference) -
+deliberately not implemented here, because this harness's actual
+threat model is a single local operator running one experiment at a
+time, not a multi-tenant boundary against a concurrent adversary with
+write access to the same directory. If that threat model ever
+changes, fd-passing is the correct fix, not a smaller mitigation.
 """
 import os
 import re
@@ -182,6 +206,18 @@ def build_qemu_args(root: str, *, system_disk: str, persistence_disk: str | None
     for extra in extra_args:
         if _DEVICE_PATH_ANYWHERE_RE.search(extra) or extra.startswith(("/proc", "/sys")):
             raise HarnessSafetyError(f"extra arg {extra!r} is device/proc/sys-shaped - refusing")
+        if "/" in extra:
+            # system_disk/persistence_disk/iso are the only parameters this
+            # function accepts a path through, and each is independently
+            # validated above. extra_args has no validated-root guarantee at
+            # all, so any path-shaped string here (e.g. "file=/home/x/real.img")
+            # could otherwise reach the argument list unchecked - refuse any
+            # "/" in extra_args outright rather than trying to guess which
+            # substrings are "just flags" and which are smuggled paths.
+            raise HarnessSafetyError(
+                f"extra arg {extra!r} contains a path separator - extra_args must be "
+                f"flag/value pairs only (e.g. \"-m\", \"1024\"), never a path; pass any "
+                f"disk/ISO path through system_disk/persistence_disk/iso instead")
         args.append(extra)
 
     for arg in args:

@@ -29,7 +29,7 @@ import qemu_harness_safety as h  # noqa: E402
 import qemu_serial_console as console  # noqa: E402
 from testpersistence_phaseB_vertical_slice import (  # noqa: E402
     Evidence, StepFailed, authorize, clean_shutdown, launch, login, run_cmd,
-    wait_for_login_prompt, _EVIDENCE_HOLDER,
+    sanitized_failure_message, wait_for_login_prompt, _EVIDENCE_HOLDER,
 )
 
 EXPERIMENT_ROOT = os.path.join(
@@ -407,8 +407,12 @@ if __name__ == "__main__":
         _rc = main()
     except Exception as _exc:
         _ev = _EVIDENCE_HOLDER.get("ev")
+        _safe_message = sanitized_failure_message(_exc, _ev)
         if _ev is not None:
-            _ev.record("unhandled_exception", False, f"{type(_exc).__name__}: {_exc}")
+            _ev.record("unhandled_exception", False, _safe_message)
             _ev.write(os.path.join(EXPERIMENT_ROOT, "evidence.json"))
-        raise
+        # See testpersistence_phaseB_vertical_slice.sanitized_failure_message's
+        # docstring: the original exception is deliberately discarded here so
+        # its unsanitized text can never reach the default excepthook.
+        raise SystemExit(f"FAILED (sanitized): {_safe_message}") from None
     raise SystemExit(_rc)

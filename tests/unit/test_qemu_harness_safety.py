@@ -213,6 +213,29 @@ def test_build_qemu_args_rejects_proc_and_sys_extra_args(root):
             h.build_qemu_args(root, system_disk=system_disk, extra_args=(hostile,))
 
 
+def test_build_qemu_args_rejects_any_path_in_extra_args_not_just_device_shaped(root):
+    """extra_args has no validated-root guarantee at all - a caller
+    could otherwise smuggle a path OUTSIDE the experiment root through
+    it (e.g. "file=/home/someone/real.img") without it ever being
+    device-shaped. The only parameters allowed to carry a path are
+    system_disk/persistence_disk/iso, each independently validated;
+    extra_args must be flag/value pairs only."""
+    system_disk = os.path.join(root, "TestSystem-A.qcow2")
+    with open(system_disk, "wb"):
+        pass
+    with pytest.raises(h.HarnessSafetyError):
+        h.build_qemu_args(root, system_disk=system_disk,
+                           extra_args=("file=/home/someone/real.img,format=qcow2",))
+
+
+def test_build_qemu_args_accepts_plain_flag_value_extra_args(root):
+    system_disk = os.path.join(root, "TestSystem-A.qcow2")
+    with open(system_disk, "wb"):
+        pass
+    args = h.build_qemu_args(root, system_disk=system_disk, extra_args=("-m", "2048"))
+    assert "-m" in args and "2048" in args
+
+
 # --- run_qemu binary allowlist, no host privilege tools --------------------
 
 def test_run_qemu_rejects_non_allowlisted_binaries(root):
