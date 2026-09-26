@@ -45,6 +45,7 @@ import diagnostics  # noqa: E402
 import proxmox_vm_metrics  # noqa: E402
 import repair  # noqa: E402
 import sensors_history  # noqa: E402
+import clipboard_osc52  # noqa: E402
 
 SNAPSHOT_PATH = Path("/var/lib/baseline/hardware_snapshot.json")
 UI_ERROR_LOG = Path("/var/log/baseline/ui_errors.log")
@@ -508,6 +509,7 @@ class BaselineApp(App):
         ("t", "run_tether", "Tether"),
         ("i", "toggle_hardware_ids", "Toggle IDs"),
         ("p", "return_to_proxmox", "Proxmox"),
+        ("c", "copy_last_answer", "Copy"),
         # priority=True: Screen binds "tab" to focus-cycling by default,
         # which would otherwise win over this since it's more specific
         # than an App-level binding. Priority bindings are checked from
@@ -1094,7 +1096,26 @@ class BaselineApp(App):
         log = self.query_one("#chat_log", Log)
         log.write_line(answer)
         log.write_line("")
+        self._last_chat_answer = answer
         self._refresh_harness_status()
+
+    def action_copy_last_answer(self) -> None:
+        answer = getattr(self, "_last_chat_answer", "")
+        if not answer:
+            self.notify("Nothing to copy yet - ask a question in the Chat tab first.", severity="warning")
+            return
+        sequence = clipboard_osc52.build_osc52_copy_sequence(answer)
+        try:
+            sys.stdout.write(sequence)
+            sys.stdout.flush()
+        except OSError as exc:
+            self.notify(f"Copy failed: {exc}", severity="error")
+            return
+        # Sending the escape sequence is not proof the terminal actually
+        # applied it - not yet verified over this console/SSH path (see
+        # docs/design/v0.1-work-queue.md item 1), so this says "sent",
+        # not "copied."
+        self.notify("Sent last answer to the terminal's clipboard (OSC 52).")
 
 
 def main() -> int:
