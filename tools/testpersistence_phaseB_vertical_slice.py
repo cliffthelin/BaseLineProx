@@ -77,12 +77,24 @@ class Evidence:
             json.dump(self.steps, f, indent=2)
 
 
-def build_system_args(root, system_disk, persistence_disk, extra_isos, serial_sock, monitor_sock):
+def build_system_args(root, system_disk, persistence_disk, extra_isos, serial_sock, monitor_sock,
+                       extra_disks=()):
+    """persistence_disk may be None to boot with NO persistence disk
+    attached at all (the "missing" failure mode, PRD §13 - the device
+    genuinely doesn't exist, not merely unformatted). extra_disks
+    attaches additional plain qcow2 drives beyond the persistence disk
+    (e.g. a permanently-blank "unknown" disk, or a byte-copy for the
+    simultaneous-clone-detection proof) - each independently validated,
+    same as every other disk path here."""
     args = []
     resolved_system = h.validate_image_path(root, system_disk, must_be_new=False)
     args += ["-drive", f"file={resolved_system},format=qcow2,if=virtio"]
-    resolved_persistence = h.validate_image_path(root, persistence_disk, must_be_new=False)
-    args += ["-drive", f"file={resolved_persistence},format=qcow2,if=virtio"]
+    if persistence_disk is not None:
+        resolved_persistence = h.validate_image_path(root, persistence_disk, must_be_new=False)
+        args += ["-drive", f"file={resolved_persistence},format=qcow2,if=virtio"]
+    for disk in extra_disks:
+        resolved_disk = h.validate_image_path(root, disk, must_be_new=False)
+        args += ["-drive", f"file={resolved_disk},format=qcow2,if=virtio"]
     for iso in extra_isos:
         resolved_iso = h.validate_image_path(root, iso, must_be_new=False)
         args += ["-drive", f"file={resolved_iso},format=raw,if=virtio,media=cdrom,readonly=on"]
@@ -97,12 +109,13 @@ def build_system_args(root, system_disk, persistence_disk, extra_isos, serial_so
     return args
 
 
-def launch(root, system_disk, persistence_disk, extra_isos, serial_sock, monitor_sock):
+def launch(root, system_disk, persistence_disk, extra_isos, serial_sock, monitor_sock,
+           extra_disks=()):
     for p in (serial_sock, monitor_sock):
         if os.path.exists(p):
             os.unlink(p)
     args = build_system_args(root, system_disk, persistence_disk, extra_isos,
-                              serial_sock, monitor_sock)
+                              serial_sock, monitor_sock, extra_disks=extra_disks)
     return h.run_qemu("qemu-system-x86_64", args)
 
 
