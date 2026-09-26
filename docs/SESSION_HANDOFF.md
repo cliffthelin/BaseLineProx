@@ -464,7 +464,14 @@ file for what changed and why):
      built since.
    - Only the `claude` harness is implemented; OpenCode/Hermes/Pi/
      DeepSeek/GrokBot remain listed-but-honestly-marked-unimplemented in
-     the Chat tab's harness selector.
+     the Chat tab's harness selector. **The dispatch layer is now real**
+     (decision record 43, `harness_adapter.py`/`harness_registry.py`) -
+     adding any of these five is now a matter of writing one conforming
+     module and setting its `adapter_module` field, not rewriting
+     `bin/baseline`. Which one (if any) to actually build is still an
+     open question for the user - none of their CLIs have been checked
+     for availability the way `claude` turned out to be in this
+     environment.
 7. **Real-hardware verification is blocked for three provisioning
    modules; the chat harness half is NOT blocked and has now been
    checked for real.** `vm_provision.py`/`pct_provision.py`/
