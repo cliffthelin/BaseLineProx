@@ -6,6 +6,7 @@ Every read is timeout-bounded; nothing here waits forever except the
 two explicit authorization gates in the orchestrator, which are a
 deliberate design choice (PRD-required "no default or timeout
 acceptance"), not a property of this module."""
+import codecs
 import socket
 import time
 
@@ -31,6 +32,14 @@ class SerialConsole:
             raise last_err
         self.sock.settimeout(1.0)
         self.buffer = ""
+        # An incremental decoder, not per-chunk decode(): a raw stream
+        # socket can split a multi-byte UTF-8 character across two
+        # recv() calls, and decoding each chunk independently (even
+        # with errors="replace") would corrupt that character into two
+        # replacement characters instead of reconstructing it. This
+        # decoder carries any incomplete trailing bytes forward to the
+        # next chunk.
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     def read_until(self, needle: str, timeout: float = 120.0) -> str:
         deadline = time.time() + timeout
@@ -42,7 +51,7 @@ class SerialConsole:
             try:
                 chunk = self.sock.recv(4096)
                 if chunk:
-                    self.buffer += chunk.decode("utf-8", errors="replace")
+                    self.buffer += self._decoder.decode(chunk)
             except socket.timeout:
                 continue
             except OSError:
@@ -64,7 +73,7 @@ class SerialConsole:
             try:
                 chunk = self.sock.recv(4096)
                 if chunk:
-                    collected += chunk.decode("utf-8", errors="replace")
+                    collected += self._decoder.decode(chunk)
                     last_data = time.time()
             except socket.timeout:
                 continue
