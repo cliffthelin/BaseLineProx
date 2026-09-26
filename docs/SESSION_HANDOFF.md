@@ -457,16 +457,20 @@ file for what changed and why):
    - Only the `claude` harness is implemented; OpenCode/Hermes/Pi/
      DeepSeek/GrokBot remain listed-but-honestly-marked-unimplemented in
      the Chat tab's harness selector.
-7. **New as of 2026-09-26: real-hardware verification is blocked for
-   three new modules.** `vm_provision.py`, `pct_provision.py`, and
-   `docker_provision.py` (decision records 34-36, Track A6) are all
-   unit-tested against fakes only. Checked directly this session: no
-   `qm`/`pct`/`pvesh` and no reachable Proxmox host at all from this
-   dev environment, and Docker's daemon isn't installed here (client
-   only, no `docker.service` unit). Needs either real Proxmox host
-   access from a session that can reach it, or explicit permission to
-   install/start a Docker daemon here for that module's own
-   verification.
+7. **Real-hardware verification is blocked for three provisioning
+   modules; the chat harness half is NOT blocked and has now been
+   checked for real.** `vm_provision.py`/`pct_provision.py`/
+   `docker_provision.py` (decision records 34-36) are still unit-tested
+   against fakes only - no `qm`/`pct`/`pvesh`/Docker daemon reachable
+   from this dev environment. But this same environment turned out to
+   have a real, working `claude` CLI all along - used directly
+   (decision record 40) to verify records 31-33's flagged unknowns:
+   session continuity (`--session-id`/`-c`) works exactly as designed;
+   the write-grant argv had a **real bug** (`Write(...)` isn't a valid
+   permission rule - the CLI wants `Edit(...)`, and `--allowedTools`
+   alone isn't sufficient without `--permission-mode acceptEdits` too)
+   - found and fixed. The scope boundary itself was confirmed to hold
+   against a real, adversarially-worded out-of-scope write attempt.
 
 ## Where to look for more detail
 
