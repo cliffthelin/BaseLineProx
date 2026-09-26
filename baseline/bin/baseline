@@ -698,7 +698,8 @@ class BaselineApp(App):
         if line in ("exit", "quit"):
             self.exit()
         elif line == "help":
-            console.write("commands: hardware, network, tether, ask <question>, exit")
+            console.write("commands: hardware, network, tether, ask <question>, "
+                           "grant write <directory>, revoke write, exit")
         elif line == "hardware":
             self.run_console_hardware()
         elif line == "network":
@@ -707,6 +708,10 @@ class BaselineApp(App):
             self.run_console_tether()
         elif line.startswith("ask "):
             self.run_console_ask(line[4:].strip())
+        elif line.startswith("grant write "):
+            self.run_console_grant_write(line[len("grant write "):].strip())
+        elif line == "revoke write":
+            self.run_console_revoke_write()
         else:
             console.write(f"unknown command: {line!r} (try 'help')")
 
@@ -780,6 +785,37 @@ class BaselineApp(App):
     def run_console_ask(self, question: str) -> None:
         answer = harness.ask(question)
         self.call_from_thread(self.query_one("#console_log", RichLog).write, answer)
+
+    def run_console_grant_write(self, path: str) -> None:
+        # Deliberately synchronous, not @work(thread=True) - this is a
+        # single stat() call and some in-memory bookkeeping, not a
+        # long-running operation. The operator names the boundary
+        # (decision record 32); nothing here infers or guesses one.
+        console = self.query_one("#console_log", RichLog)
+        if not path:
+            console.write("[red]usage: grant write <directory>[/red]")
+            return
+        try:
+            grant = harness.grant_write_scope(
+                harness._default_session, path,
+                authorized_by="operator via console", now=time.time(),
+            )
+        except ValueError as exc:
+            console.write(f"[red]{exc}[/red]")
+            return
+        console.write(f"[yellow]Write access granted, scoped to {grant.scope_path}[/yellow]")
+        console.write("[yellow]This is a one-time grant for this session only - "
+                       "it ends when Baseline exits and is never remembered "
+                       "next time. Type 'revoke write' to end it sooner.[/yellow]")
+
+    def run_console_revoke_write(self) -> None:
+        console = self.query_one("#console_log", RichLog)
+        had_grant = harness._default_session.write_grant is not None
+        harness.revoke_write_scope(harness._default_session)
+        if had_grant:
+            console.write("[green]Write access revoked for this session.[/green]")
+        else:
+            console.write("[green]No write access was granted this session.[/green]")
 
     # -- Hardware: collection happens off the UI thread, since `inxi`
     # can take real time and must never freeze button clicks/typing. --

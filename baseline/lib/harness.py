@@ -59,22 +59,83 @@ class RealRunner(Runner):
 
 
 @dataclass
+class WriteGrant:
+    """An explicit, scoped, session-only write authorization (decision
+    record 32). Never created by the harness itself and never by
+    anything reacting to the harness's own output - only Baseline's
+    own console, after an operator has explicitly named the boundary.
+    Holds only what was actually decided: where, by whom, and when -
+    no duration field, because the answer is always "this session"
+    and nothing here ever writes it to disk."""
+    scope_path: str
+    authorized_by: str
+    granted_at: float
+
+
+@dataclass
 class HarnessSession:
     """One warm, resumable session, alive only for this process's
     lifetime. `started` flips to True after the first turn is sent
     (even if that turn fails) so every later turn continues the same
-    session with `-c` rather than naming a new one."""
+    session with `-c` rather than naming a new one. `write_grant`
+    defaults to None on every new instance - a fresh session (a fresh
+    Baseline process) never inherits a grant made in a previous one,
+    by construction, not by remembering to clear it."""
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     started: bool = False
+    write_grant: WriteGrant = None
 
 
 _default_session = HarnessSession()
 
 
+def grant_write_scope(session: HarnessSession, scope_path: str, *, authorized_by: str, now: float) -> WriteGrant:
+    """The only way a `WriteGrant` comes into existence. Refuses a
+    scope that isn't a real, existing directory - fail-closed rather
+    than granting a boundary around nothing (matches
+    gui_brokers.file_picker's allowlist-by-construction discipline).
+    Resolves symlinks/`..` before storing, so the stored scope is the
+    real path being granted, not whatever string was typed."""
+    resolved = os.path.realpath(scope_path)
+    if not os.path.isdir(resolved):
+        raise ValueError(f"{scope_path!r} is not an existing directory - "
+                          "refusing to grant a write scope around it")
+    grant = WriteGrant(scope_path=resolved, authorized_by=authorized_by, granted_at=now)
+    session.write_grant = grant
+    return grant
+
+
+def revoke_write_scope(session: HarnessSession) -> None:
+    session.write_grant = None
+
+
+def is_path_within_grant(session: HarnessSession, path: str) -> bool:
+    """Whether `path` genuinely resolves inside the session's granted
+    scope - real containment after resolving symlinks/`..`, never a
+    prefix-string comparison alone, so `scope-but-not-really/` can't
+    pass a check meant for `scope/` and `scope/../outside` can't
+    escape it. False whenever there is no active grant at all."""
+    if session.write_grant is None:
+        return False
+    resolved = os.path.realpath(path)
+    scope = session.write_grant.scope_path
+    return resolved == scope or resolved.startswith(scope + os.sep)
+
+
 def build_ask_argv(full_prompt: str, session: HarnessSession) -> list:
-    if not session.started:
-        return ["claude", "-p", full_prompt, "--session-id", session.session_id, "--tools", ""]
-    return ["claude", "-p", full_prompt, "-c", "--tools", ""]
+    argv = ["claude", "-p", full_prompt]
+    argv += ["--session-id", session.session_id] if not session.started else ["-c"]
+    if session.write_grant is not None:
+        # NOT yet verified against the real Claude Code CLI's actual
+        # --allowedTools pattern syntax for a path-scoped Write tool -
+        # see decision record 32's "explicitly not decided here". Pin
+        # this exact shape in tests so a real-CLI verification pass
+        # has one concrete thing to confirm or correct, rather than
+        # leaving the mapping unspecified.
+        argv += ["--allowedTools", f"Write({session.write_grant.scope_path}/**)"]
+    else:
+        argv += ["--tools", ""]
+    return argv
 
 
 def _load_env():
