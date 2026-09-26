@@ -122,6 +122,20 @@ def is_path_within_grant(session: HarnessSession, path: str) -> bool:
     return resolved == scope or resolved.startswith(scope + os.sep)
 
 
+def describe_session(session: HarnessSession) -> str:
+    """The visible-access-scope status text SESSION_HANDOFF.md's
+    Chat-tab item asked for - the underlying HarnessSession/WriteGrant
+    state already existed with no UI reading it. Pure and cheap
+    enough to call on every render; the TUI header/status widget is
+    the only intended caller."""
+    state = "warm (multi-turn memory active)" if session.started else "cold (no memory yet)"
+    if session.write_grant is None:
+        scope = "write: none"
+    else:
+        scope = f"write: {session.write_grant.scope_path} (this session only)"
+    return f"session: {state} | {scope}"
+
+
 def build_ask_argv(full_prompt: str, session: HarnessSession) -> list:
     argv = ["claude", "-p", full_prompt]
     argv += ["--session-id", session.session_id] if not session.started else ["-c"]

@@ -560,6 +560,7 @@ class BaselineApp(App):
                         [(h["name"] + ("" if h["implemented"] else " (not implemented)"), h["id"]) for h in providers.HARNESSES],
                         value="claude", id="harness_select", allow_blank=False,
                     )
+                yield Static("", id="harness_status", classes="sparkline_label")
                 yield Log(id="chat_log")
                 yield Input(placeholder="Ask Baseline...", id="chat_input")
             with TabPane("Console", id="console_tab"):
@@ -580,6 +581,18 @@ class BaselineApp(App):
         self.set_interval(DASHBOARD_AUTOREFRESH_SECONDS, self.collect_sensors)
         self.set_interval(DASHBOARD_AUTOREFRESH_SECONDS, self.collect_vms)
         self.query_one("#console_log", RichLog).write("Baseline console. Type 'help' for commands.")
+        self._refresh_harness_status()
+
+    def _refresh_harness_status(self) -> None:
+        # The one place the Chat tab's header reads HarnessSession/
+        # WriteGrant state - grant/revoke happen from the Console tab
+        # (harness._default_session is process-global, one session per
+        # Baseline run), so this is called after every action that
+        # could change it, not just once at startup.
+        try:
+            self.query_one("#harness_status", Static).update(harness.describe_session(harness._default_session))
+        except NoMatches:
+            pass
 
     def action_manual_refresh(self) -> None:
         self.collect_hardware()
@@ -785,6 +798,7 @@ class BaselineApp(App):
     def run_console_ask(self, question: str) -> None:
         answer = harness.ask(question)
         self.call_from_thread(self.query_one("#console_log", RichLog).write, answer)
+        self.call_from_thread(self._refresh_harness_status)
 
     def run_console_grant_write(self, path: str) -> None:
         # Deliberately synchronous, not @work(thread=True) - this is a
@@ -807,6 +821,7 @@ class BaselineApp(App):
         console.write("[yellow]This is a one-time grant for this session only - "
                        "it ends when Baseline exits and is never remembered "
                        "next time. Type 'revoke write' to end it sooner.[/yellow]")
+        self._refresh_harness_status()
 
     def run_console_revoke_write(self) -> None:
         console = self.query_one("#console_log", RichLog)
@@ -816,6 +831,7 @@ class BaselineApp(App):
             console.write("[green]Write access revoked for this session.[/green]")
         else:
             console.write("[green]No write access was granted this session.[/green]")
+        self._refresh_harness_status()
 
     # -- Hardware: collection happens off the UI thread, since `inxi`
     # can take real time and must never freeze button clicks/typing. --
@@ -1078,6 +1094,7 @@ class BaselineApp(App):
         log = self.query_one("#chat_log", Log)
         log.write_line(answer)
         log.write_line("")
+        self._refresh_harness_status()
 
 
 def main() -> int:

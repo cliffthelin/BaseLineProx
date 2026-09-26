@@ -110,3 +110,27 @@ def test_ask_reports_a_timeout_without_crashing():
     result = harness.ask("first", runner=FailingRunner(__import__("subprocess").TimeoutExpired(cmd="claude", timeout=60)),
                           session=harness.HarnessSession())
     assert "timed out" in result
+
+
+# -- describe_session(): the visible-access-scope status text ------------
+# (SESSION_HANDOFF.md's still-open "Chat tab quality" item: the
+# underlying HarnessSession/WriteGrant state existed with no UI reading
+# it - this is the pure, testable piece that UI reads from.)
+
+def test_describe_session_cold_with_no_grant():
+    session = harness.HarnessSession(session_id="fixed-id")
+    assert harness.describe_session(session) == "session: cold (no memory yet) | write: none"
+
+
+def test_describe_session_warm_with_no_grant():
+    session = harness.HarnessSession(session_id="fixed-id", started=True)
+    assert harness.describe_session(session) == "session: warm (multi-turn memory active) | write: none"
+
+
+def test_describe_session_with_an_active_write_grant(tmp_path):
+    session = harness.HarnessSession(session_id="fixed-id", started=True)
+    harness.grant_write_scope(session, str(tmp_path), authorized_by="operator", now=1.0)
+    resolved = str(tmp_path.resolve())
+    assert harness.describe_session(session) == (
+        f"session: warm (multi-turn memory active) | write: {resolved} (this session only)"
+    )
