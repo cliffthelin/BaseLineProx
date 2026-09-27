@@ -301,3 +301,182 @@ def test_ensure_all_redirects_stops_early_if_the_persistence_mount_fails():
     assert results[0].applied is False
     # None of the three redirects were ever attempted.
     assert not any(c[0] == "mv" for c in runner.calls)
+
+
+# -- persona-aware wiring (work-queue item 25, decision record 78) ---------
+
+def test_persistence_label_for_defaults_to_legacy_singular_label():
+    assert pbm.persistence_label_for() == "USER_PERSISTENCE"
+    assert pbm.persistence_label_for(None) == "USER_PERSISTENCE"
+
+
+def test_persistence_label_for_a_real_persona_uses_drive_installer_scheme():
+    assert pbm.persistence_label_for("admin") == "USER_PERSISTENCE_ADMIN"
+    assert pbm.persistence_label_for("personal") == "USER_PERSISTENCE_PERSONAL"
+
+
+def test_persistence_mountpoint_for_defaults_to_legacy_mount_point():
+    assert pbm.persistence_mountpoint_for() == "/mnt/USER_PERSISTENCE"
+
+
+def test_persistence_mountpoint_for_a_real_persona():
+    assert pbm.persistence_mountpoint_for("admin") == "/mnt/USER_PERSISTENCE_ADMIN"
+    assert pbm.persistence_mountpoint_for("personal") == "/mnt/USER_PERSISTENCE_PERSONAL"
+
+
+def test_ensure_persistence_mounted_with_a_persona_mounts_the_personas_own_label():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
+    result = pbm.ensure_persistence_mounted(runner, persona="personal")
+    assert result.applied is True
+    assert runner.calls[0] == ["mount", "LABEL=USER_PERSISTENCE_PERSONAL", "/mnt/USER_PERSISTENCE_PERSONAL"]
+
+
+def test_ensure_redirect_with_a_persona_binds_onto_the_personas_own_mountpoint():
+    mounts = "/dev/sdd2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    result = pbm.ensure_redirect(runner, "/etc/baseline", "etc-baseline", persona="admin")
+    assert result.applied is True
+    assert ["mount", "--bind", "/mnt/USER_PERSISTENCE_ADMIN/etc-baseline", "/etc/baseline"] in runner.calls
+
+
+def test_ensure_all_redirects_with_a_persona_never_touches_the_legacy_label():
+    mounts = "/dev/sdd2 /mnt/USER_PERSISTENCE_PERSONAL ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    results = pbm.ensure_all_redirects(runner, persona="personal")
+    assert all(r.applied for r in results)
+    assert not any("LABEL=USER_PERSISTENCE " in " ".join(c) or c == ["mount", "LABEL=USER_PERSISTENCE", "/mnt/USER_PERSISTENCE"]
+                   for c in runner.calls)
+
+
+# -- unmount_persistence / unmount_redirect / unmount_all_redirects --------
+
+def test_unmount_persistence_is_a_noop_success_when_already_unmounted():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
+    result = pbm.unmount_persistence(runner)
+    assert result.applied is True
+    assert not any(c[:1] == ["umount"] for c in runner.calls)
+
+
+def test_unmount_persistence_runs_real_umount_when_mounted():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    result = pbm.unmount_persistence(runner)
+    assert result.applied is True
+    assert ["umount", "/mnt/USER_PERSISTENCE"] in runner.calls
+
+
+def test_unmount_persistence_reports_a_real_failure():
+    runner = FakeRunner(
+        files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE},
+        command_responses=[(lambda a: a[:1] == ["umount"], FakeProc(1, "", "target is busy"))],
+    )
+    result = pbm.unmount_persistence(runner)
+    assert result.applied is False
+    assert "target is busy" in result.detail
+
+
+def test_unmount_redirect_is_a_noop_success_when_not_bound():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    result = pbm.unmount_redirect(runner, "/etc/baseline")
+    assert result.applied is True
+    assert not any(c[:1] == ["umount"] for c in runner.calls)
+
+
+def test_unmount_redirect_runs_real_umount_when_bound():
+    mounts = MOUNTS_WITH_PERSISTENCE + "/mnt/USER_PERSISTENCE/etc-baseline /etc/baseline none rw,bind 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    result = pbm.unmount_redirect(runner, "/etc/baseline")
+    assert result.applied is True
+    assert ["umount", "/etc/baseline"] in runner.calls
+
+
+def test_unmount_all_redirects_unbinds_every_redirect_before_the_persistence_volume():
+    mounts = (MOUNTS_WITH_PERSISTENCE
+              + "/mnt/USER_PERSISTENCE/etc-baseline /etc/baseline none rw,bind 0 0\n"
+              + "/mnt/USER_PERSISTENCE/var-lib-baseline /var/lib/baseline none rw,bind 0 0\n"
+              + "/mnt/USER_PERSISTENCE/var-log-baseline /var/log/baseline none rw,bind 0 0\n")
+    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    results = pbm.unmount_all_redirects(runner)
+    assert all(r.applied for r in results)
+    assert len(results) == 1 + len(pbm.REDIRECT_PATHS)
+    umount_calls = [c[1] for c in runner.calls if c[:1] == ["umount"]]
+    # every redirect target unbound before the persistence mountpoint itself
+    assert umount_calls.index("/mnt/USER_PERSISTENCE") == len(umount_calls) - 1
+
+
+# -- get_active_persona / set_active_persona / switch_active_persona -------
+
+def test_get_active_persona_defaults_when_no_marker_exists():
+    runner = FakeRunner()
+    assert pbm.get_active_persona(runner) == "admin"
+
+
+def test_get_active_persona_reads_a_real_marker():
+    runner = FakeRunner(files={pbm.ACTIVE_PERSONA_MARKER_PATH: "personal"})
+    assert pbm.get_active_persona(runner) == "personal"
+
+
+def test_set_active_persona_writes_a_real_marker_on_baseline():
+    runner = FakeRunner()
+    pbm.set_active_persona(runner, "personal")
+    assert runner.files[pbm.ACTIVE_PERSONA_MARKER_PATH] == "personal"
+
+
+def test_switch_active_persona_refuses_without_a_proven_credential():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
+    result = pbm.switch_active_persona(runner, to_persona="personal", credential_ok=False)
+    assert result.applied is False
+    assert not any(c[:1] in (["mount"], ["umount"]) for c in runner.calls)
+
+
+def test_switch_active_persona_is_idempotent_when_already_active():
+    mounts = "/dev/sdd2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
+    result = pbm.switch_active_persona(runner, to_persona="admin", credential_ok=True)
+    assert result.applied is True
+    assert not any(c[:1] == ["umount"] for c in runner.calls)
+
+
+def test_switch_active_persona_unmounts_current_and_issues_the_real_mount_command_for_the_new_one():
+    """A FakeRunner's /proc/self/mounts doesn't update itself just
+    because a fake `umount`/`mount` command "succeeded", the same
+    honest limitation this module's own pre-existing tests already
+    document for `ensure_all_redirects` - so this proves the real
+    commands are issued, in the right order, not the full end-to-end
+    mounted-and-bound outcome (covered separately below against an
+    already-steady-state fake)."""
+    mounts = "/dev/sdd2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
+    pbm.switch_active_persona(runner, to_persona="personal", credential_ok=True)
+    assert ["umount", "/mnt/USER_PERSISTENCE_ADMIN"] in runner.calls
+    assert ["mount", "LABEL=USER_PERSISTENCE_PERSONAL", "/mnt/USER_PERSISTENCE_PERSONAL"] in runner.calls
+    # the unmount happened before the new mount
+    assert runner.calls.index(["umount", "/mnt/USER_PERSISTENCE_ADMIN"]) < \
+        runner.calls.index(["mount", "LABEL=USER_PERSISTENCE_PERSONAL", "/mnt/USER_PERSISTENCE_PERSONAL"])
+
+
+def test_switch_active_persona_succeeds_and_updates_the_marker_once_the_new_persona_is_actually_mounted():
+    """The steady-state real case, matching
+    `test_ensure_all_redirects_runs_every_redirect_once_persistence_is_mounted`'s
+    own precedent: once the target persona's volume is genuinely
+    mounted, the switch's redirect-rebinding half succeeds for real and
+    the active-persona marker is durably updated."""
+    mounts = "/dev/sdd2 /mnt/USER_PERSISTENCE_PERSONAL ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
+    result = pbm.switch_active_persona(runner, to_persona="personal", credential_ok=True)
+    assert result.applied is True
+    assert runner.files[pbm.ACTIVE_PERSONA_MARKER_PATH] == "personal"
+    for target_path in pbm.REDIRECT_PATHS:
+        assert any(c[:2] == ["mount", "--bind"] and c[3] == target_path for c in runner.calls)
+
+
+def test_switch_active_persona_reports_a_real_unmount_failure_and_never_mounts_the_new_one():
+    mounts = "/dev/sdd2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(
+        files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"},
+        command_responses=[(lambda a: a[:1] == ["umount"], FakeProc(1, "", "target is busy"))],
+    )
+    result = pbm.switch_active_persona(runner, to_persona="personal", credential_ok=True)
+    assert result.applied is False
+    assert "target is busy" in result.detail
+    assert not any(c[:1] == ["mount"] and "PERSONAL" in c[1] for c in runner.calls)
+    assert runner.files[pbm.ACTIVE_PERSONA_MARKER_PATH] == "admin"

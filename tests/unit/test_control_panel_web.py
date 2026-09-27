@@ -28,6 +28,24 @@ def test_handle_detect_calls_the_real_backend_and_returns_its_result():
     assert result.body["found_volumes"] == ["baseline_user_persistence_admin"]
 
 
+# -- active persona (work-queue item 25, decision record 78) --------------
+
+def test_handle_active_persona_defaults_when_no_marker_exists():
+    runner = FakeRunner()
+    result = cpw.handle_active_persona(runner)
+    assert result.outcome == "applied"
+    assert result.body["persona"] == "admin"
+    assert result.body["mountpoint"] == "/mnt/USER_PERSISTENCE_ADMIN"
+
+
+def test_handle_active_persona_reflects_a_real_marker():
+    import persist_bind_mounts as pbm
+    runner = FakeRunner(files={pbm.ACTIVE_PERSONA_MARKER_PATH: "personal"})
+    result = cpw.handle_active_persona(runner)
+    assert result.body["persona"] == "personal"
+    assert result.body["mountpoint"] == "/mnt/USER_PERSISTENCE_PERSONAL"
+
+
 # -- differences ----------------------------------------------------------
 
 def test_handle_differences_hands_off_when_no_config_file_exists():

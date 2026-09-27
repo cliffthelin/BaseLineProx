@@ -147,18 +147,43 @@ class LoginSession:
     username: str
     created: float
     ttl_s: float = 1800.0
+    # Persona-aware wiring (work-queue item 25, decision record 78):
+    # which persona was active (per persist_bind_mounts.get_active_persona)
+    # at the moment this session was created. None when the caller
+    # never supplied an ActivePersonaProvider - the pre-existing,
+    # single-persona behavior, fully unaffected. This module's own
+    # account/settings data lives under /var/lib/baseline, which
+    # persist_bind_mounts.py bind-mounts onto whichever persona is
+    # currently active - a session's data identity can change
+    # underneath it if the active persona switches mid-session, so
+    # this field lets that be caught rather than silently ignored.
+    persona: str | None = None
 
     def expired(self, now: float) -> bool:
         return now > self.created + self.ttl_s
+
+
+class ActivePersonaProvider:
+    """Answers which persona is currently active. The real
+    implementation calls `persist_bind_mounts.get_active_persona`
+    against a real Runner; injectable so tests never need a real
+    filesystem, matching this module's own established pattern for
+    every other boundary (`PasswordVerifier`, `SettingsSource`, ...).
+    Entirely optional - a caller that never passes one to
+    `handle_login`/`handle_settings_view`/`handle_settings_edit` gets
+    the pre-existing, persona-unaware behavior unchanged."""
+
+    def current_persona(self) -> str:
+        raise NotImplementedError
 
 
 @dataclass
 class SessionStore:
     sessions: dict = field(default_factory=dict)
 
-    def create(self, username: str, now: float) -> LoginSession:
+    def create(self, username: str, now: float, persona: str | None = None) -> LoginSession:
         token = secrets.token_urlsafe(32)
-        session = LoginSession(token=token, username=username, created=now)
+        session = LoginSession(token=token, username=username, created=now, persona=persona)
         self.sessions[token] = session
         return session
 
@@ -196,29 +221,55 @@ class RouteResult:
 
 
 def handle_login(verifier: PasswordVerifier, sessions: SessionStore,
-                  username: str, password: str, now: float) -> RouteResult:
+                  username: str, password: str, now: float,
+                  persona_provider: ActivePersonaProvider | None = None) -> RouteResult:
     if verifier.verify(username, password):
-        session = sessions.create(username, now)
+        persona = persona_provider.current_persona() if persona_provider is not None else None
+        session = sessions.create(username, now, persona=persona)
         return RouteResult("applied", 200, {"token": session.token})
     # Deliberately identical response shape/timing-irrelevant message
     # for "no such user" and "wrong password" - no username enumeration.
     return RouteResult("refused", 401, {"error": "invalid credentials"})
 
 
+def _stale_persona_result(session: LoginSession, persona_provider: ActivePersonaProvider | None) -> RouteResult | None:
+    """Returns a refusal RouteResult if the active persona has changed
+    since this session was created, else None. A no-op (returns None
+    unconditionally) when either the caller never supplied a
+    provider, or the session itself never recorded a persona (both mean
+    "not opted into persona-awareness") - the pre-existing behavior."""
+    if persona_provider is None or session.persona is None:
+        return None
+    current = persona_provider.current_persona()
+    if current != session.persona:
+        return RouteResult(
+            "refused", 401,
+            {"error": "stale session - the active persona changed since login; log in again",
+             "session_persona": session.persona, "active_persona": current})
+    return None
+
+
 def handle_settings_view(sessions: SessionStore, source: SettingsSource,
-                          token: str, now: float) -> RouteResult:
+                          token: str, now: float,
+                          persona_provider: ActivePersonaProvider | None = None) -> RouteResult:
     session = sessions.get(token, now)
     if session is None:
         return RouteResult("refused", 401, {"error": "not authenticated"})
+    stale = _stale_persona_result(session, persona_provider)
+    if stale is not None:
+        return stale
     return RouteResult("applied", 200, {"settings": source.current_settings()})
 
 
 def handle_settings_edit(sessions: SessionStore, applier: SectionApplier,
                           token: str, section: str, new_values: dict,
-                          now: float) -> RouteResult:
+                          now: float, persona_provider: ActivePersonaProvider | None = None) -> RouteResult:
     session = sessions.get(token, now)
     if session is None:
         return RouteResult("refused", 401, {"error": "not authenticated"})
+    stale = _stale_persona_result(session, persona_provider)
+    if stale is not None:
+        return stale
     if section not in KNOWN_SECTIONS:
         # Not one of the two safe flows this module completes
         # automatically - hand off rather than guess what an unknown
@@ -345,7 +396,8 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
 
         if self.path == "/login":
             result = handle_login(deps["verifier"], deps["sessions"],
-                                   body.get("username", ""), body.get("password", ""), now)
+                                   body.get("username", ""), body.get("password", ""), now,
+                                   persona_provider=deps.get("persona_provider"))
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "applied":
@@ -356,7 +408,8 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             section = self.path[len("/settings/"):]
             values = body if json_mode else self._parse_values_json(body)
             result = handle_settings_edit(deps["sessions"], deps["applier"],
-                                           self._token(), section, values, now)
+                                           self._token(), section, values, now,
+                                           persona_provider=deps.get("persona_provider"))
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "refused" and result.status == 401:
@@ -414,7 +467,8 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, render_setup_page("account"))
 
         if self.path == "/settings":
-            result = handle_settings_view(deps["sessions"], deps["source"], self._token(), now)
+            result = handle_settings_view(deps["sessions"], deps["source"], self._token(), now,
+                                           persona_provider=deps.get("persona_provider"))
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome != "applied":
@@ -549,6 +603,19 @@ class FileBackedPasswordVerifier(PasswordVerifier):
             return False
         salt = parts[2]
         return _sha512crypt(password, salt) == stored_hash
+
+
+class RunnerBackedActivePersonaProvider(ActivePersonaProvider):
+    """The real `ActivePersonaProvider`: reuses
+    `persist_bind_mounts.get_active_persona` against a real Runner,
+    directly - never re-derives the active-persona marker logic here."""
+
+    def __init__(self, runner):
+        self.runner = runner
+
+    def current_persona(self) -> str:
+        import persist_bind_mounts as pbm
+        return pbm.get_active_persona(self.runner)
 
 
 class FileBackedSettingsSource(SettingsSource):
@@ -732,11 +799,13 @@ class SettingsWebServer:
     def __init__(self, bind_host: str, bind_port: int, *, verifier: PasswordVerifier,
                  source: SettingsSource, applier: SectionApplier,
                  eligibility: RebuildEligibility, trigger: RebuildTrigger,
-                 hasher, store=None, clock=time.time):
+                 hasher, store=None, clock=time.time,
+                 persona_provider: ActivePersonaProvider | None = None):
         self.deps = {
             "verifier": verifier, "source": source, "applier": applier,
             "eligibility": eligibility, "trigger": trigger, "hasher": hasher,
             "clock": clock, "sessions": SessionStore(), "store": store,
+            "persona_provider": persona_provider,
         }
         self.httpd = http.server.HTTPServer((bind_host, bind_port), SettingsHandler)
         self.httpd.deps = self.deps  # type: ignore[attr-defined]
@@ -749,12 +818,20 @@ class SettingsWebServer:
 
 
 def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
-                       data_path: Path | None = None) -> SettingsWebServer:
+                       data_path: Path | None = None, runner=None) -> SettingsWebServer:
     """A genuinely working, standalone deployment - one JSON file, no
     root, no real Proxmox install required. Default login is
     root/baseline (see JsonFileStore's seed) until PasswordVerifier is
-    wired to the real system account."""
+    wired to the real system account.
+
+    `runner` (optional, real-deployment only) wires a real
+    `RunnerBackedActivePersonaProvider` so a session becomes stale if
+    the active persona switches underneath it (decision record 78) -
+    omitted (the default) keeps this fully usable standalone with no
+    Runner/persistence layer available at all, matching this
+    function's own "no root, no real hardware required" design."""
     store = JsonFileStore(data_path or Path("/tmp/baseline-settings-web/store.json"))
+    persona_provider = RunnerBackedActivePersonaProvider(runner) if runner is not None else None
     return SettingsWebServer(
         bind_host, bind_port,
         verifier=FileBackedPasswordVerifier(store),
@@ -764,6 +841,7 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
         trigger=LoggingRebuildTrigger(store),
         hasher=default_hasher,
         store=store,
+        persona_provider=persona_provider,
     )
 
 
@@ -783,9 +861,10 @@ def resolve_data_path(env: dict) -> Path:
 def main() -> int:
     import os
     import sys
+    from repair import RealRunner
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8100
     data_path = resolve_data_path(os.environ)
-    server = build_real_server(bind_port=port, data_path=data_path)
+    server = build_real_server(bind_port=port, data_path=data_path, runner=RealRunner())
     print(f"Baseline settings web UI on http://0.0.0.0:{port}/  (login: root / baseline)")
     print(f"Data store: {data_path}")
     try:

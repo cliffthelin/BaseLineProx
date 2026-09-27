@@ -163,3 +163,19 @@ def test_delete_script_refuses_unsafe_name_without_touching_the_filesystem():
     result = si.delete_script(r, "../real.sh", inbox_dir="/inbox")
     assert result.ok is False
     assert "/inbox/real.sh" in r.files
+
+
+# -- inbox_dir_for: persona-aware wiring (work-queue item 25) ---------------
+
+def test_inbox_dir_for_defaults_to_the_legacy_singular_inbox_dir():
+    assert si.inbox_dir_for() == si.DEFAULT_INBOX_DIR
+    assert si.inbox_dir_for(None) == si.DEFAULT_INBOX_DIR
+
+
+def test_inbox_dir_for_a_real_persona_uses_its_own_mountpoint():
+    assert si.inbox_dir_for("admin") == "/mnt/USER_PERSISTENCE_ADMIN/scripts_inbox"
+    assert si.inbox_dir_for("personal") == "/mnt/USER_PERSISTENCE_PERSONAL/scripts_inbox"
+
+
+def test_inbox_dir_for_different_personas_never_collide():
+    assert si.inbox_dir_for("admin") != si.inbox_dir_for("personal")

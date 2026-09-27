@@ -133,6 +133,85 @@ def test_session_expires_after_ttl():
 
 
 # --------------------------------------------------------------------------
+# Persona-aware wiring (work-queue item 25, decision record 78): a
+# session's data (settings_web's own account/settings store, redirected
+# via persist_bind_mounts onto whichever persona is active) can change
+# identity underneath it if the active persona switches mid-session.
+# --------------------------------------------------------------------------
+
+class FakePersonaProvider(sw.ActivePersonaProvider):
+    def __init__(self, persona: str):
+        self.persona = persona
+
+    def current_persona(self):
+        return self.persona
+
+
+def test_login_without_a_persona_provider_is_unaffected_legacy_behavior():
+    sessions = sw.SessionStore()
+    result = sw.handle_login(FakeVerifier({"root": "baseline"}), sessions, "root", "baseline", now=1000.0)
+    token = result.body["token"]
+    session = sessions.get(token, now=1000.0)
+    assert session.persona is None
+
+
+def test_login_records_the_active_persona_when_a_provider_is_supplied():
+    sessions = sw.SessionStore()
+    result = sw.handle_login(FakeVerifier({"root": "baseline"}), sessions, "root", "baseline", now=1000.0,
+                              persona_provider=FakePersonaProvider("admin"))
+    token = result.body["token"]
+    session = sessions.get(token, now=1000.0)
+    assert session.persona == "admin"
+
+
+def test_settings_view_succeeds_when_persona_unchanged_since_login():
+    sessions = sw.SessionStore()
+    provider = FakePersonaProvider("admin")
+    login = sw.handle_login(FakeVerifier({"root": "baseline"}), sessions, "root", "baseline", now=1000.0,
+                             persona_provider=provider)
+    result = sw.handle_settings_view(sessions, FakeSource({"network": {}}), token=login.body["token"],
+                                      now=1001.0, persona_provider=provider)
+    assert result.outcome == "applied"
+
+
+def test_settings_view_refuses_a_stale_session_after_persona_switches():
+    sessions = sw.SessionStore()
+    provider = FakePersonaProvider("admin")
+    login = sw.handle_login(FakeVerifier({"root": "baseline"}), sessions, "root", "baseline", now=1000.0,
+                             persona_provider=provider)
+    provider.persona = "personal"  # the active persona switched underneath this session
+    result = sw.handle_settings_view(sessions, FakeSource({"network": {}}), token=login.body["token"],
+                                      now=1001.0, persona_provider=provider)
+    assert result.outcome == "refused"
+    assert result.status == 401
+    assert result.body["session_persona"] == "admin"
+    assert result.body["active_persona"] == "personal"
+
+
+def test_settings_edit_refuses_a_stale_session_after_persona_switches_without_calling_applier():
+    sessions = sw.SessionStore()
+    provider = FakePersonaProvider("admin")
+    login = sw.handle_login(FakeVerifier({"root": "baseline"}), sessions, "root", "baseline", now=1000.0,
+                             persona_provider=provider)
+    provider.persona = "personal"
+    applier = FakeApplier()
+    result = sw.handle_settings_edit(sessions, applier, login.body["token"], "network", {"hostname": "x"},
+                                      now=1001.0, persona_provider=provider)
+    assert result.outcome == "refused"
+    assert applier.calls == []
+
+
+def test_settings_view_without_a_persona_provider_ignores_persona_entirely():
+    """A caller that never opts into persona-awareness (the pre-existing
+    single-persona behavior) is fully unaffected, even for a session
+    that itself has a recorded persona from an earlier login."""
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0, persona="admin")
+    result = sw.handle_settings_view(sessions, FakeSource({"network": {}}), token=session.token, now=1001.0)
+    assert result.outcome == "applied"
+
+
+# --------------------------------------------------------------------------
 # New account (flow 2, step 1)
 # --------------------------------------------------------------------------
 
@@ -228,3 +307,38 @@ def test_resolve_data_path_honors_env_override():
     from pathlib import Path
     env = {"BASELINE_SETTINGS_WEB_DATA": "/var/lib/baseline/settings-web/store.json"}
     assert sw.resolve_data_path(env) == Path("/var/lib/baseline/settings-web/store.json")
+
+
+def test_runner_backed_active_persona_provider_reuses_persist_bind_mounts_directly():
+    from fake_runner import FakeRunner
+    import persist_bind_mounts as pbm
+
+    runner = FakeRunner(files={pbm.ACTIVE_PERSONA_MARKER_PATH: "personal"})
+    provider = sw.RunnerBackedActivePersonaProvider(runner)
+    assert provider.current_persona() == "personal"
+
+
+def test_runner_backed_active_persona_provider_falls_back_to_the_same_default():
+    from fake_runner import FakeRunner
+
+    provider = sw.RunnerBackedActivePersonaProvider(FakeRunner())
+    assert provider.current_persona() == "admin"
+
+
+def test_build_real_server_without_a_runner_has_no_persona_provider(tmp_path):
+    server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json")
+    try:
+        assert server.deps["persona_provider"] is None
+    finally:
+        server.httpd.server_close()
+
+
+def test_build_real_server_with_a_runner_wires_a_real_persona_provider(tmp_path):
+    from fake_runner import FakeRunner
+
+    server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json", runner=FakeRunner())
+    try:
+        assert isinstance(server.deps["persona_provider"], sw.RunnerBackedActivePersonaProvider)
+        assert server.deps["persona_provider"].current_persona() == "admin"
+    finally:
+        server.httpd.server_close()

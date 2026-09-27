@@ -85,6 +85,20 @@ def handle_detect(runner: Runner, *, vg_name: str = drive_installer.DEFAULT_VG_N
     return RouteResult("applied", 200, result)
 
 
+def handle_active_persona(runner: Runner) -> RouteResult:
+    """Persona-aware wiring (work-queue item 25, decision record 78):
+    the Backup card's own target path used to hardcode the legacy
+    singular `/mnt/USER_PERSISTENCE` mountpoint regardless of which
+    persona is actually active - reuses `persist_bind_mounts.py`'s own
+    active-persona marker directly rather than re-deriving it here, so
+    a caller (the page's own JS) can default the field correctly
+    instead of pointing at a mountpoint that may not even be mounted."""
+    import persist_bind_mounts as pbm
+    persona = pbm.get_active_persona(runner)
+    mountpoint = pbm.persistence_mountpoint_for(persona)
+    return RouteResult("applied", 200, {"persona": persona, "mountpoint": mountpoint})
+
+
 def handle_differences(runner: Runner, *, config_path: str = DEFAULT_CONFIG_PATH,
                         network_interface: str = "eno1") -> RouteResult:
     config = _load_config(runner, config_path)
@@ -232,6 +246,10 @@ class ControlPanelHandler(http.server.BaseHTTPRequestHandler):
             result = handle_detect(deps["runner"], vg_name=deps.get("vg_name", drive_installer.DEFAULT_VG_NAME))
             return self._json(result.status, {"outcome": result.outcome, **result.body})
 
+        if parsed.path == "/api/active-persona":
+            result = handle_active_persona(deps["runner"])
+            return self._json(result.status, {"outcome": result.outcome, **result.body})
+
         if parsed.path == "/api/differences":
             result = handle_differences(deps["runner"], config_path=deps["config_path"],
                                          network_interface=deps.get("network_interface", "eno1"))
@@ -334,7 +352,7 @@ label{display:inline-flex;align-items:center;gap:6px;margin-right:14px;font-size
 <div class="card">
   <h2>Backup</h2>
   <div class="row">Destination: <input id="backupDest" value="/mnt/INSTALLER_CACHE/backups/baseline-backup.tar.gz" size="50"></div>
-  <div class="row">Targets (comma-separated paths): <input id="backupTargets" value="/mnt/USER_PERSISTENCE" size="50"></div>
+  <div class="row">Targets (comma-separated paths): <input id="backupTargets" value="" size="50" placeholder="loading active persona..."></div>
   <button onclick="runBackup()">Run backup</button>
   <div id="backupResult"></div>
 </div>
@@ -361,6 +379,11 @@ async function callApi(path, opts){
   const body = await res.json();
   return body;
 }
+async function loadActivePersona(){
+  const body = await callApi("/api/active-persona");
+  if (body.mountpoint) document.getElementById("backupTargets").value = body.mountpoint;
+}
+loadActivePersona();
 async function detect(){
   const body = await callApi("/api/detect");
   document.getElementById("detectResult").innerHTML = "<pre>" + JSON.stringify(body, null, 2) + "</pre>";
