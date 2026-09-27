@@ -80,3 +80,88 @@ def test_open_db_is_idempotent_on_existing_schema():
     # calling schema init logic twice on the same connection must not raise
     sh._ensure_schema(conn)
     conn.execute("SELECT 1 FROM samples LIMIT 0")
+
+
+# --------------------------------------------------------------------------
+# Per-source collection intervals (decision record 72) - "a parameter
+# available to be set as needed as often as needed... it should not
+# change places that are not of high concern": every source gets its
+# own independently settable interval, defaulting to whatever the
+# caller passes (sensors_collect.py's own DEFAULT_INTERVALS).
+# --------------------------------------------------------------------------
+
+def test_get_interval_returns_the_given_default_when_never_set():
+    conn = make_db()
+    assert sh.get_interval(conn, "nvme", default=30.0) == 30.0
+
+
+def test_set_interval_then_get_returns_the_override():
+    conn = make_db()
+    sh.set_interval(conn, "nvme", 1.0)
+    assert sh.get_interval(conn, "nvme", default=30.0) == 1.0
+
+
+def test_set_interval_only_affects_the_named_source():
+    conn = make_db()
+    sh.set_interval(conn, "nvme", 1.0)
+    assert sh.get_interval(conn, "sensors", default=30.0) == 30.0
+    assert sh.get_interval(conn, "smart", default=30.0) == 30.0
+    assert sh.get_interval(conn, "volume", default=30.0) == 30.0
+
+
+def test_set_interval_overwrites_a_previous_override_for_the_same_source():
+    conn = make_db()
+    sh.set_interval(conn, "nvme", 1.0)
+    sh.set_interval(conn, "nvme", 5.0)
+    assert sh.get_interval(conn, "nvme", default=30.0) == 5.0
+
+
+def test_clear_interval_reverts_to_the_default():
+    conn = make_db()
+    sh.set_interval(conn, "nvme", 1.0)
+    sh.clear_interval(conn, "nvme")
+    assert sh.get_interval(conn, "nvme", default=30.0) == 30.0
+
+
+def test_clear_interval_is_a_no_op_when_nothing_was_overridden():
+    conn = make_db()
+    sh.clear_interval(conn, "nvme")  # must not raise
+    assert sh.get_interval(conn, "nvme", default=30.0) == 30.0
+
+
+def test_list_intervals_returns_only_explicit_overrides():
+    conn = make_db()
+    sh.set_interval(conn, "nvme", 1.0)
+    assert sh.list_intervals(conn) == {"nvme": 1.0}
+
+
+def test_list_intervals_empty_when_nothing_overridden():
+    conn = make_db()
+    assert sh.list_intervals(conn) == {}
+
+
+# -- last-attempt tracking (drives per-source due-ness independent of
+# whether that attempt actually produced a recordable sample) ---------
+
+def test_get_last_attempt_returns_none_when_never_attempted():
+    conn = make_db()
+    assert sh.get_last_attempt(conn, "nvme") is None
+
+
+def test_record_attempt_then_get_returns_the_timestamp():
+    conn = make_db()
+    sh.record_attempt(conn, "nvme", 1700000000.0)
+    assert sh.get_last_attempt(conn, "nvme") == 1700000000.0
+
+
+def test_record_attempt_overwrites_the_previous_timestamp_for_the_same_source():
+    conn = make_db()
+    sh.record_attempt(conn, "nvme", 1700000000.0)
+    sh.record_attempt(conn, "nvme", 1700000030.0)
+    assert sh.get_last_attempt(conn, "nvme") == 1700000030.0
+
+
+def test_record_attempt_only_affects_the_named_source():
+    conn = make_db()
+    sh.record_attempt(conn, "nvme", 1700000000.0)
+    assert sh.get_last_attempt(conn, "sensors") is None

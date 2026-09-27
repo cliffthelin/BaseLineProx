@@ -128,6 +128,16 @@ cp "$SRC/baseline/lib/proxmox_vm_metrics.py" /opt/baseline/lib/proxmox_vm_metric
 cp "$SRC/baseline/lib/sensors_history.py" /opt/baseline/lib/sensors_history.py
 cp "$SRC/baseline/lib/sensors_collect.py" /opt/baseline/lib/sensors_collect.py
 cp "$SRC/baseline/bin/baseline-sensors-collect" /opt/baseline/bin/baseline-sensors-collect
+# Per-source collection cadence, live-adjustable (decision record 72):
+# checking one specific source (e.g. nvme) as often as every second
+# during a time of high concern, without restarting anything and
+# without changing any other source's own cadence. Per-source gating
+# lives in sensors_history.py's own tables; sensors_interval_control.py
+# is the one thing that can't be scoped per-source - the outer systemd
+# timer tick baseline-sensors-collect.timer itself, applied via a
+# drop-in override, never by editing the shipped .timer unit.
+cp "$SRC/baseline/lib/sensors_interval_control.py" /opt/baseline/lib/sensors_interval_control.py
+cp "$SRC/baseline/bin/baseline-sensors-set-interval" /opt/baseline/bin/baseline-sensors-set-interval
 # Track A3: kiosk GUI (cage + stock Chromium) onto Proxmox's own web UI.
 # kiosk_gate.py reuses firstboot_statemachine.already_completed() unchanged
 # so the kiosk can never appear before the machine is actually configured.
@@ -210,7 +220,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -274,10 +284,12 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/backup_restore.py /opt/baseline/lib/config_crypto.py \
          /opt/baseline/lib/control_panel_web.py /opt/baseline/lib/iso_builder.py \
          /opt/baseline/lib/scripts_inbox.py /opt/baseline/lib/scripts_inbox_web.py /opt/baseline/lib/scripts_inbox_gate.py \
+         /opt/baseline/lib/sensors_interval_control.py \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
-         /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate; do
+         /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate \
+         /opt/baseline/bin/baseline-sensors-set-interval; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
 command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
@@ -295,7 +307,8 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
-         /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate; do
+         /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate \
+         /opt/baseline/bin/baseline-sensors-set-interval; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."

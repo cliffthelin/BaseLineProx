@@ -139,3 +139,69 @@ def test_collect_once_records_no_volume_samples_when_nothing_mounted():
     conn = make_db()
     count = sc.collect_once(runner, conn, now=1700000000.0)
     assert count == 0
+
+
+# --------------------------------------------------------------------------
+# Per-source collection cadence (decision record 72) - "a parameter
+# available to be set as needed as often as needed... check every
+# second until a condition changes... should not change places that
+# are not of high concern": each source's own interval independently
+# gates whether its real collector even runs this cycle.
+# --------------------------------------------------------------------------
+
+def test_collect_once_skips_a_source_whose_interval_has_not_yet_elapsed():
+    runner = FakeRunner()
+    script_no_hardware(runner)
+    conn = make_db()
+    sc.collect_once(runner, conn, now=1700000000.0)  # first call: everything due (never attempted)
+    calls_after_first = len(runner.calls)
+    sc.collect_once(runner, conn, now=1700000005.0)  # 5s later - well under the 30s default
+    # no new real subprocess calls should have been made for any source
+    assert len(runner.calls) == calls_after_first
+
+
+def test_collect_once_recollects_a_source_once_its_interval_has_elapsed():
+    runner = FakeRunner()
+    script_no_hardware(runner)
+    conn = make_db()
+    sc.collect_once(runner, conn, now=1700000000.0)
+    calls_after_first = len(runner.calls)
+    sc.collect_once(runner, conn, now=1700000031.0)  # 31s later - past the 30s default
+    assert len(runner.calls) > calls_after_first
+
+
+def test_collect_once_respects_a_real_time_override_escalated_to_one_second():
+    runner = FakeRunner()
+    script_no_hardware(runner)
+    conn = make_db()
+    sh.set_interval(conn, "nvme", 1.0)  # a time of high concern for nvme specifically
+    sc.collect_once(runner, conn, now=1700000000.0)
+    nvme_calls_after_first = sum(1 for c in runner.calls if c[:2] == ["nvme", "list"])
+    sc.collect_once(runner, conn, now=1700000002.0)  # 2s later - past the 1s override
+    nvme_calls_after_second = sum(1 for c in runner.calls if c[:2] == ["nvme", "list"])
+    assert nvme_calls_after_second > nvme_calls_after_first
+
+
+def test_collect_once_escalating_one_source_does_not_speed_up_another():
+    """The direct instruction's own core requirement: escalating nvme
+    to 1s must not also re-poll sensors/smart/volume early."""
+    runner = FakeRunner()
+    script_no_hardware(runner)
+    conn = make_db()
+    sh.set_interval(conn, "nvme", 1.0)
+    sc.collect_once(runner, conn, now=1700000000.0)
+    sensors_calls_after_first = sum(1 for c in runner.calls if c[:1] == ["sensors"])
+    sc.collect_once(runner, conn, now=1700000002.0)  # nvme is due again, sensors (still 30s) is not
+    sensors_calls_after_second = sum(1 for c in runner.calls if c[:1] == ["sensors"])
+    assert sensors_calls_after_second == sensors_calls_after_first
+
+
+def test_collect_once_records_an_attempt_even_when_no_samples_result():
+    runner = FakeRunner()
+    script_no_hardware(runner)
+    conn = make_db()
+    sc.collect_once(runner, conn, now=1700000000.0)
+    assert sh.get_last_attempt(conn, "sensors") == 1700000000.0
+    assert sh.get_last_attempt(conn, "nvme") == 1700000000.0
+    assert sh.get_last_attempt(conn, "smart") == 1700000000.0
+    assert sh.get_last_attempt(conn, "volume") == 1700000000.0

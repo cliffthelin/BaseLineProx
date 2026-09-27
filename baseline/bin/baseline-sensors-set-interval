@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Real entry point for setting or clearing a per-source sensor-
+collection interval (decision record 72) - lets an operator escalate
+one specific source (sensors/nvme/smart/volume) to checking as often
+as every second during a time of high concern, without restarting
+anything by hand and without changing any other source's own cadence,
+then de-escalate again the moment the concern is over.
+
+    baseline-sensors-set-interval --list
+    baseline-sensors-set-interval --source nvme --seconds 1
+    baseline-sensors-set-interval --source nvme --reset
+
+Every call recomputes and applies the real outer systemd timer tick
+too (sensors_interval_control.py) - you cannot check a source more
+often than the outer loop that invokes the collector at all actually
+runs, so the timer's own cadence is kept at the minimum of every
+source's current interval, and reverted exactly to the plain default
+the moment nothing needs faster than that.
+"""
+import argparse
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import repair  # noqa: E402
+import sensors_collect as sc  # noqa: E402
+import sensors_history as sh  # noqa: E402
+import sensors_interval_control as sic  # noqa: E402
+
+
+def _effective_intervals(conn) -> dict:
+    overrides = sh.list_intervals(conn)
+    return {source: overrides.get(source, default) for source, default in sc.DEFAULT_INTERVALS.items()}
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="baseline-sensors-set-interval")
+    parser.add_argument("--source", choices=sorted(sc.DEFAULT_INTERVALS))
+    parser.add_argument("--seconds", type=float, help="new interval in seconds - as low as needed, e.g. 1")
+    parser.add_argument("--reset", action="store_true", help="clear this source's override, reverting to its default")
+    parser.add_argument("--list", action="store_true", help="print every source's current effective interval")
+    args = parser.parse_args(argv)
+
+    conn = sh.open_db(sc.DB_PATH)
+    try:
+        if args.list:
+            overrides = sh.list_intervals(conn)
+            for source, default in sorted(sc.DEFAULT_INTERVALS.items()):
+                effective = overrides.get(source, default)
+                tag = " (overridden)" if source in overrides else ""
+                print(f"{source}: {effective:g}s{tag}")
+            return 0
+
+        if args.source is None:
+            parser.error("--source is required unless --list is given")
+        if not args.reset and args.seconds is None:
+            parser.error("--seconds is required unless --reset is given")
+
+        if args.reset:
+            sh.clear_interval(conn, args.source)
+            print(f"{args.source}: reverted to default ({sc.DEFAULT_INTERVALS[args.source]:g}s)")
+        else:
+            sh.set_interval(conn, args.source, args.seconds)
+            print(f"{args.source}: interval set to {args.seconds:g}s")
+
+        result = sic.apply_timer_tick(repair.RealRunner(), _effective_intervals(conn))
+        print(f"timer: {result.detail}")
+        return 0
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
