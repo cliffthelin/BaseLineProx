@@ -147,7 +147,31 @@ cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-set
 # 57, 58).
 cp "$SRC/baseline/lib/vm_scripts.py" /opt/baseline/lib/vm_scripts.py
 cp "$SRC/baseline/lib/quadlet.py" /opt/baseline/lib/quadlet.py
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts
+# The real "Master Config" control-plane: target-drive validation,
+# config diffing, selective update, and encrypted backup/restore
+# (decision record 64) - built and tested but never staged by this
+# script until now (decision record 65). baseline-control-panel is
+# deliberately NOT wired to any systemd unit: control_panel_web.py has
+# no authentication of its own, and its default bind (127.0.0.1) is a
+# mitigation, not a substitute for one - auto-starting it as an
+# always-on service would deploy a real, reachable door to
+# backup/restore/update/encrypt-decrypt with no login. It stays
+# operator-invoked-only, same as vm_scripts.py/quadlet.py above, until
+# it has real auth. baseline-diff/-update/-backup/-config-crypto are
+# plain one-shot CLI tools with no service to wire at all.
+cp "$SRC/baseline/lib/physical_device_safety.py" /opt/baseline/lib/physical_device_safety.py
+cp "$SRC/baseline/lib/drive_installer.py" /opt/baseline/lib/drive_installer.py
+cp "$SRC/baseline/lib/config_diff.py" /opt/baseline/lib/config_diff.py
+cp "$SRC/baseline/lib/update_pipeline.py" /opt/baseline/lib/update_pipeline.py
+cp "$SRC/baseline/lib/backup_restore.py" /opt/baseline/lib/backup_restore.py
+cp "$SRC/baseline/lib/config_crypto.py" /opt/baseline/lib/config_crypto.py
+cp "$SRC/baseline/lib/control_panel_web.py" /opt/baseline/lib/control_panel_web.py
+cp "$SRC/baseline/bin/baseline-diff" /opt/baseline/bin/baseline-diff
+cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
+cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
+cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
+cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -202,7 +226,14 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/harness_adapter.py /opt/baseline/lib/harness_registry.py /opt/baseline/lib/harness_events.py \
          /opt/baseline/lib/clipboard_osc52.py /opt/baseline/lib/status_bar.py \
          /opt/baseline/lib/config_apply.py /opt/baseline/lib/config_pipeline.py \
-         /opt/baseline/lib/persist_bind_mounts.py /opt/baseline/bin/baseline-persist-bind-mounts; do
+         /opt/baseline/lib/persist_bind_mounts.py /opt/baseline/bin/baseline-persist-bind-mounts \
+         /opt/baseline/lib/physical_device_safety.py /opt/baseline/lib/drive_installer.py \
+         /opt/baseline/lib/config_diff.py /opt/baseline/lib/update_pipeline.py \
+         /opt/baseline/lib/backup_restore.py /opt/baseline/lib/config_crypto.py \
+         /opt/baseline/lib/control_panel_web.py \
+         /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
+         /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
+         /opt/baseline/bin/baseline-control-panel; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
 command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
@@ -216,7 +247,10 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
          /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
-         /opt/baseline/bin/baseline-persist-bind-mounts; do
+         /opt/baseline/bin/baseline-persist-bind-mounts \
+         /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
+         /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
+         /opt/baseline/bin/baseline-control-panel; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
