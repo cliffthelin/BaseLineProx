@@ -27,6 +27,7 @@ import json
 import os
 import secrets
 import tempfile
+import time
 from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qs
 
@@ -95,8 +96,14 @@ def handle_differences(runner: Runner, *, config_path: str = DEFAULT_CONFIG_PATH
     return RouteResult("applied", 200, {"diff_sections": sections})
 
 
-def handle_backup(runner: Runner, *, dest: str, targets: list, config_only: bool = False) -> RouteResult:
-    result = backup_restore.create_backup(runner, dest_path=dest, targets=targets, config_only=config_only)
+def handle_backup(runner: Runner, *, dest: str, targets: list, config_only: bool = False,
+                   now: float = None) -> RouteResult:
+    """`now` (real wall-clock time from the caller) records a fresh
+    backup-success manifest per target on success - the durable proof
+    `handle_restore`'s own hard gate checks before allowing any
+    restore to touch USER_PERSISTENCE (decision record 74)."""
+    result = backup_restore.create_backup(runner, dest_path=dest, targets=targets,
+                                           config_only=config_only, now=now)
     if not result.ok:
         return RouteResult("refused", 422, {"detail": result.detail})
     return RouteResult("applied", 200, {"detail": result.detail, "dest": dest})
@@ -107,8 +114,15 @@ def handle_backup_list(runner: Runner, *, archive: str) -> RouteResult:
     return RouteResult("applied", 200, {"contents": contents})
 
 
-def handle_restore(runner: Runner, *, archive: str, dest_root: str, members: list = None) -> RouteResult:
-    result = backup_restore.restore_backup(runner, archive_path=archive, dest_root=dest_root, members=members or None)
+def handle_restore(runner: Runner, *, archive: str, dest_root: str, members: list = None,
+                    now: float = None) -> RouteResult:
+    """`now` (real wall-clock time from the caller) is required to
+    pass backup_restore.restore_backup's own hard gate: any restore
+    touching USER_PERSISTENCE refuses outright without a fresh backup
+    manifest (decision record 74) - omitting `now` refuses too,
+    matching that module's own fail-closed design."""
+    result = backup_restore.restore_backup(runner, archive_path=archive, dest_root=dest_root,
+                                            members=members or None, now=now)
     if not result.ok:
         return RouteResult("refused", 422, {"detail": result.detail})
     return RouteResult("applied", 200, {"detail": result.detail})
@@ -237,12 +251,14 @@ class ControlPanelHandler(http.server.BaseHTTPRequestHandler):
 
         if self.path == "/api/backup":
             result = handle_backup(deps["runner"], dest=body.get("dest", ""),
-                                    targets=body.get("targets", []), config_only=bool(body.get("config_only")))
+                                    targets=body.get("targets", []), config_only=bool(body.get("config_only")),
+                                    now=time.time())
             return self._json(result.status, {"outcome": result.outcome, **result.body})
 
         if self.path == "/api/restore":
             result = handle_restore(deps["runner"], archive=body.get("archive", ""),
-                                     dest_root=body.get("dest_root", "/mnt"), members=body.get("members", []))
+                                     dest_root=body.get("dest_root", "/mnt"), members=body.get("members", []),
+                                     now=time.time())
             return self._json(result.status, {"outcome": result.outcome, **result.body})
 
         if self.path == "/api/update":

@@ -76,8 +76,15 @@ def test_handle_backup_list_returns_the_real_tar_contents():
 
 
 def test_handle_restore_runs_the_real_tar_extract():
+    """An unconstrained restore (empty members) conservatively counts
+    as touching USER_PERSISTENCE (decision record 74) - needs a fresh
+    backup manifest to pass the hard gate, same as backup_restore's
+    own tests."""
+    import backup_restore
     runner = FakeRunner()
-    result = cpw.handle_restore(runner, archive="/tmp/x.tar.gz", dest_root="/mnt", members=[])
+    backup_restore.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    result = cpw.handle_restore(runner, archive="/tmp/x.tar.gz", dest_root="/mnt", members=[],
+                                 now=1700000000.0 + 60)
     assert result.outcome == "applied"
     assert any(c[:2] == ["tar", "-xzf"] for c in runner.calls)
 
