@@ -474,7 +474,21 @@ file for what changed and why):
      unimplemented; the dispatch layer (decision record 43) makes any
      of them a drop-in whenever the user names one and its CLI turns
      out to be checkable the way `claude`/`opencode` both were.
-7. **Real-hardware verification is blocked for three provisioning
+7. **See `docs/INSTALL.md` now - the definitive install runbook this
+   project didn't have, written 2026-09-26 after an audit found no
+   single document (this one included) actually tells anyone how to
+   build a working Baseline drive install.** Two real gaps it closed
+   with new code rather than narration: `persistence_pool.py` (the
+   LVM-thin pool Track A2 built once by hand, never scripted) and a
+   documented, code-reuse-based procedure for the real Proxmox install
+   (turns out `drive_setup_install.py`'s existing QEMU invocation
+   builders already accept a real block device path directly - no new
+   code was needed there, just writing down the correct combination
+   for the first time). Neither has been run for real yet - see that
+   document's own status table, which is meant to be corrected in
+   place the first time someone actually runs it, not left to go stale
+   the way this section's own prose repeatedly has.
+8. **Real-hardware verification is blocked for three provisioning
    modules; the chat harness half is NOT blocked and has now been
    checked for real.** `vm_provision.py`/`pct_provision.py`/
    `docker_provision.py` (decision records 34-36) are still unit-tested
