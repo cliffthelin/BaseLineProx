@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Real entry point for the Baseline Control Panel - the live "Master
+Config" web application, not a static form. See
+lib/control_panel_web.py's module docstring for the direct correction
+this exists to satisfy.
+
+    baseline-control-panel [--host 127.0.0.1] [--port 8642] \
+        [--config-path /etc/baseline/install-config.json] [--vg-name pve] [--interface eno1]
+
+Every route calls straight into the real backend modules already in
+this repo (drive_installer, config_diff, backup_restore,
+update_pipeline, config_crypto, physical_device_safety) against this
+live host - open a browser to the printed URL and use it directly.
+"""
+import argparse
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import control_panel_web as cpw  # noqa: E402
+import physical_device_safety as pds  # noqa: E402
+from repair import RealRunner  # noqa: E402
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="baseline-control-panel")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8642)
+    parser.add_argument("--config-path", default=cpw.DEFAULT_CONFIG_PATH)
+    parser.add_argument("--vg-name", default="pve")
+    parser.add_argument("--interface", default="eno1")
+    args = parser.parse_args(argv)
+
+    server = cpw.make_server(
+        runner=RealRunner(), pds_runner=pds.Runner(), config_path=args.config_path,
+        vg_name=args.vg_name, network_interface=args.interface, host=args.host, port=args.port,
+    )
+    print(f"Baseline Control Panel listening on http://{args.host}:{args.port}/")
+    server.serve_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
