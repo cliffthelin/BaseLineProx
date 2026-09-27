@@ -1,5 +1,53 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-27 handoff - v0.1 queue items #14-16 closed; real install-ISO tooling proven; a live disk-merge is mid-flight, NOT executed
+
+**Ending this session because it's out of tokens, not because the work is done.** The disk-merge work below is genuinely in progress - read the "Right now, unfinished" section before doing anything to either physical drive.
+
+### What shipped this session (pushed to `origin`, tip `23a8ee0`)
+
+Six commits, three decision records (57, 58, 59 were the prior session; this one added **60** and **61**):
+
+1. **`vm_scripts.py`** - pinned + sha256-verified `community-scripts/ProxmoxVE` Helper-Scripts (resolves decision record 35's deferred item). Manifest: `debian-lxc`, `docker-lxc`, `homeassistant-lxc`, `pihole-lxc`, `debian-vm`, `haos-vm`.
+2. **`quadlet.py`** - Podman + Quadlet host-service management (Track B4), rootless mode now fully implemented (real `getent passwd` lookup, `runuser -u <user> -- env XDG_RUNTIME_DIR=... systemctl --user`), default corrected to `rootless=False` (no sensible universal default user).
+3. **Real QEMU proof, twice** - a disposable install actually reached a genuine, screendump-verified Proxmox login prompt. Found and fixed two real bugs neither module's fake-based tests caught: `repair.RealRunner.write_text_atomic` didn't create missing parent dirs; `systemctl enable` refuses a Quadlet-generated (transient) unit outright (fixed: `write_and_start`, uses `start`/`stop`, never `enable`/`disable`).
+4. **Real, important disclosed finding**: `ct/debian.sh` run off-Proxmox doesn't fail closed - it silently took an "update in place" branch and ran real `apt` activity on the host in 8s. `docker-lxc` and `debian-vm` were also run for real afterward and behaved *differently again* (exit 113; exit 127 "pveversion: command not found") - behavior genuinely varies by script/kind, documented plainly in `vm_scripts.py`'s docstring rather than generalized from one data point.
+5. **`baseline/bin/baseline-prepare-real-install-iso`** - new operator tool, operationalizes `docs/INSTALL.md` Step 2 for real (`--fetch-from http`, the only accepted mode for real hardware per decision record 02). Found and fixed a real bug (`prepare_iso_defensively` never created its own `--tmp`). Verified for real: hardware match -> 200, mismatch -> 403, replay -> 403.
+6. **Hardware-pinning corrected mid-work, per direct instruction** ("hardware is expected to change with install"): the tool's `--target-mac`/`--target-dmi-product` are now optional, not required - `None` means "don't check this fact," relying on the session's other real properties (LAN scope, pinned TLS fingerprint, single-use, TTL) instead. Re-verified for real with a synthetic unknown machine - correctly accepted.
+7. **`vm_scripts.py` unified with `pct_provision.py`/`vm_provision.py`** via a VMID-adoption bridge (`run_script_and_adopt`/`start_adopted`/`stop_adopted`/`destroy_adopted`) - creation still runs through the upstream script (unavoidable), everything after creation now goes through Baseline's existing tested primitives. Added `vm_provision.destroy_vm` (a real gap found while wiring this - only the persistence-preserving retire path existed before).
+8. `packaging/baseline-drive-setup`'s executables were `777` (contradicting the package's own "read-only, root-owned" description) - fixed to `0755`/`0644`, rebuilt `.deb`, sent to the user.
+
+Full suite: **922/922 passing.** `docs/design/v0.1-work-queue.md` items #14 and #16 closed; #15 partial (2 of 5 remaining scripts real-executed, `homeassistant-lxc`/`haos-vm` still only hash-verified - tracked as new item #18); #17 (real hardware) still blocked, unchanged.
+
+### Right now, unfinished - a live disk-merge investigation, nothing executed yet
+
+User decided to **merge the two physical drives** from `docs/INSTALL.md`'s table (`sdd`, the Proxmox substrate, serial `FD01N6557110C271B`; `sdb`, the persistence backend, serial `MD89N41071210AP4E`) into one - "not the end result and doesn't need to be the journey," both currently connected via USB to the dev machine (this machine, **not** the laptop), neither currently in the laptop.
+
+**Real facts gathered, read-only, both drives left exactly as found (mounted/activated then cleanly unmounted/deactivated afterward):**
+
+- `sdb`: all three partitions (`USER_PERSISTENCE`/`INSTALLER_CACHE`/`SESSION_TEMP`) are **completely empty** - 20K used each, just a fresh `lost+found`. Zero real data at risk on this drive.
+- `sdd`'s `pve` LVM (VG size <475.94G, 16G free): `root` LV is 96G allocated but only **6.2G actually used** (7%); thin pool `data` is 352.74G allocated but only **~3.0G actually written** (0.85% data / 0.50% meta), all of it the two real VMs - `vm-202-disk-0` (4.2G alloc, 39.78% used, ~1.67G real) and `vm-203-disk-0` (5.0G alloc, 26.68% used, ~1.33G real), plus two negligible cloudinit disks. **Total real data across both drives: ~9.2GB** - smaller than the user's own "~25-30GB" estimate.
+
+**Recommended plan, given to the user, not yet actioned:**
+1. `sudo vzdump 202 203 --dumpdir <path> --mode stop` (or `--mode snapshot`) - back up the only two things worth keeping.
+2. Fresh minimal Proxmox install on whichever single drive survives, via `baseline-prepare-real-install-iso` (already proven this session), with `root`/`data` deliberately sized small (~40G/40G instead of 96G/352G) to leave the rest of the drive for `USER_PERSISTENCE`/`INSTALLER_CACHE`/`SESSION_TEMP`.
+3. `qmrestore` the two `vzdump` archives onto the fresh install.
+4. Verify both VMs boot and match pre-migration state before wiping the now-redundant second drive.
+
+Rejected: shrinking the existing thin pool/root LV in place - real risk combined with a physical-drive consolidation happening at the same time, for no benefit given how little real data exists to preserve.
+
+**Still open, next session should ask the user directly rather than assume:**
+- Which physical drive survives (keep `sdd`'s or `sdb`'s physical unit)?
+- Proceed with the `vzdump` backup as step 1?
+
+### A real, scoped sudoers entry now exists on this dev machine
+
+`/etc/sudoers.d/claude-disk-inspect` (user-added, not by me): `cane ALL=(root) NOPASSWD: /usr/sbin/vgs, /usr/sbin/lvs, /usr/sbin/vgchange, /usr/sbin/pvs, /usr/bin/mount, /usr/sbin/vzdump`. Confirmed working (`sudo -n vgs` succeeds; `sudo -n true` correctly still fails since `true` isn't in the list - this is a narrow, scoped grant, not a blanket bypass). **Missing `/usr/bin/umount`** - `sudo -n umount` was needed for this session's own cleanup and wasn't in the list, yet succeeded anyway (cause not fully understood - possibly a separate cached ticket from the user's own terminal at the time); don't assume it will always work without a password. If the `vzdump`/reinstall plan above needs more commands (`lvresize`, `lvcreate`, `resize2fs`, `qmrestore`, `pct`/`qm` themselves), they are **not yet in this sudoers file** - ask the user to extend it rather than assuming broader access exists.
+
+### Standing rule this session leaned on hard, worth repeating
+
+Sudo credential caching is per-TTY (`tty_tickets`) - a session authenticated in the user's own terminal does not extend to a separately-launched Claude session even as the same Linux user. Don't assume a "the user just ran sudo" claim means *this* session can too; test with `sudo -n <cmd>` and take the real answer.
+
 ## 2026-09-26 status refresh - V0.1 remaining-work audit; starting V0.2
 
 **Requested via chat:** "Note it in unfinished work but I want to
