@@ -150,6 +150,62 @@ def test_symlink_resolving_to_the_correct_device_is_still_refused(monkeypatch):
             runner=_good_runner(realpath_map={"/dev/sdd-link": "/dev/sdd"}))
 
 
+# --- serial restriction is opt-in, not forced by default -------------------
+# Direct instruction: "Expected serial doesn't seem like it should be
+# forced but that it should be a restricted... Default is not and I do
+# not want it restricted in my current builds." expected_serial is now
+# optional: omitted (or None) means unrestricted - any real block
+# device passes as long as it isn't the boot device and its size is in
+# range. Passing it (a string, or a list for "the number of drives...
+# that should be detected") restores the old exact-match/allowlist
+# behavior, opt-in per call.
+
+def test_unrestricted_by_default_when_expected_serial_is_omitted():
+    runner = _good_runner(udevadm_by_path={"/dev/sdd": "SOME-UNLISTED-SERIAL",
+                                            "/dev/nvme0n1": TEST_BOOT_SERIAL})
+    result = pds.validate_target_device(
+        "/dev/sdd", min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000, runner=runner)
+    assert result["serial"] == "SOME-UNLISTED-SERIAL"
+
+
+def test_unrestricted_mode_still_refuses_a_device_reporting_no_serial_if_it_is_the_boot_device():
+    """Unrestricted means "don't require serial matching," never "skip
+    the boot-device check" - that guard is independent and always on."""
+    runner = _good_runner(udevadm_by_path={"/dev/sdd": TEST_BOOT_SERIAL,
+                                            "/dev/nvme0n1": TEST_BOOT_SERIAL})
+    with pytest.raises(pds.PhysicalDeviceSafetyError):
+        pds.validate_target_device(
+            "/dev/sdd", min_size_bytes=0, max_size_bytes=10**15, runner=runner)
+
+
+def test_unrestricted_mode_accepts_a_device_reporting_no_serial_at_all():
+    """The real finding this module's own docstring already documents:
+    USB-NVMe bridge enclosures often report no serial at all. Under
+    restriction that's refused (test_no_serial_reported_is_refused);
+    unrestricted, it must not be - a real device with a real size in
+    range and not the boot device is a legitimate target."""
+    runner = _good_runner(udevadm_by_path={"/dev/nvme0n1": TEST_BOOT_SERIAL})  # sdd absent
+    result = pds.validate_target_device(
+        "/dev/sdd", min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000, runner=runner)
+    assert result["serial"] is None
+
+
+def test_expected_serial_accepts_a_list_of_multiple_allowed_serials():
+    runner = _good_runner()
+    result = pds.validate_target_device(
+        "/dev/sdb", expected_serial=[TEST_TARGET_SERIAL, TEST_PERSISTENCE_SERIAL],
+        min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000, runner=runner)
+    assert result["serial"] == TEST_PERSISTENCE_SERIAL
+
+
+def test_expected_serial_list_still_refuses_a_serial_not_in_it():
+    runner = _good_runner()
+    with pytest.raises(pds.PhysicalDeviceSafetyError):
+        pds.validate_target_device(
+            "/dev/sdd", expected_serial=[TEST_PERSISTENCE_SERIAL],
+            min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000, runner=runner)
+
+
 # --- caller-supplied allowlist ----------------------------------------------
 
 TEST_TARGETS = {

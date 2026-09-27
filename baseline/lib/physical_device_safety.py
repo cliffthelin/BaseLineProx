@@ -84,14 +84,26 @@ def get_boot_device_serial(runner: Runner) -> str | None:
     return get_device_serial(runner, parent)
 
 
-def validate_target_device(path: str, *, expected_serial: str, min_size_bytes: int,
-                            max_size_bytes: int, runner: Runner = None) -> dict:
+def validate_target_device(path: str, *, expected_serial: str | list[str] | None = None,
+                            min_size_bytes: int, max_size_bytes: int,
+                            runner: Runner = None) -> dict:
     """The one function every destructive helper in this module
     requires a result from. Refuses (raises PhysicalDeviceSafetyError)
     unless ALL of: the path is not a symlink; the resolved path is a
-    block device; its serial matches expected_serial EXACTLY; its size
-    falls within [min_size_bytes, max_size_bytes]; its serial does NOT
-    match the machine's own boot-device serial."""
+    block device; its size falls within [min_size_bytes, max_size_bytes];
+    its serial does NOT match the machine's own boot-device serial.
+
+    `expected_serial` is opt-in restriction, not a forced default -
+    direct instruction: "Expected serial doesn't seem like it should be
+    forced but that it should be a restricted... Default is not and I
+    do not want it restricted in my current builds." Omitted (or
+    `None`, the default): unrestricted - any real, non-boot device in
+    the size range passes, serial matched or not (a real, already-
+    documented case: the USB-NVMe bridges this project's own drives sit
+    behind often report no serial at all). Passed as a string: exact
+    match required. Passed as a list: the resolved device's serial
+    must be a member of it - the real shape for "the number of drives
+    and what drives should be detected" being more than exactly one."""
     runner = runner or Runner()
 
     if os.path.islink(path):
@@ -103,10 +115,12 @@ def validate_target_device(path: str, *, expected_serial: str, min_size_bytes: i
         raise PhysicalDeviceSafetyError(f"{resolved!r} is not a block device - refusing")
 
     actual_serial = get_device_serial(runner, resolved)
-    if actual_serial != expected_serial:
-        raise PhysicalDeviceSafetyError(
-            f"{resolved!r} has serial {actual_serial!r}, expected exactly "
-            f"{expected_serial!r} - refusing")
+    if expected_serial is not None:
+        allowed = [expected_serial] if isinstance(expected_serial, str) else list(expected_serial)
+        if actual_serial not in allowed:
+            raise PhysicalDeviceSafetyError(
+                f"{resolved!r} has serial {actual_serial!r}, not in the allowed set "
+                f"{allowed!r} - refusing")
 
     boot_serial = get_boot_device_serial(runner)
     if boot_serial is not None and actual_serial == boot_serial:
