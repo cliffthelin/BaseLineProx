@@ -41,6 +41,7 @@ This PRD defines, at a design level only, the storage-class taxonomy, identity m
 
 | Class | What it is | Rebuild/lifetime policy | Migrates with hardware swap? |
 |---|---|---|---|
+| 0. Installer/package cache | Vanilla, unmodified upstream install artifacts (package files, container images, anything pulled from a third-party/non-custom source during provisioning) - **not** user or application persistence at all | Durable *as a cache* (avoids re-downloading), but disposable without consequence - safe to wipe and re-populate from source at any time. Never customized: what's stored is exactly what was pulled, byte for byte | No - regenerated from source on any host; never carries identity |
 | 1. Disposable substrate | The OS Baseline runs on top of - matches `provision.sh`'s existing rebuild model exactly | Freely destroyable/rebuildable at any time without consulting persistence | No - regenerated fresh on new hardware |
 | 2. Baseline control-plane state | Baseline's own operational data: journals, its own service state, its own ledgers (§9, §11) | Not disposable, but not the same namespace as person/application state - a Baseline reinstall must be able to deliberately inherit or rebuild this, never accidentally | With the logical store (§4), not the substrate |
 | 3. Person persistence | One person's documents and preferences (`TestDocuments`) - the application-agnostic profile a person owns | Durable; survives substrate rebuild and application reinstall | With the logical store |
@@ -49,6 +50,14 @@ This PRD defines, at a design level only, the storage-class taxonomy, identity m
 | 6. Cache/scratch | Ephemeral working data any component can regenerate | Explicitly allowed to be lost; never backed up; never migrated; first dropped under storage pressure | No |
 
 Classes 2-6 all live inside the one encrypted `TestPersistence` volume in this experiment's initial storage design (§6), but remain structurally separated namespaces within it - never comingled just because they share a volume.
+
+**Class 0 is not among them, by requirement, not merely by convention.** The installer/package cache must live in a **completely separate dataset/volume/service** from the `TestPersistence` volume - never a namespace within it, never a subdirectory reachable through the same access path, never backed up or migrated as part of a person's or application's persistence. The concrete reasons this separation is required, not just tidy:
+
+- **Trust boundary.** Class 0 content is, by definition, unmodified third-party material pulled from outside sources. Person/application persistence (classes 2-6) is Baseline-authored or Baseline-authorized content. Mixing them means every future operation that touches "the persistence volume" (a snapshot, an export, an integrity check) has to reason about two entirely different trust levels instead of one.
+- **Never customized, ever.** The moment class 0 storage becomes reachable from a code path that also writes person/application data, it becomes possible - even accidentally - for something to modify a cached package or lace it with local state. Physical/dataset-level separation makes that structurally impossible, not merely policy-forbidden.
+- **Independent lifecycle.** Class 0 can be wiped and re-populated from source at any time with zero consequence to any person's data - it is designed to be disposable in exactly the way class 1 (the substrate) is, just for downloaded artifacts instead of the OS itself. Sharing a volume with durable classes 2-6 would couple two things that should never need to be backed up, restored, or migrated together.
+
+Where class 0 physically lives (a separate LVM volume, a separate VM, a dedicated file server) is an implementation choice for whichever milestone builds it - this PRD fixes the requirement (structurally separate, never intermixed, vanilla-only), not the mechanism.
 
 ## 4. Identity model
 
@@ -185,6 +194,15 @@ Three classes of settings that might otherwise be carried across a substrate reb
 
 **Adapter/version requirements**: a portable-settings importer must declare which schema versions it accepts, and refuse - not best-effort-convert - anything outside that declared range. This matches this project's existing fail-closed-on-unknown discipline (the handoff journal in `drive-setup-gui-v2-prd.md`, `firstboot_statemachine.py`'s corrupted-journal handling).
 
+### 9a. Daily-driver reconstitution - the substrate must be able to lose everything and it not matter
+
+**The governing requirement**: a person's disposable substrate (class 1) must be destroyable and rebuilt from a generic, zero-customization base image - "think an official OS installer," not a Baseline-specific image - and the resulting fresh machine must become that same person's actual daily-driver again, with nothing important lost, purely by reattaching their `TestPersistence` store. The ISO/base-image build has no knowledge of any person, application configuration, or customization whatsoever; everything that makes a machine *that specific person's* machine lives in persistence, not in the image.
+
+This has a concrete implication the earlier sections of this PRD describe the data model for but not the mechanism: **the OS's own expected file paths for user/application data are not where that data actually lives.** A disposable substrate's home directory, per-application config/data directories, and any other path an application expects to read its own state from must be **symlinks or bind-mounts pointing into the attached `TestPersistence` store**, not real directories on the disposable substrate itself. An application (or the OS) writing to what it believes is its own local path is, structurally, writing into persistence - the substrate never accumulates state an operator would miss if it were wiped.
+
+- **What this is not**: a settings-import/export mechanism (that's §9's own scope, above) - this is about where the *live, in-use* files for a running daily-driver machine physically reside while the machine is running, not about carrying settings across a discrete rebuild event.
+- **What still needs deciding, deferred to the milestone that implements this**: the exact mapping mechanism (symlink vs. bind-mount vs. overlay filesystem, decided per path based on what each actually needs), which paths are in scope for a first pass vs. later, and how a mapped path behaves when persistence is briefly detached while the substrate keeps running. None of that is resolved here - what's fixed now is the requirement itself: **the substrate holds no daily-driver state an operator would miss on rebuild**, and class 0's installer/package cache (§3) is explicitly not part of what gets mapped this way - a cached vanilla package binary is not daily-driver state, and never migrates as if it were.
+
 ## 10. Application lifecycle
 
 | Operation | Application state (class 4) | Referenced person data (class 3, via grant) |
@@ -279,6 +297,8 @@ Three classes of settings that might otherwise be carried across a substrate reb
 
 Milestones 3 onward are the first point at which this PRD's scope touches QEMU at all; nothing before Milestone 2 exists as code. None of these milestones begin in this pass.
 
+**Status note (2026-09-26): milestone 7's real equivalent already happened, ahead of this PRD's own sequencing, under a different (newer) PRD's plan.** Two real, physical NVMe drives were validated (`physical_device_safety.py`), and a real LVM-thin persistence backend (`baseline-persist`) was configured on one of them, attached to a real running Proxmox guest, and proven to survive a real VM destroy/rebuild - see Track A2 in the working plan and its decision records. That work predates class 0 (§3) being identified as a requirement at all - **the installer/package cache does not exist anywhere yet, on any real hardware, as of this note.** It is a new requirement, not yet built, not yet even scoped into a milestone. Whoever picks this up next should treat "design and build class 0's actual separate dataset" as unscoped work, not assume it's covered by anything Track A already did.
+
 ## 17. Open questions
 
 - Final filesystem choice for the volume atop LUKS2 (§6) - deferred past this PRD.
@@ -288,3 +308,5 @@ Milestones 3 onward are the first point at which this PRD's scope touches QEMU a
 - Whether "application rollback" (§10/§11) needs its own generation counter independent of the store's overall generation counter (§4), to let two applications roll back independently without interfering with each other's continuity evidence.
 - **Identity-evidence record encoding** (§4): each piece of evidence used in an equivalence/continuity/ownership/authorization decision should itself carry - not just its raw value, but: **source** (which layer/mechanism produced it - LUKS header, filesystem UUID, manifest field, external observation), **observation time** (when this evidence was last actually read, not assumed current), **scope** (what it claims to establish - carrier identity, logical identity, a specific generation), **confidence** (directly read vs. inferred vs. externally reported), and **corroborating/contradictory status** (does it agree or conflict with other currently-held evidence for the same claim). Whether this becomes a formal per-evidence-item record type in the Milestone-2 schema, or stays informal/textual in early experiments, is undecided.
 - The non-rollback-authority-domain vs. independent-monotonic-anchor choice for §11's rollback-cannot-resurrect-revocation problem is a Milestone-2 blocker (§11, §16) rather than a fully open question - it must be decided, not indefinitely deferred, but which of the two (or a third option) is chosen is not settled by this PRD.
+- **Class 0's actual physical form** (§3): a separate LVM volume, a separate VM, or a dedicated file server - the requirement (structurally separate, never intermixed, vanilla-only) is fixed; the mechanism is not, and no milestone currently claims it.
+- **Daily-driver path-mapping mechanism** (§9a): symlink vs. bind-mount vs. overlay filesystem, decided per path; which paths are in scope for a first pass; behavior when persistence is briefly detached while the substrate keeps running. The requirement (the substrate holds no daily-driver state an operator would miss on rebuild) is fixed; none of this is resolved here.
