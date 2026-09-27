@@ -59,6 +59,22 @@ Classes 2-6 all live inside the one encrypted `TestPersistence` volume in this e
 
 Where class 0 physically lives (a separate LVM volume, a separate VM, a dedicated file server) is an implementation choice for whichever milestone builds it - this PRD fixes the requirement (structurally separate, never intermixed, vanilla-only), not the mechanism.
 
+### 3a. Real partition names (decision record 46) - the mapping this section didn't have until an audit found the gap
+
+This section's class numbers (0-6) are the abstract model. Decision
+record 46 introduced real, concrete partition names for a physical
+disk - `BASELINE`, `USER_PERSISTENCE`, `INSTALLER_CACHE`,
+`SESSION_TEMP` - without ever updating this table to say how they
+relate. A 2026-09-26 audit found this gap directly (two naming schemes
+for overlapping concepts, never reconciled) - see decision record 47.
+
+| Abstract class (this section) | Real partition (decision record 46) |
+|---|---|
+| 0. Installer/package cache | `INSTALLER_CACHE` |
+| 1. Disposable substrate | `BASELINE` |
+| 2-5 (Baseline control-plane state, person persistence, application persistence, secrets) | `USER_PERSISTENCE` (all four still-separated namespaces within it, per this section's own "never comingled just because they share a volume" rule) |
+| 6. Cache/scratch | Closest real analog is `SESSION_TEMP`, but they're not identical - class 6 is described as freely-droppable, regeneratable ephemeral working data; `SESSION_TEMP` (decision record 46) is specifically a *staging/quarantine* area for content not yet triaged into `USER_PERSISTENCE` or `INSTALLER_CACHE`. Treat this as an open question, not a settled equivalence - resolving it precisely is real follow-up work. |
+
 ## 4. Identity model
 
 > Identity is a body of time-scoped evidence, never one identifier.

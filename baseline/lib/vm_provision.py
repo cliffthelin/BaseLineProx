@@ -38,6 +38,18 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 
 DEFAULT_BRIDGE = "vmbr0"
 DEFAULT_VM_STORAGE = "local-lvm"
+# SUPERSEDED as of decision record 46/47 (2026-09-26): named a Proxmox
+# storage backend ("baseline-persist") that assumed an LVM-thin pool
+# on /dev/sdb - that drive is now plain ext4 (USER_PERSISTENCE/
+# INSTALLER_CACHE/SESSION_TEMP), and no such Proxmox storage backend
+# exists on it. attach_persistence_disk()'s own qm-set mechanism is
+# unaffected and still correct for whatever Proxmox storage backend
+# eventually does exist - only this default value is stale. An audit
+# (decision record 47) found this constant referenced a backend this
+# repo has zero code actually creating, and that persistence_pool.py's
+# own reconstruction of that backend was never run before the disk was
+# repartitioned instead - fix the real storage backend name here once
+# one actually exists, don't trust this default blind.
 DEFAULT_PERSISTENCE_STORAGE = "baseline-persist"
 
 

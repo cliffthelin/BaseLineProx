@@ -474,7 +474,20 @@ file for what changed and why):
      unimplemented; the dispatch layer (decision record 43) makes any
      of them a drop-in whenever the user names one and its CLI turns
      out to be checkable the way `claude`/`opencode` both were.
-7. **See `docs/INSTALL.md` now - the definitive install runbook this
+7. **A full audit (2026-09-26, decision record 47) found a real,
+   provable contradiction in this session's own record**: commit
+   `e82c6e4` claims "Real-hardware-verified... on the live Track A1
+   Proxmox install" for Track A3/A5's modules; decision record 45,
+   written hours later the same day, says "this session cannot verify
+   anything on real Proxmox hardware at all." Neither can be fully
+   right. The working plan's Track A1-A5 "STATUS: complete, verified
+   on real hardware" claims have no decision record behind any of
+   them and are now marked corrected/unconfirmed in place - see
+   decision record 47 for the full account. A2's claimed
+   `baseline-persist` LVM-thin backend specifically does not exist on
+   `/dev/sdb` today (it's plain ext4, decision record 46) - do not
+   build anything assuming it does.
+9. **See `docs/INSTALL.md` now - the definitive install runbook this
    project didn't have, written 2026-09-26 after an audit found no
    single document (this one included) actually tells anyone how to
    build a working Baseline drive install.** Two real gaps it closed
@@ -488,7 +501,7 @@ file for what changed and why):
    document's own status table, which is meant to be corrected in
    place the first time someone actually runs it, not left to go stale
    the way this section's own prose repeatedly has.
-8. **Real-hardware verification is blocked for three provisioning
+10. **Real-hardware verification is blocked for three provisioning
    modules; the chat harness half is NOT blocked and has now been
    checked for real.** `vm_provision.py`/`pct_provision.py`/
    `docker_provision.py` (decision records 34-36) are still unit-tested

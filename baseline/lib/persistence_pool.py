@@ -1,26 +1,32 @@
 """Real-hardware LVM-thin persistence pool setup.
 
-Track A2 did this once, for real, on `/dev/sdb` - deactivating a
-stale duplicate `pve` volume group by exact UUID, wiping signatures,
-building an LVM-thin pool, and registering it with Proxmox as the
-`baseline-persist` storage backend - but via ad hoc, manually-typed
-commands, narrated only in prose (`docs/SESSION_HANDOFF.md`), with no
-reusable code left behind. An audit of this repo (2026-09-26) found
-zero code anywhere that creates this pool - only a string constant
-referencing its *name* (`vm_provision.DEFAULT_PERSISTENCE_STORAGE`).
+**SUPERSEDED as of decision record 46/47 (2026-09-26) - the real
+`/dev/sdb` was repartitioned to plain ext4 (`USER_PERSISTENCE`/
+`INSTALLER_CACHE`/`SESSION_TEMP`), not an LVM-thin pool. This module's
+design no longer matches the physical disk's current state.** Kept
+because its Runner-injected argv-building logic and its 16 unit tests
+remain real and correct *for the LVM-thin design specifically*, in
+case that design is ever revisited for a different disk - not because
+it's the current intended path for `/dev/sdb`. An audit
+(decision record 47) found this module's own docstring didn't say so,
+and flagged it as exactly the kind of stale reference this project's
+own `AGENTS.md` now exists to prevent recurring.
 
-**This module is a NEW reconstruction of that intended procedure, not
-a recovery of the exact original commands, which are lost or
-unconfirmed.** See `docs/INSTALL.md` for the honest status of this
-gap. Every function here is Runner-injectable and unit-tested against
-fakes only - **not verified against real hardware**. Review and
-dry-run-check every command against a freshly `physical_device_safety
-.validate_target_device`-validated target before trusting this on a
-real drive; every operation below is destructive.
+Track A2 described building an LVM-thin pool once, for real, on
+`/dev/sdb` - deactivating a stale duplicate `pve` volume group by
+exact UUID, wiping signatures, building the pool, and registering it
+with Proxmox as the `baseline-persist` storage backend - but via ad
+hoc, manually-typed commands, narrated only in prose
+(`docs/SESSION_HANDOFF.md`), with no reusable code left behind. This
+module was a reconstruction of that intended procedure, not a recovery
+of the exact original commands - and decision record 45 already
+flagged that even that reconstruction was never run against real
+hardware before `/dev/sdb` was repartitioned to ext4 instead.
 
-No destructive helper here ever accepts a bare device path - only
-`physical_device_safety`'s validated dict, matching that module's own
-established discipline.
+Every function here is Runner-injectable and unit-tested against
+fakes only. No destructive helper here ever accepts a bare device
+path - only `physical_device_safety`'s validated dict, matching that
+module's own established discipline.
 """
 from __future__ import annotations
 
