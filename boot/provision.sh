@@ -23,6 +23,10 @@ apt-get install -y inxi python3-rich python3-textual tmux gnupg
 echo "=== Installing kiosk GUI packages (Track A3 - cage + stock Chromium) ==="
 apt-get install -y cage chromium
 
+echo "=== Installing Podman (Track B4 - Quadlet service management) ==="
+apt-get install -y podman
+mkdir -p /etc/containers/systemd
+
 echo "=== Installing Node.js 22 (NodeSource - Debian's own package is too old) ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
@@ -104,6 +108,17 @@ cp "$SRC/baseline/lib/settings_web.py" /opt/baseline/lib/settings_web.py
 cp "$SRC/baseline/lib/settings_web_gate.py" /opt/baseline/lib/settings_web_gate.py
 cp "$SRC/baseline/bin/baseline-settings-web" /opt/baseline/bin/baseline-settings-web
 cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-settings-web-gate
+# App-specific LXC/VM provisioning via pinned + sha256-verified
+# community-scripts/ProxmoxVE Helper-Scripts - resolves decision record
+# 35's deferred "LXC app-installer vendoring" item; see vm_scripts.py's
+# module docstring for the verification model, its disclosed
+# limitation, and its relationship to pct_provision.py/vm_provision.py.
+# Track B4: Podman + Quadlet service management - see quadlet.py.
+# Neither is wired to any systemd unit or automatic trigger; both are
+# operator-invoked-only libraries for now (docs/design/decision-records/
+# 57, 58).
+cp "$SRC/baseline/lib/vm_scripts.py" /opt/baseline/lib/vm_scripts.py
+cp "$SRC/baseline/lib/quadlet.py" /opt/baseline/lib/quadlet.py
 chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
@@ -153,9 +168,12 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/proxmox_vm_metrics.py /opt/baseline/lib/sensors_history.py /opt/baseline/lib/sensors_collect.py \
          /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
-         /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate; do
+         /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
+         /opt/baseline/lib/vm_scripts.py /opt/baseline/lib/quadlet.py; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
+command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
+[ -d /etc/containers/systemd ] || verify_fail "missing /etc/containers/systemd (Quadlet unit directory)"
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
          baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
          baseline-settings-web.service; do

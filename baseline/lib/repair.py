@@ -105,6 +105,7 @@ class RealRunner(Runner):
 
     def write_text_atomic(self, path, content):
         path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + f".tmp-baseline-{os.getpid()}")
         mode, uid, gid = 0o644, None, None
         if path.exists():
