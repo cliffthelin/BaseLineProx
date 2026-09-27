@@ -427,3 +427,20 @@ def collect_volume_usage(runner: Runner, *, personas: tuple = DEFAULT_PERSONAS) 
             continue
         results.append(VolumeUsage(label=label, mountpoint=mountpoint, **parsed))
     return results
+
+
+# ---------------------------------------------------------------------------
+# BASELINE -> INSTALLER_CACHE seeding (decision record 76) - "make
+# BASELINE the first thing added into the installer_Cache": a self-
+# installing drive bootstraps INSTALLER_CACHE with a real backup of
+# BASELINE's own current content, established as the first artifact
+# it holds. Reuses backup_restore.create_backup directly rather than
+# a second tar-invocation path.
+# ---------------------------------------------------------------------------
+
+def seed_installer_cache_with_baseline(runner: Runner, *, now: float,
+                                        installer_cache_mountpoint: str = "/mnt/INSTALLER_CACHE",
+                                        baseline_mountpoint: str = "/mnt/BASELINE"):
+    import backup_restore
+    dest = f"{installer_cache_mountpoint}/seed/baseline-seed.tar.gz"
+    return backup_restore.create_backup(runner, dest_path=dest, targets=[baseline_mountpoint], now=now)

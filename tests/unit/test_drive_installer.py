@@ -405,3 +405,41 @@ def test_ensure_baseline_volumes_still_refuses_cleanly_when_truly_zero_space():
     results = di.ensure_baseline_volumes(runner, vg_name="pve")
     assert all(r.ok is False for r in results.values())
     assert not any(c[0] == "lvcreate" for c in runner.calls)
+
+
+# --------------------------------------------------------------------------
+# BASELINE -> INSTALLER_CACHE seeding (decision record 76) - "make
+# BASELINE the first thing added into the installer_Cache": a self-
+# installing drive bootstraps INSTALLER_CACHE with a real backup of
+# BASELINE's own current content as the very first artifact it holds.
+# --------------------------------------------------------------------------
+
+def test_seed_installer_cache_with_baseline_backs_up_the_real_baseline_mountpoint():
+    runner = FakeRunner()
+    result = di.seed_installer_cache_with_baseline(runner, now=1700000000.0)
+    assert result.ok is True
+    assert runner.calls[0][:2] == ["tar", "-czf"]
+    assert "/mnt/BASELINE" in runner.calls[0]
+
+
+def test_seed_installer_cache_with_baseline_writes_under_installer_cache():
+    runner = FakeRunner()
+    result = di.seed_installer_cache_with_baseline(runner, now=1700000000.0)
+    dest = runner.calls[0][2]
+    assert dest.startswith("/mnt/INSTALLER_CACHE/")
+
+
+def test_seed_installer_cache_with_baseline_records_a_fresh_backup_manifest():
+    import backup_restore as br
+    runner = FakeRunner()
+    di.seed_installer_cache_with_baseline(runner, now=1700000000.0)
+    assert br.has_recent_successful_backup(runner, target="/mnt/BASELINE", now=1700000000.0) is True
+
+
+def test_seed_installer_cache_with_baseline_reports_a_real_tar_failure():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["tar"], FakeProc(1, "", "no space left on device")),
+    ])
+    result = di.seed_installer_cache_with_baseline(runner, now=1700000000.0)
+    assert result.ok is False
+    assert "no space" in result.detail
