@@ -130,3 +130,84 @@ def test_is_running_true_and_false():
     runner2 = FakeRunner()
     runner2.script_prefix("systemctl", returncode=3, stdout="inactive\n", stderr="")
     assert quadlet.is_running(runner2, "pihole") is False
+
+
+# --------------------------------------------------------------------------
+# Rootless mode
+# --------------------------------------------------------------------------
+
+def _rootless_runner(uid="1500", home="/home/svc"):
+    runner = FakeRunner()
+    runner.script_prefix("getent", returncode=0, stdout=f"svc:x:{uid}:{uid}:Service:{home}:/usr/sbin/nologin\n", stderr="")
+    runner.script_prefix("podman", returncode=0, stdout="podman version 5.7.0", stderr="")
+    runner.script(lambda a: a[:1] == ["runuser"], FakeProc(0, "", ""))
+    return runner
+
+
+def test_unit_path_rootless_requires_user_home():
+    import pytest
+    with pytest.raises(quadlet.RootlessUserRequired):
+        quadlet.unit_path("pihole", rootless=True)
+
+
+def test_unit_path_rootless_uses_user_home():
+    assert quadlet.unit_path("pihole", rootless=True, user_home="/home/svc") == "/home/svc/.config/containers/systemd/pihole.container"
+
+
+def test_write_and_start_refuses_rootless_without_user():
+    runner = FakeRunner()
+    runner.script_prefix("podman", returncode=0, stdout="podman version 5.7.0", stderr="")
+    spec = ContainerSpec(name="pihole", image="pihole/pihole", rootless=True)
+    result = quadlet.write_and_start(runner, spec)
+    assert result.applied is False
+    assert "requires .user" in result.detail
+
+
+def test_write_and_start_refuses_when_user_does_not_resolve():
+    runner = FakeRunner()
+    runner.script_prefix("podman", returncode=0, stdout="podman version 5.7.0", stderr="")
+    runner.script_prefix("getent", returncode=2, stdout="", stderr="")
+    spec = ContainerSpec(name="pihole", image="pihole/pihole", rootless=True, user="svc")
+    result = quadlet.write_and_start(runner, spec)
+    assert result.applied is False
+    assert "could not resolve user" in result.detail
+
+
+def test_write_and_start_rootless_writes_to_user_config_and_uses_runuser():
+    runner = _rootless_runner(uid="1500", home="/home/svc")
+    spec = ContainerSpec(name="pihole", image="pihole/pihole", rootless=True, user="svc")
+    result = quadlet.write_and_start(runner, spec)
+    assert result.applied is True
+    assert "rootless (user=svc)" in result.detail
+    assert "/home/svc/.config/containers/systemd/pihole.container" in runner.files
+    runuser_calls = [c for c in runner.calls if c[:1] == ["runuser"]]
+    assert len(runuser_calls) == 2  # daemon-reload, start
+    assert runuser_calls[0][:8] == ["runuser", "-u", "svc", "--", "env", "XDG_RUNTIME_DIR=/run/user/1500", "systemctl", "--user"]
+    assert runuser_calls[0][8:] == ["daemon-reload"]
+    assert runuser_calls[1][8:] == ["start", "pihole.service"]
+    # never touches the root-level unit dir
+    assert quadlet.unit_path("pihole") not in runner.files
+
+
+def test_stop_and_remove_rootless_uses_runuser_and_removes_user_unit():
+    runner = _rootless_runner(uid="1500", home="/home/svc")
+    runner.files["/home/svc/.config/containers/systemd/pihole.container"] = "stub"
+    result = quadlet.stop_and_remove(runner, "pihole", rootless=True, user="svc")
+    assert result.applied is True
+    assert "/home/svc/.config/containers/systemd/pihole.container" not in runner.files
+    runuser_calls = [c for c in runner.calls if c[:1] == ["runuser"]]
+    assert runuser_calls[0][8:] == ["stop", "pihole.service"]
+
+
+def test_status_rootless_uses_runuser():
+    runner = FakeRunner()
+    runner.script_prefix("getent", returncode=0, stdout="svc:x:1500:1500:Service:/home/svc:/usr/sbin/nologin\n", stderr="")
+    runner.script(lambda a: a[:1] == ["runuser"] and a[-2:] == ["is-active", "pihole.service"], FakeProc(0, "active\n", ""))
+    assert quadlet.status(runner, "pihole", rootless=True, user="svc") == "active"
+    runuser_calls = [c for c in runner.calls if c[:1] == ["runuser"]]
+    assert runuser_calls[0][:8] == ["runuser", "-u", "svc", "--", "env", "XDG_RUNTIME_DIR=/run/user/1500", "systemctl", "--user"]
+
+
+def test_status_rootless_without_user_is_unknown_not_a_crash():
+    runner = FakeRunner()
+    assert quadlet.status(runner, "pihole", rootless=True, user=None) == "unknown"

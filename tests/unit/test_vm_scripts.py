@@ -151,3 +151,91 @@ def test_run_script_logs_refusal_event_when_script_id_unknown():
     logged = json.loads(runner.files[runner.appends[0]].strip())
     assert logged["outcome"] == "refused"
     assert logged["stage"] == "entry_script"
+
+
+# --------------------------------------------------------------------------
+# Adoption bridge to pct_provision.py/vm_provision.py
+# --------------------------------------------------------------------------
+
+def _runner_ready_for_adoption(next_vmid=105):
+    from fake_runner import FakeProc
+    runner = _runner_with_verified_fetches()
+    runner.script(lambda argv: argv == ["pvesh", "get", "/cluster/nextid"], FakeProc(0, f"{next_vmid}\n", ""))
+    runner.script(lambda argv: argv[:1] == ["bash"], FakeProc(0, "Created LXC 105", ""))
+    return runner
+
+
+def test_run_script_and_adopt_refuses_unknown_script_without_querying_vmid():
+    runner = FakeRunner()
+    result = vm_scripts.run_script_and_adopt(runner, "not-a-real-script")
+    assert result.outcome == "refused"
+    assert result.vmid is None
+    assert runner.calls == []  # never even queried nextid
+
+
+def test_run_script_and_adopt_captures_vmid_before_running_and_reports_kind():
+    runner = _runner_ready_for_adoption(next_vmid=105)
+    result = vm_scripts.run_script_and_adopt(runner, "debian-lxc")
+    assert result.outcome == "applied"
+    assert result.vmid == 105
+    assert result.kind == "lxc"
+    # nextid was queried strictly before the script executed
+    nextid_index = runner.calls.index(["pvesh", "get", "/cluster/nextid"])
+    bash_index = [i for i, c in enumerate(runner.calls) if c[0] == "bash"][0]
+    assert nextid_index < bash_index
+
+
+def test_run_script_and_adopt_refuses_when_script_itself_fails():
+    from fake_runner import FakeProc
+    runner = _runner_with_verified_fetches()
+    runner.script(lambda argv: argv == ["pvesh", "get", "/cluster/nextid"], FakeProc(0, "105\n", ""))
+    runner.script(lambda argv: argv[:1] == ["bash"], FakeProc(1, "", "script failed"))
+    result = vm_scripts.run_script_and_adopt(runner, "debian-lxc")
+    assert result.outcome == "refused"
+    assert result.vmid is None
+
+
+def test_run_script_and_adopt_refuses_when_nextid_query_fails():
+    from fake_runner import FakeProc
+    runner = _runner_with_verified_fetches()
+    runner.script(lambda argv: argv == ["pvesh", "get", "/cluster/nextid"], FakeProc(1, "", "connection refused"))
+    result = vm_scripts.run_script_and_adopt(runner, "debian-lxc")
+    assert result.outcome == "refused"
+    assert result.vmid is None
+    assert all(c[0] != "bash" for c in runner.calls)  # never ran the script against an unknown VMID
+
+
+def test_start_adopted_dispatches_to_pct_provision_for_lxc():
+    runner = FakeRunner()
+    guest = vm_scripts.AdoptedGuest("applied", 105, "lxc", "")
+    result = vm_scripts.start_adopted(runner, guest)
+    assert result.ok is True
+    assert runner.calls == [["pct", "start", "105"]]
+
+
+def test_start_adopted_dispatches_to_vm_provision_for_vm():
+    runner = FakeRunner()
+    guest = vm_scripts.AdoptedGuest("applied", 105, "vm", "")
+    result = vm_scripts.start_adopted(runner, guest)
+    assert result.ok is True
+    assert runner.calls == [["qm", "start", "105"]]
+
+
+def test_stop_adopted_dispatches_by_kind():
+    runner = FakeRunner()
+    vm_scripts.stop_adopted(runner, vm_scripts.AdoptedGuest("applied", 105, "lxc", ""))
+    vm_scripts.stop_adopted(runner, vm_scripts.AdoptedGuest("applied", 106, "vm", ""))
+    assert runner.calls == [["pct", "stop", "105"], ["qm", "stop", "106"]]
+
+
+def test_destroy_adopted_dispatches_by_kind():
+    runner = FakeRunner()
+    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedGuest("applied", 105, "lxc", ""))
+    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedGuest("applied", 106, "vm", ""))
+    assert runner.calls == [["pct", "destroy", "105", "--purge"], ["qm", "destroy", "106", "--purge"]]
+
+
+def test_destroy_adopted_respects_no_purge():
+    runner = FakeRunner()
+    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedGuest("applied", 105, "lxc", ""), purge=False)
+    assert runner.calls == [["pct", "destroy", "105"]]

@@ -156,6 +156,21 @@ def stop_vm(runner: Runner, vmid) -> CommandResult:
     return CommandResult(True, f"VM {vmid} stopped")
 
 
+def destroy_vm(runner: Runner, vmid, *, purge: bool = True) -> CommandResult:
+    """Plain destroy for a VM that never had a persistence disk
+    attached - there is nothing to reassign first, so this is safe to
+    call directly. **Never call this on a VM with a persistence disk
+    attached** - use `retire_vm_preserving_persistence` for that case;
+    this function does not check for one and will destroy it too,
+    matching `qm destroy`'s own real behavior (see this module's
+    docstring for why `retire_vm_preserving_persistence` exists at
+    all)."""
+    proc = runner.run(destroy_vm_argv(vmid, purge=purge), timeout=30)
+    if proc.returncode != 0:
+        return CommandResult(False, proc.stderr.strip() or f"qm destroy exited {proc.returncode}")
+    return CommandResult(True, f"VM {vmid} destroyed")
+
+
 def retire_vm_preserving_persistence(runner: Runner, old_vmid, new_vmid, *,
                                       unused_key: str, purge: bool = True) -> CommandResult:
     """The only safe way this module destroys a VM that has a

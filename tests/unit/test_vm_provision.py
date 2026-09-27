@@ -98,6 +98,28 @@ def test_start_and_stop_vm_call_qm_directly():
     assert runner.calls == [["qm", "start", "201"], ["qm", "stop", "201"]]
 
 
+def test_destroy_vm_reports_success():
+    runner = FakeRunner()
+    result = vp.destroy_vm(runner, 201)
+    assert result.ok is True
+    assert runner.calls[0] == ["qm", "destroy", "201", "--purge"]
+
+
+def test_destroy_vm_without_purge():
+    runner = FakeRunner()
+    vp.destroy_vm(runner, 201, purge=False)
+    assert runner.calls[0] == ["qm", "destroy", "201"]
+
+
+def test_destroy_vm_reports_the_real_failure_detail():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:2] == ["qm", "destroy"], FakeProc(1, "", "VM is running")),
+    ])
+    result = vp.destroy_vm(runner, 201)
+    assert result.ok is False
+    assert "VM is running" in result.detail
+
+
 # -- retire_vm_preserving_persistence(): the exact ordering A4 proved -------
 
 def test_retire_reassigns_the_disk_before_destroying():

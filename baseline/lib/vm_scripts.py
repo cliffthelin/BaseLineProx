@@ -5,19 +5,33 @@ picking two of the exact candidates that record itself named
 (Pi-hole, Home Assistant OS), plus a few more (see
 docs/design/decision-records/57-vm-scripts-pinned-community-helper-scripts.md).
 
-**Relationship to `pct_provision.py`/`vm_provision.py` - read before
-assuming this builds on them, because it doesn't.** Those two modules
-are Baseline-native, Runner-tested, minimal `pct create`/`qm create`
-primitives with no opinion about what runs inside the guest. This
-module is a different, parallel path: it fetches and runs an
-upstream Helper-Script that calls `pct create`/`qm create` *itself*,
-internally, with upstream's own opinionated defaults - Baseline never
-sees or controls that inner command. Picking `debian-lxc` here does
-**not** go through `pct_provision.create_ct`. That's a real
-architectural seam, not an oversight - unifying them (e.g. having this
-module shell out through `pct_provision.py` instead of upstream's own
-script logic) is real, separate follow-up work, not assumed solved
-here.
+**Relationship to `pct_provision.py`/`vm_provision.py` - partially
+unified, read before assuming either "fully separate" or "fully
+merged."** Those two modules are Baseline-native, Runner-tested,
+minimal `pct create`/`qm create` primitives with no opinion about what
+runs inside the guest. This module's *creation* step is still a
+different, parallel path: it fetches and runs an upstream Helper-Script
+that calls `pct create`/`qm create` *itself*, internally, with
+upstream's own opinionated defaults - Baseline never sees or controls
+that inner command, and there is no realistic way to route creation
+itself through `pct_provision.create_ct` without reimplementing
+upstream's actual install logic (template selection, network wait-up,
+package install, etc.) by hand, which defeats the entire point of
+reusing these scripts.
+
+What *is* unified: `run_script_and_adopt()` captures the VMID Proxmox
+will assign immediately before invoking the script
+(`vm_provision.next_free_vmid` - the exact same call `pct_provision.py`
+already imports for the same reason), then returns an `AdoptedGuest`
+the caller feeds into `start_adopted`/`stop_adopted`/`destroy_adopted`,
+which dispatch to `pct_provision.py`'s or `vm_provision.py`'s own
+tested functions by the script's `kind`. So creation stays on this
+module's own path (unavoidable), but every lifecycle operation after
+creation goes through Baseline's existing, tested primitives - not a
+third, separate command shape. See `run_script_and_adopt`'s own
+docstring for the one real, disclosed limitation of this approach (a
+non-atomic VMID read, acceptable in this project's single-operator
+context, not silently assumed safe in general).
 
 Community-maintained, MIT-licensed, one-command LXC/VM installers
 already exist for hundreds of services - reusing them for the
@@ -61,17 +75,38 @@ isn't solvable in the general case" honesty testpersistence-prd
 applies to itself (see its S:5's scoped claim) - don't claim more
 closure here than actually exists.
 
-**A real QEMU smoke test (decision record 59) found something more
-concrete and more important than that theoretical gap: `run_script()`
-does NOT fail safely on a non-Proxmox host.** Run against a plain
-Debian VM with no `pct`/`qm` present at all, `ct/debian.sh` did not
-error out - it silently took its own "already-installed, update in
-place" branch instead (these Helper-Scripts are dual-purpose: create
-*and* update the same container) and ran a real `apt` update/upgrade
-directly on the host in ~8 seconds, reporting `outcome: applied`,
-`returncode: 0`. **Never assume a missing Proxmox environment makes
-this module inert - it can mutate whatever real host it's run
-against, Proxmox or not.** Treat `run_script()` as
+**Real QEMU smoke tests (decision records 59 and 61) found `run_script()`
+does NOT fail uniformly on a non-Proxmox host - behavior genuinely
+varies by script and by kind, confirmed with four real data points, not
+one:**
+
+- `ct/debian.sh` (`debian-lxc`) - did **not** error out. It silently
+  took its own "already-installed, update in place" branch (these
+  Helper-Scripts are dual-purpose: create *and* update the same
+  container) and ran a real `apt` update/upgrade directly on the host
+  in ~8s, reporting `outcome: applied`, exit 0.
+- `ct/docker.sh` (`docker-lxc`) - detected the same "no interactive
+  terminal" condition and also took an update-mode branch, but **this
+  one failed**: exit 113, "General error / Operation not permitted."
+  Refused, not applied - a different real outcome than `debian-lxc`
+  for the same general condition.
+- `vm/debian-vm.sh` (`debian-vm`) - a genuinely different code path:
+  failed immediately (under 1s) with `pveversion: command not found`,
+  exit 127. VM-kind scripts checked so far do not have the LXC-kind
+  update-in-place fallback at all - they hard-require `pveversion` and
+  fail closed immediately without it.
+- `run_script_and_adopt` against `pihole-lxc` - correctly refused
+  before ever reaching `bash`, because `next_free_vmid`'s own
+  `pvesh get /cluster/nextid` call fails cleanly (`pvesh` not found) -
+  confirmed for real, not just against `FakeRunner`.
+
+**The honest summary: don't assume either "always fails closed" or
+"always mutates the host" - it depends on the specific script, and
+this project has only directly observed 4 of the 6 curated entries
+(`homeassistant-lxc` and `haos-vm` are fetch+hash-verified but not yet
+executed under QEMU).** Never assume a missing Proxmox environment
+makes this module inert - `debian-lxc` alone is enough to prove it can
+mutate whatever real host it's run against. Treat `run_script()` as
 operator-supervised-only (never wired to any automatic/scheduled
 trigger, never invoked by the harness on its own initiative) until a
 fully vendored, network-isolated execution environment closes this
@@ -95,11 +130,23 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
         def run(self, argv, timeout=10):
             raise NotImplementedError
 
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
+try:
+    import pct_provision
+    import vm_provision
+    from vm_provision import CommandResult, next_free_vmid
+except ImportError:  # pragma: no cover - direct-script execution fallback
+    pct_provision = None  # type: ignore
+    vm_provision = None  # type: ignore
 
-        def append_text(self, path, content):
-            raise NotImplementedError
+    @dataclass
+    class CommandResult:  # type: ignore
+        ok: bool
+        detail: str
+
+    def next_free_vmid(runner):  # type: ignore
+        raise NotImplementedError
+
+
 
 
 UPSTREAM_SCRIPTS_REPO = "community-scripts/ProxmoxVE"
@@ -293,3 +340,89 @@ def run_script(runner: Runner, script_id: str, *, timeout: int = DEFAULT_EXECUTI
               else f"script exited {proc.returncode}: {proc.stderr.strip()[-2000:]}")
     _log_event(runner, {"script_id": script_id, "outcome": outcome, "stage": "execute", "detail": detail[:500]})
     return RunOutcome(outcome, detail)
+
+
+# ---------------------------------------------------------------------------
+# Adoption bridge to pct_provision.py/vm_provision.py - creation stays on
+# this module's own path (see module docstring for why), but every
+# lifecycle operation afterward goes through Baseline's existing, tested
+# primitives instead of a third, separate command shape.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AdoptedGuest:
+    outcome: str  # "applied" | "refused"
+    vmid: int | None
+    kind: str | None  # "lxc" | "vm"
+    detail: str
+
+
+def run_script_and_adopt(runner: Runner, script_id: str, *,
+                          timeout: int = DEFAULT_EXECUTION_TIMEOUT_S) -> AdoptedGuest:
+    """Captures the VMID Proxmox will assign *before* running the
+    script, via `vm_provision.next_free_vmid` - the exact same call
+    `pct_provision.py` already imports for the same reason (VMIDs are
+    one shared namespace across VMs and containers).
+
+    **Disclosed limitation, not a solved allocation**: querying
+    `/cluster/nextid` does not reserve it - there is no lock between
+    this read and the Helper-Script's own internal call to the same
+    endpoint. In this project's established single-operator, sequential
+    -use context (nothing else is concurrently creating guests), the
+    two reads land on the same VMID in practice; this is not a
+    guarantee under concurrent/clustered use, and this function does
+    not pretend otherwise. If that ever matters, the real fix is
+    upstream Helper-Script cooperation (e.g. an `--on-first-boot` hook
+    reporting its own VMID back), not a client-side guess.
+
+    Returns an `AdoptedGuest` the caller feeds into `start_adopted`/
+    `stop_adopted`/`destroy_adopted` for every operation after creation."""
+    script = SCRIPT_MANIFEST.get(script_id)
+    if script is None:
+        return AdoptedGuest("refused", None, None,
+                             f"{script_id!r} is not on the known-script allow-list; known ids: {sorted(SCRIPT_MANIFEST)}")
+
+    try:
+        expected_vmid = next_free_vmid(runner)
+    except Exception as exc:  # pragma: no cover - exact upstream error text varies
+        return AdoptedGuest("refused", None, None,
+                             f"could not determine the next free VMID before running the script: {exc}")
+
+    outcome = run_script(runner, script_id, timeout=timeout)
+    if outcome.outcome != "applied":
+        return AdoptedGuest("refused", None, None, outcome.detail)
+
+    return AdoptedGuest(
+        "applied", expected_vmid, script.kind,
+        f"{script_id!r} created VMID {expected_vmid} (kind={script.kind}) - "
+        f"use start_adopted/stop_adopted/destroy_adopted for lifecycle from here",
+    )
+
+
+def start_adopted(runner: Runner, guest: AdoptedGuest) -> CommandResult:
+    if guest.kind == "lxc":
+        return pct_provision.start_ct(runner, guest.vmid)
+    if guest.kind == "vm":
+        return vm_provision.start_vm(runner, guest.vmid)
+    raise ValueError(f"unknown adopted-guest kind {guest.kind!r}")
+
+
+def stop_adopted(runner: Runner, guest: AdoptedGuest) -> CommandResult:
+    if guest.kind == "lxc":
+        return pct_provision.stop_ct(runner, guest.vmid)
+    if guest.kind == "vm":
+        return vm_provision.stop_vm(runner, guest.vmid)
+    raise ValueError(f"unknown adopted-guest kind {guest.kind!r}")
+
+
+def destroy_adopted(runner: Runner, guest: AdoptedGuest, *, purge: bool = True) -> CommandResult:
+    """Plain destroy, not `vm_provision.retire_vm_preserving_persistence` -
+    these app-installer guests have no persistence disk attached by
+    this module, so there is nothing to reassign first. If a future
+    caller attaches persistence to an adopted guest, use the
+    persistence-preserving retire path instead of this one."""
+    if guest.kind == "lxc":
+        return pct_provision.destroy_ct(runner, guest.vmid, purge=purge)
+    if guest.kind == "vm":
+        return vm_provision.destroy_vm(runner, guest.vmid, purge=purge)
+    raise ValueError(f"unknown adopted-guest kind {guest.kind!r}")
