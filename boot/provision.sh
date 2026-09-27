@@ -147,6 +147,15 @@ cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-set
 # 57, 58).
 cp "$SRC/baseline/lib/vm_scripts.py" /opt/baseline/lib/vm_scripts.py
 cp "$SRC/baseline/lib/quadlet.py" /opt/baseline/lib/quadlet.py
+# vm_scripts.py's own adoption-bridge functions (start/stop/destroy)
+# import these two as an optional, try/except-guarded dependency - real
+# code, tested (test_vm_provision.py/test_pct_provision.py), but never
+# staged before now (decision record 65's audit), silently degrading
+# the bridge to a stub CommandResult on any real deployed machine
+# rather than crashing. Staged for the same reason vm_scripts.py itself
+# is: operator-invoked-only, no systemd unit.
+cp "$SRC/baseline/lib/vm_provision.py" /opt/baseline/lib/vm_provision.py
+cp "$SRC/baseline/lib/pct_provision.py" /opt/baseline/lib/pct_provision.py
 # The real "Master Config" control-plane: target-drive validation,
 # config diffing, selective update, and encrypted backup/restore
 # (decision record 64) - built and tested but never staged by this
@@ -223,6 +232,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
          /opt/baseline/lib/vm_scripts.py /opt/baseline/lib/quadlet.py \
+         /opt/baseline/lib/vm_provision.py /opt/baseline/lib/pct_provision.py \
          /opt/baseline/lib/harness_adapter.py /opt/baseline/lib/harness_registry.py /opt/baseline/lib/harness_events.py \
          /opt/baseline/lib/clipboard_osc52.py /opt/baseline/lib/status_bar.py \
          /opt/baseline/lib/config_apply.py /opt/baseline/lib/config_pipeline.py \
