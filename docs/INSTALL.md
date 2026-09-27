@@ -15,7 +15,7 @@ newer scattered narrative.**
 | Step | Code behind it | Verified against real hardware? |
 |---|---|---|
 | 1. Acquire + verify the Proxmox installer | `drive_setup_acquire.py` | Yes - live, against the real `download.proxmox.com` (decision record 18) |
-| 2. Prepare the unattended-install answer ISO | `drive_setup_answer.py` | Yes, under QEMU (decision record 19). Not yet re-verified with `--fetch-from iso` specifically, recommended below for a real bare-metal boot - see "Open question" |
+| 2. Prepare the unattended-install answer ISO | `drive_setup_answer.py`, `baseline/bin/baseline-prepare-real-install-iso` (new) | Yes - re-verified 2026-09-27 (decision record 60): a fresh real `--fetch-from iso` QEMU disposable install ran to a genuine post-install Proxmox login prompt (not inferred - a literal screendump showing it), and a real `--fetch-from http` run of the new `baseline-prepare-real-install-iso` tool proved the full HTTPS answer-serve cycle end to end (hardware-mismatch refused, correct hardware served the real answer once, replay refused). Found and fixed a real bug in the same pass: `prepare_iso_defensively` didn't create `--tmp` itself (exit 0 but `Error: No such file or directory` - every FakeAnswerRunner test had passed regardless). **Still not run against real target hardware** - this machine has no physical access to the real drives in the table below |
 | 3. Validate the two target drives | `physical_device_safety.py` | Yes - real, live, on the actual two drives (serials below) |
 | 4. Install Proxmox onto the validated drive | `drive_setup_install.py`'s invocation builders, reused per this doc's own instructions below | **No** - every prior install this code has performed was a QEMU sparse file. The one real install (Dell Latitude 5290) used none of this code and left no reproducible record. This doc's Step 4 is the first time this exact procedure is written down; it has not been run end-to-end for real yet |
 | 5. Deploy the Baseline app (`provision.sh`) | `boot/provision.sh` | Yes - real, per Track A1 |
@@ -35,6 +35,8 @@ newer scattered narrative.**
 
 `/dev/sdX` letters are **not** identity - re-resolve by serial every time (Step 3), never assume the same letter next boot.
 
+**Hardware is expected to change with an install - the two rows above are an example from one point in time, not a permanent fact.** A drive gets replaced, a persistence disk gets upgraded, the substrate disk itself might not even be the same physical unit next time - adding or swapping a drive is a normal, supported operation, not an exception to work around. Re-derive the real serial at the time of each install (`lsblk -o NAME,SERIAL,SIZE,MODEL` or `udevadm info`); never carry a serial forward from this table without re-checking it against the drive actually in front of you. `baseline-prepare-real-install-iso`'s `--target-mac`/`--target-dmi-product` are optional for the same reason - see Step 2.
+
 ## Step 1 - Acquire and verify the Proxmox installer
 
 ```python
@@ -52,47 +54,59 @@ parameter to avoid drifting out of sync with the code's own docstring.
 
 ## Step 2 - Prepare the unattended-install answer ISO
 
-**Corrected 2026-09-26 - the first version of this step recommended
-`--fetch-from iso` for simplicity. That was wrong and has been
-removed.** Decision record 02 already investigated this directly and
-found, by demonstration (not theory), that `--fetch-from iso` embeds
-the root password *hash* recoverably inside the prepared ISO file
-itself - `inspect-iso` reads it straight back out, and so does a bare
-`grep -a` against the raw ISO with no tooling at all. Anyone who ever
-obtains that ISO has the hash. This is exactly why this project's own
-accepted design is `--fetch-from http`, via a Baseline-owned,
-single-use, TTL-bounded, hardware-fact-bound `EphemeralAnswerServer` -
-never the embedded-ISO mode, for a real install any more than a QEMU
-one.
+**Two different modes, for two different purposes - do not mix them up:**
 
-```python
-import drive_setup_answer as dsan
+- **For a disposable QEMU test only** (proving the install mechanism
+  works, never for real hardware): `--fetch-from iso` is fine here -
+  the credential is synthetic, one-time, and the whole VM is deleted
+  afterward. This is the accepted exception decision records 21/22/27
+  already used successfully, and it sidesteps decision records 15-16's
+  unresolved `guestfwd`-based-answer-fetch QEMU networking blocker
+  entirely (that blocker is specific to `--fetch-from http` under
+  QEMU's SLIRP; it does not apply to `iso` mode, and has still never
+  been resolved - don't attempt `--fetch-from http` under QEMU, use
+  `iso` mode for QEMU proofs instead).
+- **For anything meant for real hardware**: always `--fetch-from
+  http`, never `iso`. Decision record 02 demonstrated `--fetch-from
+  iso` embeds the root password *hash* recoverably inside the prepared
+  ISO file itself - `inspect-iso` reads it straight back out, and so
+  does a bare `grep -a` with no tooling at all. `--fetch-from http`,
+  via a Baseline-owned, single-use, TTL-bounded, hardware-fact-bound
+  `EphemeralAnswerServer`, is the only accepted mode for a real
+  install.
 
-outcome = dsan.prepare_iso_defensively(
-    runner, binary=Path("/usr/bin/proxmox-auto-install-assistant"),
-    source_iso=<iso from step 1>, answer_file=<your answer.toml>,
-    fetch_from="http",
-    output_path=Path("/root/baseline-real-install.iso"),
-    tmp_dir=Path("/root/baseline-install-tmp"),
-    workspace_root=Path("/root/baseline-install-workspace"),
-    expected_fetch_mode="http", min_size=..., max_size=...,
-    forbidden_iso_strings=[...],
-)
+**Use the real tool, not hand-rolled snippets**:
+`baseline/bin/baseline-prepare-real-install-iso` operationalizes this
+whole step (decision record 60) - it builds the answer file (disk
+targeted by serial via `filter.ID_SERIAL_SHORT`, never a device
+letter), generates a fresh one-time credential, calls
+`prepare_iso_defensively`, and can also start the matching
+`EphemeralAnswerServer` in one invocation (`--serve`). It refuses to
+guess your real target's MAC address or DMI product name - pass
+`--target-mac`/`--target-dmi-product` yourself, obtained from the real
+machine (`proxmox-auto-install-assistant system-info` from any live
+media, or `dmidecode -s system-product-name` / `ip link`).
+
+```bash
+baseline/bin/baseline-prepare-real-install-iso \
+  --source-iso <iso from step 1> \
+  --assistant-binary /usr/bin/proxmox-auto-install-assistant \
+  --output /root/baseline-real-install.iso \
+  --workspace /root/baseline-install-workspace \
+  --disk-serial FD01N6557110C271B \
+  --server-host <a real LAN IP reachable from the target at boot - never 127.0.0.1, never QEMU's gateway> \
+  --cert /root/answer-server.crt --key /root/answer-server.key \
+  --target-mac <the real target's real NIC MAC> \
+  --target-dmi-product <the real target's real DMI system product name> \
+  --serve
 ```
 
-Then run `dsan.EphemeralAnswerServer` on a machine reachable from the
-real target's own local network at boot (not QEMU's SLIRP gateway -
-a real LAN IP) and never exposed beyond that network: single-use,
-TTL-bounded, and bound to the installing machine's own hardware facts,
-matching every other network-facing surface in this project
-(`settings_web.py`'s LAN-scoped, never-internet-exposed convention).
-**Known open risk, not yet resolved**: decision records 15-16 found
-this exact `guestfwd`-based answer-fetch path failing under QEMU with
-a root cause never identified ("blocks building any new disposable
-Proxmox install... via the established guestfwd/ephemeral-answer-server
-methodology"). A real bare-metal boot reaches the answer server over a
-real NIC, not `guestfwd`, so this specific failure mode may not apply -
-but it hasn't been re-tested on real hardware either. Watch for it.
+Run `--serve` on a machine reachable from the real target's own local
+network at boot, never exposed beyond that network - matching every
+other network-facing surface in this project (`settings_web.py`'s
+LAN-scoped, never-internet-exposed convention). It blocks until the
+session is consumed or its TTL expires (default 30 min) - start it,
+*then* boot the target from the USB stick.
 
 ## Step 3 - Validate the target drives
 

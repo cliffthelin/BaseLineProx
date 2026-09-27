@@ -26,7 +26,7 @@ overwritten in place - it's a pointer, not a record.
 | [network](network/001.md) | network/001.md | 6 | 2026-09-20 | ConnectionModal: bridged identity, alias, enable/disable, lifeline position |
 | [ui](ui/001.md) | ui/001.md | 11 | 2026-09-20 | Down arrow as sole navigation unreliable on bare console (Shift+Tab fallback) |
 | [chat](chat/001.md) | chat/001.md | 11 | 2026-09-26 | OpenCode as the second HarnessAdapter, normalized through real ACP |
-| [proxmox](proxmox/001.md) | proxmox/001.md | 8 | 2026-09-27 | pointer: real QEMU test found a real RealRunner bug + an important upstream-behavior finding (full entry under containers) |
+| [proxmox](proxmox/001.md) | proxmox/001.md | 9 | 2026-09-27 | real install-ISO tooling: QEMU end-to-end proof, real answer-server proof, two bugs fixed, hardware-pinning made optional |
 | [containers](containers/001.md) | containers/001.md | 2 | 2026-09-27 | real QEMU smoke test found and fixed two real bugs; one important upstream-behavior finding disclosed |
 
 Categories are named after the part of the system a change touches, not
