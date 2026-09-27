@@ -238,31 +238,81 @@ def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_V
     return {"has_existing_install": len(missing) == 0, "found_volumes": found, "missing_volumes": missing}
 
 
-def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME) -> dict:
-    """The top-level, idempotent entry point: ensures USER_PERSISTENCE/
-    INSTALLER_CACHE/SESSION_TEMP all exist on `vg_name`, checking real
-    free space first and refusing (not guessing, not shrinking
-    anything) if there isn't enough. Never touches boot/EFI partitions
-    or any existing logical volume - only ever creates what's missing."""
-    total_needed_gb = sum(int(size.rstrip("G")) for _, size, _, _ in BASELINE_VOLUMES)
+DEFAULT_SAFETY_MARGIN_BYTES = 1 * (1024 ** 3)  # never claim the last GiB of free space
 
+
+def adaptive_single_size_gb(free_bytes: int, desired_gb: int, *,
+                             safety_margin_bytes: int = DEFAULT_SAFETY_MARGIN_BYTES,
+                             min_gb: int = 1) -> int:
+    """"There are no immutable volumes, only reasons why things should
+    change or not change them" - `desired_gb` is a reasoned default,
+    never a hard requirement. Returns it unchanged when real free
+    space comfortably covers it; otherwise scales down to whatever is
+    actually usable (never claiming the safety margin); returns 0 only
+    when truly nothing usable remains, for the caller to handle."""
+    usable_bytes = max(free_bytes - safety_margin_bytes, 0)
+    usable_gb = usable_bytes // (1024 ** 3)
+    if usable_gb >= desired_gb:
+        return desired_gb
+    return int(usable_gb) if usable_gb >= min_gb else 0
+
+
+def compute_adaptive_plan(free_bytes: int, volumes=BASELINE_VOLUMES, *,
+                           safety_margin_bytes: int = DEFAULT_SAFETY_MARGIN_BYTES) -> dict:
+    """Real available space always wins over the fixed BASELINE_VOLUMES
+    defaults. If `free_bytes` covers every default size, returns them
+    unchanged. Otherwise scales every volume down proportionally so
+    they all still fit, preserving their relative size ratios (the
+    reasoning behind USER_PERSISTENCE getting more than SESSION_TEMP
+    still holds even when everything is smaller) - never refuses
+    outright just because the fixed defaults don't fit."""
+    defaults_gb = {label: int(size.rstrip("G")) for _, size, label, _ in volumes}
+    total_default_gb = sum(defaults_gb.values())
+
+    usable_bytes = max(free_bytes - safety_margin_bytes, 0)
+    usable_gb = usable_bytes // (1024 ** 3)
+
+    if usable_gb >= total_default_gb:
+        return defaults_gb
+    if usable_gb <= 0:
+        return {label: 0 for label in defaults_gb}
+
+    return {
+        label: max(1, int(default_gb * usable_gb / total_default_gb))
+        for label, default_gb in defaults_gb.items()
+    }
+
+
+def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME) -> dict:
+    """The top-level, idempotent entry point: ensures BASELINE/
+    USER_PERSISTENCE/INSTALLER_CACHE/SESSION_TEMP all exist on
+    `vg_name`, sizing them adaptively to whatever real free space
+    actually exists (decision record 73) rather than refusing outright
+    when the fixed defaults don't fit. Never touches boot/EFI
+    partitions or any existing logical volume - only ever creates
+    what's missing."""
     free_proc = runner.run(vg_free_bytes_argv(vg_name), timeout=15)
     if free_proc.returncode != 0:
         detail = free_proc.stderr.strip() or f"vgs exited {free_proc.returncode}"
         return {label: CommandResult(False, detail) for _, _, label, _ in BASELINE_VOLUMES}
 
     free_bytes = parse_vg_free_bytes(free_proc.stdout)
-    needed_bytes = total_needed_gb * (1024 ** 3)
-    if free_bytes is None or free_bytes < needed_bytes:
-        detail = (f"insufficient free space in VG {vg_name!r}: "
-                  f"{free_bytes if free_bytes is not None else 'unknown'} bytes free, "
-                  f"need at least {needed_bytes} bytes for all three volumes")
-        return {label: CommandResult(False, detail) for _, _, label, _ in BASELINE_VOLUMES}
+    if free_bytes is None:
+        return {label: CommandResult(False, f"could not determine free space in VG {vg_name!r}")
+                for _, _, label, _ in BASELINE_VOLUMES}
+
+    plan_gb = compute_adaptive_plan(free_bytes, BASELINE_VOLUMES)
 
     results = {}
-    for lv_name, size, label, mountpoint in BASELINE_VOLUMES:
+    for lv_name, default_size, label, mountpoint in BASELINE_VOLUMES:
+        size_gb = plan_gb[label]
+        if size_gb <= 0:
+            results[label] = CommandResult(
+                False, f"insufficient free space in VG {vg_name!r} for {label} - "
+                       f"{free_bytes} bytes free, adaptive plan gave 0G real usable space")
+            continue
         results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name,
-                                        size=size, label=label, mountpoint=mountpoint)
+                                        size=f"{size_gb}G", label=label, mountpoint=mountpoint)
     return results
 
 

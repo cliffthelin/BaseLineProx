@@ -319,3 +319,78 @@ def test_ensure_volume_remounts_an_already_mounted_existing_volume_to_apply_opti
                       size="50G", label="SESSION_TEMP", mountpoint="/mnt/SESSION_TEMP")
     remount_calls = [c for c in runner.calls if c[0] == "mount" and any("remount" in part for part in c)]
     assert remount_calls == [["mount", "-o", f"remount,{di.MOUNT_OPTIONS['SESSION_TEMP']}", "/mnt/SESSION_TEMP"]]
+
+
+# --------------------------------------------------------------------------
+# Adaptive volume sizing (decision record 73) - "there are no immutable
+# volumes only reasons why things should change or not change them."
+# The fixed BASELINE_VOLUMES sizes are a reasoned default, not a hard
+# requirement - real available space always wins, scaled down rather
+# than refused outright.
+# --------------------------------------------------------------------------
+
+def test_adaptive_single_size_gb_returns_desired_when_space_comfortably_covers_it():
+    free_bytes = 500 * (1024 ** 3)
+    assert di.adaptive_single_size_gb(free_bytes, 300) == 300
+
+
+def test_adaptive_single_size_gb_scales_down_when_space_is_tight():
+    free_bytes = 16 * (1024 ** 3)  # matches the real dev machine's actual free space
+    result = di.adaptive_single_size_gb(free_bytes, 300)
+    assert 0 < result < 300
+
+
+def test_adaptive_single_size_gb_never_claims_the_full_safety_margin():
+    free_bytes = 1 * (1024 ** 3)  # exactly the default 1GiB safety margin
+    assert di.adaptive_single_size_gb(free_bytes, 300) == 0
+
+
+def test_adaptive_single_size_gb_returns_zero_when_truly_out_of_space():
+    assert di.adaptive_single_size_gb(0, 300) == 0
+
+
+def test_compute_adaptive_plan_uses_defaults_when_space_comfortably_covers_everything():
+    free_bytes = 800 * (1024 ** 3)  # well over the 650G total default need
+    plan = di.compute_adaptive_plan(free_bytes)
+    assert plan == {"BASELINE": 200, "USER_PERSISTENCE": 300, "INSTALLER_CACHE": 100, "SESSION_TEMP": 50}
+
+
+def test_compute_adaptive_plan_scales_every_volume_down_proportionally_when_space_is_tight():
+    free_bytes = 16 * (1024 ** 3)  # the real dev machine's actual free space - nowhere near 650G
+    plan = di.compute_adaptive_plan(free_bytes)
+    assert all(size_gb >= 1 for size_gb in plan.values())
+    assert sum(plan.values()) <= 16
+    # relative ordering preserved: USER_PERSISTENCE (300G default) still gets more than SESSION_TEMP (50G default)
+    assert plan["USER_PERSISTENCE"] >= plan["SESSION_TEMP"]
+
+
+def test_compute_adaptive_plan_returns_zero_for_every_volume_when_truly_out_of_space():
+    plan = di.compute_adaptive_plan(0)
+    assert all(size_gb == 0 for size_gb in plan.values())
+
+
+def test_ensure_baseline_volumes_adapts_sizes_instead_of_refusing_when_space_is_tight():
+    """The real point of decision record 73: a real machine with only
+    16GB free (this dev machine's own actual state) must still get
+    working, adaptively-sized volumes, not a blanket refusal."""
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["vgs"], FakeProc(0, "17179869184\n", "")),  # 16GiB free
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   root  \n", "")),
+    ])
+    results = di.ensure_baseline_volumes(runner, vg_name="pve")
+    assert all(r.ok for r in results.values())
+    lvcreate_calls = [c for c in runner.calls if c[0] == "lvcreate"]
+    assert len(lvcreate_calls) == 4
+    # none of the adapted sizes should be the old fixed defaults
+    sizes_used = {c[c.index("-L") + 1] for c in lvcreate_calls}
+    assert "300G" not in sizes_used
+    assert "200G" not in sizes_used
+
+
+def test_ensure_baseline_volumes_still_refuses_cleanly_when_truly_zero_space():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["vgs"], FakeProc(0, "0\n", "")),
+    ])
+    results = di.ensure_baseline_volumes(runner, vg_name="pve")
+    assert all(r.ok is False for r in results.values())
+    assert not any(c[0] == "lvcreate" for c in runner.calls)
