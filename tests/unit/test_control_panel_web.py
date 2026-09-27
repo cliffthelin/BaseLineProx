@@ -20,12 +20,12 @@ import control_panel_web as cpw
 
 def test_handle_detect_calls_the_real_backend_and_returns_its_result():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve  baseline_user_persistence\n", "")),
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve  baseline_user_persistence_admin\n", "")),
     ])
     result = cpw.handle_detect(runner, vg_name="pve")
     assert result.outcome == "applied"
     assert result.status == 200
-    assert result.body["found_volumes"] == ["baseline_user_persistence"]
+    assert result.body["found_volumes"] == ["baseline_user_persistence_admin"]
 
 
 # -- differences ----------------------------------------------------------

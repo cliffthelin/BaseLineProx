@@ -46,7 +46,8 @@ def test_collect_volume_usage_returns_one_entry_per_real_mounted_volume():
     usages = di.collect_volume_usage(runner)
     assert len(usages) == len(di.BASELINE_VOLUMES)
     labels = {u.label for u in usages}
-    assert labels == {"BASELINE", "USER_PERSISTENCE", "INSTALLER_CACHE", "SESSION_TEMP"}
+    assert labels == {"BASELINE", "USER_PERSISTENCE_ADMIN", "USER_PERSISTENCE_PERSONAL",
+                       "INSTALLER_CACHE", "SESSION_TEMP"}
     first = usages[0]
     assert first.percent_used == 20.0
     assert first.total_bytes == 53687091200

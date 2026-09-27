@@ -146,13 +146,16 @@ def test_ensure_baseline_volumes_checks_free_space_before_creating_anything():
     assert not any(c[0] == "lvcreate" for c in runner.calls)
 
 
-def test_ensure_baseline_volumes_creates_all_four_when_space_allows():
+def test_ensure_baseline_volumes_creates_all_five_when_space_allows():
+    """Admin + personal, per direct instruction - two USER_PERSISTENCE
+    volumes by default, not one (decision record 76)."""
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["vgs"], FakeProc(0, "800000000000\n", "")),  # 800GB free - plenty for all four (650G)
+        (lambda a: a[:1] == ["vgs"], FakeProc(0, "1100000000000\n", "")),  # 1.1TB free - plenty for all five (950G)
         (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   root  \n", "")),
     ])
     results = di.ensure_baseline_volumes(runner, vg_name="pve")
-    assert set(results) == {"BASELINE", "USER_PERSISTENCE", "INSTALLER_CACHE", "SESSION_TEMP"}
+    assert set(results) == {"BASELINE", "USER_PERSISTENCE_ADMIN", "USER_PERSISTENCE_PERSONAL",
+                             "INSTALLER_CACHE", "SESSION_TEMP"}
     assert all(r.ok for r in results.values())
 
 
@@ -174,13 +177,14 @@ def test_ensure_baseline_volumes_never_touches_boot_or_efi():
 # that could drift out of sync with it.
 # --------------------------------------------------------------------------
 
-def test_detect_existing_baseline_install_true_when_all_four_volumes_present():
+def test_detect_existing_baseline_install_true_when_all_volumes_present():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["lvs"], FakeProc(
             0,
             "  pve  root\n"
             "  pve  baseline_app_state\n"
-            "  pve  baseline_user_persistence\n"
+            "  pve  baseline_user_persistence_admin\n"
+            "  pve  baseline_user_persistence_personal\n"
             "  pve  baseline_installer_cache\n"
             "  pve  baseline_session_temp\n",
             "")),
@@ -188,7 +192,8 @@ def test_detect_existing_baseline_install_true_when_all_four_volumes_present():
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is True
     assert set(result["found_volumes"]) == {
-        "baseline_app_state", "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
+        "baseline_app_state", "baseline_user_persistence_admin", "baseline_user_persistence_personal",
+        "baseline_installer_cache", "baseline_session_temp"}
     assert result["missing_volumes"] == []
 
 
@@ -200,7 +205,8 @@ def test_detect_existing_baseline_install_false_when_none_present():
     assert result["has_existing_install"] is False
     assert result["found_volumes"] == []
     assert set(result["missing_volumes"]) == {
-        "baseline_app_state", "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
+        "baseline_app_state", "baseline_user_persistence_admin", "baseline_user_persistence_personal",
+        "baseline_installer_cache", "baseline_session_temp"}
 
 
 def test_detect_existing_baseline_install_false_when_only_some_present():
@@ -208,12 +214,13 @@ def test_detect_existing_baseline_install_false_when_only_some_present():
     "existing" or blocked - ensure_baseline_volumes() already creates
     whatever's missing regardless."""
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve  root\n  pve  baseline_user_persistence\n", "")),
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve  root\n  pve  baseline_user_persistence_admin\n", "")),
     ])
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is False
-    assert result["found_volumes"] == ["baseline_user_persistence"]
-    assert set(result["missing_volumes"]) == {"baseline_app_state", "baseline_installer_cache", "baseline_session_temp"}
+    assert result["found_volumes"] == ["baseline_user_persistence_admin"]
+    assert set(result["missing_volumes"]) == {
+        "baseline_app_state", "baseline_installer_cache", "baseline_session_temp", "baseline_user_persistence_personal"}
 
 
 def test_detect_existing_baseline_install_handles_a_real_lvs_failure():
@@ -237,9 +244,10 @@ def test_mount_options_restricts_session_temp_and_installer_cache_to_noexec():
 
 
 def test_mount_options_never_restricts_user_persistence_or_baseline_to_noexec():
-    # USER_PERSISTENCE holds the scripts inbox - an operator may
-    # reasonably chmod +x and run a script directly from there.
-    assert "noexec" not in di.MOUNT_OPTIONS["USER_PERSISTENCE"]
+    # USER_PERSISTENCE_<PERSONA> holds the scripts inbox - an operator
+    # may reasonably chmod +x and run a script directly from there.
+    assert "noexec" not in di.mount_options_for("USER_PERSISTENCE_ADMIN")
+    assert "noexec" not in di.mount_options_for("USER_PERSISTENCE_PERSONAL")
     assert "noexec" not in di.MOUNT_OPTIONS["BASELINE"]
 
 
@@ -350,18 +358,21 @@ def test_adaptive_single_size_gb_returns_zero_when_truly_out_of_space():
 
 
 def test_compute_adaptive_plan_uses_defaults_when_space_comfortably_covers_everything():
-    free_bytes = 800 * (1024 ** 3)  # well over the 650G total default need
+    free_bytes = 1000 * (1024 ** 3)  # well over the 950G total default need (admin + personal)
     plan = di.compute_adaptive_plan(free_bytes)
-    assert plan == {"BASELINE": 200, "USER_PERSISTENCE": 300, "INSTALLER_CACHE": 100, "SESSION_TEMP": 50}
+    assert plan == {"BASELINE": 200, "USER_PERSISTENCE_ADMIN": 300, "USER_PERSISTENCE_PERSONAL": 300,
+                     "INSTALLER_CACHE": 100, "SESSION_TEMP": 50}
 
 
 def test_compute_adaptive_plan_scales_every_volume_down_proportionally_when_space_is_tight():
-    free_bytes = 16 * (1024 ** 3)  # the real dev machine's actual free space - nowhere near 650G
+    free_bytes = 16 * (1024 ** 3)  # the real dev machine's actual free space - nowhere near 950G
     plan = di.compute_adaptive_plan(free_bytes)
     assert all(size_gb >= 1 for size_gb in plan.values())
     assert sum(plan.values()) <= 16
-    # relative ordering preserved: USER_PERSISTENCE (300G default) still gets more than SESSION_TEMP (50G default)
-    assert plan["USER_PERSISTENCE"] >= plan["SESSION_TEMP"]
+    # relative ordering preserved: each USER_PERSISTENCE_<PERSONA> (300G default) still gets
+    # more than SESSION_TEMP (50G default)
+    assert plan["USER_PERSISTENCE_ADMIN"] >= plan["SESSION_TEMP"]
+    assert plan["USER_PERSISTENCE_PERSONAL"] >= plan["SESSION_TEMP"]
 
 
 def test_compute_adaptive_plan_returns_zero_for_every_volume_when_truly_out_of_space():
@@ -380,7 +391,7 @@ def test_ensure_baseline_volumes_adapts_sizes_instead_of_refusing_when_space_is_
     results = di.ensure_baseline_volumes(runner, vg_name="pve")
     assert all(r.ok for r in results.values())
     lvcreate_calls = [c for c in runner.calls if c[0] == "lvcreate"]
-    assert len(lvcreate_calls) == 4
+    assert len(lvcreate_calls) == 5
     # none of the adapted sizes should be the old fixed defaults
     sizes_used = {c[c.index("-L") + 1] for c in lvcreate_calls}
     assert "300G" not in sizes_used

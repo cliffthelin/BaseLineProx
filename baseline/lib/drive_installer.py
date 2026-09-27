@@ -46,20 +46,58 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 
 DEFAULT_VG_NAME = "pve"
 
-# name, size, GPT/ext4 label, mountpoint - the four real volumes this
-# session's own decision records 46-49 (USER_PERSISTENCE/INSTALLER_CACHE/
-# SESSION_TEMP) and 68 (BASELINE) settled on. BASELINE holds
-# application/VM/LXC state changes - separate from USER_PERSISTENCE
-# (credentials/config/logs, meant to survive a reinstall) and from the
-# disposable substrate itself (Proxmox's own root LV, wiped by any
-# fresh install) - a real, persistent-but-app-scoped location, not
-# something a fresh install would already imply.
-BASELINE_VOLUMES = (
+# name, size, GPT/ext4 label, mountpoint - the three volumes shared
+# across every persona (decision records 46-49, 68): BASELINE
+# (application/VM/LXC state), INSTALLER_CACHE, SESSION_TEMP. Never
+# persona-scoped - there is exactly one of each per install.
+SHARED_VOLUMES = (
     ("baseline_app_state", "200G", "BASELINE", "/mnt/BASELINE"),
-    ("baseline_user_persistence", "300G", "USER_PERSISTENCE", "/mnt/USER_PERSISTENCE"),
     ("baseline_installer_cache", "100G", "INSTALLER_CACHE", "/mnt/INSTALLER_CACHE"),
     ("baseline_session_temp", "50G", "SESSION_TEMP", "/mnt/SESSION_TEMP"),
 )
+
+# Multiple, isolated USER_PERSISTENCE volumes - "like a different
+# Proxmox account," per direct instruction - not one shared volume.
+# The default creator becomes "admin" (root-like, not the daily
+# driver, has cross-persona access gated behind its own additional
+# passphrase); "personal" is the default daily-driver persona spun up
+# alongside it. Any further persona (work, a deliberately risky
+# account, etc.) is opt-in, created explicitly later - never implied
+# by this default (decision record 76).
+DEFAULT_PERSONAS = ("admin", "personal")
+
+
+def persona_label(persona: str) -> str:
+    return f"USER_PERSISTENCE_{persona.upper()}"
+
+
+def persona_lv_name(persona: str) -> str:
+    return f"baseline_user_persistence_{persona.lower()}"
+
+
+def persona_mountpoint(persona: str) -> str:
+    return f"/mnt/{persona_label(persona)}"
+
+
+def persona_volume(persona: str, size: str = "300G") -> tuple:
+    return (persona_lv_name(persona), size, persona_label(persona), persona_mountpoint(persona))
+
+
+def is_persistence_label(label: str) -> bool:
+    return label.startswith("USER_PERSISTENCE_") or label == "USER_PERSISTENCE"
+
+
+def baseline_volumes_for(personas: tuple = DEFAULT_PERSONAS) -> tuple:
+    """The real, complete volume set for a given persona set: the
+    three shared volumes plus one USER_PERSISTENCE_<PERSONA> volume
+    per persona. `personas=()` gives just the shared volumes - useful
+    for provisioning the substrate before any persona is created."""
+    return SHARED_VOLUMES + tuple(persona_volume(p) for p in personas)
+
+
+# The real, default set this module ensures unless a caller passes its
+# own `personas` - admin + personal, matching DEFAULT_PERSONAS.
+BASELINE_VOLUMES = baseline_volumes_for()
 
 # Per-role mount restrictions (real follow-up work, decision record
 # 71): nosuid+nodev everywhere - none of these volumes should ever
@@ -73,10 +111,20 @@ BASELINE_VOLUMES = (
 # things it stores.
 MOUNT_OPTIONS = {
     "BASELINE": "defaults,nosuid,nodev",
-    "USER_PERSISTENCE": "defaults,nosuid,nodev",
     "INSTALLER_CACHE": "defaults,nosuid,nodev,noexec",
     "SESSION_TEMP": "defaults,nosuid,nodev,noexec",
 }
+_PERSISTENCE_MOUNT_OPTIONS = "defaults,nosuid,nodev"
+
+
+def mount_options_for(label: str) -> str:
+    """Every USER_PERSISTENCE_<PERSONA> label (any persona) gets the
+    same policy as the old singular USER_PERSISTENCE did - matched by
+    prefix, not by an ever-growing dict of every persona name."""
+    if is_persistence_label(label):
+        return _PERSISTENCE_MOUNT_OPTIONS
+    return MOUNT_OPTIONS.get(label, "defaults")
+
 
 FSTAB_PATH = "/etc/fstab"
 
@@ -189,7 +237,7 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
 
     groups = parse_logical_volumes(proc.stdout)
     lv_path = f"/dev/{vg_name}/{lv_name}"
-    options = MOUNT_OPTIONS.get(label, "defaults")
+    options = mount_options_for(label)
 
     if lv_exists(groups, vg_name=vg_name, lv_name=lv_name):
         # A pre-existing mount may predate this fix (mounted plain, no
@@ -216,25 +264,28 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
     return CommandResult(True, f"{lv_name} created, formatted {label}, mounted at {mountpoint}", created=True)
 
 
-def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME) -> dict:
-    """Real auto-detection: does `vg_name` already have the three
-    BASELINE_VOLUMES provisioned? Reuses the exact same `lvs` parsing
-    ensure_volume() already uses, rather than a second detection
-    mechanism that could drift out of sync with it. "Existing install"
-    means ALL three are present; a target with none or only some is
+def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
+                                      personas: tuple = DEFAULT_PERSONAS) -> dict:
+    """Real auto-detection: does `vg_name` already have every volume
+    for `personas` provisioned (the three shared volumes plus one
+    USER_PERSISTENCE_<PERSONA> per persona)? Reuses the exact same
+    `lvs` parsing ensure_volume() already uses, rather than a second
+    detection mechanism that could drift out of sync with it. "Existing
+    install" means ALL are present; a target with none or only some is
     reported honestly as not-yet-fully-installed - ensure_baseline_volumes()
     already creates whatever's missing regardless of this function's
     own answer, so a partial state is never blocked, only surfaced."""
+    volumes = baseline_volumes_for(personas)
     proc = runner.run(list_logical_volumes_argv(), timeout=15)
     if proc.returncode != 0:
-        all_names = [lv_name for lv_name, _, _, _ in BASELINE_VOLUMES]
+        all_names = [lv_name for lv_name, _, _, _ in volumes]
         return {"has_existing_install": False, "found_volumes": [], "missing_volumes": all_names,
                 "error": proc.stderr.strip() or f"lvs exited {proc.returncode}"}
 
     groups = parse_logical_volumes(proc.stdout)
-    found = [lv_name for lv_name, _, _, _ in BASELINE_VOLUMES
+    found = [lv_name for lv_name, _, _, _ in volumes
              if lv_exists(groups, vg_name=vg_name, lv_name=lv_name)]
-    missing = [lv_name for lv_name, _, _, _ in BASELINE_VOLUMES if lv_name not in found]
+    missing = [lv_name for lv_name, _, _, _ in volumes if lv_name not in found]
     return {"has_existing_install": len(missing) == 0, "found_volumes": found, "missing_volumes": missing}
 
 
@@ -283,28 +334,32 @@ def compute_adaptive_plan(free_bytes: int, volumes=BASELINE_VOLUMES, *,
     }
 
 
-def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME) -> dict:
-    """The top-level, idempotent entry point: ensures BASELINE/
-    USER_PERSISTENCE/INSTALLER_CACHE/SESSION_TEMP all exist on
-    `vg_name`, sizing them adaptively to whatever real free space
-    actually exists (decision record 73) rather than refusing outright
-    when the fixed defaults don't fit. Never touches boot/EFI
-    partitions or any existing logical volume - only ever creates
-    what's missing."""
+def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
+                             personas: tuple = DEFAULT_PERSONAS) -> dict:
+    """The top-level, idempotent entry point: ensures the three shared
+    volumes plus one USER_PERSISTENCE_<PERSONA> volume per `personas`
+    all exist on `vg_name`, sizing them adaptively to whatever real
+    free space actually exists (decision record 73) rather than
+    refusing outright when the fixed defaults don't fit. Additional
+    opt-in personas beyond the default admin+personal pass their own
+    `personas` tuple - never touches boot/EFI partitions or any
+    existing logical volume, only ever creates what's missing."""
+    volumes = baseline_volumes_for(personas)
+
     free_proc = runner.run(vg_free_bytes_argv(vg_name), timeout=15)
     if free_proc.returncode != 0:
         detail = free_proc.stderr.strip() or f"vgs exited {free_proc.returncode}"
-        return {label: CommandResult(False, detail) for _, _, label, _ in BASELINE_VOLUMES}
+        return {label: CommandResult(False, detail) for _, _, label, _ in volumes}
 
     free_bytes = parse_vg_free_bytes(free_proc.stdout)
     if free_bytes is None:
         return {label: CommandResult(False, f"could not determine free space in VG {vg_name!r}")
-                for _, _, label, _ in BASELINE_VOLUMES}
+                for _, _, label, _ in volumes}
 
-    plan_gb = compute_adaptive_plan(free_bytes, BASELINE_VOLUMES)
+    plan_gb = compute_adaptive_plan(free_bytes, volumes)
 
     results = {}
-    for lv_name, default_size, label, mountpoint in BASELINE_VOLUMES:
+    for lv_name, default_size, label, mountpoint in volumes:
         size_gb = plan_gb[label]
         if size_gb <= 0:
             results[label] = CommandResult(
@@ -355,14 +410,15 @@ def parse_df_output(text: str):
     return {"total_bytes": total, "used_bytes": used, "available_bytes": avail, "percent_used": percent}
 
 
-def collect_volume_usage(runner: Runner) -> list:
-    """Real per-volume usage for every BASELINE_VOLUMES mountpoint that
-    is actually mounted right now - never assumes
+def collect_volume_usage(runner: Runner, *, personas: tuple = DEFAULT_PERSONAS) -> list:
+    """Real per-volume usage for every shared volume plus one
+    USER_PERSISTENCE_<PERSONA> per `personas`, for whichever
+    mountpoints are actually mounted right now - never assumes
     ensure_baseline_volumes() has run; a volume that isn't mounted
     (df fails) is skipped, not an error, matching diagnostics.py's own
     tolerance for missing hardware/tools."""
     results = []
-    for _, _, label, mountpoint in BASELINE_VOLUMES:
+    for _, _, label, mountpoint in baseline_volumes_for(personas):
         proc = runner.run(df_argv(mountpoint), timeout=10)
         if proc.returncode != 0:
             continue

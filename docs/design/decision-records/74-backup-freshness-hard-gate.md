@@ -43,9 +43,9 @@ intended, now that the gate applies to them too.
 
 - Does not yet build the automated recurring encrypted backup job that
   would keep the 24h window satisfied without manual action - flagged
-  directly by the user as expected next work ("presumably regular
-  backups of the UserPersistance will be automated too a separate
-  storage device and be encrypted"), not built in this pass.
+  directly by the user as expected next work (regular backups of
+  USER_PERSISTENCE automated to a separate storage device, encrypted),
+  not built in this pass.
 - Not run against real hardware.
 
 ## Verification performed
