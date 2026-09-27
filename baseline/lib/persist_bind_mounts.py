@@ -106,16 +106,74 @@ def _fstab_has_line(runner: Runner, line: str) -> bool:
     return line.strip() in {existing.strip() for existing in content.splitlines()}
 
 
-def ensure_persistence_mounted(runner: Runner) -> ApplyResult:
+def discover_persistence_device(runner: Runner) -> str | None:
+    """Real discovery via blkid - does a USER_PERSISTENCE-labeled
+    device exist anywhere among currently attached block devices,
+    even if mount-by-label just failed (e.g. not yet settled, or a
+    stale mount elsewhere)? Returns the real device path, or None if
+    genuinely not found anywhere. Checked before any local fallback
+    creation, so a real existing volume is never duplicated - the
+    exact "same label, two different real volumes" risk decision
+    record 69 already found once."""
+    proc = runner.run(["blkid", "-L", PERSISTENCE_LABEL], timeout=10)
+    if proc.returncode != 0:
+        return None
+    device = proc.stdout.strip()
+    return device or None
+
+
+def _local_fallback_size_gb(runner: Runner, vg_name: str) -> int:
+    import drive_installer as di
+    free_proc = runner.run(di.vg_free_bytes_argv(vg_name), timeout=15)
+    if free_proc.returncode != 0:
+        return 0
+    free_bytes = di.parse_vg_free_bytes(free_proc.stdout)
+    if free_bytes is None:
+        return 0
+    return di.adaptive_single_size_gb(free_bytes, 300)
+
+
+def ensure_persistence_mounted(runner: Runner, *, vg_name: str = "pve") -> ApplyResult:
     """Mounts USER_PERSISTENCE at MOUNT_POINT if not already active,
     and ensures a durable fstab entry exists so this survives reboot
-    without depending on this function running again. Refuses (never
-    guesses) if the labeled partition can't be found or mounted."""
+    without depending on this function running again.
+
+    A missing external USER_PERSISTENCE is "the most important aspect
+    to resolve" (direct instruction) - it is never simply refused.
+    Real discovery first (blkid, not just one mount-by-label attempt):
+    if a labeled device exists anywhere, mount it directly rather than
+    duplicating it. Only when nothing is found anywhere does this
+    self-install a real, adaptively-sized local logical volume - "the
+    drives are self installing systems," a second dedicated
+    persistence drive is an optional upgrade, never a hard
+    requirement (decision record 75)."""
     if not is_mounted(runner, MOUNT_POINT):
         runner.makedirs(MOUNT_POINT)
         proc = runner.run(["mount", f"LABEL={PERSISTENCE_LABEL}", MOUNT_POINT], timeout=30)
         if proc.returncode != 0:
-            return ApplyResult(False, f"mount LABEL={PERSISTENCE_LABEL} failed: {proc.stderr.strip()[:300]}")
+            label_mount_error = proc.stderr.strip()[:300]
+            device = discover_persistence_device(runner)
+            if device is not None:
+                direct_proc = runner.run(["mount", device, MOUNT_POINT], timeout=30)
+                if direct_proc.returncode != 0:
+                    return ApplyResult(
+                        False, f"found {PERSISTENCE_LABEL} at {device} but direct mount failed: "
+                               f"{direct_proc.stderr.strip()[:300]}")
+            else:
+                import drive_installer as di
+                local_size_gb = _local_fallback_size_gb(runner, vg_name)
+                if local_size_gb <= 0:
+                    return ApplyResult(
+                        False, f"no {PERSISTENCE_LABEL} device found anywhere (label mount: "
+                               f"{label_mount_error}) and no real local free space to self-install one")
+                local_result = di.ensure_volume(
+                    runner, vg_name=vg_name, lv_name="baseline_user_persistence_local",
+                    size=f"{local_size_gb}G", label=PERSISTENCE_LABEL, mountpoint=MOUNT_POINT,
+                )
+                if not local_result.ok:
+                    return ApplyResult(
+                        False, f"no {PERSISTENCE_LABEL} device found anywhere and local self-install "
+                               f"failed: {local_result.detail}")
 
     line = persistence_mount_fstab_line()
     if not _fstab_has_line(runner, line):
