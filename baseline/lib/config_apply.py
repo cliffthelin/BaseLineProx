@@ -169,16 +169,20 @@ def apply_ethtool_config(runner: Runner, interface: str, config: dict) -> Comman
 # mt7921e Wi-Fi) - not generic placeholders.
 # ---------------------------------------------------------------------------
 
-def apply_cpu_microcode(runner: Runner) -> CommandResult:
-    # DEBIAN_FRONTEND=noninteractive matches firstboot_statemachine.py's
-    # own install_diagnostic_tools() convention - a bare apt-get here
-    # (found missing this during audit) risks a debconf prompt hanging
-    # an unattended firstboot run.
-    proc = runner.run(["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "amd64-microcode"],
+def apply_cpu_microcode(runner: Runner, package: str = "amd64-microcode") -> CommandResult:
+    # `package` defaults to this session's own detected CPU vendor
+    # (AMD) - that default is only correct when the target matches
+    # this machine. A different target (e.g. Intel) must override it
+    # via config, never assumed - found missing (no override at all)
+    # on audit. DEBIAN_FRONTEND=noninteractive matches
+    # firstboot_statemachine.py's own install_diagnostic_tools()
+    # convention - a bare apt-get here (also found missing on audit)
+    # risks a debconf prompt hanging an unattended firstboot run.
+    proc = runner.run(["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", package],
                        timeout=60)
     if proc.returncode != 0:
-        return CommandResult(False, f"amd64-microcode install failed: {proc.stderr.strip()}")
-    return CommandResult(True, "amd64-microcode installed")
+        return CommandResult(False, f"{package} install failed: {proc.stderr.strip()}")
+    return CommandResult(True, f"{package} installed")
 
 
 def apply_wifi_firmware(runner: Runner, package: str = "firmware-mediatek") -> CommandResult:

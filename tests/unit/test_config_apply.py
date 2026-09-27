@@ -136,6 +136,15 @@ def test_apply_cpu_microcode_installs_the_real_amd_package_noninteractively():
     assert runner.calls[0] == ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "amd64-microcode"]
 
 
+def test_apply_cpu_microcode_accepts_a_different_package_name():
+    """The configurator's default package is only correct for a target
+    with this session's own AMD CPU - a different target (Intel) must
+    be able to override it, found missing on audit."""
+    runner = FakeRunner()
+    ca.apply_cpu_microcode(runner, package="intel-microcode")
+    assert runner.calls[0] == ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "intel-microcode"]
+
+
 def test_apply_cpu_microcode_reports_a_real_failure():
     runner = FakeRunner(command_responses=[
         (lambda a: "apt-get" in a and "install" in a, FakeProc(1, "", "unable to locate package")),

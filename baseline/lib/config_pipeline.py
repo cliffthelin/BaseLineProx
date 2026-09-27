@@ -109,9 +109,16 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
                   lambda: config_apply.apply_smartd_config(runner, proxmox))
     run_subsystem("ethtool", _has_any_key(proxmox, _ETHTOOL_KEYS),
                   lambda: config_apply.apply_ethtool_config(runner, resolved_interface, proxmox))
+    # cpu_microcode_package/wifi_firmware_package default to THIS
+    # session's own detected hardware (AMD, MediaTek) only when the
+    # exported config omits them - a different target machine (a
+    # different CPU vendor, a different Wi-Fi chip) must be able to
+    # override the package actually installed, found missing on audit.
     run_subsystem("cpu_microcode", bool(drivers.get("cpu_microcode")),
-                  lambda: config_apply.apply_cpu_microcode(runner))
+                  lambda: config_apply.apply_cpu_microcode(
+                      runner, package=drivers.get("cpu_microcode_package") or "amd64-microcode"))
     run_subsystem("wifi_firmware", bool(drivers.get("nic_wifi_firmware")),
-                  lambda: config_apply.apply_wifi_firmware(runner))
+                  lambda: config_apply.apply_wifi_firmware(
+                      runner, package=drivers.get("wifi_firmware_package") or "firmware-mediatek"))
 
     return summary

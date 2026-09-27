@@ -65,6 +65,33 @@ def test_apply_stored_config_uses_the_configs_own_ethtool_interface_over_the_fal
     assert not any(c[:3] == ["ethtool", "-s", "eno1"] for c in runner.calls)
 
 
+def test_apply_stored_config_uses_a_driver_package_override_for_different_target_hardware():
+    """Real bug found on audit: the drivers toggles were hardwired to
+    THIS session's own detected packages (amd64-microcode,
+    firmware-mediatek) with no way to target different hardware - the
+    exported config's own cpu_microcode_package/wifi_firmware_package
+    must be honored when the operator sets them for a different
+    target machine."""
+    runner = FakeRunner()
+    config = {"proxmox": {}, "drivers": {
+        "cpu_microcode": True, "cpu_microcode_package": "intel-microcode",
+        "nic_wifi_firmware": True, "wifi_firmware_package": "firmware-realtek",
+    }}
+    cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert any("intel-microcode" in c for c in runner.calls)
+    assert not any("amd64-microcode" in c for c in runner.calls)
+    assert any("firmware-realtek" in c for c in runner.calls)
+    assert not any("firmware-mediatek" in c for c in runner.calls)
+
+
+def test_apply_stored_config_falls_back_to_this_machines_own_packages_when_omitted():
+    runner = FakeRunner()
+    config = {"proxmox": {}, "drivers": {"cpu_microcode": True, "nic_wifi_firmware": True}}
+    cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert any("amd64-microcode" in c for c in runner.calls)
+    assert any("firmware-mediatek" in c for c in runner.calls)
+
+
 def test_apply_stored_config_falls_back_to_network_interface_when_config_omits_it():
     config = {"proxmox": json.loads(CONFIG_JSON)["proxmox"], "drivers": {}}
     runner = FakeRunner()
