@@ -1,0 +1,13 @@
+[Unit]
+Description=Baseline persistence redirects (credentials/state/logs onto USER_PERSISTENCE)
+After=local-fs.target
+Before=baseline-firstboot.service baseline.service
+Requires=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/baseline/bin/baseline-persist-bind-mounts
+
+[Install]
+WantedBy=multi-user.target

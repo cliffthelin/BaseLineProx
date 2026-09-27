@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Thin installed entry point redirecting Baseline's own control-plane
+paths (/etc/baseline, /var/lib/baseline, /var/log/baseline) onto the
+USER_PERSISTENCE partition via bind mounts, per direct instruction
+("All user data including credentials and config and logs should go
+to the User Persistence partition") - decision record 62.
+
+Runs at every boot, before baseline-firstboot.service or
+baseline.service ever touch those paths - see
+boot/baseline-persist-bind-mounts.service's own ordering. Idempotent:
+migrates pre-existing substrate content into persistence exactly once
+(only on first run), and only ever re-verifies the mounts on every
+run after that. See lib/persist_bind_mounts.py's module docstring for
+exactly what it does and does not touch.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import persist_bind_mounts  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(persist_bind_mounts.main())

@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
-    from repair import Runner  # type: ignore
+    from repair import RealRunner, Runner  # type: ignore
 except ImportError:  # pragma: no cover - direct-script execution fallback
     class Runner:
         def run(self, argv, timeout=10):
@@ -46,6 +46,8 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 
         def listdir(self, path):
             raise NotImplementedError
+
+    RealRunner = Runner
 
 
 PERSISTENCE_LABEL = "USER_PERSISTENCE"
@@ -173,3 +175,15 @@ def ensure_all_redirects(runner: Runner) -> list[ApplyResult]:
     for target_path, subdir in REDIRECT_PATHS.items():
         results.append(ensure_redirect(runner, target_path, subdir))
     return results
+
+
+def main(runner: Runner = None, print_fn=print) -> int:
+    """Real entry point, matching this project's own boot-invoked
+    scripts (e.g. repair_additive_persist.main()): print each result,
+    exit 0 only if every one of them actually applied."""
+    if runner is None:
+        runner = RealRunner()
+    results = ensure_all_redirects(runner)
+    for result in results:
+        print_fn(f"[{'ok' if result.applied else 'FAILED'}] {result.detail}")
+    return 0 if all(r.applied for r in results) else 1

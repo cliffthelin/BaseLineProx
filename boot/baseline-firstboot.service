@@ -1,7 +1,7 @@
 [Unit]
 Description=Baseline first-boot network-repair authorization (Gate E)
 Conflicts=getty@tty1.service
-After=getty@tty1.service network-online.target
+After=getty@tty1.service network-online.target baseline-persist-bind-mounts.service
 Before=baseline.service
 Wants=network-online.target
 

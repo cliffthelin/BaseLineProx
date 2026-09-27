@@ -1,7 +1,7 @@
 [Unit]
 Description=Baseline Console
 Conflicts=getty@tty1.service
-After=getty@tty1.service baseline-firstboot.service
+After=getty@tty1.service baseline-firstboot.service baseline-persist-bind-mounts.service
 
 [Service]
 Environment=HOME=/root

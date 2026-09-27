@@ -177,6 +177,21 @@ def test_ensure_all_redirects_runs_every_redirect_once_persistence_is_mounted():
         assert any(c[:2] == ["mount", "--bind"] and c[3] == target_path for c in runner.calls)
 
 
+def test_main_returns_0_and_prints_each_result_when_everything_applies():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    printed = []
+    code = pbm.main(runner=runner, print_fn=printed.append)
+    assert code == 0
+    assert len(printed) == 1 + len(pbm.REDIRECT_PATHS)
+    assert all("[ok]" in line for line in printed)
+
+
+def test_main_returns_1_when_any_result_failed():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})  # persistence unmounted, no mount script configured to succeed
+    code = pbm.main(runner=runner, print_fn=lambda *a: None)
+    assert code == 1
+
+
 def test_ensure_all_redirects_issues_the_real_mount_command_on_first_boot():
     """Proves the other half for real: when persistence isn't mounted
     yet, ensure_all_redirects's first step genuinely issues the real

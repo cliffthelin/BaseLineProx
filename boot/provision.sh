@@ -42,6 +42,17 @@ cp "$SRC/baseline/bin/baseline-auth-setup.sh" /opt/baseline/bin/baseline-auth-se
 cp "$SRC/baseline/lib/hardware.py" /opt/baseline/lib/hardware.py
 cp "$SRC/baseline/lib/network.py" /opt/baseline/lib/network.py
 cp "$SRC/baseline/lib/harness.py" /opt/baseline/lib/harness.py
+# harness.py/bin/baseline's own real transitive dependencies - found
+# missing entirely from this deployment list by a real import-graph
+# audit (every bin script provision.sh installs, resolved against what
+# it and its dependencies actually `import`, cross-checked against
+# this file's own copy list). Without these, `baseline.service` would
+# have crashed with ModuleNotFoundError on its very first real start.
+cp "$SRC/baseline/lib/harness_adapter.py" /opt/baseline/lib/harness_adapter.py
+cp "$SRC/baseline/lib/harness_registry.py" /opt/baseline/lib/harness_registry.py
+cp "$SRC/baseline/lib/harness_events.py" /opt/baseline/lib/harness_events.py
+cp "$SRC/baseline/lib/clipboard_osc52.py" /opt/baseline/lib/clipboard_osc52.py
+cp "$SRC/baseline/lib/status_bar.py" /opt/baseline/lib/status_bar.py
 cp "$SRC/baseline/lib/netpref.py" /opt/baseline/lib/netpref.py
 cp "$SRC/baseline/lib/providers.py" /opt/baseline/lib/providers.py
 cp "$SRC/baseline/lib/tether.py" /opt/baseline/lib/tether.py
@@ -70,8 +81,25 @@ cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline
 cp "$SRC/baseline/lib/proxmox_detect.py" /opt/baseline/lib/proxmox_detect.py
 cp "$SRC/baseline/lib/diagnostics.py" /opt/baseline/lib/diagnostics.py
 cp "$SRC/baseline/lib/setup_intent.py" /opt/baseline/lib/setup_intent.py
+# config_apply.py/config_pipeline.py: firstboot_statemachine.py imports
+# config_pipeline at module scope (decision record 51) - also found
+# missing entirely from this deployment list by the same real
+# import-graph audit. Without these, baseline-firstboot.service would
+# have crashed on import before Gate E ever ran at all.
+cp "$SRC/baseline/lib/config_apply.py" /opt/baseline/lib/config_apply.py
+cp "$SRC/baseline/lib/config_pipeline.py" /opt/baseline/lib/config_pipeline.py
 cp "$SRC/baseline/lib/firstboot_statemachine.py" /opt/baseline/lib/firstboot_statemachine.py
 cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
+# Redirects Baseline's own control-plane paths (/etc/baseline,
+# /var/lib/baseline, /var/log/baseline) onto the USER_PERSISTENCE
+# partition via bind mounts, per direct instruction ("All user data
+# including credentials and config and logs should go to the User
+# Persistence partition") - decision record 62. Must run, and succeed,
+# before baseline-firstboot.service or baseline.service ever touch
+# those paths; see boot/baseline-persist-bind-mounts.service's own
+# ordering. Not yet run against real hardware.
+cp "$SRC/baseline/lib/persist_bind_mounts.py" /opt/baseline/lib/persist_bind_mounts.py
+cp "$SRC/baseline/bin/baseline-persist-bind-mounts" /opt/baseline/bin/baseline-persist-bind-mounts
 # Physical Phase P0: read-only current-drive inventory collector, ported
 # from cliffthelin/baseline's inventory/current-drive-manifest branch
 # (docs/design/current-drive-inventory-plan.md) - never invoked by
@@ -119,11 +147,12 @@ cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-set
 # 57, 58).
 cp "$SRC/baseline/lib/vm_scripts.py" /opt/baseline/lib/vm_scripts.py
 cp "$SRC/baseline/lib/quadlet.py" /opt/baseline/lib/quadlet.py
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
+cp "$SRC/boot/baseline-persist-bind-mounts.service" /etc/systemd/system/baseline-persist-bind-mounts.service
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
 cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sensors-collect.service
 cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-sensors-collect.timer
@@ -169,7 +198,11 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
-         /opt/baseline/lib/vm_scripts.py /opt/baseline/lib/quadlet.py; do
+         /opt/baseline/lib/vm_scripts.py /opt/baseline/lib/quadlet.py \
+         /opt/baseline/lib/harness_adapter.py /opt/baseline/lib/harness_registry.py /opt/baseline/lib/harness_events.py \
+         /opt/baseline/lib/clipboard_osc52.py /opt/baseline/lib/status_bar.py \
+         /opt/baseline/lib/config_apply.py /opt/baseline/lib/config_pipeline.py \
+         /opt/baseline/lib/persist_bind_mounts.py /opt/baseline/bin/baseline-persist-bind-mounts; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
 command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
@@ -182,13 +215,15 @@ done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
          /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate \
-         /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate; do
+         /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
+         /opt/baseline/bin/baseline-persist-bind-mounts; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
 
 echo "=== Enabling units for next boot (no --now, no getty changes - nothing here touches this session's tty) ==="
 systemctl daemon-reload
+systemctl enable baseline-persist-bind-mounts.service
 systemctl enable baseline-firstboot.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
@@ -196,7 +231,7 @@ systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service
 systemctl enable baseline-settings-web.service
 
-for u in baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service; do
+for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
 echo "PASS: all six units confirmed enabled."
