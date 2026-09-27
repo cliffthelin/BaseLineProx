@@ -223,3 +223,99 @@ def test_detect_existing_baseline_install_handles_a_real_lvs_failure():
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is False
     assert "no such volume group" in result["error"]
+
+
+# --------------------------------------------------------------------------
+# Per-mount permission restrictions (real follow-up work, confirmed
+# direction: keep the per-role LVM volumes, add per-mount permission
+# restriction + per-volume telemetry - decision record 71).
+# --------------------------------------------------------------------------
+
+def test_mount_options_restricts_session_temp_and_installer_cache_to_noexec():
+    assert "noexec" in di.MOUNT_OPTIONS["SESSION_TEMP"]
+    assert "noexec" in di.MOUNT_OPTIONS["INSTALLER_CACHE"]
+
+
+def test_mount_options_never_restricts_user_persistence_or_baseline_to_noexec():
+    # USER_PERSISTENCE holds the scripts inbox - an operator may
+    # reasonably chmod +x and run a script directly from there.
+    assert "noexec" not in di.MOUNT_OPTIONS["USER_PERSISTENCE"]
+    assert "noexec" not in di.MOUNT_OPTIONS["BASELINE"]
+
+
+def test_mount_options_applies_nosuid_and_nodev_to_every_volume():
+    for label, opts in di.MOUNT_OPTIONS.items():
+        assert "nosuid" in opts, label
+        assert "nodev" in opts, label
+
+
+def test_mount_argv_without_options_matches_original_bare_shape():
+    assert di.mount_argv("/dev/pve/x", "/mnt/X") == ["mount", "/dev/pve/x", "/mnt/X"]
+
+
+def test_mount_argv_with_options_includes_dash_o():
+    assert di.mount_argv("/dev/pve/x", "/mnt/X", options="defaults,noexec") == [
+        "mount", "-o", "defaults,noexec", "/dev/pve/x", "/mnt/X",
+    ]
+
+
+def test_remount_argv_shape():
+    assert di.remount_argv("/mnt/X", "defaults,noexec") == [
+        "mount", "-o", "remount,defaults,noexec", "/mnt/X",
+    ]
+
+
+def test_fstab_line_shape():
+    assert di.fstab_line("/dev/pve/x", "/mnt/X", "defaults,noexec") == \
+        "/dev/pve/x /mnt/X ext4 defaults,noexec 0 2\n"
+
+
+def test_ensure_volume_mounts_a_new_volume_with_its_real_role_options():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   root  \n", "")),
+    ])
+    di.ensure_volume(runner, vg_name="pve", lv_name="baseline_session_temp",
+                      size="50G", label="SESSION_TEMP", mountpoint="/mnt/SESSION_TEMP")
+    mount_calls = [c for c in runner.calls if c[0] == "mount"]
+    assert len(mount_calls) == 1
+    assert mount_calls[0] == ["mount", "-o", di.MOUNT_OPTIONS["SESSION_TEMP"],
+                               "/dev/pve/baseline_session_temp", "/mnt/SESSION_TEMP"]
+
+
+def test_ensure_volume_writes_a_real_fstab_entry_for_a_new_volume():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   root  \n", "")),
+    ])
+    di.ensure_volume(runner, vg_name="pve", lv_name="baseline_session_temp",
+                      size="50G", label="SESSION_TEMP", mountpoint="/mnt/SESSION_TEMP")
+    assert di.FSTAB_PATH in runner.appends
+    assert di.fstab_line("/dev/pve/baseline_session_temp", "/mnt/SESSION_TEMP",
+                          di.MOUNT_OPTIONS["SESSION_TEMP"]) in runner.files[di.FSTAB_PATH]
+
+
+def test_ensure_volume_never_duplicates_an_existing_fstab_entry():
+    existing_line = di.fstab_line("/dev/pve/baseline_session_temp", "/mnt/SESSION_TEMP",
+                                   di.MOUNT_OPTIONS["SESSION_TEMP"])
+    runner = FakeRunner(
+        files={di.FSTAB_PATH: existing_line},
+        command_responses=[
+            (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   root  \n", "")),
+        ],
+    )
+    di.ensure_volume(runner, vg_name="pve", lv_name="baseline_session_temp",
+                      size="50G", label="SESSION_TEMP", mountpoint="/mnt/SESSION_TEMP")
+    assert runner.files[di.FSTAB_PATH].count(existing_line) == 1
+
+
+def test_ensure_volume_remounts_an_already_mounted_existing_volume_to_apply_options():
+    """The real point of this feature: an already-mounted volume from
+    before this fix must have its restrictive options actually applied,
+    not just recorded in fstab for next boot."""
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   baseline_session_temp  \n", "")),
+        (lambda a: a[:1] == ["mount"] and "-o" in a and "remount" not in a[2], FakeProc(32, "", "already mounted")),
+    ])
+    di.ensure_volume(runner, vg_name="pve", lv_name="baseline_session_temp",
+                      size="50G", label="SESSION_TEMP", mountpoint="/mnt/SESSION_TEMP")
+    remount_calls = [c for c in runner.calls if c[0] == "mount" and any("remount" in part for part in c)]
+    assert remount_calls == [["mount", "-o", f"remount,{di.MOUNT_OPTIONS['SESSION_TEMP']}", "/mnt/SESSION_TEMP"]]

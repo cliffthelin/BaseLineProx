@@ -104,3 +104,38 @@ def test_collect_once_never_raises_when_tools_missing():
     conn = make_db()
     count = sc.collect_once(runner, conn, now=1700000000.0)
     assert count == 0
+
+
+# --------------------------------------------------------------------------
+# Per-volume telemetry (real follow-up work, decision record 71) - feeds
+# the same 30s collection cycle/store, no new moving parts.
+# --------------------------------------------------------------------------
+
+def test_collect_once_records_real_volume_usage_samples():
+    runner = FakeRunner()
+    df_payload = (
+        "         1B-blocks         Used    Avail Use%\n"
+        " 53687091200  10737418240 42949672960  20%\n"
+    )
+    runner.command_responses = [
+        (lambda a: a[:1] == ["sensors"], FakeProc(0, "{}", "")),
+        (lambda a: a[:2] == ["nvme", "list"], FakeProc(0, json.dumps({"Devices": []}), "")),
+        (lambda a: a[:2] == ["smartctl", "--scan-open"], FakeProc(0, json.dumps({"devices": []}), "")),
+        (lambda a: a[:1] == ["df"], FakeProc(0, df_payload, "")),
+    ]
+    conn = make_db()
+    count = sc.collect_once(runner, conn, now=1700000000.0)
+    # 4 volumes x 2 samples each (percent_used, used_bytes)
+    assert count == 8
+    rows = sh.query_history(conn, source="volume", key="SESSION_TEMP/percent_used", since_ts=0)
+    assert rows == [(1700000000.0, 20.0)]
+    rows = sh.query_history(conn, source="volume", key="USER_PERSISTENCE/used_bytes", since_ts=0)
+    assert rows == [(1700000000.0, 10737418240.0)]
+
+
+def test_collect_once_records_no_volume_samples_when_nothing_mounted():
+    runner = FakeRunner()
+    script_no_hardware(runner)  # default fake response for unmatched df is (0, "", "") -> no valid rows
+    conn = make_db()
+    count = sc.collect_once(runner, conn, now=1700000000.0)
+    assert count == 0

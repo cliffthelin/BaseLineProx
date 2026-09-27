@@ -61,6 +61,25 @@ BASELINE_VOLUMES = (
     ("baseline_session_temp", "50G", "SESSION_TEMP", "/mnt/SESSION_TEMP"),
 )
 
+# Per-role mount restrictions (real follow-up work, decision record
+# 71): nosuid+nodev everywhere - none of these volumes should ever
+# host a setuid binary or a device node. noexec additionally on
+# SESSION_TEMP (pure ephemeral session data - never anything meant to
+# run) and INSTALLER_CACHE (holds ISOs/driver packages, consumed by
+# name via dpkg/mount/xorriso, never executed directly). Not on
+# USER_PERSISTENCE - it holds the scripts inbox, and an operator may
+# reasonably chmod +x and run a pushed script directly from there. Not
+# on BASELINE - app/VM/LXC state may legitimately need to execute
+# things it stores.
+MOUNT_OPTIONS = {
+    "BASELINE": "defaults,nosuid,nodev",
+    "USER_PERSISTENCE": "defaults,nosuid,nodev",
+    "INSTALLER_CACHE": "defaults,nosuid,nodev,noexec",
+    "SESSION_TEMP": "defaults,nosuid,nodev,noexec",
+}
+
+FSTAB_PATH = "/etc/fstab"
+
 
 @dataclass
 class CommandResult:
@@ -93,8 +112,18 @@ def makedirs_argv(mountpoint: str) -> list:
     return ["mkdir", "-p", mountpoint]
 
 
-def mount_argv(lv_path: str, mountpoint: str) -> list:
+def mount_argv(lv_path: str, mountpoint: str, options: str | None = None) -> list:
+    if options:
+        return ["mount", "-o", options, lv_path, mountpoint]
     return ["mount", lv_path, mountpoint]
+
+
+def remount_argv(mountpoint: str, options: str) -> list:
+    return ["mount", "-o", f"remount,{options}", mountpoint]
+
+
+def fstab_line(lv_path: str, mountpoint: str, options: str) -> str:
+    return f"{lv_path} {mountpoint} ext4 {options} 0 2\n"
 
 
 def parse_logical_volumes(text: str) -> list:
@@ -118,6 +147,32 @@ def parse_vg_free_bytes(text: str):
         return None
 
 
+def _fstab_has_line(runner: Runner, line: str) -> bool:
+    if not runner.path_exists(FSTAB_PATH):
+        return False
+    return line in runner.read_text(FSTAB_PATH)
+
+
+def ensure_fstab_entry(runner: Runner, lv_path: str, mountpoint: str, options: str) -> None:
+    """Idempotent: never duplicates an existing entry, so this is safe
+    to call on every ensure_volume() run, not just the first."""
+    line = fstab_line(lv_path, mountpoint, options)
+    if not _fstab_has_line(runner, line):
+        runner.append_text(FSTAB_PATH, line)
+
+
+def ensure_mounted_with_options(runner: Runner, lv_path: str, mountpoint: str, options: str) -> None:
+    """Best-effort: mounts fresh with the real role options if not
+    already mounted; if already mounted (the plain mount attempt fails
+    for exactly that reason), remounts to apply/refresh the options on
+    a pre-existing mount instead of leaving it with stale or absent
+    ones. Never raises - matches this module's own existing tolerance
+    for "already mounted" being a normal, expected outcome."""
+    mount_proc = runner.run(mount_argv(lv_path, mountpoint, options=options), timeout=15)
+    if mount_proc.returncode != 0:
+        runner.run(remount_argv(mountpoint, options), timeout=15)
+
+
 # ---------------------------------------------------------------------------
 # Runner-executed operations
 # ---------------------------------------------------------------------------
@@ -134,12 +189,14 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
 
     groups = parse_logical_volumes(proc.stdout)
     lv_path = f"/dev/{vg_name}/{lv_name}"
+    options = MOUNT_OPTIONS.get(label, "defaults")
 
     if lv_exists(groups, vg_name=vg_name, lv_name=lv_name):
-        mount_proc = runner.run(mount_argv(lv_path, mountpoint), timeout=15)
-        # A nonzero exit here is tolerated (already mounted is a common
-        # real-world case) - this function's job is "make sure it's
-        # usable," not "prove mount's own idempotency semantics."
+        # A pre-existing mount may predate this fix (mounted plain, no
+        # restrictive options) - ensure_mounted_with_options remounts
+        # to actually apply them, not just record them for next boot.
+        ensure_mounted_with_options(runner, lv_path, mountpoint, options)
+        ensure_fstab_entry(runner, lv_path, mountpoint, options)
         return CommandResult(True, f"{lv_name} already existed on {vg_name} - not reformatted", created=False)
 
     create_proc = runner.run(create_logical_volume_argv(vg_name, lv_name, size), timeout=30)
@@ -151,10 +208,11 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
         return CommandResult(False, f"mkfs.ext4 failed on newly-created {lv_name}: {format_proc.stderr.strip()}")
 
     runner.run(makedirs_argv(mountpoint), timeout=10)
-    mount_proc = runner.run(mount_argv(lv_path, mountpoint), timeout=15)
+    mount_proc = runner.run(mount_argv(lv_path, mountpoint, options=options), timeout=15)
     if mount_proc.returncode != 0:
         return CommandResult(False, f"mount failed on newly-created {lv_name}: {mount_proc.stderr.strip()}")
 
+    ensure_fstab_entry(runner, lv_path, mountpoint, options)
     return CommandResult(True, f"{lv_name} created, formatted {label}, mounted at {mountpoint}", created=True)
 
 
@@ -205,4 +263,61 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME) -
     for lv_name, size, label, mountpoint in BASELINE_VOLUMES:
         results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name,
                                         size=size, label=label, mountpoint=mountpoint)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Per-volume telemetry (real follow-up work, decision record 71) - real
+# `df` output, not a second lvs-based estimate that could drift from
+# what's actually mounted. Feeds sensors_collect.py's existing 30s
+# collection cycle/store rather than building a separate one.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class VolumeUsage:
+    label: str
+    mountpoint: str
+    total_bytes: int
+    used_bytes: int
+    available_bytes: int
+    percent_used: float
+
+
+def df_argv(mountpoint: str) -> list:
+    return ["df", "-B1", "--output=size,used,avail,pcent", mountpoint]
+
+
+def parse_df_output(text: str):
+    """Parses `df -B1 --output=size,used,avail,pcent`'s two-line
+    output. Returns None for anything that isn't real, complete df
+    output (empty, header-only, malformed) rather than guessing."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return None
+    parts = lines[1].split()
+    if len(parts) < 4:
+        return None
+    try:
+        total, used, avail = int(parts[0]), int(parts[1]), int(parts[2])
+        percent = float(parts[3].rstrip("%"))
+    except ValueError:
+        return None
+    return {"total_bytes": total, "used_bytes": used, "available_bytes": avail, "percent_used": percent}
+
+
+def collect_volume_usage(runner: Runner) -> list:
+    """Real per-volume usage for every BASELINE_VOLUMES mountpoint that
+    is actually mounted right now - never assumes
+    ensure_baseline_volumes() has run; a volume that isn't mounted
+    (df fails) is skipped, not an error, matching diagnostics.py's own
+    tolerance for missing hardware/tools."""
+    results = []
+    for _, _, label, mountpoint in BASELINE_VOLUMES:
+        proc = runner.run(df_argv(mountpoint), timeout=10)
+        if proc.returncode != 0:
+            continue
+        parsed = parse_df_output(proc.stdout)
+        if parsed is None:
+            continue
+        results.append(VolumeUsage(label=label, mountpoint=mountpoint, **parsed))
     return results

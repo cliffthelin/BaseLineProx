@@ -12,6 +12,11 @@ every cycle - keeps the store permanently small without a separate
 cleanup job. Never raises on missing hardware/tools; diagnostics.py's
 collectors already treat that as a normal, expected outcome, and this
 module preserves that discipline all the way through.
+
+Also flattens `drive_installer.collect_volume_usage`'s real per-volume
+`df` output (source "volume") - real follow-up work, decision record
+71. Reuses this same 30s cycle/store rather than a separate one; a
+volume that isn't mounted contributes nothing, not an error.
 """
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ import time
 from pathlib import Path
 
 import diagnostics
+import drive_installer
 import repair
 import sensors_history
 
@@ -60,6 +66,14 @@ def _smart_samples(result) -> list:
     return samples
 
 
+def _volume_samples(usages) -> list:
+    samples = []
+    for u in usages:
+        samples.append(("volume", f"{u.label}/percent_used", u.percent_used, "%"))
+        samples.append(("volume", f"{u.label}/used_bytes", float(u.used_bytes), "bytes"))
+    return samples
+
+
 def collect_once(runner: repair.Runner, conn, *, now: float, retention_s: float = DEFAULT_RETENTION_S) -> int:
     """Runs one collection cycle. Returns the number of samples
     recorded."""
@@ -67,6 +81,7 @@ def collect_once(runner: repair.Runner, conn, *, now: float, retention_s: float 
     samples += _sensor_samples(diagnostics.collect_sensors(runner))
     samples += _nvme_samples(diagnostics.collect_nvme(runner))
     samples += _smart_samples(diagnostics.collect_smart(runner))
+    samples += _volume_samples(drive_installer.collect_volume_usage(runner))
     for source, key, value, unit in samples:
         sensors_history.record_sample(conn, ts=now, source=source, key=key, value=value, unit=unit)
     sensors_history.prune_older_than(conn, cutoff_ts=now - retention_s)
