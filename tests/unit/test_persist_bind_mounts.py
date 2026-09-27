@@ -11,34 +11,34 @@ from fake_runner import FakeProc, FakeRunner
 
 import persist_bind_mounts as pbm
 
-MOUNTS_WITH_PERSISTENCE = "/dev/sdd2 /mnt/user-persistence ext4 rw,relatime 0 0\n"
+MOUNTS_WITH_PERSISTENCE = "/dev/sdd2 /mnt/USER_PERSISTENCE ext4 rw,relatime 0 0\n"
 MOUNTS_WITHOUT_PERSISTENCE = "/dev/sdd1 / ext4 rw,relatime 0 0\n"
 
 
 def test_persistence_mount_fstab_line():
-    assert pbm.persistence_mount_fstab_line() == "LABEL=USER_PERSISTENCE /mnt/user-persistence ext4 defaults 0 2\n"
+    assert pbm.persistence_mount_fstab_line() == "LABEL=USER_PERSISTENCE /mnt/USER_PERSISTENCE ext4 defaults 0 2\n"
 
 
 def test_bind_fstab_line():
     assert pbm.bind_fstab_line("/etc/baseline", "etc-baseline") == \
-        "/mnt/user-persistence/etc-baseline /etc/baseline none bind 0 0\n"
+        "/mnt/USER_PERSISTENCE/etc-baseline /etc/baseline none bind 0 0\n"
 
 
 # -- is_mounted --------------------------------------------------------
 
 def test_is_mounted_true_when_present_in_real_proc_mounts():
     runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
-    assert pbm.is_mounted(runner, "/mnt/user-persistence") is True
+    assert pbm.is_mounted(runner, "/mnt/USER_PERSISTENCE") is True
 
 
 def test_is_mounted_false_when_absent():
     runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
-    assert pbm.is_mounted(runner, "/mnt/user-persistence") is False
+    assert pbm.is_mounted(runner, "/mnt/USER_PERSISTENCE") is False
 
 
 def test_is_mounted_false_when_proc_mounts_unreadable():
     runner = FakeRunner()  # /proc/self/mounts not present at all
-    assert pbm.is_mounted(runner, "/mnt/user-persistence") is False
+    assert pbm.is_mounted(runner, "/mnt/USER_PERSISTENCE") is False
 
 
 # -- ensure_persistence_mounted -----------------------------------------
@@ -47,7 +47,7 @@ def test_ensure_persistence_mounted_mounts_when_not_already():
     runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
     result = pbm.ensure_persistence_mounted(runner)
     assert result.applied is True
-    assert runner.calls[0] == ["mount", "LABEL=USER_PERSISTENCE", "/mnt/user-persistence"]
+    assert runner.calls[0] == ["mount", "LABEL=USER_PERSISTENCE", "/mnt/USER_PERSISTENCE"]
 
 
 def test_ensure_persistence_mounted_skips_mount_when_already_mounted():
@@ -97,12 +97,12 @@ def test_ensure_redirect_migrates_existing_substrate_content_on_first_run():
     mv_calls = [c for c in runner.calls if c[0] == "mv"]
     assert len(mv_calls) == 2
     assert {c[1] for c in mv_calls} == {"/etc/baseline/harness.env", "/etc/baseline/config.json"}
-    assert all(c[2] == "/mnt/user-persistence/etc-baseline/" for c in mv_calls)
+    assert all(c[2] == "/mnt/USER_PERSISTENCE/etc-baseline/" for c in mv_calls)
 
 
 def test_ensure_redirect_never_remigrates_once_the_persistence_side_exists():
     runner = _mounted_runner()
-    runner.makedirs("/mnt/user-persistence/etc-baseline")  # simulates a prior run already having migrated
+    runner.makedirs("/mnt/USER_PERSISTENCE/etc-baseline")  # simulates a prior run already having migrated
     runner.makedirs("/etc/baseline")
     result = pbm.ensure_redirect(runner, "/etc/baseline", "etc-baseline")
     assert result.applied is True
@@ -114,11 +114,11 @@ def test_ensure_redirect_creates_the_target_dir_if_missing_and_bind_mounts():
     result = pbm.ensure_redirect(runner, "/etc/baseline", "etc-baseline")
     assert result.applied is True
     assert "/etc/baseline" in runner.dirs
-    assert ["mount", "--bind", "/mnt/user-persistence/etc-baseline", "/etc/baseline"] in runner.calls
+    assert ["mount", "--bind", "/mnt/USER_PERSISTENCE/etc-baseline", "/etc/baseline"] in runner.calls
 
 
 def test_ensure_redirect_skips_bind_mount_when_already_bound():
-    mounts = MOUNTS_WITH_PERSISTENCE + "/mnt/user-persistence/etc-baseline /etc/baseline none rw,bind 0 0\n"
+    mounts = MOUNTS_WITH_PERSISTENCE + "/mnt/USER_PERSISTENCE/etc-baseline /etc/baseline none rw,bind 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     pbm.ensure_redirect(runner, "/etc/baseline", "etc-baseline")
     assert not any(c[:2] == ["mount", "--bind"] for c in runner.calls)
@@ -145,7 +145,7 @@ def test_ensure_redirect_refuses_when_persistence_partition_is_not_mounted():
     """The real gap this test proves: calling ensure_redirect() directly
     (not through ensure_all_redirects) must never silently create the
     persistence-side subdirectory and bind-mount onto it while
-    /mnt/user-persistence itself isn't actually mounted - that would
+    /mnt/USER_PERSISTENCE itself isn't actually mounted - that would
     write straight through to the disposable substrate, exactly the
     bug this module's own docstring says it prevents. The guarantee
     must hold inside ensure_redirect itself, not only in the sequencing
@@ -156,7 +156,7 @@ def test_ensure_redirect_refuses_when_persistence_partition_is_not_mounted():
     assert result.applied is False
     assert "not mounted" in result.detail.lower()
     # Nothing was created or mounted on the real substrate as a result.
-    assert "/mnt/user-persistence/etc-baseline" not in runner.dirs
+    assert "/mnt/USER_PERSISTENCE/etc-baseline" not in runner.dirs
     assert not any(c[0] in ("mv", "mount") for c in runner.calls)
 
 
@@ -200,7 +200,7 @@ def test_ensure_all_redirects_issues_the_real_mount_command_on_first_boot():
     ensure_redirect's own dedicated tests instead."""
     runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
     pbm.ensure_all_redirects(runner)
-    assert ["mount", "LABEL=USER_PERSISTENCE", "/mnt/user-persistence"] in runner.calls
+    assert ["mount", "LABEL=USER_PERSISTENCE", "/mnt/USER_PERSISTENCE"] in runner.calls
 
 
 def test_ensure_all_redirects_stops_early_if_the_persistence_mount_fails():

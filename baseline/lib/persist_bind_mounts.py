@@ -51,7 +51,13 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 
 
 PERSISTENCE_LABEL = "USER_PERSISTENCE"
-MOUNT_POINT = "/mnt/user-persistence"
+# Must match drive_installer.BASELINE_VOLUMES' own real mountpoint for
+# this label exactly - a real, previously-undetected mismatch (this
+# was "/mnt/user-persistence", lowercase) meant the same ext4-labeled
+# filesystem could end up mounted read-write at two different paths by
+# two different modules, a real corruption/lost-write risk, not a
+# cosmetic one (decision record 69).
+MOUNT_POINT = "/mnt/USER_PERSISTENCE"
 FSTAB_PATH = "/etc/fstab"
 
 # absolute path -> subdirectory name on the persistence partition
