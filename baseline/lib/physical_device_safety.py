@@ -85,13 +85,22 @@ def get_boot_device_serial(runner: Runner) -> str | None:
 
 
 def validate_target_device(path: str, *, expected_serial: str | list[str] | None = None,
-                            min_size_bytes: int, max_size_bytes: int,
+                            min_size_bytes: int, max_size_bytes: int | None = None,
                             runner: Runner = None) -> dict:
     """The one function every destructive helper in this module
     requires a result from. Refuses (raises PhysicalDeviceSafetyError)
     unless ALL of: the path is not a symlink; the resolved path is a
-    block device; its size falls within [min_size_bytes, max_size_bytes];
-    its serial does NOT match the machine's own boot-device serial.
+    block device; its size is at least `min_size_bytes` (and, only if
+    `max_size_bytes` is actually given, at most that too); its serial
+    does NOT match the machine's own boot-device serial.
+
+    `max_size_bytes` is opt-in, not a forced ceiling - direct
+    instruction: "there should not be a maximum hard drive size
+    parameter or logic restricting the drive used to any limit of
+    size." Omitted (or `None`, the default): no upper bound at all - a
+    real, however-large drive passes as long as it clears the minimum.
+    Pass it explicitly only when a genuine ceiling is actually wanted.
+    The minimum is unaffected either way and is always enforced.
 
     `expected_serial` is opt-in restriction, not a forced default -
     direct instruction: "Expected serial doesn't seem like it should be
@@ -129,10 +138,14 @@ def validate_target_device(path: str, *, expected_serial: str | list[str] | None
             f"boot device - refusing regardless of which path was passed")
 
     size_bytes = get_device_size_bytes(runner, resolved)
-    if not (min_size_bytes <= size_bytes <= max_size_bytes):
+    if size_bytes < min_size_bytes:
         raise PhysicalDeviceSafetyError(
-            f"{resolved!r} is {size_bytes} bytes, outside the expected range "
-            f"[{min_size_bytes}, {max_size_bytes}] - refusing")
+            f"{resolved!r} is {size_bytes} bytes, below the required minimum "
+            f"{min_size_bytes} - refusing")
+    if max_size_bytes is not None and size_bytes > max_size_bytes:
+        raise PhysicalDeviceSafetyError(
+            f"{resolved!r} is {size_bytes} bytes, above the explicit ceiling "
+            f"{max_size_bytes} - refusing")
 
     return {"path": resolved, "serial": actual_serial, "size_bytes": size_bytes}
 

@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Real CLI for encrypting/decrypting the exported Master Config file
+or specific targeted fields within it (see lib/config_crypto.py's
+module docstring). The password is never passed as a CLI argument -
+always via --password-file, a path to a private file holding it.
+
+    baseline-config-crypto encrypt-file --in install-config.json --out install-config.json.enc --password-file PATH
+    baseline-config-crypto decrypt-file --in install-config.json.enc --out install-config.json --password-file PATH
+    baseline-config-crypto encrypt-fields --config install-config.json --field credentials.root_password [--field ...] \
+        --password-file PATH --out install-config.json
+    baseline-config-crypto decrypt-fields --config install-config.json --password-file PATH --out install-config.json
+"""
+import argparse
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import config_crypto  # noqa: E402
+from repair import RealRunner  # noqa: E402
+
+
+def _encrypt_file(args):
+    result = config_crypto.encrypt_file(
+        RealRunner(), in_path=args.in_, out_path=args.out, password_file=args.password_file)
+    print(result.detail)
+    return 0 if result.ok else 1
+
+
+def _decrypt_file(args):
+    result = config_crypto.decrypt_file(
+        RealRunner(), in_path=args.in_, out_path=args.out, password_file=args.password_file)
+    print(result.detail)
+    return 0 if result.ok else 1
+
+
+def _encrypt_fields(args):
+    with open(args.config) as f:
+        config = json.load(f)
+    result = config_crypto.encrypt_json_fields(RealRunner(), config, args.field, password_file=args.password_file)
+    with open(args.out, "w") as f:
+        json.dump(result, f, indent=2)
+    print(f"encrypted {len(args.field)} field(s), wrote {args.out}")
+    return 0
+
+
+def _decrypt_fields(args):
+    with open(args.config) as f:
+        config = json.load(f)
+    result, errors = config_crypto.decrypt_json_fields(
+        RealRunner(), config, password_file=args.password_file, return_errors=True)
+    with open(args.out, "w") as f:
+        json.dump(result, f, indent=2)
+    if errors:
+        print(f"wrong password or corrupt data for: {', '.join(errors)} - left encrypted, not corrupted",
+              file=sys.stderr)
+        return 1
+    print(f"decrypted, wrote {args.out}")
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="baseline-config-crypto")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    ef = sub.add_parser("encrypt-file")
+    ef.add_argument("--in", dest="in_", required=True)
+    ef.add_argument("--out", required=True)
+    ef.add_argument("--password-file", required=True)
+
+    df = sub.add_parser("decrypt-file")
+    df.add_argument("--in", dest="in_", required=True)
+    df.add_argument("--out", required=True)
+    df.add_argument("--password-file", required=True)
+
+    efi = sub.add_parser("encrypt-fields")
+    efi.add_argument("--config", required=True)
+    efi.add_argument("--field", action="append", required=True, help="dotted field path, e.g. credentials.root_password")
+    efi.add_argument("--password-file", required=True)
+    efi.add_argument("--out", required=True)
+
+    dfi = sub.add_parser("decrypt-fields")
+    dfi.add_argument("--config", required=True)
+    dfi.add_argument("--password-file", required=True)
+    dfi.add_argument("--out", required=True)
+
+    args = parser.parse_args(argv)
+    return {"encrypt-file": _encrypt_file, "decrypt-file": _decrypt_file,
+            "encrypt-fields": _encrypt_fields, "decrypt-fields": _decrypt_fields}[args.command](args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

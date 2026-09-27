@@ -125,6 +125,39 @@ def test_size_slightly_above_range_is_refused():
         _validate_sdd(runner)
 
 
+# --- no maximum size restriction when max_size_bytes is omitted -----------
+# Direct instruction: "there should not be a maximum hard drive size
+# parameter or logic restricting the drive used to any limit of size."
+# max_size_bytes is now optional (default None = no upper bound at
+# all) - a real, huge drive must pass. The minimum is unaffected and
+# still always enforced; only the ceiling is opt-in now.
+
+def test_no_max_size_bytes_means_no_upper_bound():
+    huge_sectors = 100_000_000_000  # ~51TB in 512-byte sectors - far above any old fixed ceiling
+    runner = _good_runner(sizes={"sdd": huge_sectors})
+    result = pds.validate_target_device(
+        "/dev/sdd", expected_serial=TEST_TARGET_SERIAL, min_size_bytes=500_000_000_000, runner=runner)
+    assert result["size_bytes"] == huge_sectors * 512
+
+
+def test_minimum_size_still_enforced_when_max_size_bytes_is_omitted():
+    runner = _good_runner(sizes={"sdd": 100})  # far too small
+    with pytest.raises(pds.PhysicalDeviceSafetyError):
+        pds.validate_target_device(
+            "/dev/sdd", expected_serial=TEST_TARGET_SERIAL, min_size_bytes=500_000_000_000, runner=runner)
+
+
+def test_explicit_max_size_bytes_is_still_honored_when_actually_passed():
+    """Omitting the ceiling is the new default - passing one explicitly
+    must still work exactly as before, for a caller that genuinely
+    wants one."""
+    runner = _good_runner(sizes={"sdd": 2_000_000_000})
+    with pytest.raises(pds.PhysicalDeviceSafetyError):
+        pds.validate_target_device(
+            "/dev/sdd", expected_serial=TEST_TARGET_SERIAL,
+            min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000, runner=runner)
+
+
 def test_non_block_device_is_refused():
     runner = _good_runner(lstat_mode=0o100000)  # S_IFREG - a regular file, not a block device
     with pytest.raises(pds.PhysicalDeviceSafetyError):

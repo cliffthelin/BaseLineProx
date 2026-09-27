@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Real CLI for backup/restore of the persistence volumes and/or the
+exported config - tar-based (see lib/backup_restore.py's module
+docstring for why). Never decrypts anything on restore - an encrypted
+field/file inside the archive comes back out exactly as encrypted;
+decrypt it with baseline-config-crypto, using the real password.
+
+    baseline-backup create --dest PATH.tar.gz (--all | --target PATH ...) [--config-only]
+    baseline-backup list --archive PATH.tar.gz
+    baseline-backup restore --archive PATH.tar.gz --dest-root DIR [--member NAME ...]
+    baseline-backup check-required --install-detected PATH.json
+"""
+import argparse
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import backup_restore  # noqa: E402
+from repair import RealRunner  # noqa: E402
+
+
+def _create(args):
+    targets = backup_restore.all_persistence_targets() if args.all else (args.target or [])
+    result = backup_restore.create_backup(
+        RealRunner(), dest_path=args.dest, targets=targets, config_only=args.config_only)
+    print(result.detail)
+    return 0 if result.ok else 1
+
+
+def _list(args):
+    contents = backup_restore.list_backup_contents(RealRunner(), args.archive)
+    print("\n".join(contents))
+    return 0
+
+
+def _restore(args):
+    result = backup_restore.restore_backup(
+        RealRunner(), archive_path=args.archive, dest_root=args.dest_root, members=args.member or None)
+    print(result.detail)
+    return 0 if result.ok else 1
+
+
+def _check_required(args):
+    with open(args.install_detected) as f:
+        detection = json.load(f)
+    required = backup_restore.backup_required(detection)
+    print("yes" if required else "no")
+    return 0 if not required else 1  # nonzero = "a backup should be made before proceeding"
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="baseline-backup")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    create_p = sub.add_parser("create")
+    create_p.add_argument("--dest", required=True)
+    create_p.add_argument("--all", action="store_true", help="back up every real persistence volume")
+    create_p.add_argument("--target", action="append", help="back up only this mountpoint/path (repeatable)")
+    create_p.add_argument("--config-only", action="store_true", help="back up only the exported config, never data")
+
+    list_p = sub.add_parser("list")
+    list_p.add_argument("--archive", required=True)
+
+    restore_p = sub.add_parser("restore")
+    restore_p.add_argument("--archive", required=True)
+    restore_p.add_argument("--dest-root", required=True)
+    restore_p.add_argument("--member", action="append", help="restore only this archive member (repeatable)")
+
+    check_p = sub.add_parser("check-required")
+    check_p.add_argument("--install-detected", required=True,
+                          help="the install_detected JSON from baseline-diff")
+
+    args = parser.parse_args(argv)
+    return {"create": _create, "list": _list, "restore": _restore,
+            "check-required": _check_required}[args.command](args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
