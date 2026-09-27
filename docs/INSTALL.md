@@ -52,31 +52,47 @@ parameter to avoid drifting out of sync with the code's own docstring.
 
 ## Step 2 - Prepare the unattended-install answer ISO
 
+**Corrected 2026-09-26 - the first version of this step recommended
+`--fetch-from iso` for simplicity. That was wrong and has been
+removed.** Decision record 02 already investigated this directly and
+found, by demonstration (not theory), that `--fetch-from iso` embeds
+the root password *hash* recoverably inside the prepared ISO file
+itself - `inspect-iso` reads it straight back out, and so does a bare
+`grep -a` against the raw ISO with no tooling at all. Anyone who ever
+obtains that ISO has the hash. This is exactly why this project's own
+accepted design is `--fetch-from http`, via a Baseline-owned,
+single-use, TTL-bounded, hardware-fact-bound `EphemeralAnswerServer` -
+never the embedded-ISO mode, for a real install any more than a QEMU
+one.
+
 ```python
 import drive_setup_answer as dsan
 
 outcome = dsan.prepare_iso_defensively(
     runner, binary=Path("/usr/bin/proxmox-auto-install-assistant"),
     source_iso=<iso from step 1>, answer_file=<your answer.toml>,
-    fetch_from="iso",   # see "Open question" below - not "http"
+    fetch_from="http",
     output_path=Path("/root/baseline-real-install.iso"),
     tmp_dir=Path("/root/baseline-install-tmp"),
     workspace_root=Path("/root/baseline-install-workspace"),
-    expected_fetch_mode="iso", min_size=..., max_size=...,
+    expected_fetch_mode="http", min_size=..., max_size=...,
     forbidden_iso_strings=[...],
 )
 ```
 
-**Open question, deliberately not resolved by guessing**: the QEMU
-experiments that proved this function built `EphemeralAnswerServer`,
-implying `--fetch-from http` (the answer fetched over a network from
-a server the installer reaches at boot). For a **real bare-metal**
-install, `--fetch-from iso` (the answer embedded directly in the ISO
-image, no network needed at boot at all) is simpler and has one fewer
-moving part - recommended here as the better choice for this case, not
-because it's confirmed to be what Track A1 actually used. If `http`
-turns out to be required for some real-hardware reason not yet
-understood, update this document with why.
+Then run `dsan.EphemeralAnswerServer` on a machine reachable from the
+real target's own local network at boot (not QEMU's SLIRP gateway -
+a real LAN IP) and never exposed beyond that network: single-use,
+TTL-bounded, and bound to the installing machine's own hardware facts,
+matching every other network-facing surface in this project
+(`settings_web.py`'s LAN-scoped, never-internet-exposed convention).
+**Known open risk, not yet resolved**: decision records 15-16 found
+this exact `guestfwd`-based answer-fetch path failing under QEMU with
+a root cause never identified ("blocks building any new disposable
+Proxmox install... via the established guestfwd/ephemeral-answer-server
+methodology"). A real bare-metal boot reaches the answer server over a
+real NIC, not `guestfwd`, so this specific failure mode may not apply -
+but it hasn't been re-tested on real hardware either. Watch for it.
 
 ## Step 3 - Validate the target drives
 
