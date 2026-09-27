@@ -145,6 +145,20 @@ cp "$SRC/baseline/lib/settings_web.py" /opt/baseline/lib/settings_web.py
 cp "$SRC/baseline/lib/settings_web_gate.py" /opt/baseline/lib/settings_web_gate.py
 cp "$SRC/baseline/bin/baseline-settings-web" /opt/baseline/bin/baseline-settings-web
 cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-settings-web-gate
+# Scripts inbox (decision record 70): "it's just files with server and
+# folder access to CRUD" - a login-gated CRUD server so a script
+# pushed from any client lands in a real folder an operator later runs
+# by hand from a terminal. Never executes anything itself. Reuses
+# settings_web.py's own auth machinery directly rather than
+# duplicating it. Gated on USER_PERSISTENCE actually being mounted
+# (scripts_inbox_gate.py, reusing persist_bind_mounts.is_mounted
+# unchanged) so a script pushed too early can't silently land on the
+# disposable substrate instead.
+cp "$SRC/baseline/lib/scripts_inbox.py" /opt/baseline/lib/scripts_inbox.py
+cp "$SRC/baseline/lib/scripts_inbox_web.py" /opt/baseline/lib/scripts_inbox_web.py
+cp "$SRC/baseline/lib/scripts_inbox_gate.py" /opt/baseline/lib/scripts_inbox_gate.py
+cp "$SRC/baseline/bin/baseline-scripts-inbox" /opt/baseline/bin/baseline-scripts-inbox
+cp "$SRC/baseline/bin/baseline-scripts-inbox-gate" /opt/baseline/bin/baseline-scripts-inbox-gate
 # App-specific LXC/VM provisioning via pinned + sha256-verified
 # community-scripts/ProxmoxVE Helper-Scripts - resolves decision record
 # 35's deferred "LXC app-installer vendoring" item; see vm_scripts.py's
@@ -196,7 +210,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -207,6 +221,7 @@ cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sen
 cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-sensors-collect.timer
 cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
 cp "$SRC/boot/baseline-settings-web.service" /etc/systemd/system/baseline-settings-web.service
+cp "$SRC/boot/baseline-scripts-inbox.service" /etc/systemd/system/baseline-scripts-inbox.service
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
@@ -258,16 +273,18 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/config_diff.py /opt/baseline/lib/update_pipeline.py \
          /opt/baseline/lib/backup_restore.py /opt/baseline/lib/config_crypto.py \
          /opt/baseline/lib/control_panel_web.py /opt/baseline/lib/iso_builder.py \
+         /opt/baseline/lib/scripts_inbox.py /opt/baseline/lib/scripts_inbox_web.py /opt/baseline/lib/scripts_inbox_gate.py \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
-         /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso; do
+         /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
+         /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
 command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
 [ -d /etc/containers/systemd ] || verify_fail "missing /etc/containers/systemd (Quadlet unit directory)"
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
          baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
-         baseline-settings-web.service; do
+         baseline-settings-web.service baseline-scripts-inbox.service; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
@@ -277,7 +294,8 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-persist-bind-mounts \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
-         /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso; do
+         /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
+         /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
@@ -291,11 +309,12 @@ systemctl enable baseline-additive-dhcp-reapply.service
 systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service
 systemctl enable baseline-settings-web.service
+systemctl enable baseline-scripts-inbox.service
 
-for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service; do
+for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service baseline-scripts-inbox.service; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
-echo "PASS: all six units confirmed enabled."
+echo "PASS: all seven units confirmed enabled."
 
 echo
 echo "Done. Nothing on this tty/session was touched or disabled - this"
