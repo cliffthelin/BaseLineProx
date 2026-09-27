@@ -82,6 +82,13 @@ def find_missing_lib_dependencies(repo_root: Path) -> list:
         entry_mods = _imports_of(bin_path, local_modules)
         needed |= _transitive_closure(entry_mods, lib_dir, local_modules)
 
+    # A lib module can also be staged directly (its own `cp` line, never
+    # reached through any bin script's import graph - e.g. an
+    # operator-invoked-only library with no CLI entry point). Its own
+    # real dependencies must be staged too, or they're invisible to the
+    # scan above (decision record 66's real blind spot).
+    needed |= _transitive_closure(copied_lib & local_modules, lib_dir, local_modules)
+
     return sorted(m for m in needed if m not in copied_lib)
 
 

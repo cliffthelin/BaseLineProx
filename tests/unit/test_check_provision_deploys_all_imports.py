@@ -88,3 +88,20 @@ def test_main_returns_1_when_a_gap_exists(tmp_path):
         provision_lib_lines=["helper_a"],
     )
     assert cpd.main(["--repo-root", str(tmp_path)]) == 1
+
+
+def test_checker_catches_a_gap_in_a_directly_copied_lib_modules_own_dependency(tmp_path):
+    """The real blind spot decision record 66 found: a lib module can be
+    staged via its own direct `cp` line (never reached through any bin
+    script's import graph) and still have its own real, unstaged
+    dependency. This must be caught even with zero bin scripts involved."""
+    (tmp_path / "baseline" / "lib").mkdir(parents=True)
+    (tmp_path / "baseline" / "bin").mkdir(parents=True)
+    (tmp_path / "boot").mkdir(parents=True)
+    (tmp_path / "baseline" / "lib" / "standalone_a.py").write_text("import standalone_b\n")
+    (tmp_path / "baseline" / "lib" / "standalone_b.py").write_text("X = 1\n")
+    (tmp_path / "boot" / "provision.sh").write_text(
+        'cp "$SRC/baseline/lib/standalone_a.py" /opt/baseline/lib/standalone_a.py\n'
+    )
+    missing = cpd.find_missing_lib_dependencies(tmp_path)
+    assert missing == ["standalone_b"]
