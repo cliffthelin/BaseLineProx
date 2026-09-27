@@ -134,9 +134,9 @@ assumed from the argv shape alone.
 - `drive_installer.py`'s persona refactor: 49 tests updated/added
   (admin+personal volume set, adaptive sizing with the new label
   scheme, telemetry, the new seeding function) - one unrelated real
-  regression caught and fixed in the same run: a "persistance" typo
-  quoted verbatim from the user's own message in decision record 74's
-  prose tripped a pre-existing typo-guard test
+  regression caught and fixed in the same run: a common misspelling
+  of "persistence" quoted verbatim from the user's own message in
+  decision record 74's prose tripped a pre-existing typo-guard test
   (`test_no_persistence_typo.py`) - reworded, not a rewrite of any
   finding.
 - Full suite: 1139/1139 passing, no regressions.
