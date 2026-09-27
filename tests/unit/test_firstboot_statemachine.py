@@ -450,3 +450,60 @@ def test_verify_diagnostic_tools_reports_iperf3_safe_by_default():
     assert result["ok"] is True
     assert result["iperf3_safe"] is True
     assert set(result["installed"]) == set(fsm.DIAGNOSTIC_PACKAGES)
+
+
+# --------------------------------------------------------------------------
+# Configurator wiring: an exported config, if present on this disk, is
+# genuinely applied once firstboot commits - real code, not just a
+# recorded intent. Best-effort and never gating: absent or malformed
+# config must never block or fail the network-repair/package-install
+# flow above, which remains the one real authorization gate.
+# --------------------------------------------------------------------------
+
+_EXPORTED_CONFIG = json.dumps({
+    "proxmox": {"smartd_health_check": True, "smartd_monitor_all": True},
+    "drivers": {"cpu_microcode": True},
+})
+
+
+def test_committed_run_applies_an_exported_configurator_config(tmp_path):
+    r = full_runner(files={
+        "/etc/network/interfaces": FIXTURE_A_IPV6_ONLY,
+        "/etc/baseline/install-config.json": _EXPORTED_CONFIG,
+    })
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                      check_lifeline_fn=broken_facts_fixture_a)
+    assert result["action"] == "committed"
+    assert "/etc/smartd.conf" in r.writes
+    assert ["apt-get", "install", "-y", "amd64-microcode"] in r.calls
+
+
+def test_already_completed_run_also_applies_an_exported_config(tmp_path):
+    r = full_runner()
+    fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+            check_lifeline_fn=broken_facts_fixture_a)
+    # Config exported/placed on disk only AFTER the initial commit - the
+    # normal real-world order (review the form, export, copy it over).
+    r.files["/etc/baseline/install-config.json"] = _EXPORTED_CONFIG
+    result2 = fsm.run(r, state_dir=tmp_path, print_fn=lambda *a: None)
+    assert result2["action"] == "already_completed"
+    assert "/etc/smartd.conf" in r.writes
+
+
+def test_missing_config_file_is_skipped_without_error(tmp_path):
+    r = full_runner()
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                      check_lifeline_fn=broken_facts_fixture_a)
+    assert result["action"] == "committed"
+    assert "/etc/smartd.conf" not in r.writes
+
+
+def test_malformed_config_file_never_blocks_or_fails_commit(tmp_path):
+    r = full_runner(files={
+        "/etc/network/interfaces": FIXTURE_A_IPV6_ONLY,
+        "/etc/baseline/install-config.json": "{not valid json",
+    })
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                      check_lifeline_fn=broken_facts_fixture_a)
+    assert result["action"] == "committed"
+    assert (tmp_path / "complete").exists()

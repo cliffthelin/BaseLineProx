@@ -17,6 +17,20 @@ all of "Proxmox Core" (`datacenter.cfg`) are flagged `coded: false` in
 the configurator itself and have no apply function here yet - real,
 separate follow-up work, not silently promised.
 
+Also covers the two driver/firmware toggles the Drivers & Hardware tab
+exposes with a real, single-package apt-get install each
+(`apply_cpu_microcode`, `apply_wifi_firmware`) - deliberately not every
+driver choice in that tab (GPU mode, passthrough target, and anything
+else still marked `coded: false` there have no apply function here
+either).
+
+All of this runs post-install, against the already-installed system's
+own live files/packages (via `config_pipeline.py`, called from
+firstboot) - never against the ISO. Nothing in this module, or in
+`config_pipeline.py`, ever reads or writes an ISO/image build
+artifact; that is `drive_setup_acquire.py`'s domain and stays entirely
+separate from this one.
+
 Same `Runner`-injected, `CommandResult`-returning convention as every
 other provisioning module in this codebase. Uses the fuller
 `repair.Runner` interface (not the minimal `run()`-only shape other
@@ -145,3 +159,25 @@ def apply_ethtool_config(runner: Runner, interface: str, config: dict) -> Comman
         if proc.returncode != 0:
             return CommandResult(False, f"{argv[1]} failed on {interface}: {proc.stderr.strip()}")
     return CommandResult(True, f"ethtool settings applied to {interface}")
+
+
+# ---------------------------------------------------------------------------
+# Driver/firmware packages - real apt-get installs for the two driver
+# toggles the Drivers & Hardware tab actually exposes (decision record on
+# the configurator's driver inventory). Package names are specific to
+# this project's own real, detected hardware (AMD Ryzen host, MediaTek
+# mt7921e Wi-Fi) - not generic placeholders.
+# ---------------------------------------------------------------------------
+
+def apply_cpu_microcode(runner: Runner) -> CommandResult:
+    proc = runner.run(["apt-get", "install", "-y", "amd64-microcode"], timeout=60)
+    if proc.returncode != 0:
+        return CommandResult(False, f"amd64-microcode install failed: {proc.stderr.strip()}")
+    return CommandResult(True, "amd64-microcode installed")
+
+
+def apply_wifi_firmware(runner: Runner, package: str = "firmware-mediatek") -> CommandResult:
+    proc = runner.run(["apt-get", "install", "-y", package], timeout=60)
+    if proc.returncode != 0:
+        return CommandResult(False, f"{package} install failed: {proc.stderr.strip()}")
+    return CommandResult(True, f"{package} installed")

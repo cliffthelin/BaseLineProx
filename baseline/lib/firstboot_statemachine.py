@@ -81,12 +81,20 @@ import secrets
 import time
 from pathlib import Path
 
+import config_pipeline
 import diagnostics
 import firstboot_network_repair as fbnr
 import network
 import proxmox_detect
 import repair
 import repair_additive
+
+# Fallback only when no network_repaired evidence exists yet in the
+# journal (e.g. the very first run, before network repair has landed) -
+# this project's own real, detected default wired NIC (lspci -k, this
+# session) is eno1; config_pipeline's ethtool step is a no-op anyway
+# unless the exported config actually carries ethtool_* keys.
+_DEFAULT_NETWORK_INTERFACE = "eno1"
 
 STATE_DIR = Path("/var/lib/baseline-firstboot")
 
@@ -314,6 +322,40 @@ def print_tty1(msg: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Configurator wiring - applies whatever the operator exported from the
+# Baseline Install Configurator artifact and placed on this disk, via
+# config_pipeline.py's already-real apply functions. Best-effort and
+# non-gating by design: an operator who never exported a config gets
+# `None` back from load_config and every subsystem is simply skipped -
+# this must never block or fail the network-repair/package-install flow
+# above, which is the one gate that actually matters. Runs post-install
+# only, against this live installed system - never touches an ISO.
+# ---------------------------------------------------------------------------
+
+def _resolve_network_interface(journal: dict) -> str:
+    try:
+        return _last(journal, "network_repaired")["target_interface"] or _DEFAULT_NETWORK_INTERFACE
+    except StopIteration:
+        return _DEFAULT_NETWORK_INTERFACE
+
+
+def apply_configurator_settings(runner: repair.Runner, journal: dict, print_fn=print_tty1) -> dict | None:
+    try:
+        config = config_pipeline.load_config(runner)
+    except Exception as exc:  # noqa: BLE001 - never let a bad config file break firstboot
+        print_fn(f"[baseline-firstboot] configurator settings: could not read config file - {exc}")
+        return None
+    if config is None:
+        print_fn("[baseline-firstboot] configurator settings: no exported config file found - nothing to apply.")
+        return None
+    summary = config_pipeline.apply_stored_config(
+        runner, config, network_interface=_resolve_network_interface(journal))
+    print_fn(f"[baseline-firstboot] configurator settings applied: {summary['applied']} "
+              f"skipped: {summary['skipped']} failed: {summary['failed']}")
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # The state machine itself.
 # ---------------------------------------------------------------------------
 
@@ -322,6 +364,7 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
     completed_at = already_completed(state_dir)
     if completed_at is not None:
         print_fn(f"[baseline-firstboot] previous run already completed at {completed_at} - not re-triggering.")
+        apply_configurator_settings(runner, load_journal(state_dir), print_fn)
         return {"action": "already_completed", "completed_at": completed_at, "package_install_allowed": True}
 
     journal = load_journal(state_dir)
@@ -454,9 +497,10 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
                     "detail": _last(journal, "packages_verified").get("reason", ""),
                     "package_install_allowed": True}
         mark_complete(state_dir)
-        record_transition(state_dir, journal, "committed")
+        journal = record_transition(state_dir, journal, "committed")
         print_fn("[baseline-firstboot] COMMITTED. Marker written - will not re-run automatically.")
 
+    apply_configurator_settings(runner, journal, print_fn)
     print_fn("[baseline-firstboot] state machine run finished.")
     return {"action": "committed", "package_install_allowed": True}
 

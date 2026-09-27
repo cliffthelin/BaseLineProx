@@ -127,3 +127,32 @@ def test_apply_ethtool_config_reports_the_real_failure_and_stops():
     assert "no such device" in result.detail
     # -K/-A must never have been attempted after -s failed
     assert not any(c[:2] == ["ethtool", "-K"] for c in runner.calls)
+
+
+def test_apply_cpu_microcode_installs_the_real_amd_package():
+    runner = FakeRunner()
+    result = ca.apply_cpu_microcode(runner)
+    assert result.ok is True
+    assert runner.calls[0] == ["apt-get", "install", "-y", "amd64-microcode"]
+
+
+def test_apply_cpu_microcode_reports_a_real_failure():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:2] == ["apt-get", "install"], FakeProc(1, "", "unable to locate package")),
+    ])
+    result = ca.apply_cpu_microcode(runner)
+    assert result.ok is False
+    assert "unable to locate package" in result.detail
+
+
+def test_apply_wifi_firmware_installs_the_real_mediatek_package_by_default():
+    runner = FakeRunner()
+    result = ca.apply_wifi_firmware(runner)
+    assert result.ok is True
+    assert runner.calls[0] == ["apt-get", "install", "-y", "firmware-mediatek"]
+
+
+def test_apply_wifi_firmware_accepts_a_different_package_name():
+    runner = FakeRunner()
+    ca.apply_wifi_firmware(runner, package="firmware-realtek")
+    assert runner.calls[0] == ["apt-get", "install", "-y", "firmware-realtek"]
