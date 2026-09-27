@@ -42,6 +42,15 @@ cp "$SRC/baseline/bin/baseline-auth-setup.sh" /opt/baseline/bin/baseline-auth-se
 cp "$SRC/baseline/lib/hardware.py" /opt/baseline/lib/hardware.py
 cp "$SRC/baseline/lib/network.py" /opt/baseline/lib/network.py
 cp "$SRC/baseline/lib/harness.py" /opt/baseline/lib/harness.py
+# harness.py's own real dependency, missed by every prior audit pass
+# because harness.py is staged via this direct cp line, never reached
+# through baseline/bin/baseline's own import graph - the checker only
+# caught it once its scan was widened to also walk directly-cp'd lib
+# modules' own imports (decision record 66/67). harness.py imports
+# this unconditionally (event-stream parsing) - without it,
+# baseline.service would crash with ModuleNotFoundError the first time
+# it actually processes a streamed event.
+cp "$SRC/baseline/lib/stream_json.py" /opt/baseline/lib/stream_json.py
 # harness.py/bin/baseline's own real transitive dependencies - found
 # missing entirely from this deployment list by a real import-graph
 # audit (every bin script provision.sh installs, resolved against what
@@ -233,6 +242,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
          /opt/baseline/lib/vm_scripts.py /opt/baseline/lib/quadlet.py \
          /opt/baseline/lib/vm_provision.py /opt/baseline/lib/pct_provision.py \
+         /opt/baseline/lib/harness.py /opt/baseline/lib/stream_json.py \
          /opt/baseline/lib/harness_adapter.py /opt/baseline/lib/harness_registry.py /opt/baseline/lib/harness_events.py \
          /opt/baseline/lib/clipboard_osc52.py /opt/baseline/lib/status_bar.py \
          /opt/baseline/lib/config_apply.py /opt/baseline/lib/config_pipeline.py \
