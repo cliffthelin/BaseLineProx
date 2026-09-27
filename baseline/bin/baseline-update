@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Real CLI bridge for the configurator's "Update" modal - applies an
+exported config to an EXISTING install, selectively, per direct
+instruction: "only code updates and or DRIVERS and or Applications
+AND or OS installs AND or only update configs," with configs
+"selectable as update or not update in any combination."
+
+    baseline-update --config /etc/baseline/install-config.json --selection /etc/baseline/update-selection.json \
+        [--interface eno1]
+
+`--selection` is a small JSON file the configurator's Update modal
+exports: {"code": bool, "drivers": bool, "applications": bool,
+"os": bool, "configs": true|false|["smartd_health_check", ...]}.
+
+Real, honest scope: "code"/"applications"/"os" have no apply mechanism
+anywhere in this codebase yet - selecting them is real (reported in
+the printed summary's "not_available" list), applying them is not.
+"drivers" and "configs" are genuinely applied via update_pipeline.py,
+which merges an unselected config field in from the target's own
+current state rather than resetting it - see that module's docstring.
+Runs strictly against this live, already-installed system - never
+touches or builds an ISO.
+"""
+import argparse
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import update_pipeline  # noqa: E402
+from repair import RealRunner  # noqa: E402
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="baseline-update")
+    parser.add_argument("--config", required=True, help="path to the exported install-config.json")
+    parser.add_argument("--selection", required=True, help="path to the exported update-selection.json")
+    parser.add_argument("--interface", default="eno1",
+                         help="fallback network interface if the config's own ethtool_interface is blank")
+    args = parser.parse_args(argv)
+
+    with open(args.config) as f:
+        config = json.load(f)
+    with open(args.selection) as f:
+        categories = json.load(f)
+
+    summary = update_pipeline.apply_selective_update(
+        RealRunner(), config, categories, network_interface=args.interface)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0 if not summary["failed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Real CLI bridge for the configurator's "DIFFERENCES" page - direct
+instruction: auto-detect the existing install, then check each real
+install point/configuration and report what would change.
+
+    baseline-diff --config /etc/baseline/install-config.json [--interface eno1] [--vg-name pve] [--out PATH]
+
+Runs `drive_installer.detect_existing_baseline_install()` (auto-detects
+whether this system's VG already has the BASELINE volumes) and
+`config_diff.compute_full_diff()` (the real, per-subsystem current-vs-
+desired report) against the LIVE, already-installed system this
+script runs on - it never touches or builds an ISO, and never writes
+anything except the optional --out report file. Prints one JSON
+document to stdout (or --out) shaped:
+
+    {"install_detected": {...}, "diff_sections": [...]}
+
+The operator copies that JSON into the DIFFERENCES page to review it
+visually, or feeds it straight to `baseline-update` to act on it.
+"""
+import argparse
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import config_diff  # noqa: E402
+import drive_installer  # noqa: E402
+from repair import RealRunner  # noqa: E402
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="baseline-diff")
+    parser.add_argument("--config", required=True, help="path to the exported install-config.json")
+    parser.add_argument("--interface", default="eno1",
+                         help="fallback network interface if the config's own ethtool_interface is blank")
+    parser.add_argument("--vg-name", default=drive_installer.DEFAULT_VG_NAME)
+    parser.add_argument("--out", default=None, help="write the JSON report here instead of stdout")
+    args = parser.parse_args(argv)
+
+    with open(args.config) as f:
+        config = json.load(f)
+
+    runner = RealRunner()
+    report = {
+        "install_detected": drive_installer.detect_existing_baseline_install(runner, vg_name=args.vg_name),
+        "diff_sections": config_diff.compute_full_diff(runner, config, network_interface=args.interface),
+    }
+    text = json.dumps(report, indent=2, sort_keys=True, default=str)
+    if args.out:
+        with open(args.out, "w") as f:
+            f.write(text + "\n")
+        print(f"wrote {args.out}")
+    else:
+        print(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

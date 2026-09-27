@@ -151,6 +151,28 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
     return CommandResult(True, f"{lv_name} created, formatted {label}, mounted at {mountpoint}", created=True)
 
 
+def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME) -> dict:
+    """Real auto-detection: does `vg_name` already have the three
+    BASELINE_VOLUMES provisioned? Reuses the exact same `lvs` parsing
+    ensure_volume() already uses, rather than a second detection
+    mechanism that could drift out of sync with it. "Existing install"
+    means ALL three are present; a target with none or only some is
+    reported honestly as not-yet-fully-installed - ensure_baseline_volumes()
+    already creates whatever's missing regardless of this function's
+    own answer, so a partial state is never blocked, only surfaced."""
+    proc = runner.run(list_logical_volumes_argv(), timeout=15)
+    if proc.returncode != 0:
+        all_names = [lv_name for lv_name, _, _, _ in BASELINE_VOLUMES]
+        return {"has_existing_install": False, "found_volumes": [], "missing_volumes": all_names,
+                "error": proc.stderr.strip() or f"lvs exited {proc.returncode}"}
+
+    groups = parse_logical_volumes(proc.stdout)
+    found = [lv_name for lv_name, _, _, _ in BASELINE_VOLUMES
+             if lv_exists(groups, vg_name=vg_name, lv_name=lv_name)]
+    missing = [lv_name for lv_name, _, _, _ in BASELINE_VOLUMES if lv_name not in found]
+    return {"has_existing_install": len(missing) == 0, "found_volumes": found, "missing_volumes": missing}
+
+
 def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME) -> dict:
     """The top-level, idempotent entry point: ensures USER_PERSISTENCE/
     INSTALLER_CACHE/SESSION_TEMP all exist on `vg_name`, checking real

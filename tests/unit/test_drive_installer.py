@@ -160,3 +160,60 @@ def test_ensure_baseline_volumes_never_touches_boot_or_efi():
     for argv in runner.calls:
         joined = " ".join(argv)
         assert "sdd1" not in joined and "sdd2" not in joined and "efi" not in joined.lower()
+
+
+# --------------------------------------------------------------------------
+# Auto-detecting an existing install - "the ability to auto detect that
+# drive" (direct instruction). Reuses the exact same lvs parsing
+# ensure_volume() already uses, rather than a second detection mechanism
+# that could drift out of sync with it.
+# --------------------------------------------------------------------------
+
+def test_detect_existing_baseline_install_true_when_all_three_volumes_present():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lvs"], FakeProc(
+            0,
+            "  pve  root\n"
+            "  pve  baseline_user_persistence\n"
+            "  pve  baseline_installer_cache\n"
+            "  pve  baseline_session_temp\n",
+            "")),
+    ])
+    result = di.detect_existing_baseline_install(runner, vg_name="pve")
+    assert result["has_existing_install"] is True
+    assert set(result["found_volumes"]) == {
+        "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
+    assert result["missing_volumes"] == []
+
+
+def test_detect_existing_baseline_install_false_when_none_present():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve  root\n", "")),
+    ])
+    result = di.detect_existing_baseline_install(runner, vg_name="pve")
+    assert result["has_existing_install"] is False
+    assert result["found_volumes"] == []
+    assert set(result["missing_volumes"]) == {
+        "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
+
+
+def test_detect_existing_baseline_install_false_when_only_some_present():
+    """A partial state is reported honestly, never rounded up to
+    "existing" or blocked - ensure_baseline_volumes() already creates
+    whatever's missing regardless."""
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve  root\n  pve  baseline_user_persistence\n", "")),
+    ])
+    result = di.detect_existing_baseline_install(runner, vg_name="pve")
+    assert result["has_existing_install"] is False
+    assert result["found_volumes"] == ["baseline_user_persistence"]
+    assert set(result["missing_volumes"]) == {"baseline_installer_cache", "baseline_session_temp"}
+
+
+def test_detect_existing_baseline_install_handles_a_real_lvs_failure():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lvs"], FakeProc(1, "", "no such volume group")),
+    ])
+    result = di.detect_existing_baseline_install(runner, vg_name="pve")
+    assert result["has_existing_install"] is False
+    assert "no such volume group" in result["error"]
