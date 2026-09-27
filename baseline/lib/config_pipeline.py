@@ -91,6 +91,12 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
 
     proxmox = config.get("proxmox") or {}
     drivers = config.get("drivers") or {}
+    # The exported config's own ethtool_interface field (the configurator's
+    # "Interface to inspect/tune" field) wins when the operator actually
+    # set one - `network_interface` is only the fallback for a config that
+    # omits it. Found on audit: this field's value used to be read and
+    # stored but never actually consulted here, silently discarded.
+    resolved_interface = proxmox.get("ethtool_interface") or network_interface
 
     def run_subsystem(name, present, apply_fn):
         if not present:
@@ -102,7 +108,7 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
     run_subsystem("smartd", _has_any_key(proxmox, _SMARTD_KEYS),
                   lambda: config_apply.apply_smartd_config(runner, proxmox))
     run_subsystem("ethtool", _has_any_key(proxmox, _ETHTOOL_KEYS),
-                  lambda: config_apply.apply_ethtool_config(runner, network_interface, proxmox))
+                  lambda: config_apply.apply_ethtool_config(runner, resolved_interface, proxmox))
     run_subsystem("cpu_microcode", bool(drivers.get("cpu_microcode")),
                   lambda: config_apply.apply_cpu_microcode(runner))
     run_subsystem("wifi_firmware", bool(drivers.get("nic_wifi_firmware")),

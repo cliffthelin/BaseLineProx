@@ -475,7 +475,7 @@ def test_committed_run_applies_an_exported_configurator_config(tmp_path):
                       check_lifeline_fn=broken_facts_fixture_a)
     assert result["action"] == "committed"
     assert "/etc/smartd.conf" in r.writes
-    assert ["apt-get", "install", "-y", "amd64-microcode"] in r.calls
+    assert any("apt-get" in c and "install" in c and "amd64-microcode" in c for c in r.calls)
 
 
 def test_already_completed_run_also_applies_an_exported_config(tmp_path):

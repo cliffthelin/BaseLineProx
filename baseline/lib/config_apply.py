@@ -170,14 +170,20 @@ def apply_ethtool_config(runner: Runner, interface: str, config: dict) -> Comman
 # ---------------------------------------------------------------------------
 
 def apply_cpu_microcode(runner: Runner) -> CommandResult:
-    proc = runner.run(["apt-get", "install", "-y", "amd64-microcode"], timeout=60)
+    # DEBIAN_FRONTEND=noninteractive matches firstboot_statemachine.py's
+    # own install_diagnostic_tools() convention - a bare apt-get here
+    # (found missing this during audit) risks a debconf prompt hanging
+    # an unattended firstboot run.
+    proc = runner.run(["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "amd64-microcode"],
+                       timeout=60)
     if proc.returncode != 0:
         return CommandResult(False, f"amd64-microcode install failed: {proc.stderr.strip()}")
     return CommandResult(True, "amd64-microcode installed")
 
 
 def apply_wifi_firmware(runner: Runner, package: str = "firmware-mediatek") -> CommandResult:
-    proc = runner.run(["apt-get", "install", "-y", package], timeout=60)
+    proc = runner.run(["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", package],
+                       timeout=60)
     if proc.returncode != 0:
         return CommandResult(False, f"{package} install failed: {proc.stderr.strip()}")
     return CommandResult(True, f"{package} installed")

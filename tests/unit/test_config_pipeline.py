@@ -53,6 +53,25 @@ def test_load_config_parses_the_real_exported_json():
     assert config["drivers"]["cpu_microcode"] is True
 
 
+def test_apply_stored_config_uses_the_configs_own_ethtool_interface_over_the_fallback():
+    """Real bug found on audit: the configurator's own ethtool_interface
+    field was never read - the pipeline always used whatever the caller
+    passed as network_interface, silently discarding the operator's
+    actual choice. This asserts the config's own value wins."""
+    config = {"proxmox": dict(json.loads(CONFIG_JSON)["proxmox"], ethtool_interface="wlp9s0"), "drivers": {}}
+    runner = FakeRunner()
+    cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert any(c[:3] == ["ethtool", "-s", "wlp9s0"] for c in runner.calls)
+    assert not any(c[:3] == ["ethtool", "-s", "eno1"] for c in runner.calls)
+
+
+def test_apply_stored_config_falls_back_to_network_interface_when_config_omits_it():
+    config = {"proxmox": json.loads(CONFIG_JSON)["proxmox"], "drivers": {}}
+    runner = FakeRunner()
+    cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert any(c[:3] == ["ethtool", "-s", "eno1"] for c in runner.calls)
+
+
 def test_apply_stored_config_applies_smartd_and_ethtool_and_drivers():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
@@ -63,8 +82,8 @@ def test_apply_stored_config_applies_smartd_and_ethtool_and_drivers():
     assert "wifi_firmware" in summary["applied"]
     assert "/etc/smartd.conf" in runner.writes
     assert any(c[:3] == ["ethtool", "-s", "eno1"] for c in runner.calls)
-    assert any(c[:3] == ["apt-get", "install", "-y"] and "amd64-microcode" in c for c in runner.calls)
-    assert any(c[:3] == ["apt-get", "install", "-y"] and "firmware-mediatek" in c for c in runner.calls)
+    assert any("apt-get" in c and "install" in c and "amd64-microcode" in c for c in runner.calls)
+    assert any("apt-get" in c and "install" in c and "firmware-mediatek" in c for c in runner.calls)
 
 
 def test_apply_stored_config_skips_a_subsystem_with_no_relevant_keys():
