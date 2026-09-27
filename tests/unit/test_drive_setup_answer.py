@@ -88,10 +88,10 @@ EXPECTED_PRODUCT = "baseline-test-synthetic"
 ANSWER = '[global]\nfqdn = "synthetic.invalid"\n'
 
 
-def _fresh_server(self_signed_cert, ttl=5.0):
+def _fresh_server(self_signed_cert, ttl=5.0, expected_mac=EXPECTED_MAC, expected_dmi_product=EXPECTED_PRODUCT):
     cert, key, fp = self_signed_cert
     sid = secrets.token_urlsafe(24)
-    sess = da.SessionState(sid, ANSWER, EXPECTED_MAC, EXPECTED_PRODUCT, ttl_seconds=ttl)
+    sess = da.SessionState(sid, ANSWER, expected_mac, expected_dmi_product, ttl_seconds=ttl)
     srv = da.EphemeralAnswerServer("127.0.0.1", 0, cert, key, sess)
     srv.start()
     time.sleep(0.1)
@@ -153,6 +153,35 @@ def test_hardware_mismatch_denied(self_signed_cert):
         srv.stop()
 
 
+def test_none_expected_mac_accepts_any_mac(self_signed_cert):
+    """Hardware is expected to change with a real install (a replaced
+    drive, a different machine entirely) - `expected_mac=None` means
+    this session doesn't pin to one, and any requester's MAC is
+    accepted (the other properties - LAN scope, fingerprint pinning,
+    single-use, TTL - remain the real trust boundary)."""
+    srv, sess, fp = _fresh_server(self_signed_cert, expected_mac=None)
+    try:
+        body = {"network_interfaces": [{"mac": "any:old:mac:00:00:00"}], "dmi": {"system": {"name": EXPECTED_PRODUCT}}}
+        status, response = post_pinned("127.0.0.1", srv.port, f"/answer/{sess.session_id}", body, fp)
+        assert status == 200
+        assert response.decode() == ANSWER
+    finally:
+        srv.stop()
+
+
+def test_none_expected_dmi_product_accepts_any_product():
+    mac_ok, dmi_ok = da._check_hardware(
+        {"network_interfaces": [{"mac": "aa:bb:cc:dd:ee:ff"}], "dmi": {"system": {"name": "literally-anything"}}},
+        expected_mac="aa:bb:cc:dd:ee:ff", expected_dmi_product=None,
+    )
+    assert mac_ok and dmi_ok
+
+
+def test_both_none_accepts_everything():
+    mac_ok, dmi_ok = da._check_hardware({}, expected_mac=None, expected_dmi_product=None)
+    assert mac_ok and dmi_ok
+
+
 def test_wrong_certificate_fingerprint_rejected_by_pinning(self_signed_cert):
     """A client pinned to a DIFFERENT (wrong) fingerprint must refuse
     the connection before ever seeing a response - this is the same
@@ -174,6 +203,7 @@ def test_wrong_certificate_fingerprint_rejected_by_pinning(self_signed_cert):
 class FakeAnswerRunner(da.AnswerRunner):
     def __init__(self):
         self.files = {}  # path -> bytes
+        self.dirs = set()
         self.command_responses = []
         self.calls = []
 
@@ -189,10 +219,13 @@ class FakeAnswerRunner(da.AnswerRunner):
 
     def path_exists(self, path):
         p = str(path)
-        if p in self.files:
+        if p in self.files or p in self.dirs:
             return True
         prefix = p.rstrip("/") + "/"
         return any(k.startswith(prefix) for k in self.files)
+
+    def makedirs(self, path):
+        self.dirs.add(str(path))
 
     def is_regular_file(self, path):
         return str(path) in self.files
@@ -247,6 +280,24 @@ def test_prepare_iso_success_all_postconditions_pass():
     assert outcome.ok
     assert outcome.output_path is not None
     assert all(c.ok for c in outcome.postconditions)
+
+
+def test_prepare_iso_creates_tmp_dir_before_invoking_the_binary():
+    """A real end-to-end run found `prepare-iso` does not create --tmp
+    itself (exit 0, stderr 'Error: No such file or directory') when the
+    directory didn't already exist - every FakeAnswerRunner-based test
+    passed regardless, since the fake never modeled that failure mode.
+    Guards the fix: prepare_iso_defensively must create tmp_dir itself,
+    before the subprocess call, not assume the caller already did."""
+    r = _make_runner_success()
+    assert not r.path_exists(Path("/ws/tmp"))
+    da.prepare_iso_defensively(
+        r, Path("/bin/assistant"), Path("/src.iso"), None, "http",
+        Path("/ws/prepared.iso"), Path("/ws/tmp"), Path("/ws"),
+        expected_fetch_mode="http", min_size=1_000_000, max_size=3_000_000,
+        forbidden_iso_strings=[],
+    )
+    assert Path("/ws/tmp") in {Path(d) for d in r.dirs}
 
 
 def test_prepare_iso_fails_when_exit_code_is_0_but_stderr_shows_error():

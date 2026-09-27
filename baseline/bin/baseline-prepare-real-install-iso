@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Operationalizes docs/INSTALL.md Step 2 as a real, runnable tool
+instead of an inline snippet - prepares a real bare-metal Proxmox
+install ISO via `--fetch-from http`, the only mode this project's own
+AGENTS.md and decision record 02 accept for a real (non-QEMU-only)
+install: `--fetch-from iso` embeds the root password *hash* recoverably
+in the ISO file itself.
+
+This tool does NOT know your real target's MAC address or DMI system
+product name in advance, and does not require you to either - hardware
+is expected to change with a real install (a replaced drive, a
+different or unknown-in-advance machine entirely), so pinning to an
+exact pre-known fingerprint can't be the only supported mode. Pass
+`--target-mac`/`--target-dmi-product` when you do know them (tightens
+the check); omit either or both to accept any requester for that fact.
+When both are omitted, the real trust boundary is what's left: this
+session is LAN-scoped, the TLS certificate fingerprint is pinned into
+the ISO itself, the answer is single-use, and it expires on the TTL -
+the same boundary every other network-facing surface in this project
+(`settings_web.py` included) already relies on. Never guessed or
+defaulted to a placeholder value - either the real value or genuinely
+absent.
+
+After this produces the ISO, you must ALSO run this same process's
+`--serve` mode (or a second invocation with `--serve-only`) on a
+machine reachable from the real target's own local network at boot -
+not this development machine unless it's genuinely on that LAN - for
+the *entire* window between "write the ISO to a USB stick" and "the
+target's installer successfully fetches the answer." The server is
+single-use and TTL-bounded (default 30 minutes); if the real boot
+takes longer than that, regenerate rather than extend it blindly.
+
+Never run this against a device path - it targets a serial-matched
+filter (see --disk-serial), consistent with physical_device_safety.py's
+whole-project discipline of resolving real storage by serial, never by
+kernel-assigned device letter.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/opt/baseline/lib")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import drive_setup_answer as dsan  # noqa: E402
+
+
+ANSWER_TEMPLATE = """[global]
+keyboard = "{keyboard}"
+country = "{country}"
+fqdn = "{fqdn}"
+mailto = "{mailto}"
+timezone = "{timezone}"
+root-password-hashed = "{password_hash}"
+
+[network]
+source = "from-dhcp"
+
+[disk-setup]
+filesystem = "ext4"
+filter.ID_SERIAL_SHORT = "{disk_serial}"
+"""
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--source-iso", type=Path, required=True, help="Path to the real, verified Proxmox VE ISO")
+    ap.add_argument("--assistant-binary", type=Path, required=True,
+                     help="Path to proxmox-auto-install-assistant (see drive_setup_acquire.py to obtain it verified)")
+    ap.add_argument("--output", type=Path, required=True, help="Where to write the prepared ISO")
+    ap.add_argument("--workspace", type=Path, required=True, help="Directory output/tmp must resolve inside")
+    ap.add_argument("--disk-serial", required=True,
+                     help="The REAL target drive's serial (e.g. from docs/INSTALL.md's table) - never a /dev/sdX letter")
+    ap.add_argument("--fqdn", default="baseline.local")
+    ap.add_argument("--server-host", required=True,
+                     help="LAN IP the answer server will bind/be reachable at - must be real, reachable from the "
+                          "target's own network segment at boot time, never 127.0.0.1/QEMU's gateway")
+    ap.add_argument("--server-port", type=int, default=8443)
+    ap.add_argument("--cert", type=Path, required=True, help="TLS cert for the answer server (openssl req -x509 ...)")
+    ap.add_argument("--key", type=Path, required=True)
+    ap.add_argument("--target-mac", default=None,
+                     help="The REAL target's NIC MAC address, if known ahead of time (obtain via "
+                          "`system-info`/`ip link` ON the real machine). Optional: hardware is expected to change "
+                          "with a real install (a replaced drive, a different machine entirely, per direct "
+                          "instruction) - omit this to accept any requester's MAC, relying instead on this "
+                          "session's other real properties (LAN-scoped reachability, the TLS fingerprint pinned "
+                          "into the ISO, single-use consumption, the TTL) as the trust boundary. Never guessed or "
+                          "defaulted to a placeholder - either the real value or genuinely absent.")
+    ap.add_argument("--target-dmi-product", default=None,
+                     help="The REAL target's DMI system product name, if known ahead of time "
+                          "(`dmidecode -s system-product-name` on the real machine). Optional, same reasoning as "
+                          "--target-mac - omit it to accept any product name.")
+    ap.add_argument("--ttl-seconds", type=float, default=1800.0)
+    ap.add_argument("--serve", action="store_true",
+                     help="After preparing the ISO, also start the answer server and block until it's consumed "
+                          "or the TTL expires - run this on the LAN-reachable machine at the moment you boot the "
+                          "real target from the USB stick you wrote from --output")
+    args = ap.parse_args()
+
+    import secrets
+    session_id = secrets.token_urlsafe(24)
+    pw = dsan.generate_one_time_password()
+    pw_hash = dsan.hash_password_sha512crypt(pw, secrets.token_hex(8))
+    # The plaintext is never printed, logged, or written anywhere - it
+    # only ever needs to exist long enough to be hashed, matching
+    # generate_one_time_password's whole argv-free design intent.
+    del pw
+
+    answer_toml = ANSWER_TEMPLATE.format(
+        keyboard="en-us", country="us", fqdn=args.fqdn, mailto="root@baseline.test",
+        timezone="UTC", password_hash=pw_hash, disk_serial=args.disk_serial,
+    )
+    answer_path = args.workspace / "answer.toml"
+    args.workspace.mkdir(parents=True, exist_ok=True)
+    answer_path.write_text(answer_toml)
+
+    fingerprint = _cert_fingerprint(args.cert)
+    url = f"https://{args.server_host}:{args.server_port}/answer/{session_id}"
+
+    runner = dsan.RealAnswerRunner()
+    outcome = dsan.prepare_iso_defensively(
+        runner, binary=args.assistant_binary, source_iso=args.source_iso,
+        answer_file=None, fetch_from="http",
+        output_path=args.output, tmp_dir=args.workspace / "tmp", workspace_root=args.workspace,
+        expected_fetch_mode="http", expected_url=url, expected_fingerprint=fingerprint,
+        min_size=1_000_000_000, max_size=3_000_000_000,
+        forbidden_iso_strings=[pw_hash.encode(), answer_toml.encode()],
+        extra_args=["--url", url, "--cert-fingerprint", fingerprint],
+    )
+    print(f"prepare-iso ok: {outcome.ok}")
+    for c in outcome.postconditions:
+        print(f"  {c.name}: {c.ok} {c.detail[:150]}")
+    if not outcome.ok:
+        print("REFUSING to proceed - the prepared ISO did not pass its own postconditions.", file=sys.stderr)
+        return 1
+
+    print(f"\nPrepared ISO: {args.output}")
+    print(f"Write it to the real USB stick yourself:")
+    print(f"  dd if={args.output} of=/dev/sdX bs=4M status=progress oflag=sync")
+    print("(triple-check /dev/sdX is the USB stick, not either real target drive)")
+
+    if args.serve:
+        if args.target_mac is None or args.target_dmi_product is None:
+            missing = ", ".join(n for n, v in (("--target-mac", args.target_mac),
+                                                ("--target-dmi-product", args.target_dmi_product)) if v is None)
+            print(f"NOTE: {missing} not given - this session will accept ANY requester for that fact. "
+                  f"Its real trust boundary is LAN scope + the pinned TLS fingerprint + single-use + TTL, "
+                  f"not hardware identity. That's fine if that's genuinely what you want (a new/unknown "
+                  f"machine) - just confirm it is.")
+        session = dsan.SessionState(
+            session_id=session_id, answer_toml=answer_toml,
+            expected_mac=args.target_mac, expected_dmi_product=args.target_dmi_product,
+            ttl_seconds=args.ttl_seconds,
+        )
+        server = dsan.EphemeralAnswerServer(
+            bind_host="0.0.0.0", bind_port=args.server_port,
+            cert_path=str(args.cert), key_path=str(args.key), session=session,
+        )
+        server.start()
+        print(f"\nAnswer server listening on 0.0.0.0:{args.server_port}, single-use, "
+              f"{args.ttl_seconds:.0f}s TTL. Boot the real target now.")
+        print(f"(matches the URL embedded in the ISO: {url})")
+        import time
+        deadline = time.monotonic() + args.ttl_seconds + 5
+        while time.monotonic() < deadline and not session.consumed:
+            time.sleep(2)
+        server.stop()
+        print(f"Session consumed: {session.consumed}. Timeline: {server.timeline}")
+
+    return 0
+
+
+def _cert_fingerprint(cert_path: Path) -> str:
+    import subprocess
+    proc = subprocess.run(
+        ["openssl", "x509", "-in", str(cert_path), "-noout", "-fingerprint", "-sha256"],
+        capture_output=True, text=True, check=True,
+    )
+    return proc.stdout.strip().split("=", 1)[1]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

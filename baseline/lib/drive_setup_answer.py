@@ -121,11 +121,17 @@ def hash_password_yescrypt(password: bytes, salt: str) -> str | None:
 # --------------------------------------------------------------------------
 
 class SessionState:
-    def __init__(self, session_id: str, answer_toml: str, expected_mac: str,
-                 expected_dmi_product: str, ttl_seconds: float):
+    def __init__(self, session_id: str, answer_toml: str, expected_mac: str | None,
+                 expected_dmi_product: str | None, ttl_seconds: float):
+        """`expected_mac`/`expected_dmi_product` may be `None` - hardware
+        is expected to change with a real install (see `_check_hardware`'s
+        own docstring); passing None for one or both means this session
+        accepts any requester's value for that fact, relying instead on
+        this server's other real properties (LAN-scoped, TLS-fingerprint-
+        pinned, single-use, TTL-bounded) as the trust boundary."""
         self.session_id = session_id
         self.answer_toml = answer_toml
-        self.expected_mac = expected_mac.lower()
+        self.expected_mac = expected_mac.lower() if expected_mac is not None else None
         self.expected_dmi_product = expected_dmi_product
         self.created = time.monotonic()
         self.expires = self.created + ttl_seconds
@@ -143,18 +149,29 @@ class RequestOutcome:
     ts: float = field(default_factory=time.monotonic)
 
 
-def _check_hardware(payload: dict, expected_mac: str, expected_dmi_product: str) -> tuple[bool, bool]:
-    macs = []
-    for iface in payload.get("network_interfaces", []) or []:
-        m = iface.get("mac")
-        if m:
-            macs.append(str(m).lower())
-    mac_ok = expected_mac in macs if macs else False
+def _check_hardware(payload: dict, expected_mac: str | None, expected_dmi_product: str | None) -> tuple[bool, bool]:
+    """`None` for either expected value means "don't check this fact" -
+    hardware is expected to change with a real install (a replaced
+    drive, a different machine entirely), so pinning to an exact,
+    pre-known MAC/DMI product can't be the *only* supported mode. When
+    both are None, this session's real trust boundary is what's left:
+    LAN-scoped reachability, the TLS certificate fingerprint pinned
+    into the ISO itself, single-use consumption, and the TTL - the
+    same boundary `settings_web.py` and every other network-facing
+    surface in this project already relies on, not a weaker one."""
+    if expected_mac is None:
+        mac_ok = True
+    else:
+        macs = [str(i.get("mac")).lower() for i in (payload.get("network_interfaces", []) or []) if i.get("mac")]
+        mac_ok = expected_mac in macs if macs else False
 
-    dmi = payload.get("dmi", {}) or {}
-    system = dmi.get("system", {}) or {}
-    product = str(system.get("name", ""))
-    dmi_ok = product == expected_dmi_product
+    if expected_dmi_product is None:
+        dmi_ok = True
+    else:
+        dmi = payload.get("dmi", {}) or {}
+        system = dmi.get("system", {}) or {}
+        dmi_ok = str(system.get("name", "")) == expected_dmi_product
+
     return mac_ok, dmi_ok
 
 
@@ -274,6 +291,9 @@ class AnswerRunner:
     def remove_tree_or_file(self, path: Path) -> None:
         raise NotImplementedError
 
+    def makedirs(self, path: Path) -> None:
+        raise NotImplementedError
+
 
 @dataclass
 class AnswerProc:
@@ -326,6 +346,9 @@ class RealAnswerRunner(AnswerRunner):
             shutil.rmtree(p)
         else:
             p.unlink()
+
+    def makedirs(self, path):
+        Path(path).mkdir(parents=True, exist_ok=True)
 
 
 FAILURE_PATTERNS = [
@@ -396,6 +419,14 @@ def prepare_iso_defensively(
     outcome = PrepareIsoOutcome(ok=False, output_path=None)
 
     try:
+        # prepare-iso does not create --tmp itself - confirmed by a real
+        # run: exit code 0 (decision record 02's finding, again) but
+        # stderr "Error: No such file or directory (os error 2)" when
+        # tmp_dir didn't already exist, caught only by an actual
+        # end-to-end run (see the real-install-ISO decision record) -
+        # every FakeAnswerRunner-based test had passed regardless, since
+        # the fake never modeled missing-directory failure at all.
+        runner.makedirs(tmp_dir)
         proc = runner.run(argv, timeout=timeout)
         outcome.exit_code = proc.returncode
         outcome.stdout = proc.stdout
