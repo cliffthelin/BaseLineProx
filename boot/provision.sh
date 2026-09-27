@@ -184,12 +184,19 @@ cp "$SRC/baseline/lib/update_pipeline.py" /opt/baseline/lib/update_pipeline.py
 cp "$SRC/baseline/lib/backup_restore.py" /opt/baseline/lib/backup_restore.py
 cp "$SRC/baseline/lib/config_crypto.py" /opt/baseline/lib/config_crypto.py
 cp "$SRC/baseline/lib/control_panel_web.py" /opt/baseline/lib/control_panel_web.py
+# Remasters the already-verified Proxmox auto-install ISO to also
+# carry this repo's own boot/provision.sh + baseline/ tree, so a
+# future fresh install needs no separate git-clone/copy step - see
+# iso_builder.py's module docstring. A one-shot build command, not a
+# service - no systemd unit.
+cp "$SRC/baseline/lib/iso_builder.py" /opt/baseline/lib/iso_builder.py
+cp "$SRC/baseline/bin/baseline-build-iso" /opt/baseline/bin/baseline-build-iso
 cp "$SRC/baseline/bin/baseline-diff" /opt/baseline/bin/baseline-diff
 cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -250,10 +257,10 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/physical_device_safety.py /opt/baseline/lib/drive_installer.py \
          /opt/baseline/lib/config_diff.py /opt/baseline/lib/update_pipeline.py \
          /opt/baseline/lib/backup_restore.py /opt/baseline/lib/config_crypto.py \
-         /opt/baseline/lib/control_panel_web.py \
+         /opt/baseline/lib/control_panel_web.py /opt/baseline/lib/iso_builder.py \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
-         /opt/baseline/bin/baseline-control-panel; do
+         /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso; do
     [ -s "$f" ] || verify_fail "missing or empty staged file: $f"
 done
 command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
@@ -270,7 +277,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-persist-bind-mounts \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
-         /opt/baseline/bin/baseline-control-panel; do
+         /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
