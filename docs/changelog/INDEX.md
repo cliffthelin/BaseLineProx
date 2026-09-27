@@ -26,8 +26,8 @@ overwritten in place - it's a pointer, not a record.
 | [network](network/001.md) | network/001.md | 6 | 2026-09-20 | ConnectionModal: bridged identity, alias, enable/disable, lifeline position |
 | [ui](ui/001.md) | ui/001.md | 11 | 2026-09-20 | Down arrow as sole navigation unreliable on bare console (Shift+Tab fallback) |
 | [chat](chat/001.md) | chat/001.md | 11 | 2026-09-26 | OpenCode as the second HarnessAdapter, normalized through real ACP |
-| [proxmox](proxmox/001.md) | proxmox/001.md | 9 | 2026-09-27 | real install-ISO tooling: QEMU end-to-end proof, real answer-server proof, two bugs fixed, hardware-pinning made optional |
-| [containers](containers/001.md) | containers/001.md | 2 | 2026-09-27 | real QEMU smoke test found and fixed two real bugs; one important upstream-behavior finding disclosed |
+| [proxmox](proxmox/001.md) | proxmox/001.md | 10 | 2026-09-27 | vm_scripts.py unified with pct_provision.py/vm_provision.py via a VMID-adoption bridge; three more Helper-Scripts run under real QEMU |
+| [containers](containers/001.md) | containers/001.md | 3 | 2026-09-27 | quadlet.py rootless mode implemented for real; default corrected |
 
 Categories are named after the part of the system a change touches, not
 the UI tab (e.g. a fix to the Hardware *tab's* focus handling is logged
