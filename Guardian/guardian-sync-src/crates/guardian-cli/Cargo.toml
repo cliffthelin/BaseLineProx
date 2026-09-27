@@ -1,0 +1,19 @@
+[package]
+name = "guardian-cli"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "guardian"
+path = "src/main.rs"
+
+[dependencies]
+async-io = "2.6.0"
+guardian-client = { path = "../guardian-client" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

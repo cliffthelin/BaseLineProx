@@ -1,0 +1,10 @@
+[
+  {"id":"EVT-1842","issueId":"service","issue":"Backup service keeps restarting","observedAt":"2026-09-13T06:41:00Z","type":"Actively Happening"},
+  {"id":"EVT-1839","issueId":"app","issue":"Notes closes just after opening","observedAt":"2026-09-13T06:14:00Z","type":"Actively Happening"},
+  {"id":"EVT-1811","issueId":"wifi","issue":"Wireless connection briefly pauses","observedAt":"2026-09-13T05:03:00Z","type":"Unresolved · Session"},
+  {"id":"EVT-1788","issueId":"keyboard","issue":"USB keyboard connection is unstable","observedAt":"2026-09-12T22:31:00Z","type":"Unresolved · Week"},
+  {"id":"EVT-1744","issueId":"browser","issue":"Browser freezes after video calls","observedAt":"2026-09-11T20:20:00Z","type":"User Reported · Unresolved"},
+  {"id":"EVT-1602","issueId":"audio","issue":"Headphones no longer lose audio","observedAt":"2026-09-05T16:10:00Z","type":"Resolved · Verified"},
+  {"id":"EVT-1498","issueId":"wallpaper","issue":"Wallpaper source is unavailable","observedAt":"2026-08-29T13:43:00Z","type":"Snoozed · Session"},
+  {"id":"EVT-1410","issueId":"bluetooth","issue":"Bluetooth is intentionally disabled","observedAt":"2026-08-18T13:42:00Z","type":"Snoozed · Permanent"}
+]

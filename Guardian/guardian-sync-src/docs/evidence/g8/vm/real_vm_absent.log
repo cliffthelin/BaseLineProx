@@ -1,0 +1,48 @@
+candidate_head=196523fcf7a1df14818236a371f2b85eafebdd47
+4b7214808006a9829e26064fbaaf60615471608857dd5e77d8d3874746065b17  -
+
+=== PSI (P1-PSI-001..005) — production crate::psi reuse, kernel files ===
+  path(cpu) = /proc/pressure/cpu
+  read(cpu) = Ok(Present(PsiResource { some: PsiLine { avg10: 50.44, avg60: 20.6, avg300: 5.62, total: 103759762 }, full: Some(PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 0 }) }))
+  path(memory) = /proc/pressure/memory
+  read(memory) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 213019 }, full: Some(PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 159962 }) }))
+  path(io) = /proc/pressure/io
+  read(io) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.37, avg60: 0.15, avg300: 0.18, total: 23220721 }, full: Some(PsiLine { avg10: 0.37, avg60: 0.14, avg300: 0.09, total: 19346411 }) }))
+
+=== systemd (P1-SYS-001..003) ===
+  probe() = true
+  unit_state(systemd-logind.service) = Ok(UnitState { load_state: "loaded", active_state: "active", sub_state: "running", description: "User Login Management" })
+  unit_state(cron.service) = Ok(UnitState { load_state: "loaded", active_state: "active", sub_state: "running", description: "Regular background program processing daemon" })
+  unit_state(nonexistent) = Err(UnitNotFound("guardian-g8-nonexistent-unit-evidence.service"))
+
+=== logind (P1-LGI-001..002) ===
+  probe() = true
+  list_inhibitors() = Ok([])
+
+=== UPower (P1-UPW-001..002) ===
+  probe() = false
+  display_device() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files"))
+  battery_presence() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files"))
+
+=== AccountsService (P1-ACC-001..003) ===
+  probe() = false
+  list_cached_users() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.Accounts was not provided by any .service files"))
+  scan_installed_sessions() = []
+  validate_session_id("nonexistent") = Err(InvalidSession("nonexistent-session-id"))
+
+=== UDisks2 (P1-UDS-001..004) ===
+  probe() = false
+  topology() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UDisks2 was not provided by any .service files"))
+
+=== Capability Registry (handoff §11) ===
+  systemd.unit.state <- guardian.g8.systemd availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  psi.pressure.cpu <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  psi.pressure.memory <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  psi.pressure.io <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  logind.inhibitors <- guardian.g8.logind availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  upower.display-device <- guardian.g8.upower availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  upower.battery-presence <- guardian.g8.upower availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  accounts.user.cache <- guardian.g8.accounts availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  accounts.session.enumeration <- guardian.g8.accounts availability=Degraded health=Warning read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  storage.drive.topology <- guardian.g8.udisks availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  storage.drive.poweroff-preconditions <- guardian.g8.udisks availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus

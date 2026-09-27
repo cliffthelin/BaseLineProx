@@ -1,0 +1,53 @@
+=== scenario metadata ===
+candidate_head=196523fcf7a1df14818236a371f2b85eafebdd47
+source_digest_sha256=fa4d24ae528b46684f343b06ade34244d3495a8fb820fbc721672ddfa0b60064
+provider=logind
+scenario=expected
+expected=production adapter and registry preserve present/absent/malformed/stale taxonomy
+
+=== PSI (P1-PSI-001..005) — production crate::psi reuse, kernel files ===
+  path(cpu) = /proc/pressure/cpu
+  read(cpu) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.0, avg60: 0.02, avg300: 0.06, total: 11951648 }, full: Some(PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 0 }) }))
+  path(memory) = /proc/pressure/memory
+  read(memory) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 154160 }, full: Some(PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 107915 }) }))
+  path(io) = /proc/pressure/io
+  read(io) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.0, avg60: 0.02, avg300: 0.06, total: 19348520 }, full: Some(PsiLine { avg10: 0.0, avg60: 0.01, avg300: 0.04, total: 17101370 }) }))
+
+=== systemd (P1-SYS-001..003) ===
+  probe() = false
+  unit_state(systemd-logind.service) = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.systemd1 was not provided by any .service files"))
+  unit_state(cron.service) = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.systemd1 was not provided by any .service files"))
+  unit_state(nonexistent) = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.systemd1 was not provided by any .service files"))
+
+=== logind (P1-LGI-001..002) ===
+  probe() = true
+  list_inhibitors() = Ok([Inhibitor { what: "shutdown", who: "g8-dbusmock", why: "evidence run", mode: "block", uid: 1000, pid: 123456 }])
+
+=== UPower (P1-UPW-001..002) ===
+  probe() = false
+  display_device() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files"))
+  battery_presence() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files"))
+
+=== AccountsService (P1-ACC-001..003) ===
+  probe() = false
+  list_cached_users() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.Accounts was not provided by any .service files"))
+  scan_installed_sessions() = []
+  validate_session_id("nonexistent") = Err(InvalidSession("nonexistent-session-id"))
+
+=== UDisks2 (P1-UDS-001..004) ===
+  probe() = false
+  topology() = Err(ProviderUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UDisks2 was not provided by any .service files"))
+
+=== Capability Registry (handoff §11) ===
+  systemd.unit.state <- guardian.g8.systemd availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  psi.pressure.cpu <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  psi.pressure.memory <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  psi.pressure.io <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  logind.inhibitors <- guardian.g8.logind availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  upower.display-device <- guardian.g8.upower availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  upower.battery-presence <- guardian.g8.upower availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  accounts.user.cache <- guardian.g8.accounts availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  accounts.session.enumeration <- guardian.g8.accounts availability=Degraded health=Warning read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  storage.drive.topology <- guardian.g8.udisks availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  storage.drive.poweroff-preconditions <- guardian.g8.udisks availability=Unavailable health=Error read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+

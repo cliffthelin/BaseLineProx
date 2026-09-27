@@ -1,0 +1,11 @@
+schema_version=1
+transaction_id=40008000-0000-0000-18d3-2a530e14b82a
+idempotency_key=40008000-0000-0000-18d3-2a530e14b82a
+capability_id=cups-restart
+provider_id=guardian.wave1.systemd-restart
+state=rolled_back
+apply_outcome=not_recorded
+dispatch_marker=true
+rollback_result=confirmed_restored
+cancellation_requested=false
+deadline_expired=false

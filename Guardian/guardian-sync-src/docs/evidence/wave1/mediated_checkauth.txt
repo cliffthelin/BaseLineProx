@@ -1,0 +1,411 @@
+Monitoring bus message stream.
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=78  Timestamp="Sat 2026-09-05 03:36:43.246651 UTC"
+  Sender=:1.76  Destination=org.freedesktop.PolicyKit1  Path=/org/freedesktop/PolicyKit1/Authority  Interface=org.freedesktop.PolicyKit1.Authority  Member=CheckAuthorization
+  UniqueName=:1.76
+  MESSAGE "(sa{sv})sa{ss}us" {
+          STRUCT "sa{sv}" {
+                  STRING "system-bus-name";
+                  ARRAY "{sv}" {
+                          DICT_ENTRY "sv" {
+                                  STRING "name";
+                                  VARIANT "s" {
+                                          STRING ":1.103";
+                                  };
+                          };
+                  };
+          };
+          STRING "org.freedesktop.systemd1.manage-units";
+          ARRAY "{ss}" {
+                  DICT_ENTRY "ss" {
+                          STRING "unit";
+                          STRING "cups.service";
+                  };
+                  DICT_ENTRY "ss" {
+                          STRING "polkit.gettext_domain";
+                          STRING "systemd";
+                  };
+                  DICT_ENTRY "ss" {
+                          STRING "verb";
+                          STRING "restart";
+                  };
+                  DICT_ENTRY "ss" {
+                          STRING "polkit.message";
+                          STRING "Authentication is required to restart 'cups.service'.";
+                  };
+          };
+          UINT32 0;
+          STRING "";
+  };
+
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=361  Timestamp="Sat 2026-09-05 03:36:43.246871 UTC"
+  Sender=:1.6  Destination=org.freedesktop.DBus  Path=/org/freedesktop/DBus  Interface=org.freedesktop.DBus  Member=GetConnectionCredentials
+  UniqueName=:1.6
+  MESSAGE "s" {
+          STRING ":1.76";
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=420  ReplyCookie=361  Timestamp="Sat 2026-09-05 03:36:43.246969 UTC"
+  Sender=org.freedesktop.DBus  Destination=:1.6
+  MESSAGE "a{sv}" {
+          ARRAY "{sv}" {
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessID";
+                          VARIANT "u" {
+                                  UINT32 87577;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixUserID";
+                          VARIANT "u" {
+                                  UINT32 0;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixGroupIDs";
+                          VARIANT "au" {
+                                  ARRAY "u" {
+                                          UINT32 0;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "LinuxSecurityLabel";
+                          VARIANT "ay" {
+                                  ARRAY "y" {
+                                          BYTE 117;
+                                          BYTE 110;
+                                          BYTE 99;
+                                          BYTE 111;
+                                          BYTE 110;
+                                          BYTE 102;
+                                          BYTE 105;
+                                          BYTE 110;
+                                          BYTE 101;
+                                          BYTE 100;
+                                          BYTE 0;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessFD";
+                          VARIANT "h" {
+                                  UNIX_FD 5;
+                          };
+                  };
+          };
+  };
+
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=362  Timestamp="Sat 2026-09-05 03:36:43.247114 UTC"
+  Sender=:1.6  Destination=org.freedesktop.DBus  Path=/org/freedesktop/DBus  Interface=org.freedesktop.DBus  Member=GetConnectionCredentials
+  UniqueName=:1.6
+  MESSAGE "s" {
+          STRING ":1.103";
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=421  ReplyCookie=362  Timestamp="Sat 2026-09-05 03:36:43.247133 UTC"
+  Sender=org.freedesktop.DBus  Destination=:1.6
+  MESSAGE "a{sv}" {
+          ARRAY "{sv}" {
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessID";
+                          VARIANT "u" {
+                                  UINT32 88617;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixUserID";
+                          VARIANT "u" {
+                                  UINT32 1003;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixGroupIDs";
+                          VARIANT "au" {
+                                  ARRAY "u" {
+                                          UINT32 1004;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "LinuxSecurityLabel";
+                          VARIANT "ay" {
+                                  ARRAY "y" {
+                                          BYTE 117;
+                                          BYTE 110;
+                                          BYTE 99;
+                                          BYTE 111;
+                                          BYTE 110;
+                                          BYTE 102;
+                                          BYTE 105;
+                                          BYTE 110;
+                                          BYTE 101;
+                                          BYTE 100;
+                                          BYTE 0;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessFD";
+                          VARIANT "h" {
+                                  UNIX_FD 5;
+                          };
+                  };
+          };
+  };
+
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=363  Timestamp="Sat 2026-09-05 03:36:43.247297 UTC"
+  Sender=:1.6  Destination=org.freedesktop.DBus  Path=/org/freedesktop/DBus  Interface=org.freedesktop.DBus  Member=GetConnectionCredentials
+  UniqueName=:1.6
+  MESSAGE "s" {
+          STRING ":1.103";
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=422  ReplyCookie=363  Timestamp="Sat 2026-09-05 03:36:43.247306 UTC"
+  Sender=org.freedesktop.DBus  Destination=:1.6
+  MESSAGE "a{sv}" {
+          ARRAY "{sv}" {
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessID";
+                          VARIANT "u" {
+                                  UINT32 88617;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixUserID";
+                          VARIANT "u" {
+                                  UINT32 1003;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixGroupIDs";
+                          VARIANT "au" {
+                                  ARRAY "u" {
+                                          UINT32 1004;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "LinuxSecurityLabel";
+                          VARIANT "ay" {
+                                  ARRAY "y" {
+                                          BYTE 117;
+                                          BYTE 110;
+                                          BYTE 99;
+                                          BYTE 111;
+                                          BYTE 110;
+                                          BYTE 102;
+                                          BYTE 105;
+                                          BYTE 110;
+                                          BYTE 101;
+                                          BYTE 100;
+                                          BYTE 0;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessFD";
+                          VARIANT "h" {
+                                  UNIX_FD 5;
+                          };
+                  };
+          };
+  };
+
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=364  Timestamp="Sat 2026-09-05 03:36:43.247438 UTC"
+  Sender=:1.6  Destination=org.freedesktop.DBus  Path=/org/freedesktop/DBus  Interface=org.freedesktop.DBus  Member=GetConnectionCredentials
+  UniqueName=:1.6
+  MESSAGE "s" {
+          STRING ":1.103";
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=423  ReplyCookie=364  Timestamp="Sat 2026-09-05 03:36:43.247445 UTC"
+  Sender=org.freedesktop.DBus  Destination=:1.6
+  MESSAGE "a{sv}" {
+          ARRAY "{sv}" {
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessID";
+                          VARIANT "u" {
+                                  UINT32 88617;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixUserID";
+                          VARIANT "u" {
+                                  UINT32 1003;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixGroupIDs";
+                          VARIANT "au" {
+                                  ARRAY "u" {
+                                          UINT32 1004;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "LinuxSecurityLabel";
+                          VARIANT "ay" {
+                                  ARRAY "y" {
+                                          BYTE 117;
+                                          BYTE 110;
+                                          BYTE 99;
+                                          BYTE 111;
+                                          BYTE 110;
+                                          BYTE 102;
+                                          BYTE 105;
+                                          BYTE 110;
+                                          BYTE 101;
+                                          BYTE 100;
+                                          BYTE 0;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessFD";
+                          VARIANT "h" {
+                                  UNIX_FD 5;
+                          };
+                  };
+          };
+  };
+
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=365  Timestamp="Sat 2026-09-05 03:36:43.247849 UTC"
+  Sender=:1.6  Destination=org.freedesktop.DBus  Path=/org/freedesktop/DBus  Interface=org.freedesktop.DBus  Member=GetConnectionCredentials
+  UniqueName=:1.6
+  MESSAGE "s" {
+          STRING ":1.103";
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=424  ReplyCookie=365  Timestamp="Sat 2026-09-05 03:36:43.247859 UTC"
+  Sender=org.freedesktop.DBus  Destination=:1.6
+  MESSAGE "a{sv}" {
+          ARRAY "{sv}" {
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessID";
+                          VARIANT "u" {
+                                  UINT32 88617;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixUserID";
+                          VARIANT "u" {
+                                  UINT32 1003;
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "UnixGroupIDs";
+                          VARIANT "au" {
+                                  ARRAY "u" {
+                                          UINT32 1004;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "LinuxSecurityLabel";
+                          VARIANT "ay" {
+                                  ARRAY "y" {
+                                          BYTE 117;
+                                          BYTE 110;
+                                          BYTE 99;
+                                          BYTE 111;
+                                          BYTE 110;
+                                          BYTE 102;
+                                          BYTE 105;
+                                          BYTE 110;
+                                          BYTE 101;
+                                          BYTE 100;
+                                          BYTE 0;
+                                  };
+                          };
+                  };
+                  DICT_ENTRY "sv" {
+                          STRING "ProcessFD";
+                          VARIANT "h" {
+                                  UNIX_FD 5;
+                          };
+                  };
+          };
+  };
+
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=366  Timestamp="Sat 2026-09-05 03:36:43.248141 UTC"
+  Sender=:1.6  Destination=org.freedesktop.systemd1  Path=/org/freedesktop/systemd1  Interface=org.freedesktop.systemd1.Manager  Member=GetUnitByPIDFD
+  UniqueName=:1.6
+  MESSAGE "h" {
+          UNIX_FD 5;
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=246  ReplyCookie=366  Timestamp="Sat 2026-09-05 03:36:43.248215 UTC"
+  Sender=:1.3  Destination=:1.6
+  UniqueName=:1.3
+  MESSAGE "osay" {
+          OBJECT_PATH "/org/freedesktop/systemd1/unit/ssh_2eservice";
+          STRING "ssh.service";
+          ARRAY "y" {
+                  BYTE 88;
+                  BYTE 195;
+                  BYTE 91;
+                  BYTE 227;
+                  BYTE 15;
+                  BYTE 157;
+                  BYTE 64;
+                  BYTE 59;
+                  BYTE 163;
+                  BYTE 131;
+                  BYTE 198;
+                  BYTE 101;
+                  BYTE 37;
+                  BYTE 143;
+                  BYTE 215;
+                  BYTE 200;
+          };
+  };
+
+‣ Type=method_call  Endian=l  Flags=0  Version=1 Cookie=367  Timestamp="Sat 2026-09-05 03:36:43.248320 UTC"
+  Sender=:1.6  Destination=org.freedesktop.systemd1  Path=/org/freedesktop/systemd1/unit/ssh_2eservice  Interface=org.freedesktop.DBus.Properties  Member=Get
+  UniqueName=:1.6
+  MESSAGE "ss" {
+          STRING "org.freedesktop.systemd1.Service";
+          STRING "NoNewPrivileges";
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=247  ReplyCookie=367  Timestamp="Sat 2026-09-05 03:36:43.248364 UTC"
+  Sender=:1.3  Destination=:1.6
+  UniqueName=:1.3
+  MESSAGE "v" {
+          VARIANT "b" {
+                  BOOLEAN false;
+          };
+  };
+
+‣ Type=method_return  Endian=l  Flags=1  Version=1 Cookie=368  ReplyCookie=78  Timestamp="Sat 2026-09-05 03:36:43.248579 UTC"
+  Sender=:1.6  Destination=:1.76
+  UniqueName=:1.6
+  MESSAGE "(bba{ss})" {
+          STRUCT "bba{ss}" {
+                  BOOLEAN true;
+                  BOOLEAN false;
+                  ARRAY "{ss}" {
+                          DICT_ENTRY "ss" {
+                                  STRING "polkit.message";
+                                  STRING "Authentication is required to restart 'cups.service'.";
+                          };
+                          DICT_ENTRY "ss" {
+                                  STRING "polkit.gettext_domain";
+                                  STRING "systemd";
+                          };
+                          DICT_ENTRY "ss" {
+                                  STRING "unit";
+                                  STRING "cups.service";
+                          };
+                          DICT_ENTRY "ss" {
+                                  STRING "polkit.result";
+                                  STRING "yes";
+                          };
+                          DICT_ENTRY "ss" {
+                                  STRING "verb";
+                                  STRING "restart";
+                          };
+                  };
+          };
+  };
+

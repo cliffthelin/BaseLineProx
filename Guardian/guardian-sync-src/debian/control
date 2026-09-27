@@ -1,0 +1,31 @@
+Source: guardian
+Section: admin
+Priority: optional
+Maintainer: Cliff <cliffthelin@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc (>= 1.85),
+               pkg-config,
+               libgtk-4-dev,
+               libadwaita-1-dev,
+               dbus
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/cliffthelin/guardian-plane
+
+Package: guardian
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         dbus,
+         polkitd | policykit-1,
+         adduser
+Description: Guardian Plane system control/recovery daemon and clients
+ Guardian Plane is a privilege-separated system control/recovery plane
+ for Ubuntu. This package installs guardian-daemon (unprivileged core
+ and monitoring process), guardian-helper (a narrow, polkit-gated
+ privileged mutation process), and four read-only D-Bus clients:
+ guardian (CLI), guardian-tui, guardian-gui, and guardian-indicator
+ (a session tray indicator, autostarted via XDG autostart). No client
+ ever runs as root or calls sudo; all privileged mutation is confined
+ to guardian-helper behind polkit.

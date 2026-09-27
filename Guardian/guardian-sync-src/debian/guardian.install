@@ -1,0 +1,4 @@
+debian/io.github.cliffthelin.guardian.g7.policy usr/share/polkit-1/actions
+debian/io.github.cliffthelin.Guardian1.conf usr/share/dbus-1/system.d
+debian/io.github.cliffthelin.GuardianHelper1.conf usr/share/dbus-1/system.d
+debian/guardian-indicator.desktop usr/share/guardian/xdg-autostart

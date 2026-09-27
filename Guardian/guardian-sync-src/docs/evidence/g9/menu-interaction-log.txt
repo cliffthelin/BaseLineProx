@@ -1,0 +1,28 @@
+G9 real DBusMenu menu-open / menu-action evidence (guardian-indicator)
+========================================================================
+
+Real StatusNotifierItem name: org.kde.StatusNotifierItem-10288-2
+(PID 10288, real production binary, autostarted via the real
+/etc/xdg/autostart/guardian-indicator.desktop entry under a real GDM
+autologin GNOME session.)
+
+1. Menu property: dbus-send Get on org.kde.StatusNotifierItem/Menu
+   returned object path /MenuBar -- the real advertised DBusMenu root,
+   exactly what a real panel reads to know where to query the menu.
+
+2. "menu opens" (real protocol call, the same one any real panel issues
+   on click): com.canonical.dbusmenu.GetLayout(0, -1, []) on /MenuBar
+   returned two real items:
+     id 1: disabled, label "Guardian - Degraded" (live daemon-derived
+           title, matching the real capability state at query time)
+     id 2: enabled, icon-name "application-exit", label "Quit"
+
+3. "menu actions invoke the client-side handler" (real protocol call):
+   com.canonical.dbusmenu.Event(2, "clicked", "", 0) on /MenuBar --
+   the exact call a real panel sends when a user clicks a menu item.
+   Result: NoReply / "Message recipient disconnected from message bus
+   without replying" -- the process called std::process::exit(0)
+   inside the Quit handler mid-call, which is the expected real
+   behavior, not an error. Confirmed via `ps -C guardian-indicator`
+   immediately after: zero rows -- the real process was genuinely
+   terminated by this real menu click, not merely a demo string.

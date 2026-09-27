@@ -1,0 +1,75 @@
+node /io/github/cliffthelin/Guardian1 {
+  interface io.github.cliffthelin.Guardian1 {
+    methods:
+      ContractVersion(out s arg_0);
+      ServiceState(out s arg_0);
+    signals:
+    properties:
+  };
+  interface org.freedesktop.DBus.Introspectable {
+    methods:
+      Introspect(out s arg_0);
+    signals:
+    properties:
+  };
+  interface org.freedesktop.DBus.Peer {
+    methods:
+      Ping();
+      GetMachineId(out s arg_0);
+    signals:
+    properties:
+  };
+  interface org.freedesktop.DBus.Properties {
+    methods:
+      Get(in  s interface_name,
+          in  s property_name,
+          out v arg_2);
+      Set(in  s interface_name,
+          in  s property_name,
+          in  v value);
+      GetAll(in  s interface_name,
+             out a{sv} arg_1);
+    signals:
+      PropertiesChanged(s interface_name,
+                        a{sv} changed_properties,
+                        as invalidated_properties);
+    properties:
+  };
+  node /io/github/cliffthelin/Guardian1/Transactions {
+    interface io.github.cliffthelin.Guardian1.Transactions1 {
+      methods:
+        AttemptProviderDelegatedWrite(out t arg_0);
+      signals:
+      properties:
+    };
+    interface org.freedesktop.DBus.Introspectable {
+      methods:
+        Introspect(out s arg_0);
+      signals:
+      properties:
+    };
+    interface org.freedesktop.DBus.Peer {
+      methods:
+        Ping();
+        GetMachineId(out s arg_0);
+      signals:
+      properties:
+    };
+    interface org.freedesktop.DBus.Properties {
+      methods:
+        Get(in  s interface_name,
+            in  s property_name,
+            out v arg_2);
+        Set(in  s interface_name,
+            in  s property_name,
+            in  v value);
+        GetAll(in  s interface_name,
+               out a{sv} arg_1);
+      signals:
+        PropertiesChanged(s interface_name,
+                          a{sv} changed_properties,
+                          as invalidated_properties);
+      properties:
+    };
+  };
+};

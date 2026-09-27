@@ -1,0 +1,139 @@
+Sep 02 23:59:22 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 02 23:59:22 guardian-g9 guardian-helper[20469]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.37
+Sep 03 00:08:05 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 00:08:05 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 00:08:05 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:11:24 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:11:24 guardian-g9 guardian-helper[35621]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.154
+Sep 03 00:11:32 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 00:11:32 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 00:11:32 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:21:37 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:21:37 guardian-g9 guardian-helper[60939]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.247
+Sep 03 00:28:38 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 00:28:38 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 00:28:38 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+-- Boot c784a137ba564490978534ee28cd6299 --
+Sep 03 00:29:05 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:29:05 guardian-g9 guardian-helper[7481]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.87
+Sep 03 00:32:16 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 00:32:16 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 00:32:16 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:32:35 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:32:36 guardian-g9 guardian-helper[9803]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.100
+Sep 03 00:32:42 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 00:32:42 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 00:32:42 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+-- Boot d6b2e2c6c60d48c6bb25edf9a5e325b4 --
+Sep 03 00:32:57 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 00:32:57 guardian-g9 guardian-helper[1355]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.20
+Sep 03 07:54:15 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 07:54:15 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 07:54:15 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 07:54:15 guardian-g9 systemd[1]: guardian-helper.service: Consumed 1.626s CPU time over 7h 21min 18.196s wall clock time, 4.9M memory peak.
+-- Boot 9b207ee8dfb048608740e11c38270a19 --
+Sep 03 07:54:30 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 07:54:30 guardian-g9 guardian-helper[1357]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.21
+Sep 03 18:42:05 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 18:42:05 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 18:42:05 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 18:42:05 guardian-g9 systemd[1]: guardian-helper.service: Consumed 2.168s CPU time over 10h 47min 34.893s wall clock time, 5.1M memory peak.
+Sep 03 18:42:35 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 18:42:35 guardian-g9 guardian-helper[12826]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.2716
+Sep 03 18:50:26 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 18:50:26 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 18:50:26 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 19:03:25 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 19:03:25 guardian-g9 guardian-helper[26085]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.2790
+Sep 03 19:11:12 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 19:11:12 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 19:11:12 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 19:11:57 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 19:11:58 guardian-g9 guardian-helper[29355]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.2837
+Sep 03 20:05:20 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 20:05:20 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 20:05:20 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 20:05:42 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 20:05:42 guardian-g9 guardian-helper[36229]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.3094
+Sep 03 20:39:16 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 20:39:16 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 20:39:16 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 20:39:16 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 20:39:16 guardian-g9 guardian-helper[37991]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.3237
+Sep 03 20:43:38 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 03 20:43:38 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 03 20:43:38 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 20:43:58 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 03 20:43:58 guardian-g9 guardian-helper[43020]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.3274
+Sep 04 06:14:47 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 06:14:47 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 06:14:47 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 06:14:47 guardian-g9 systemd[1]: guardian-helper.service: Consumed 1.945s CPU time over 9h 30min 48.867s wall clock time, 2.8M memory peak.
+Sep 04 06:14:47 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 06:14:47 guardian-g9 guardian-helper[62132]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.5619
+Sep 04 21:07:54 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:07:54 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:07:54 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:07:54 guardian-g9 systemd[1]: guardian-helper.service: Consumed 3.138s CPU time over 14h 53min 6.975s wall clock time, 2.9M memory peak.
+Sep 04 21:07:54 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:07:54 guardian-g9 guardian-helper[78925]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.9259
+Sep 04 21:16:30 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:16:30 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:16:30 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:16:30 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:16:30 guardian-g9 guardian-helper[80574]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.9300
+Sep 04 21:18:58 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:18:58 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:18:58 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:18:58 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:18:58 guardian-g9 guardian-helper[81057]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.9315
+Sep 04 21:20:56 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:20:56 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:20:56 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:20:56 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:20:56 guardian-g9 guardian-helper[82153]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.9328
+Sep 04 21:21:15 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:21:15 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:21:15 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:21:15 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:21:15 guardian-g9 guardian-helper[82777]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.9331
+Sep 04 21:24:04 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:24:04 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:24:04 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:24:04 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:24:04 guardian-g9 guardian-helper[83384]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.9348
+Sep 04 21:31:21 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:31:21 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:31:21 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:31:21 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:31:21 guardian-g9 guardian-helper[85398]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.14
+Sep 04 21:35:26 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:35:26 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:35:26 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:35:26 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:35:26 guardian-g9 guardian-helper[87440]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.75
+Sep 04 21:35:32 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:35:32 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:35:32 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:35:32 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:35:32 guardian-g9 guardian-helper[87577]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.76
+Sep 04 21:37:41 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:37:41 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:37:41 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:37:42 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:37:42 guardian-g9 guardian-helper[89370]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.119
+Sep 04 21:37:53 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:37:53 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:37:53 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:37:53 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:37:53 guardian-g9 guardian-helper[89651]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.125
+Sep 04 21:38:04 guardian-g9 systemd[1]: guardian-helper.service: Main process exited, code=killed, status=9/KILL
+Sep 04 21:38:04 guardian-g9 systemd[1]: guardian-helper.service: Failed with result 'signal'.
+Sep 04 21:38:41 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:38:49 guardian-g9 guardian-helper[90408]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d3-11a31b23c0e8 resolved -> Committed
+Sep 04 21:38:49 guardian-g9 guardian-helper[90408]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.139
+Sep 04 21:39:20 guardian-g9 systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 04 21:39:20 guardian-g9 systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 04 21:39:20 guardian-g9 systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:39:20 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:39:20 guardian-g9 guardian-helper[90837]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.148

@@ -1,0 +1,8 @@
+DEBUG      libindicator-plugin       Looking at Module: libayatana-application.so
+DEBUG      libindicator-plugin       Loading Module: libayatana-application.so
+DEBUG      libindicator-plugin       Load indicator: libayatana-application.so
+WARNING    libindicator-plugin       Error opening directory "/usr/share/ayatana/indicators": No such file or directory
+DEBUG      Ayatana-Indicator-Application Connected to Application Indicator Service.
+DEBUG      Ayatana-Indicator-Application Request current apps
+DEBUG      Ayatana-Indicator-Application Building new application entry: org.kde.StatusNotifierItem-26447-1  with icon: computer at position 0
+DEBUG      libindicator-plugin       Entry added for io=libayatana-application.so

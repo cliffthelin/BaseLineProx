@@ -1,0 +1,53 @@
+[g1-layer2-server] serving io.github.cliffthelin.Guardian1.G1LayerTwoHarness at /io/github/cliffthelin/Guardian1/G1LayerTwoHarness, unique_name=:1.33
+[g1-layer2-server] resolved caller: unique_name=:1.34 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Authorized
+[g1-layer2-server] resolved caller: unique_name=:1.35 uid=Some(1002)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.36 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.37 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.38 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.44 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.55 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Authorized
+[g1-layer2-server] resolved caller: unique_name=:1.57 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.58 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.60 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.62 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+
+--- completion pass (2026-08-30, later same day), guardian-g1-vm3, fixed policy ---
+[g1-layer2-server] serving io.github.cliffthelin.Guardian1.G1LayerTwoHarness at /io/github/cliffthelin/Guardian1/G1LayerTwoHarness, unique_name=:1.87
+[g1-layer2-server] resolved caller: unique_name=:1.90 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Authorized
+[g1-layer2-server] resolved caller: unique_name=:1.95 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Unavailable(NoAuthenticationAgent)
+[g1-layer2-server] resolved caller: unique_name=:1.99 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Unavailable(InteractionRequiredButDisallowed)
+[g1-layer2-server] resolved caller: unique_name=:1.100 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Authorized
+[g1-layer2-server] resolved caller: unique_name=:1.101 uid=Some(1002)
+[g1-layer2-server] real polkit outcome: Denied
+[g1-layer2-server] resolved caller: unique_name=:1.102 uid=Some(1001)
+[g1-layer2-server] real polkit outcome: Denied
+
+--- hardening pass (2026-08-31), guardian-g1-hardening, ProviderUnavailable proof ---
+[g1-layer2-server] serving io.github.cliffthelin.Guardian1.G1LayerTwoHarness at /io/github/cliffthelin/Guardian1/G1LayerTwoHarness, unique_name=:1.28
+[g1-layer2-server] resolved caller: unique_name=:1.29 uid=Some(1001)
+[g1-layer2-server] real polkit result: Ok(Authorized)
+[g1-layer2-server] resolved caller: unique_name=:1.30 uid=Some(1002)
+[g1-layer2-server] real polkit result: Ok(Denied)
+[g1-layer2-server] resolved caller: unique_name=:1.31 uid=Some(1001)
+[g1-layer2-server] real polkit result: Ok(Denied)
+[g1-layer2-server] resolved caller: unique_name=:1.33 uid=Some(1001)
+[g1-layer2-server] real polkit result: Ok(Authorized)
+[g1-layer2-server] resolved caller: unique_name=:1.37 uid=Some(1001)
+[g1-layer2-server] real polkit result: Err(ProviderUnavailable("CheckAuthorization failed: org.freedesktop.systemd1.UnitMasked: Unit polkit.service is masked."))
+[g1-layer2-server] resolved caller: unique_name=:1.40 uid=Some(1001)
+[g1-layer2-server] real polkit result: Ok(Authorized)

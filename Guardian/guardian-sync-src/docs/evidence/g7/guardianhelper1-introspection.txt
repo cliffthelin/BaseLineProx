@@ -1,0 +1,39 @@
+node /io/github/cliffthelin/GuardianHelper1 {
+  interface io.github.cliffthelin.GuardianHelper1 {
+    methods:
+      GuardedWrite(in  b interactive,
+                   out t arg_1);
+      CallCount(out t arg_0);
+    signals:
+    properties:
+  };
+  interface org.freedesktop.DBus.Introspectable {
+    methods:
+      Introspect(out s arg_0);
+    signals:
+    properties:
+  };
+  interface org.freedesktop.DBus.Peer {
+    methods:
+      Ping();
+      GetMachineId(out s arg_0);
+    signals:
+    properties:
+  };
+  interface org.freedesktop.DBus.Properties {
+    methods:
+      Get(in  s interface_name,
+          in  s property_name,
+          out v arg_2);
+      Set(in  s interface_name,
+          in  s property_name,
+          in  v value);
+      GetAll(in  s interface_name,
+             out a{sv} arg_1);
+    signals:
+      PropertiesChanged(s interface_name,
+                        a{sv} changed_properties,
+                        as invalidated_properties);
+    properties:
+  };
+};

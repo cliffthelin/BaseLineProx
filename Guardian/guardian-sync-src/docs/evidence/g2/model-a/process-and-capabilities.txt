@@ -1,0 +1,11 @@
+PID=6841
+    PID USER     GROUP    CMD
+   6841 root     root     /usr/local/bin/g2-model-a-daemon
+--- capabilities ---
+Uid:	0	0	0	0
+Gid:	0	0	0	0
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	0000000000000000
+CapAmb:	0000000000000000

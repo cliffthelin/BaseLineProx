@@ -1,0 +1,18 @@
+candidate_head=196523fcf7a1df14818236a371f2b85eafebdd47
+source_digest=fa4d24ae528b46684f343b06ade34244d3495a8fb820fbc721672ddfa0b60064
+scenario=registry_provider_disappearance_reappearance
+Sep 02 02:27:41 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=7 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:28:11 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=8 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:28:17 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] capability registry tick: 6/11 capabilities available
+Sep 02 02:28:41 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=9 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:29:11 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=10 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:29:12 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] capability registry tick: 1/11 capabilities available
+Sep 02 02:27:41 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=7 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:28:11 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=8 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:28:17 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] capability registry tick: 6/11 capabilities available
+Sep 02 02:28:41 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=9 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:29:11 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=10 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:29:12 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] capability registry tick: 1/11 capabilities available
+Sep 02 02:29:41 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=11 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 02 02:30:01 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] capability registry tick: 6/11 capabilities available
+Sep 02 02:30:11 guardian-g8-repair guardian-daemon[11408]: [guardian-daemon] monitoring tick: recorder len=12 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)

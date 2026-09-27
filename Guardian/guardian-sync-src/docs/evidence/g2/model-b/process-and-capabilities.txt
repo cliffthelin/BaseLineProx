@@ -1,0 +1,20 @@
+=== guardian-model-b-core PID=7090 ===
+    PID USER     GROUP    CMD
+   7090 svc-mod+ svc-mod+ /usr/local/bin/g2-model-b-core
+Uid:	997	997	997	997
+Gid:	982	982	982	982
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	0000000000000000
+CapAmb:	0000000000000000
+=== guardian-model-b-helper PID=7304 ===
+    PID USER     GROUP    CMD
+   7304 root     root     /usr/local/bin/g2-model-b-helper
+Uid:	0	0	0	0
+Gid:	0	0	0	0
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	0000000000000000
+CapAmb:	0000000000000000

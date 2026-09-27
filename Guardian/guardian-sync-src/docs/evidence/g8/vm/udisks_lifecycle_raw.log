@@ -1,0 +1,6 @@
+phase=initial stable_id=Linux-scsi_debug-14000 nodes=["/dev/sdb"]
+phase=removed events=[Removed { drive_id: "Linux-scsi_debug-14000" }] stale_result=Err(StaleOrRemovedIdentity)
+
+thread 'main' (31315) panicked at crates/guardian-core/examples/g8_udisks_lifecycle_evidence.rs:21:10:
+scsi_debug drive visible through UDisks
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

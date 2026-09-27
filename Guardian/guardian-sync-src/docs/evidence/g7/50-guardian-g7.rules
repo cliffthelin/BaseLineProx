@@ -1,0 +1,5 @@
+polkit.addRule(function(action, subject) {
+    if (action.id == "io.github.cliffthelin.guardian.g7.bounded-write" && subject.user == "guardiang7caller") {
+        return polkit.Result.YES;
+    }
+});

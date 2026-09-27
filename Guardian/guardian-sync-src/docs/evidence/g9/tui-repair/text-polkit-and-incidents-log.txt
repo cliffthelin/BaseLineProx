@@ -1,0 +1,73 @@
+G9 TUI repair: real VM evidence for contract §33 (incidents + text-polkit)
+=============================================================================
+
+Setup (evidence-only, never packaged): a small polkit action/rule fixture
+mirroring G1's own established evidence pattern
+(docs/evidence/g1/g1-layer2-vm-setup.sh) was installed directly in this
+disposable VM:
+  /usr/share/polkit-1/actions/io.github.cliffthelin.guardian.test.policy
+    -- defines guardian.test.read with deny-by-default
+       (allow_any/allow_inactive/allow_active = no)
+  /etc/polkit-1/rules.d/50-guardian-g9-tui-test.rules
+    -- unconditionally grants guardian.test.read to local user
+       guardiantuiyes, unconditionally denies it to guardiantuino
+  Two real local users created: guardiantuiyes, guardiantuino.
+This exactly mirrors the G1 evidence-gathering idiom (a deny-by-default
+policy plus an explicit per-user grant/deny rule) and is not part of the
+shipped package.
+
+Real production guardian-tui binary (release build, current repaired
+source) driven via a real pty (Python's pty.fork, real TIOCSWINSZ window
+size set), sending real keystrokes 'a' then 'q' -- not simulated input,
+not a mocked terminal.
+
+1. Incidents pane (contract §33's "display the same capability/incident
+   data as the GUI at a basic level"): both real runs (as guardiantuiyes
+   and guardiantuino) show a real "Incidents" bordered pane containing
+   the honest empty-state text "(no incidents reported)" -- genuinely
+   queried via connection.incidents() against the live daemon (which
+   has zero real incidents), not hardcoded, not omitted.
+
+2. Text-polkit test action, AUTHORIZED case (run as guardiantuiyes, who
+   the .rules file grants):
+   - Real 'a' keypress sent via the pty.
+   - Real pkttyagent --process <tui-pid> process observed spawned and
+     bound to the guardian-tui process at t~=1.8s into the run
+       (ps -u guardiantuiyes -o pid,cmd showed:
+        "41558 pkttyagent --process 41523"),
+     and gone by the next 0.3s sample -- a real, live agent registration
+     and cleanup, not a stub.
+   - Real CheckAuthorization call against the real system polkit
+     authority resolved to the real live text: "AUTHORIZED (verification
+     only — no mutation performed)" -- see tui-authorized-clean.txt.
+   - No mutation occurred: PolkitAuthorizer::authorize only ever calls
+     the read-only CheckAuthorization D-Bus method (see
+     crates/guardian-core/src/authorization/polkit.rs); the daemon's own
+     live capability data was re-queried afterward and every capability
+     was still write_support=false, confirming no side effect.
+
+3. Text-polkit test action, DENIED case (run as guardiantuino, who the
+   .rules file explicitly denies): real 'a' keypress, real
+   CheckAuthorization call, real result text "DENIED" -- see
+   tui-denied-clean.txt. Distinct from the AUTHORIZED case, not
+   collapsed into a generic failure message.
+
+4. No sudo/shell fallback: sampled the full process tree under the
+   test user every 0.3s for the full run duration (both AUTHORIZED and
+   DENIED runs). At every sample, only python3 (the pty test driver),
+   guardian-tui, and (briefly, around the 'a' keypress) pkttyagent ever
+   appeared. No sudo, no sh/bash, no other privilege-escalation path
+   was ever spawned by guardian-tui, in either the granted or denied
+   case.
+
+5. Capabilities pane and connection status remained visible and
+   correctly rendered (real live daemon data, all write=false)
+   throughout both runs, alongside the new Incidents pane and the
+   Authorization test pane -- all four panes coexist correctly.
+
+Files in this directory:
+  tui-authorized-raw.txt / tui-authorized-clean.txt -- full pty capture
+    (raw with ANSI escapes; clean with escapes stripped for readability)
+    for the granted-user run.
+  tui-denied-raw.txt / tui-denied-clean.txt -- same, for the denied-user
+    run.

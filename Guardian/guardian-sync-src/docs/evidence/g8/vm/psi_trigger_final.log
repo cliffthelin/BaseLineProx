@@ -1,0 +1,5 @@
+registered=true path=/proc/pressure/cpu trigger='some 10000 2000000' wait=poll(POLLPRI) baseline_avg10=0.01
+wake=1 crossing=false
+wake=2 crossing=false
+wake=3 crossing=false
+wake=4 guardian_event=Event { event_id: EventId("guardian.psi.cpu.event-1"), timestamp_monotonic: 1, timestamp_wall: "sequence-1", source_provider: ProviderId("guardian.g8.psi"), event_type: "psi_threshold_crossing", resource_refs: ["/proc/pressure/cpu"], severity: Moderate, normalized_key: "psi cpu threshold crossing nominal->elevated", raw_reference: "PSI cpu threshold crossing Nominal->Elevated", attributes: {"from": "Nominal", "to": "Elevated"} }

@@ -1,0 +1,132 @@
+Wave 1 real-VM authorization transcripts (guardian-g9, Ubuntu 26.04 LTS,
+polkitd 127-2ubuntu1, systemd 257/258 series shipped with 26.04).
+
+All calls below are real `busctl`/`gdbus` invocations against the real,
+running `guardian-helper.service` (built from this handoff's implementation,
+release profile, no evidence-hooks feature unless noted) on the real system
+bus, mediating the real `org.freedesktop.systemd1.manage-units` policy via
+the evidence-only fixture `60-wave1-evidence.rules` (see that file in this
+directory) installed only in this disposable VM.
+
+=== W1-VM-001: authorized real caller succeeds ===
+$ sudo -u wave1allowed busctl call --system io.github.cliffthelin.GuardianHelper1 \
+    /io/github/cliffthelin/GuardianHelper1 io.github.cliffthelin.GuardianHelper1 \
+    RestartCapability sb 'cups-restart' false
+s "40008000-0000-0000-18d3-197648356f39"
+(0.085s wall clock)
+
+Persisted transaction 40008000-0000-0000-18d3-197648356f39.txn:
+  state=committed, apply_outcome=confirmed_success, last_observation=postcondition_met
+Real cups.service ActiveEnterTimestamp advanced (fresh restart confirmed via
+`systemctl show cups.service -p ActiveEnterTimestamp`).
+
+=== W1-VM-002: real, denied local user is rejected ===
+$ sudo -u wave1denied gdbus call --system --dest io.github.cliffthelin.GuardianHelper1 \
+    --object-path /io/github/cliffthelin/GuardianHelper1 \
+    --method io.github.cliffthelin.GuardianHelper1.RestartCapability 'cups-restart' false
+Error: GDBus.Error:io.github.cliffthelin.Guardian1.Error.NotAuthorized: authorization denied for org.freedesktop.systemd1.manage-units
+
+`wave1denied` is denied by the fixture unconditionally for manage-units --
+this is guardian-helper's own mediated authorize_provider_request check
+denying the real caller under the real (fixture) systemd policy, not a
+direct-to-systemd test.
+
+=== W1-VM-003: real, pre-existing, non-Guardian-specific grant is honored ===
+$ sudo -u wave1preexisting busctl call --system io.github.cliffthelin.GuardianHelper1 \
+    /io/github/cliffthelin/GuardianHelper1 io.github.cliffthelin.GuardianHelper1 \
+    RestartCapability sb 'cups-restart' false
+s "40008000-0000-0002-18d3-196d287f23ca"
+
+`wave1preexisting` is granted manage-units unconditionally (any unit/verb)
+by the fixture -- a real, pre-existing OS-level grant, independent of
+Guardian and not narrowed to cups-restart. Its success proves the mediated
+check is genuinely provider-policy-governed (whatever the real manage-units
+policy already grants), not a second, Guardian-specific gate.
+
+=== W1-MUT-002: unknown capability_id rejected before any unit lookup ===
+$ sudo -u ubuntu busctl call --system io.github.cliffthelin.GuardianHelper1 \
+    /io/github/cliffthelin/GuardianHelper1 io.github.cliffthelin.GuardianHelper1 \
+    RestartCapability sb 'nginx-restart' false
+Call failed: unknown capability_id: nginx-restart
+
+=== W1-VM-007 (3): mismatched verb is denied ===
+$ sudo -u wave1wrongverb busctl call --system io.github.cliffthelin.GuardianHelper1 \
+    /io/github/cliffthelin/GuardianHelper1 io.github.cliffthelin.GuardianHelper1 \
+    RestartCapability sb 'cups-restart' false
+Call failed: authorization denied for org.freedesktop.systemd1.manage-units
+
+`wave1wrongverb` is granted manage-units by the fixture ONLY for
+unit=cups.service AND verb=stop -- since RestartCapability's real
+`RestartUnit` call always presents verb=restart, this user is correctly
+denied. Native cross-check: `sudo -u wave1wrongverb systemctl restart
+cups.service` -> "Failed to restart cups.service: Access denied" (identical
+denial via the direct systemd path, confirming the fixture and mediated
+check track the same real policy).
+
+=== W1-VM-007 (3), unit variant: mismatched unit is denied ===
+$ sudo -u wave1wrongunit busctl call --system io.github.cliffthelin.GuardianHelper1 \
+    /io/github/cliffthelin/GuardianHelper1 io.github.cliffthelin.GuardianHelper1 \
+    RestartCapability sb 'cups-restart' false
+Call failed: authorization denied for org.freedesktop.systemd1.manage-units
+
+Native cross-check: `sudo -u wave1wrongunit systemctl restart cups.service`
+-> "Failed to restart cups.service: Access denied" (identical).
+
+=== W1-VM-007 (5): guardian-helper's own root identity is never sufficient ===
+Every RestartCapability call above was issued while `guardian-helper` itself
+runs as root (systemd `User=root`, matching the deployed
+`guardian-helper.service`). `wave1denied`'s denial above, and
+`wave1wrongverb`/`wave1wrongunit`'s denials, each prove root/trusted
+identity is not what is being evaluated -- the fixture only ever branches on
+`subject.user`/`action.lookup(...)`, which the mediated
+`CheckAuthorization` request (see checkauth-comparison.txt) shows carries
+the real original caller's own bus name as `subject`, never
+guardian-helper's.
+
+=== W1-VM-007 (4): no hypothetical Guardian-owned action could substitute ===
+No Guardian-owned `.policy` action for systemd restart exists anywhere in
+this build (W1-AUTH-005, mechanically checked by
+`polkit_action_gains_no_systemd_restart_variant` in
+crates/guardian-core/tests/wave1_authorization_contract.rs) -- there is
+structurally nothing such a substitution could even name. Confirmed by
+inspection of the real, installed `PolkitAction` enum
+(`crates/guardian-core/src/authorization.rs`): five variants, four
+`guardian.test.*` fixtures plus `io.github.cliffthelin.guardian.g7.bounded-write`,
+none referencing systemd.
+
+=== W1-VM-004: concurrent human + Guardian-issued restart ===
+See w1_vm_004.txt. A manual `sudo systemctl restart cups.service`
+(backgrounded) issued immediately before a Guardian-mediated
+RestartCapability call for the same unit: Guardian's own call succeeded
+(Committed), and the real cups.service journal shows systemd processing
+two Start sequences for the unit without corruption, converging on
+ActiveState=active/SubState=running/Result=success. systemd's own
+job-merging/queuing is what allows both restart requests to resolve
+without Guardian or the manual restart clobbering each other's view of
+success.
+
+=== W1-VM-005: crash genuinely mid-RestartUnit-call ===
+See wave1_vm005_finding.md in this directory (also summarized in
+WAVE1_MILESTONE.md) -- this is the one point where real VM evidence
+diverges from the handoff's required classification. Full raw transcript:
+guardian-helper-journal.txt (the specific timestamps: kill -9 at
+21:38:04, recovery at 21:38:41-21:38:49) and the persisted record
+40008000-0000-0000-18d3-11a31b23c0e8.txn (both its pre-recovery and
+post-recovery contents are reproduced in wave1_vm005_finding.md).
+
+=== W1-VM-006: BestEffort compensating restart itself fails ===
+$ sudo -u wave1allowed gdbus call --system --dest io.github.cliffthelin.GuardianHelper1 \
+    --object-path /io/github/cliffthelin/GuardianHelper1 \
+    --method io.github.cliffthelin.GuardianHelper1.RestartCapability 'cups-restart' false
+Error: GDBus.Error:io.github.cliffthelin.Guardian1.Error.RollbackFailed: compensating restart itself failed (W1-REC-008)
+
+cups.service's ExecStart was temporarily overridden to `/bin/false` via
+`/etc/systemd/system/cups.service.d/break-for-w1-vm-006.conf` (removed
+immediately afterward; cups.service was confirmed healthy again before
+continuing). Persisted transaction 40008000-0000-0001-18d3-2d73ccd6a68b.txn:
+  state=rollback_failed, apply_outcome=confirmed_success,
+  last_observation=ambiguous, rollback_result=confirmed_failed
+Never RolledBack, never a fabricated success, never an infinite retry loop
+-- the transaction reached the real, existing RollbackFailed terminal state
+exactly as G4's `classify()`/`RollbackOutcome::terminal_state()` require,
+and the caller received `GuardianErrorCategory::RollbackFailed` honestly.

@@ -1,0 +1,72 @@
+# Guardian gate manifest — configuration only.
+# Read alongside docs/guardian/30_TDD/GUARDIAN_EXECUTION_PROTOCOL.md.
+# This file carries ownership/scope/evidence configuration for one gate;
+# it is read directly by coding/review agents, not mechanically validated
+# by tooling in this pass.
+
+schema_version = 1
+gate_id = "phase2-2b"
+status = "not-started"
+
+# Commit this manifest was authored against. A future implementer must
+# verify the working tree is at this SHA (or a descendant it explicitly
+# accepts) before starting, per the execution protocol step 2.
+baseline_sha = "10a20abc5962ca15d8bccca731d226efd7ecea56"
+
+tdd_file = "docs/guardian/30_TDD/gates/phase2-2b-tdd.md"
+
+# Normative IDs this gate is responsible for closing. Gate 2a already
+# closed P2-EVT-001..004, P2-COR-001..007, P2-INC-002..004, P2-REC-001..005
+# (19 IDs, committed at baseline_sha) — Gate 2b does not reopen them.
+owned_normative_ids = [
+    "P2-API-001",
+    "P2-API-002",
+    "P2-API-003",
+]
+
+dependencies = ["phase2-2a"]
+
+[allowed_scope]
+paths = [
+    "crates/guardian-daemon/**",
+    "crates/guardian-core/src/providers/**",
+    "docs/evidence/p2/**",
+]
+
+[forbidden_scope]
+paths = [
+    # IncidentWire's wire shape is frozen per TDD contract §51
+    # ("Severity/wire disposition") and the implementation handoff §15/§20.
+    # Gate 2b populates it; it does not change its shape.
+    "crates/guardian-daemon/src/dbus_surface.rs::IncidentWire-shape",
+    "crates/guardian-client/src/lib.rs::IncidentWire-shape",
+    # Wave 1 production-mutation files — separately gated, unrelated scope.
+    "crates/guardian-daemon/src/restart_capability.rs",
+    "crates/guardian-helper/**",
+    # Other gates' owned modules.
+    "crates/guardian-core/src/correlation.rs",          # Gate 2a, closed
+    "crates/guardian-core/tests/correlation_contract.rs", # Gate 2a, closed
+    "crates/guardian-core/src/incident.rs",             # unmodified per §20
+    "crates/guardian-gui/**",
+    "crates/guardian-tui/**",
+    "crates/guardian-cli/**",
+    "crates/guardian-indicator/**",
+]
+
+required_test_layers = ["layer1", "layer2"]
+
+[validation_commands]
+fmt = "cargo fmt --check"
+clippy = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+test = "cargo test --workspace"
+expected_baseline = "375 passed, 0 failed, 3 ignored (baseline_sha, before this gate's changes)"
+
+required_evidence = [
+    "docs/evidence/p2/ — provider-health producer emits on real snapshot diff (Layer 2)",
+    "docs/evidence/p2/ — Incidents1.ListIncidents() returns real, non-empty incidents over a private/mocked bus",
+    "IncidentWire shape-lock regression test result (P2-API-003)",
+]
+
+commit_policy = "leave-uncommitted-for-independent-review"
+
+next_gate = "phase2-2c"

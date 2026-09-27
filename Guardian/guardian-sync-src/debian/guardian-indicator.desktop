@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Guardian Indicator
+Comment=System tray indicator for the Guardian Plane daemon
+Exec=/usr/bin/guardian-indicator
+Icon=computer
+Terminal=false
+NoDisplay=false
+Categories=System;Monitor;
+X-GNOME-Autostart-enabled=true

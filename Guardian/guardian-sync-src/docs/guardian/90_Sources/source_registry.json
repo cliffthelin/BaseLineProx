@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "generated": "2026-08-30",
+  "sources": [
+    {
+      "id": "ubuntu-dbus-daemon-resolute",
+      "title": "Ubuntu 26.04 dbus-daemon(1)",
+      "provider": "D-Bus",
+      "url": "https://manpages.ubuntu.com/manpages/resolute/man1/dbus-daemon.1.html",
+      "snapshot": "90_Sources/wiki/ubuntu-dbus-daemon-resolute.md",
+      "url_pointer": "90_Sources/raw/ubuntu-dbus-daemon-resolute.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ubuntu-polkit-resolute",
+      "title": "Ubuntu 26.04 polkit(8)",
+      "provider": "polkit",
+      "url": "https://manpages.ubuntu.com/manpages/resolute/man8/polkit.8.html",
+      "snapshot": "90_Sources/wiki/ubuntu-polkit-resolute.md",
+      "url_pointer": "90_Sources/raw/ubuntu-polkit-resolute.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ubuntu-pkttyagent",
+      "title": "pkttyagent textual authorization helper",
+      "provider": "polkit",
+      "url": "https://manpages.ubuntu.com/manpages/resolute/man1/pkttyagent.1.html",
+      "snapshot": "90_Sources/wiki/ubuntu-pkttyagent.md",
+      "url_pointer": "90_Sources/raw/ubuntu-pkttyagent.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ubuntu-systemd-resource-control",
+      "title": "Ubuntu 26.04 systemd.resource-control(5)",
+      "provider": "systemd",
+      "url": "https://manpages.ubuntu.com/manpages/resolute/man5/systemd.resource-control.5.html",
+      "snapshot": "90_Sources/wiki/ubuntu-systemd-resource-control.md",
+      "url_pointer": "90_Sources/raw/ubuntu-systemd-resource-control.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ubuntu-systemd-exec",
+      "title": "Ubuntu 26.04 systemd.exec(5)",
+      "provider": "systemd",
+      "url": "https://manpages.ubuntu.com/manpages/resolute/man5/systemd.exec.5.html",
+      "snapshot": "90_Sources/wiki/ubuntu-systemd-exec.md",
+      "url_pointer": "90_Sources/raw/ubuntu-systemd-exec.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ubuntu-systemd-service",
+      "title": "Ubuntu 26.04 systemd.service(5)",
+      "provider": "systemd",
+      "url": "https://manpages.ubuntu.com/manpages/resolute/man5/systemd.service.5.html",
+      "snapshot": "90_Sources/wiki/ubuntu-systemd-service.md",
+      "url_pointer": "90_Sources/raw/ubuntu-systemd-service.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ubuntu-journald-conf",
+      "title": "Ubuntu 26.04 journald.conf(5)",
+      "provider": "systemd-journald",
+      "url": "https://manpages.ubuntu.com/manpages/resolute/man5/journald.conf.5.html",
+      "snapshot": "90_Sources/wiki/ubuntu-journald-conf.md",
+      "url_pointer": "90_Sources/raw/ubuntu-journald-conf.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "linux-psi",
+      "title": "Linux kernel PSI \u2014 Pressure Stall Information",
+      "provider": "Linux kernel",
+      "url": "https://cdn.kernel.org/doc/html/latest/accounting/psi.html",
+      "snapshot": "90_Sources/wiki/linux-psi.md",
+      "url_pointer": "90_Sources/raw/linux-psi.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "networkmanager-dbus",
+      "title": "NetworkManager D-Bus Manager API",
+      "provider": "NetworkManager",
+      "url": "https://networkmanager.pages.freedesktop.org/NetworkManager/NetworkManager/gdbus-org.freedesktop.NetworkManager.html",
+      "snapshot": "90_Sources/wiki/networkmanager-dbus.md",
+      "url_pointer": "90_Sources/raw/networkmanager-dbus.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "udisks-drive",
+      "title": "UDisks2 Drive D-Bus API",
+      "provider": "UDisks2",
+      "url": "https://storaged.org/doc/udisks2-api/latest/gdbus-org.freedesktop.UDisks2.Drive.html",
+      "snapshot": "90_Sources/wiki/udisks-drive.md",
+      "url_pointer": "90_Sources/raw/udisks-drive.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "accountsservice-23-13-9",
+      "title": "AccountsService 23.13.9 API",
+      "provider": "AccountsService",
+      "url": "https://freedocs.mi.hdm-stuttgart.de/doc/accountsservice/spec/AccountsService.html",
+      "snapshot": "90_Sources/wiki/accountsservice-23-13-9.md",
+      "url_pointer": "90_Sources/raw/accountsservice-23-13-9.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "upower-dbus",
+      "title": "UPower D-Bus API Reference",
+      "provider": "UPower",
+      "url": "https://upower.freedesktop.org/docs/ref-dbus.html",
+      "snapshot": "90_Sources/wiki/upower-dbus.md",
+      "url_pointer": "90_Sources/raw/upower-dbus.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "power-profiles-dbus",
+      "title": "Power Profiles daemon D-Bus API",
+      "provider": "power-profiles-daemon",
+      "url": "https://freedesktop-team.pages.debian.net/power-profiles-daemon/ref-dbus.html",
+      "snapshot": "90_Sources/wiki/power-profiles-dbus.md",
+      "url_pointer": "90_Sources/raw/power-profiles-dbus.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "zbus-docs",
+      "title": "zbus Rust D-Bus library",
+      "provider": "zbus",
+      "url": "https://docs.rs/zbus/latest/zbus/index.html",
+      "snapshot": "90_Sources/wiki/zbus-docs.md",
+      "url_pointer": "90_Sources/raw/zbus-docs.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ksni-docs",
+      "title": "ksni Rust StatusNotifierItem library",
+      "provider": "ksni",
+      "url": "https://docs.rs/ksni/latest/ksni/",
+      "snapshot": "90_Sources/wiki/ksni-docs.md",
+      "url_pointer": "90_Sources/raw/ksni-docs.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "ayatana-glib-resolute",
+      "title": "Ubuntu 26.04 libayatana-appindicator-glib2 package",
+      "provider": "Ubuntu / Ayatana",
+      "url": "https://packages.ubuntu.com/en/resolute/libayatana-appindicator-glib2",
+      "snapshot": "90_Sources/wiki/ayatana-glib-resolute.md",
+      "url_pointer": "90_Sources/raw/ayatana-glib-resolute.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    },
+    {
+      "id": "systemd-logind",
+      "title": "systemd-logind and inhibitor locks",
+      "provider": "systemd-logind",
+      "url": "https://wiki.freedesktop.org/www/Software/systemd/logind/",
+      "snapshot": "90_Sources/wiki/systemd-logind.md",
+      "url_pointer": "90_Sources/raw/systemd-logind.url.txt",
+      "last_checked": "2026-08-30",
+      "update_sensitivity": "high"
+    }
+  ]
+}

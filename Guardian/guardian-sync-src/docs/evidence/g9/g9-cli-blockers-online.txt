@@ -1,0 +1,2 @@
+shutdown by Unattended Upgrades Shutdown (delay): Stop ongoing upgrades or perform upgrades before shutdown
+sleep by ModemManager (delay): ModemManager needs to reset devices

@@ -1,0 +1,4 @@
+=== GetManagedObjects (real udisksd, real umockdev testbed, private system bus) ===
+a{oa{sa{sv}}} 1 "/org/freedesktop/UDisks2/Manager" 2 "org.freedesktop.UDisks2.Manager.NVMe" 2 "HostNQN" ay 69 110 113 110 46 50 48 49 52 45 48 56 46 111 114 103 46 110 118 109 101 120 112 114 101 115 115 58 117 117 105 100 58 100 51 102 54 49 98 101 99 45 97 97 57 53 45 52 51 56 57 45 98 48 55 54 45 97 48 51 51 98 57 53 100 97 97 54 52 0 "HostID" ay 1 0 "org.freedesktop.UDisks2.Manager" 4 "Version" s "2.10.91" "SupportedFilesystems" as 12 "ext2" "ext3" "ext4" "xfs" "vfat" "ntfs" "f2fs" "nilfs2" "exfat" "btrfs" "udf" "swap" "SupportedEncryptionTypes" as 2 "luks1" "luks2" "DefaultEncryptionType" s "luks2"
+=== process alive ===
+yes

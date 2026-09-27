@@ -1,0 +1,15 @@
+s "40008000-0000-0007-18d3-199e332d7247"
+EXIT=0
+ActiveState=active
+SubState=running
+Result=success
+Sep 04 21:36:43 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:36:43 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Stopping cups.service - CUPS Scheduler...
+Sep 04 21:37:24 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:37:24 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:37:24 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.

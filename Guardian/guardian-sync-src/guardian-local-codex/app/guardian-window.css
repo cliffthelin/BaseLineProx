@@ -1,0 +1,24 @@
+.tray-button.disabled .shield-mark{color:#86868d;filter:saturate(0)}
+.power-menu{width:100%;border:0;border-radius:0!important;margin:0!important;padding:11px 14px!important;display:flex;align-items:center;gap:8px;text-align:left;background:#343339!important}
+.power-menu.enable{color:#a8c2ff!important;border-bottom:1px solid #4a494f!important}
+.power-menu.disable{color:#d6b6b3!important;border-top:1px solid #4a494f!important}
+.app-window{touch-action:none}
+.app-window.maximized{inset:32px 0 0!important;width:100vw!important;height:calc(100vh - 32px)!important;transform:none!important;translate:none!important;border-radius:0!important}
+.window-titlebar{user-select:none;cursor:grab}
+.window-titlebar:active{cursor:grabbing}
+.window-title.guardian-disabled .shield-mark{color:#e0483e}
+.window-title em{font-style:normal;color:#ff756b;font-weight:650}
+.enable-button{padding:0 12px;gap:7px;background:#304e9c!important;color:white!important;border-color:#304e9c!important}
+.sync:disabled{opacity:.45;cursor:not-allowed;background:#e7e8eb}
+.close-modal{max-width:500px!important;background:#f6f6f8!important}
+.close-modal [data-slot=dialog-header] p{font-size:.8rem;line-height:1.5;color:#666c79}
+.close-options{display:grid;gap:9px;margin-top:8px}
+.close-options>button{border:1px solid #d4d6dd;background:white;border-radius:9px;padding:14px;display:flex;gap:12px;align-items:center;text-align:left;color:#303746}
+.close-options>button:hover{border-color:#8798c5;background:#f5f7fc}
+.close-options span{display:flex;flex-direction:column}
+.close-options b{font-size:.82rem}
+.close-options small{font-size:.7rem;color:#737987;margin-top:3px}
+.close-options .turn-off{color:#a7352f}
+.close-options .turn-off:hover{border-color:#d8aaa6;background:#fff5f3}
+.size-setting>div{display:flex;align-items:center;gap:12px;min-width:260px}.size-setting input[type=range]{width:210px;accent-color:#304e9c}.size-setting output{min-width:48px;text-align:right;font-size:.78rem;font-weight:750;color:#304e9c}
+.guardian-dark{color-scheme:dark}.guardian-dark .app-window,.guardian-dark .app-scroll,.guardian-dark .app-content{background:#202126;color:#f1f2f5}.guardian-dark .count-grid,.guardian-dark .count-grid button,.guardian-dark .issue-list,.guardian-dark .issue-card,.guardian-dark .belief-box,.guardian-dark .detail-section,.guardian-dark .fact,.guardian-dark .trend-grid div,.guardian-dark .filter-block label,.guardian-dark .filter-block input,.guardian-dark .filter-block select,.guardian-dark .filter-block>div input,.guardian-dark .subtabs button,.guardian-dark .modal,.guardian-dark .settings-modal,.guardian-dark .close-modal,.guardian-dark .close-options>button,.guardian-dark .setting-row input,.guardian-dark .setting-row select,.guardian-dark .inline-fields input,.guardian-dark .inline-fields select,.guardian-dark .form-grid input,.guardian-dark .form-grid select,.guardian-dark .form-grid textarea{background:#292b31!important;color:#eef0f5!important;border-color:#464952!important}.guardian-dark .critical{background:linear-gradient(110deg,#292b31,#252b3c);border-color:#454955}.guardian-dark .issue-card:hover,.guardian-dark .count-grid button:hover{background:#30333b!important}.guardian-dark .issue-card p,.guardian-dark .critical p,.guardian-dark .card-meta,.guardian-dark .results-head p,.guardian-dark footer,.guardian-dark .setting-row small,.guardian-dark .copy,.guardian-dark .time-item p,.guardian-dark .fact span{color:#b5bac6}.guardian-dark .issue-card h3,.guardian-dark .results-head h2,.guardian-dark .critical h2,.guardian-dark .setting-row b,.guardian-dark .detail-hero h2{color:#f4f5f7}.guardian-dark .filter-block{background:#25272c;border-color:#454850}.guardian-dark .group-tabs{border-color:#484b54}.guardian-dark .settings-layout nav{border-color:#484b54}.guardian-dark .settings-layout nav button{color:#c6cad3}.guardian-dark .settings-layout nav button.selected{background:#35436a;color:#fff}.guardian-dark .detail-section summary{border-color:#464952}.guardian-dark .fact{background:#33353c!important}.guardian-dark .inferred{background:#302f3a!important;color:#e0dfeb}.guardian-dark .observed{background:#23372b!important;color:#d9eee0}.guardian-dark .assistant-card{background:#28334a;color:#eef3ff}.guardian-dark .upstream{background:#303238;border-color:#484b54}.guardian-dark .quiet{background:#303238;color:#eef0f5;border-color:#4b4e58}.guardian-dark .size-setting output{color:#9db4ff}.guardian-high-contrast .app-window,.guardian-high-contrast .modal,.guardian-high-contrast .settings-modal{filter:contrast(1.18)}

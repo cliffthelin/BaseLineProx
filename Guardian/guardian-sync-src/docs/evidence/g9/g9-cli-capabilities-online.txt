@@ -1,0 +1,11 @@
+systemd.unit.state  <-  guardian.g8.systemd  availability=available health=healthy read=true write=false authz=unknown priv=no_direct_privilege
+psi.pressure.cpu  <-  guardian.g8.psi  availability=unsupported health=unknown read=true write=false authz=unknown priv=no_direct_privilege
+psi.pressure.memory  <-  guardian.g8.psi  availability=unsupported health=unknown read=true write=false authz=unknown priv=no_direct_privilege
+psi.pressure.io  <-  guardian.g8.psi  availability=unsupported health=unknown read=true write=false authz=unknown priv=no_direct_privilege
+logind.inhibitors  <-  guardian.g8.logind  availability=available health=healthy read=true write=false authz=unknown priv=no_direct_privilege
+upower.display-device  <-  guardian.g8.upower  availability=unavailable health=error read=true write=false authz=unknown priv=no_direct_privilege
+upower.battery-presence  <-  guardian.g8.upower  availability=unavailable health=error read=true write=false authz=unknown priv=no_direct_privilege
+accounts.user.cache  <-  guardian.g8.accounts  availability=unavailable health=error read=true write=false authz=unknown priv=no_direct_privilege
+accounts.session.enumeration  <-  guardian.g8.accounts  availability=degraded health=warning read=true write=false authz=unknown priv=no_direct_privilege
+storage.drive.topology  <-  guardian.g8.udisks  availability=available health=healthy read=true write=false authz=unknown priv=no_direct_privilege
+storage.drive.poweroff-preconditions  <-  guardian.g8.udisks  availability=available health=healthy read=true write=false authz=unknown priv=no_direct_privilege

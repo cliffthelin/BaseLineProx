@@ -1,0 +1,1 @@
+https://freedesktop-team.pages.debian.net/power-profiles-daemon/ref-dbus.html

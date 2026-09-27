@@ -1,0 +1,19 @@
+[workspace]
+
+[package]
+name = "g1-layer2-vm-harness"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "g1-layer2-server"
+path = "src/server.rs"
+
+[[bin]]
+name = "g1-layer2-client"
+path = "src/client.rs"
+
+[dependencies]
+guardian-core = { path = "../../../crates/guardian-core" }
+zbus = { version = "5.12.0", features = ["blocking-api"] }

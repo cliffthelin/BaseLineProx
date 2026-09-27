@@ -1,0 +1,11 @@
+# Guardian provider contract provenance fixture
+provider_id=org.freedesktop.DBus
+package_name=dbus-daemon
+package_version=1.16.2-2ubuntu4
+interface_name=org.freedesktop.DBus
+interface_version=unknown
+introspection_hash=f2899d87cfed767c7b2153deeecc83e4994491159ab7a2d1e91986d7a048753a
+policy_hash=unknown
+observed_at=2026-08-30T00:00:00Z
+source_url=https://manpages.ubuntu.com/manpages/resolute/man1/dbus-daemon.1.html
+source_origin=docs/guardian/90_Sources/wiki/ubuntu-dbus-daemon-resolute.md

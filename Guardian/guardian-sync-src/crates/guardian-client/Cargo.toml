@@ -1,0 +1,12 @@
+[package]
+name = "guardian-client"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+zbus.workspace = true
+
+[lints]
+workspace = true

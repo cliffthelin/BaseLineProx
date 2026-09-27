@@ -1,0 +1,7 @@
+/* Shared contract: add .resizable-window to every non-modal application window. */
+.resizable-window,.app-window,.file-browser{resize:both;overflow:auto}
+.app-window{left:clamp(72px,9vw,140px)!important;transform:none!important;min-width:620px;min-height:430px;max-width:calc(100vw - clamp(84px,10vw,152px));max-height:calc(100vh - 40px)}
+.app-window.maximized{resize:none}
+.file-browser{left:12vw!important;top:48px!important;transform:none!important;min-width:520px;min-height:420px;max-width:calc(100vw - 12vw)!important;max-height:calc(100vh - 56px)!important}
+.resizable-window::after,.app-window:not(.maximized)::after,.file-browser::after{content:"";position:absolute;right:4px;bottom:4px;width:13px;height:13px;pointer-events:none;background:linear-gradient(135deg,transparent 48%,#808693 50% 57%,transparent 59% 66%,#808693 68% 75%,transparent 77%);opacity:.65}
+@media(max-width:700px){.resizable-window,.app-window,.file-browser{min-width:0;min-height:0;resize:none}.app-window{left:8px!important;max-width:calc(100vw - 16px)}.file-browser{left:8px!important;top:40px!important;max-width:calc(100vw - 16px)!important;max-height:calc(100vh - 48px)!important}}

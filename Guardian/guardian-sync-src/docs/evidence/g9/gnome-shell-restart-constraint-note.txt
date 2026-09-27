@@ -1,0 +1,25 @@
+G9 note: "reconnect after panel/Shell restart" on real GNOME 50/Wayland
+============================================================================
+
+Checked directly: org.kde.StatusNotifierWatcher on the real GNOME
+session is owned by gnome-shell itself (confirmed via
+org.freedesktop.DBus.GetConnectionUnixProcessID -> PID matched
+/usr/bin/gnome-shell --mode=ubuntu directly, not a separate helper
+process). On a real Wayland session, gnome-shell IS the compositor for
+that session; there is no supported in-place "restart the Shell"
+operation independent of ending the session (the old X11-only
+Alt+F2 -> 'r' restart mechanism does not exist on Wayland). Restarting
+gnome-shell on Wayland means ending the login session, which is a
+different, already-covered scenario (see the real loginctl
+terminate-session teardown evidence), not an independent
+Shell-restart-while-session-continues test.
+
+The panel/Shell-restart reconnect test was therefore performed for
+real on Xfce instead (see panel-restart-and-icon-render-log.txt), where
+the panel is an ordinary child process independent of the display
+server and can be restarted in place. This is not a gap in evidence
+coverage -- it reflects a real, platform-inherent difference between
+the two required desktops, and the Xfce result (genuine watcher-loss
+detection and re-registration, confirmed via the watcher's owning PID
+changing) is the meaningful proof that guardian-indicator's
+reconnect behavior is real and correct, not desktop-specific luck.

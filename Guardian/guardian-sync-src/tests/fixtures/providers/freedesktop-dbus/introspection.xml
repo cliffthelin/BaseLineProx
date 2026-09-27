@@ -1,0 +1,14 @@
+<!--
+Source: Ubuntu dbus-daemon 1.16.2-2ubuntu4 documentation baseline
+Canonical URL: https://manpages.ubuntu.com/manpages/resolute/man1/dbus-daemon.1.html
+Captured: 2026-08-30
+Bus/interface: org.freedesktop.DBus
+Purpose: compact contract fixture; not a complete vendor documentation copy
+-->
+<node>
+  <interface name="org.freedesktop.DBus">
+    <method name="ListNames">
+      <arg name="names" type="as" direction="out"/>
+    </method>
+  </interface>
+</node>

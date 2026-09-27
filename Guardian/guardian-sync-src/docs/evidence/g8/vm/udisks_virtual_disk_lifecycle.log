@@ -1,0 +1,7 @@
+candidate_head=196523fcf7a1df14818236a371f2b85eafebdd47
+source_digest=fa4d24ae528b46684f343b06ade34244d3495a8fb820fbc721672ddfa0b60064
+kernel=7.0.0-30-generic
+scenario=real_udisks_virtual_scsi_remove_reenumerate
+phase=initial stable_id=Linux-scsi_debug-8000 nodes=["/dev/sdb"]
+phase=removed events=[Removed { drive_id: "Linux-scsi_debug-8000" }, Removed { drive_id: "Linux-scsi_debug-10000" }] stale_result=Err(StaleOrRemovedIdentity)
+phase=reenumerated stable_id=Linux-scsi_debug-8000 nodes=["/dev/sdc"] events=[Reenumerated { drive_id: "Linux-scsi_debug-8000", previous_nodes: ["/dev/sdb"], current_nodes: ["/dev/sdc"] }, Reenumerated { drive_id: "Linux-scsi_debug-10000", previous_nodes: ["/dev/sdc"], current_nodes: ["/dev/sdb"] }]

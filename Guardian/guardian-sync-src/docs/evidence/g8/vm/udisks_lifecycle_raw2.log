@@ -1,0 +1,9 @@
+phase=initial stable_id=Linux-scsi_debug-16000 nodes=["/dev/sdb"]
+phase=removed events=[Removed { drive_id: "Linux-scsi_debug-16000" }] stale_result=Err(StaleOrRemovedIdentity)
+phase=reenumerated stable_id=Linux-scsi_debug-16000 nodes=["/dev/sdb"] events=[]
+
+thread 'main' (31535) panicked at crates/guardian-core/examples/g8_udisks_lifecycle_evidence.rs:60:5:
+assertion `left != right` failed
+  left: ["/dev/sdb"]
+ right: ["/dev/sdb"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

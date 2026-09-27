@@ -1,0 +1,39 @@
+[package]
+name = "guardian-helper"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "guardian-helper"
+path = "src/main.rs"
+
+[features]
+# Off by default -- NOT present in a plain `cargo build --release` used for
+# production install. Enables the artificial Apply-delay hook used only to
+# gather real crash-during-Apply VM evidence (P1-DMN-005). Never reachable
+# via D-Bus; only a local systemd `Environment=` (admin-controlled) can set
+# the underlying env var, and only when this feature was compiled in.
+evidence-hooks = []
+
+[dependencies]
+guardian-core = { path = "../guardian-core" }
+guardian-provider-api = { path = "../guardian-provider-api" }
+zbus = { workspace = true, features = ["blocking-api"] }
+
+[dev-dependencies]
+# Wave 1 JOBREMOVED race repair: deterministic signal-timing tests need a
+# real (but private, never the host system bus) D-Bus daemon plus a fake
+# `org.freedesktop.systemd1.Manager` service under our own control -- the
+# same `PrivateSessionBus` pattern already used throughout G0-G9's own
+# D-Bus contract tests.
+guardian-testkit = { path = "../guardian-testkit" }
+# Minimal executor to drive the fake systemd service's async interface
+# methods and connection setup from synchronous test code -- zbus itself
+# already depends on this (default "async-io" feature), so this adds no
+# new dependency to the tree, only a direct one for test code to call it.
+futures-lite = "2"
+
+[lints]
+workspace = true

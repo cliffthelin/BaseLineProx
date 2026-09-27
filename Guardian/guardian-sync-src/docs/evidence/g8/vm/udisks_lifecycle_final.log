@@ -1,0 +1,3 @@
+phase=initial stable_id=Linux-scsi_debug-20000 nodes=["/dev/sdb"]
+phase=removed events=[Removed { drive_id: "Linux-scsi_debug-20000" }] stale_result=Err(StaleOrRemovedIdentity)
+phase=reenumerated stable_id=Linux-scsi_debug-20000 nodes=["/dev/sdc"] events=[Reenumerated { drive_id: "Linux-scsi_debug-20000", previous_nodes: ["/dev/sdb"], current_nodes: ["/dev/sdc"] }]

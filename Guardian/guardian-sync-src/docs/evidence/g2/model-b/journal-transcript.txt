@@ -1,0 +1,40 @@
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: Started guardian-model-b-core.service - Guardian G2 Model B prototype - unprivileged core.
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: Started guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:00:44 guardian-g2-vm g2-model-b-core[7090]: [g2-model-b-core] serving io.github.cliffthelin.Guardian1.G2ModelBCore at /io/github/cliffthelin/Guardian1/G2ModelBCore (unprivileged), unique_name=:1.52
+Aug 31 02:00:44 guardian-g2-vm g2-model-b-helper[7091]: Error: MethodError(OwnedErrorName("org.freedesktop.DBus.Error.AccessDenied"), Some("Connection \":1.53\" is not allowed to own the service \"io.github.cliffthelin.Guardian1.G2ModelBHelper\" due to security policies in the configuration file"), Msg { type: Error, serial: 5, sender: UniqueName("org.freedesktop.DBus"), reply-serial: 4, body: Str, fds: [] })
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Failed with result 'exit-code'.
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Scheduled restart job, restart counter is at 1.
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: Started guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:00:44 guardian-g2-vm g2-model-b-helper[7102]: Error: MethodError(OwnedErrorName("org.freedesktop.DBus.Error.AccessDenied"), Some("Connection \":1.54\" is not allowed to own the service \"io.github.cliffthelin.Guardian1.G2ModelBHelper\" due to security policies in the configuration file"), Msg { type: Error, serial: 5, sender: UniqueName("org.freedesktop.DBus"), reply-serial: 4, body: Str, fds: [] })
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Failed with result 'exit-code'.
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Scheduled restart job, restart counter is at 2.
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: Started guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:00:44 guardian-g2-vm g2-model-b-helper[7108]: Error: MethodError(OwnedErrorName("org.freedesktop.DBus.Error.AccessDenied"), Some("Connection \":1.55\" is not allowed to own the service \"io.github.cliffthelin.Guardian1.G2ModelBHelper\" due to security policies in the configuration file"), Msg { type: Error, serial: 5, sender: UniqueName("org.freedesktop.DBus"), reply-serial: 4, body: Str, fds: [] })
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Failed with result 'exit-code'.
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Scheduled restart job, restart counter is at 3.
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: Started guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:00:44 guardian-g2-vm g2-model-b-helper[7114]: Error: MethodError(OwnedErrorName("org.freedesktop.DBus.Error.AccessDenied"), Some("Connection \":1.56\" is not allowed to own the service \"io.github.cliffthelin.Guardian1.G2ModelBHelper\" due to security policies in the configuration file"), Msg { type: Error, serial: 5, sender: UniqueName("org.freedesktop.DBus"), reply-serial: 4, body: Str, fds: [] })
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 02:00:44 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Failed with result 'exit-code'.
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Scheduled restart job, restart counter is at 4.
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: Started guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:00:45 guardian-g2-vm g2-model-b-helper[7120]: Error: MethodError(OwnedErrorName("org.freedesktop.DBus.Error.AccessDenied"), Some("Connection \":1.58\" is not allowed to own the service \"io.github.cliffthelin.Guardian1.G2ModelBHelper\" due to security policies in the configuration file"), Msg { type: Error, serial: 5, sender: UniqueName("org.freedesktop.DBus"), reply-serial: 4, body: Str, fds: [] })
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Failed with result 'exit-code'.
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Scheduled restart job, restart counter is at 5.
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Start request repeated too quickly.
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Failed with result 'exit-code'.
+Aug 31 02:00:45 guardian-g2-vm systemd[1]: Failed to start guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:01:04 guardian-g2-vm systemd[1]: Started guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:01:04 guardian-g2-vm g2-model-b-helper[7304]: [g2-model-b-helper] serving io.github.cliffthelin.Guardian1.G2ModelBHelper at /io/github/cliffthelin/Guardian1/G2ModelBHelper (privileged), unique_name=:1.63
+Aug 31 02:01:05 guardian-g2-vm g2-model-b-helper[7304]: [g2-model-b-helper] real polkit result: Ok(Authorized)
+Aug 31 02:01:05 guardian-g2-vm g2-model-b-helper[7304]: [g2-model-b-helper] real polkit result: Ok(Denied)
+Aug 31 02:01:55 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Main process exited, code=killed, status=9/KILL
+Aug 31 02:01:55 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Failed with result 'signal'.
+Aug 31 02:01:55 guardian-g2-vm systemd[1]: guardian-model-b-helper.service: Scheduled restart job, restart counter is at 1.
+Aug 31 02:01:55 guardian-g2-vm systemd[1]: Started guardian-model-b-helper.service - Guardian G2 Model B prototype - narrow privileged helper.
+Aug 31 02:01:55 guardian-g2-vm g2-model-b-helper[7556]: [g2-model-b-helper] serving io.github.cliffthelin.Guardian1.G2ModelBHelper at /io/github/cliffthelin/Guardian1/G2ModelBHelper (privileged), unique_name=:1.71
+Aug 31 02:01:57 guardian-g2-vm g2-model-b-helper[7556]: [g2-model-b-helper] real polkit result: Ok(Authorized)

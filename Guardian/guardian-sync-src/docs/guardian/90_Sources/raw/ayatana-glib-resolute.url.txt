@@ -1,0 +1,1 @@
+https://packages.ubuntu.com/en/resolute/libayatana-appindicator-glib2

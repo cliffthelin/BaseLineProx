@@ -1,0 +1,24 @@
+[package]
+name = "guardian-tui"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "guardian-tui"
+path = "src/main.rs"
+
+[dependencies]
+async-io = "2.6.0"
+guardian-client = { path = "../guardian-client" }
+guardian-core = { path = "../guardian-core" }
+ratatui = "0.29"
+crossterm = "0.28"
+zbus.workspace = true
+
+[dev-dependencies]
+guardian-testkit = { path = "../guardian-testkit" }
+
+[lints]
+workspace = true

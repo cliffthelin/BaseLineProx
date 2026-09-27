@@ -1,0 +1,1 @@
+https://manpages.ubuntu.com/manpages/resolute/man8/polkit.8.html

@@ -1,0 +1,31 @@
+=== OS ===
+PRETTY_NAME="Ubuntu 26.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+VERSION="26.04 LTS (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=resolute
+LOGO=ubuntu-logo
+=== kernel ===
+Linux guardian-g8-evidence 7.0.0-30-generic #30-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 31 18:22:54 UTC 2026 x86_64 GNU/Linux
+=== rust ===
+rustc 1.98.0 (88d9e12ae 2026-08-18)
+cargo 1.98.0 (797e8a9bc 2026-08-05)
+=== dbusmock ===
+ii  python3-dbusmock 0.38.1-1     all          mock D-Bus objects for tests
+=== umockdev ===
+ii  libumockdev-dev 0.19.7-1     amd64        development files and documentation for libumockdev
+ii  umockdev        0.19.7-1     amd64        record/mock hardware devices for bug reports and regression tests
+0.19.7
+=== providers ===
+ii  accountsservice 23.13.9-8ubuntu5.2 amd64        query and manipulate user account information
+ii  dbus            1.16.2-2ubuntu4    amd64        simple interprocess messaging system (system message bus)
+ii  systemd         259.5-0ubuntu3.4   amd64        system and service manager
+ii  udisks2         2.10.91-1ubuntu2.1 amd64        D-Bus service to access and manipulate storage devices
+ii  upower          1.91.1-1           amd64        abstraction for power management

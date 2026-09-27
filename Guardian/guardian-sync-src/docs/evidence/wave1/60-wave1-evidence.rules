@@ -1,0 +1,53 @@
+// Wave 1 evidence-only polkit fixture (W1-VM-002/003/007).
+// NEVER packaged. Never installed outside a disposable evidence VM.
+// Governs org.freedesktop.systemd1.manage-units for a small set of
+// evidence-only local test users, keyed on the real action id and, for
+// detail-sensitive rules, the real unit/verb polkit details systemd's own
+// request carries.
+polkit.addRule(function(action, subject) {
+    if (action.id != "org.freedesktop.systemd1.manage-units") {
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    // W1-VM-002: an explicitly denied user -- denied under this real,
+    // evidence-authored policy, unconditionally for this action.
+    if (subject.user == "wave1denied") {
+        return polkit.Result.NO;
+    }
+
+    // W1-VM-003 (pre-existing-grant branch): a genuine, real, pre-existing
+    // OS-level manage-units grant, independent of Guardian and NOT
+    // narrowed to cups-restart specifically.
+    if (subject.user == "wave1preexisting") {
+        return polkit.Result.YES;
+    }
+
+    // W1-VM-001/003 (detail-sensitive branch) + W1-VM-007 (1)/(2)/(4)/(5):
+    // granted ONLY when unit == cups.service AND verb == restart.
+    if (subject.user == "wave1allowed") {
+        if (action.lookup("unit") == "cups.service" && action.lookup("verb") == "restart") {
+            return polkit.Result.YES;
+        }
+        return polkit.Result.NO;
+    }
+
+    // W1-VM-007 (3): mismatched verb -- granted only for a *different*
+    // verb than the one this operation actually presents.
+    if (subject.user == "wave1wrongverb") {
+        if (action.lookup("unit") == "cups.service" && action.lookup("verb") == "stop") {
+            return polkit.Result.YES;
+        }
+        return polkit.Result.NO;
+    }
+
+    // W1-VM-007 (3), unit variant: mismatched unit -- granted only for a
+    // *different* unit than the one this operation actually presents.
+    if (subject.user == "wave1wrongunit") {
+        if (action.lookup("unit") == "other.service" && action.lookup("verb") == "restart") {
+            return polkit.Result.YES;
+        }
+        return polkit.Result.NO;
+    }
+
+    return polkit.Result.NOT_HANDLED;
+});

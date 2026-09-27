@@ -1,0 +1,18 @@
+[package]
+name = "guardian-gui"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "guardian-gui"
+path = "src/main.rs"
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+guardian-client = { path = "../guardian-client" }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+● guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)
+     Loaded: loaded (/etc/systemd/system/guardian-helper.service; enabled; preset: enabled)
+     Active: active (running) since Fri 2026-09-04 21:39:20 MDT; 1min 28s ago
+ Invocation: b4a349719a0341d5b578a44664b0112e
+   Main PID: 90837 (guardian-helper)
+      Tasks: 6 (limit: 4016)
+     Memory: 1.3M (peak: 2.9M)
+        CPU: 41ms
+     CGroup: /system.slice/guardian-helper.service
+             └─90837 /usr/local/bin/guardian-helper
+
+Sep 04 21:39:20 guardian-g9 systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 04 21:39:20 guardian-g9 guardian-helper[90837]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.148

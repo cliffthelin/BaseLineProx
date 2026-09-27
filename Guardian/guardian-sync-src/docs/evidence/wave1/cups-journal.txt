@@ -1,0 +1,60 @@
+Sep 04 21:36:02 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:36:02 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:36:02 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.
+Sep 04 21:36:17 guardian-g9 systemd[1]: Stopping cups.service - CUPS Scheduler...
+Sep 04 21:36:17 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:36:17 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:36:17 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:36:17 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.
+Sep 04 21:36:43 guardian-g9 systemd[1]: Stopping cups.service - CUPS Scheduler...
+Sep 04 21:36:43 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:36:43 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:36:43 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:36:43 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Stopping cups.service - CUPS Scheduler...
+Sep 04 21:37:24 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:37:24 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:37:24 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:37:24 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.
+Sep 04 21:38:49 guardian-g9 systemd[1]: Stopping cups.service - CUPS Scheduler...
+Sep 04 21:38:49 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:38:49 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:38:49 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:38:49 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Stopping cups.service - CUPS Scheduler...
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Main process exited, code=exited, status=1/FAILURE
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Failed with result 'exit-code'.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Failed to start cups.service - CUPS Scheduler.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Deactivated successfully.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Stopped cups.service - CUPS Scheduler.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Main process exited, code=exited, status=1/FAILURE
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Failed with result 'exit-code'.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Failed to start cups.service - CUPS Scheduler.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Main process exited, code=exited, status=1/FAILURE
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Failed with result 'exit-code'.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Failed to start cups.service - CUPS Scheduler.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Main process exited, code=exited, status=1/FAILURE
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Failed with result 'exit-code'.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Failed to start cups.service - CUPS Scheduler.
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Start request repeated too quickly.
+Sep 04 21:39:34 guardian-g9 systemd[1]: cups.service: Failed with result 'exit-code'.
+Sep 04 21:39:34 guardian-g9 systemd[1]: Failed to start cups.service - CUPS Scheduler.
+Sep 04 21:39:39 guardian-g9 systemd[1]: cups.service: Start request repeated too quickly.
+Sep 04 21:39:39 guardian-g9 systemd[1]: cups.service: Failed with result 'exit-code'.
+Sep 04 21:39:39 guardian-g9 systemd[1]: Failed to start cups.service - CUPS Scheduler.
+Sep 04 21:39:59 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:39:59 guardian-g9 systemd[1]: cups.service: Main process exited, code=exited, status=1/FAILURE
+Sep 04 21:39:59 guardian-g9 systemd[1]: cups.service: Failed with result 'exit-code'.
+Sep 04 21:39:59 guardian-g9 systemd[1]: Failed to start cups.service - CUPS Scheduler.
+Sep 04 21:40:14 guardian-g9 systemd[1]: Starting cups.service - CUPS Scheduler...
+Sep 04 21:40:14 guardian-g9 systemd[1]: Started cups.service - CUPS Scheduler.

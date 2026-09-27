@@ -1,0 +1,122 @@
+G9 broad gate audit → TUI contract-compliance repair: history
+================================================================
+
+This file exists so the sequence below is never inferred or reconstructed
+after the fact — it is preserved exactly as it happened.
+
+1. BROAD GATE AUDIT (independent, first pass)
+
+   Scope: the final, gate-level G9 audit, after the desktop/indicator
+   (§30) slice and the packaging/privilege slice had each already been
+   independently closed (PASS WITH NON-BLOCKING FINDINGS). Twenty-three
+   audit areas were covered: candidate/baseline state, the 12 normative
+   IDs, five-surface scope, the central fabricated-write-capability
+   question, the public D-Bus surface, client thinness, CLI/TUI/GUI
+   audits, indicator/packaging regression spot-checks, ADR compliance,
+   empty-state semantics, cross-client consistency, capability
+   presentation, test adequacy, prior-gate regression, scope discipline,
+   and evidence integrity.
+
+   Verdict: FAIL — G9 NORMATIVE REQUIREMENTS INCOMPLETE.
+
+   Every area passed except one. Twelve of twelve normative IDs
+   independently re-verified PASS; the central write-capability
+   question, public D-Bus surface, packaging/privilege regression, and
+   indicator regression were all independently re-confirmed clean;
+   fmt/clippy/292-test baseline reproduced exactly.
+
+   The one blocking finding: contract §33 states unconditionally that
+   the Phase 1 TUI MUST "display the same capability/incident data as
+   the GUI at a basic level" and MUST "exercise text polkit in a test
+   action." The G9 implementation handoff's own §7.2 explicitly commits
+   to both. Independent inspection of the full guardian-tui source (199
+   lines at the time) and a live VM run found neither existed at all:
+   the TUI rendered only connection status and capabilities; no
+   incidents pane existed; no polkit call of any kind existed anywhere
+   in the crate. This was not a partial implementation or a weak-evidence
+   finding — the functionality was genuinely, entirely absent.
+
+   Exact next action from that audit: "Repair G9 and request another
+   focused audit."
+
+2. REPAIR (this revision)
+
+   Scope: a narrow, bounded repair of exactly the one blocking finding.
+   No redesign of the TUI; no changes to CLI/GUI/indicator/packaging
+   behavior; no new write capability; no exposure of
+   GuardianHelper1.GuardedWrite as a user-facing capability; no change
+   to the public D-Bus contract.
+
+   2a. Incidents pane. Added a real "Incidents" pane to guardian-tui,
+       reusing the same `connection.incidents()` typed call the GUI
+       already uses (guardian-client, no new/parallel D-Bus parsing
+       path). Empty incidents render as the honest, healthy
+       "(no incidents reported)" text, never as an error, matching the
+       CLI/GUI's existing empty-state discipline.
+
+   2b. Text-polkit test action. Added a real, interactive 'a' key
+       binding that runs a genuine `CheckAuthorization` call against
+       the real system polkit authority, reusing G1's already-accepted
+       `guardian_core::authorization::polkit::PolkitAuthorizer`
+       directly — no new polkit action was defined (reuses
+       `PolkitAction::Read`, one of the four `guardian.test.*` actions
+       contract §9 already fixed at G1); no new D-Bus method was added
+       anywhere. `CheckAuthorization` is read-only by construction (see
+       the `Authorizer` trait's own doc comment in guardian-core); its
+       result is never wired to any mutation. Real interactive terminal
+       authentication, when required, is obtained by spawning
+       `pkttyagent` bound to the TUI's own process for the duration of
+       the check only — never `sudo`, never a shell. An honest
+       "unavailable" is reported if the check cannot be completed, with
+       no fallback to any privileged mechanism.
+
+   Files changed: crates/guardian-tui/Cargo.toml (added guardian-core,
+   zbus, guardian-testkit dev-dependency), crates/guardian-tui/src/main.rs
+   (incidents pane, authorization-test action, real event loop replacing
+   the old single-frame-and-sleep exit, 12 new tests: 10 pure
+   view-model/rendering tests plus 2 real-private-D-Bus-bus tests proving
+   identity resolution against a live connection, mirroring G1's own
+   Layer 1 testing discipline). No other crate, no packaging file, no
+   ADR, no public D-Bus interface was touched.
+
+   Test count: 292 → 304 passed, 0 failed (fmt clean, clippy clean,
+   full workspace including guardian-gui, run in the VM).
+
+3. REAL VM EVIDENCE CLOSING §33 (this revision)
+
+   An evidence-only polkit action/rule fixture was installed in the
+   disposable VM, mirroring G1's own established evidence-gathering
+   idiom (docs/evidence/g1/g1-layer2-vm-setup.sh) exactly: a
+   deny-by-default `guardian.test.read` action plus an explicit
+   per-user grant/deny rule (two real local users, one granted, one
+   denied). This fixture is VM-only and is not packaged.
+
+   The real, packaged /usr/bin/guardian-tui binary (installed from the
+   rebuilt .deb, not a manually-placed copy — confirmed via `dpkg -S`)
+   was driven via a real pseudo-terminal (Python's `pty.fork`, a real
+   `TIOCSWINSZ` window size set, real keystrokes sent) as each test
+   user in turn. Results, saved under docs/evidence/g9/tui-repair/:
+
+   - Incidents pane: "(no incidents reported)" rendered honestly in
+     both runs (tui-authorized-clean.txt, tui-denied-clean.txt).
+   - Authorized case (guardiantuiyes): real "AUTHORIZED (verification
+     only — no mutation performed)" result rendered, after a real
+     `pkttyagent --process <pid>` was observed spawned and bound to the
+     TUI process (sampled live via `ps`) and cleaned up immediately
+     after the check completed.
+   - Denied case (guardiantuino): real "DENIED" result rendered,
+     distinct from the authorized case.
+   - No sudo/shell fallback: the full process tree was sampled every
+     0.3s across both runs; only python3 (the test driver),
+     guardian-tui, and (briefly) pkttyagent ever appeared — no sudo, no
+     sh/bash, at any point, in either the granted or denied case.
+   - No mutation side effect: the daemon's live capability data was
+     re-queried after the authorized run and every capability was still
+     write_support=false.
+
+   Full transcripts, both raw (with ANSI escape codes) and cleaned, are
+   preserved in docs/evidence/g9/tui-repair/.
+
+Nothing in step 1's original finding was rewritten or softened by this
+file — the FAIL verdict and its exact reasoning are reproduced above
+verbatim in substance, before the repair that followed it.

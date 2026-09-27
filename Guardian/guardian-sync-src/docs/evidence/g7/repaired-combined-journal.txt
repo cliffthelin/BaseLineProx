@@ -1,0 +1,62 @@
+Sep 01 13:05:28 guardian-g7-repair-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 13:05:28 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:05:28 guardian-g7-repair-vm guardian-daemon[6558]: [guardian-daemon] monitoring tick: recorder len=1 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 01 13:05:28 guardian-g7-repair-vm guardian-helper[6559]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.28
+Sep 01 13:05:28 guardian-g7-repair-vm guardian-daemon[6558]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1, unique_name=:1.29
+Sep 01 13:05:34 guardian-g7-repair-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 13:05:34 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:05:34 guardian-g7-repair-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 13:05:34 guardian-g7-repair-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 13:05:34 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:05:34 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+-- Boot e18e488f32164da59231cb076916f22d --
+Sep 01 13:05:44 guardian-g7-repair-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 13:05:44 guardian-g7-repair-vm guardian-daemon[1068]: [guardian-daemon] monitoring tick: recorder len=1 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 01 13:05:44 guardian-g7-repair-vm guardian-daemon[1068]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1, unique_name=:1.5
+Sep 01 13:05:44 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:05:45 guardian-g7-repair-vm guardian-helper[1226]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.12
+Sep 01 13:06:00 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:06:00 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:06:00 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:00 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:00 guardian-g7-repair-vm guardian-helper[1655]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.22
+Sep 01 13:06:15 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:06:15 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:06:15 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:15 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:15 guardian-g7-repair-vm guardian-helper[1796]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.24
+Sep 01 13:06:15 guardian-g7-repair-vm guardian-daemon[1068]: [guardian-daemon] monitoring tick: recorder len=2 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 01 13:06:18 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Main process exited, code=killed, status=9/KILL
+Sep 01 13:06:18 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Failed with result 'signal'.
+Sep 01 13:06:18 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Scheduled restart job, restart counter is at 1.
+Sep 01 13:06:18 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:25 guardian-g7-repair-vm guardian-helper[1829]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-40e12be8a48a resolved -> Committed
+Sep 01 13:06:25 guardian-g7-repair-vm guardian-helper[1829]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.27
+Sep 01 13:06:28 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:06:28 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:06:28 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:28 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:28 guardian-g7-repair-vm guardian-helper[1961]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.28
+Sep 01 13:06:43 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:06:43 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:06:43 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:43 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:43 guardian-g7-repair-vm guardian-helper[2086]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.29
+Sep 01 13:06:44 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:06:44 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:06:44 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:44 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:44 guardian-g7-repair-vm guardian-helper[2099]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.30
+Sep 01 13:06:45 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:06:45 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:06:45 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:45 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:06:45 guardian-g7-repair-vm guardian-helper[2112]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.31
+Sep 01 13:06:45 guardian-g7-repair-vm guardian-daemon[1068]: [guardian-daemon] monitoring tick: recorder len=3 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 01 13:07:01 guardian-g7-repair-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 13:07:01 guardian-g7-repair-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 13:07:01 guardian-g7-repair-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:07:01 guardian-g7-repair-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 13:07:01 guardian-g7-repair-vm guardian-helper[2190]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.33
+Sep 01 13:07:15 guardian-g7-repair-vm guardian-daemon[1068]: [guardian-daemon] monitoring tick: recorder len=4 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)
+Sep 01 13:07:45 guardian-g7-repair-vm guardian-daemon[1068]: [guardian-daemon] monitoring tick: recorder len=5 dropped=0 policy=Normal free_space=Sufficient (FC-2 not closed: no spill sink wired)

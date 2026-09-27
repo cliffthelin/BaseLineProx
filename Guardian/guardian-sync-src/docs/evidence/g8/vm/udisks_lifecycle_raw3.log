@@ -1,0 +1,6 @@
+phase=initial stable_id=Linux-scsi_debug-16000 nodes=["/dev/sdb"]
+phase=removed events=[Reenumerated { drive_id: "Linux-scsi_debug-16000", previous_nodes: ["/dev/sdb"], current_nodes: ["/dev/sdc"] }] stale_result=Ok(())
+
+thread 'main' (31700) panicked at crates/guardian-core/examples/g8_udisks_lifecycle_evidence.rs:45:5:
+assertion failed: matches!(stale, Err(PowerOffRejection::StaleOrRemovedIdentity))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

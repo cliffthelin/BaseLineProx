@@ -1,0 +1,141 @@
+# Guardian gate manifest — configuration only.
+# Read alongside docs/guardian/30_TDD/GUARDIAN_EXECUTION_PROTOCOL.md.
+# This file carries ownership/scope/evidence configuration for one gate;
+# it is read directly by coding/review agents, not mechanically validated
+# by tooling in this pass.
+#
+# This is a SECOND, separate REOPENED-GATE REPAIR against Gate 2a — not a
+# new feature gate, and not a continuation of the first Gate 2a repair
+# (docs/guardian/30_TDD/gates/phase2-2a-health-lifecycle-repair-manifest.toml,
+# already accepted and committed in 0d071e194c353ffb42afd566be958a2a40925cd0).
+# The first repair fixed *promotion mechanics* (fresh-observation-driven
+# dwell advancement, `FreshHealthObservation`, `advance_health_dwell`,
+# `HealthDirection::Bad(Confidence)`) and a target-state classification bug
+# (`Available + Error` no longer misclassifies as `Good`). This second
+# repair fixes a distinct, narrower defect in the same area: *how* the
+# `Confidence` payload carried by `HealthDirection::Bad(Confidence)` is
+# computed. It is additive/corrective to the first repair's typed design,
+# not a redesign of it — see the Contract Collision Table in the linked TDD.
+
+schema_version = 1
+gate_id = "phase2-2a-transition-confidence-repair"
+kind = "reopened-gate-repair"
+status = "not-started"
+
+# The gate this repair reopens, and exactly which of its already-closed
+# normative IDs are affected. P2-COR-003 (debounced Available→Unavailable
+# provider-health incident behavior) is reopened for its confidence
+# derivation. P2-COR-004 (fast-flapping/no-thrashing) is explicitly NOT
+# reopened — it remains closed and is regression-only in this repair: its
+# existing tests must keep passing unmodified, but this repair does not
+# touch or reinterpret its behavior. Confidence itself has no dedicated
+# P2-* normative ID — it is owned directly by binding
+# GUARDIAN_PHASE2_IMPLEMENTATION_HANDOFF.md §4.2 ("Confidence:
+# `Confirmed` for `Available→Unavailable`... `Probable` for
+# `Healthy→Warning`..."), which is the normative source this repair
+# corrects Gate 2a's implementation against. No new ID and no new gate are
+# created by this repair.
+reopens_gate = "phase2-2a"
+reopened_normative_ids = ["P2-COR-003"]
+
+# Commit this manifest was authored against. Confirmed via `git
+# rev-parse HEAD` at authoring time; matches the task's stated baseline.
+baseline_sha = "0d071e194c353ffb42afd566be958a2a40925cd0"
+
+tdd_file = "docs/guardian/30_TDD/gates/phase2-2a-transition-confidence-repair-tdd.md"
+
+# The defect being repaired (see the linked TDD for full detail):
+# `health_direction(availability: Availability, health: Health) ->
+# Option<HealthDirection>` (crates/guardian-core/src/correlation.rs)
+# derives incident `Confidence` from the destination `(Availability,
+# Health)` pair alone — any `Unavailable` destination is unconditionally
+# `Confirmed`, any `Available + Warning` destination is unconditionally
+# `Probable` — regardless of what state the capability transitioned
+# *from*. Binding §4.2 names specific transitions, not destination
+# states: `Available→Unavailable` is `Confirmed`; `Healthy→Warning` is
+# `Probable`. Concrete transitions that must NOT inherit `Confirmed`/
+# `Probable` from destination alone under the corrected rule:
+# `Degraded→Unavailable`, `Unknown→Unavailable`, `Error→Warning`,
+# `Degraded→Warning`.
+defect_summary = "health_direction() assigns incident Confidence from the destination (Availability, Health) pair alone; binding §4.2 names specific FROM->TO transitions, not destination states, so several transitions today inherit a confidence tier §4.2 never authorized for them."
+
+dependencies = ["phase2-2a", "phase2-2a-health-lifecycle-repair"]
+
+[allowed_scope]
+paths = [
+    "crates/guardian-core/src/correlation.rs",
+    "crates/guardian-core/tests/correlation_contract.rs",
+    "docs/guardian/30_TDD/gates/phase2-2a-transition-confidence-repair-manifest.toml",
+    "docs/guardian/30_TDD/gates/phase2-2a-transition-confidence-repair-tdd.md",
+    "docs/evidence/p2/**",
+]
+
+[forbidden_scope]
+paths = [
+    # Gate 2b's producer/daemon files. This repair corrects the engine-side
+    # confidence-derivation rule only; it does not touch the producer, the
+    # daemon's fresh-snapshot-driven wiring, or Gate 2b's own tests. The
+    # forward-pointer for Gate 2b's own downstream repair (threading real
+    # availability_from/availability_to/health_from/health_to provenance
+    # onto the real Event) is recorded in the linked TDD, not implemented
+    # here.
+    "crates/guardian-core/src/providers/health.rs",
+    "crates/guardian-daemon/**",
+    "crates/guardian-daemon/tests/phase2_2b_contract.rs",
+    # The parked Gate 2b repair envelope — still-blocked, unrelated
+    # uncommitted local work this task must not touch or depend on.
+    "docs/guardian/30_TDD/gates/phase2-2b-health-lifecycle-integration-repair-manifest.toml",
+    "docs/guardian/30_TDD/gates/phase2-2b-health-lifecycle-integration-repair-tdd.md",
+    # All Gate 2c files — parked, unrelated, uncommitted local work.
+    "docs/guardian/30_TDD/gates/phase2-2c-manifest.toml",
+    "docs/guardian/30_TDD/gates/phase2-2c-tdd.md",
+    # The FIRST Gate 2a repair envelope — already accepted/committed in
+    # 0d071e1. Do not edit; this second repair is additive/corrective to
+    # it, recorded as its own distinct envelope instead.
+    "docs/guardian/30_TDD/gates/phase2-2a-health-lifecycle-repair-manifest.toml",
+    "docs/guardian/30_TDD/gates/phase2-2a-health-lifecycle-repair-tdd.md",
+    # Everything else already forbidden to Gate 2a per its original scope.
+    "crates/guardian-core/src/incident.rs",
+    "crates/guardian-gui/**",
+    "crates/guardian-tui/**",
+    "crates/guardian-cli/**",
+    "crates/guardian-indicator/**",
+    "crates/guardian-helper/**",
+    "crates/guardian-core/src/restart_capability.rs",
+]
+
+required_test_layers = ["layer1"]
+
+[validation_commands]
+fmt = "cargo fmt --check"
+clippy = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+test = "cargo test --workspace"
+expected_baseline = "400 passed, 0 failed, 3 ignored (baseline_sha 0d071e1, before this repair's changes) — confirmed on guardian-g9 (multipass VM, libadwaita-1-dev present, guardian-gui builds): fmt clean, clippy clean (-D warnings), 400 passed / 0 failed / 3 ignored."
+
+required_evidence = [
+    "docs/evidence/p2/ — Available -> Unavailable -> Confidence::Confirmed",
+    "docs/evidence/p2/ — Degraded -> Unavailable -> Confidence::Unknown (not Confirmed)",
+    "docs/evidence/p2/ — Unknown -> Unavailable -> Confidence::Unknown (not Confirmed)",
+    "docs/evidence/p2/ — Healthy -> Warning -> Confidence::Probable",
+    "docs/evidence/p2/ — Error -> Warning -> Confidence::Unknown (not Probable)",
+    "docs/evidence/p2/ — missing/incomplete from-provenance -> Confidence::Unknown, never defaulted to Available/Healthy",
+    "docs/evidence/p2/ — regression: destination-state classification (Good/Bad/unresolved table) is unchanged by this repair",
+    "docs/evidence/p2/ — regression: advance_health_dwell()/FreshHealthObservation are byte-for-byte untouched by this repair's diff",
+    "docs/evidence/p2/ — regression: P2-COR-004's existing tests pass unmodified",
+    "docs/evidence/p2/ — regression: all Gate 2a normative IDs (19 original + the first repair's tests) remain green",
+]
+
+commit_policy = "leave-uncommitted-for-independent-review"
+
+# Recorded here as a forward pointer only — NOT implemented in this pass.
+# After this Gate 2a repair is accepted and committed, Gate 2b requires its
+# own separate, narrow repair (see the linked TDD's "Downstream Gate 2b
+# repair" section for full detail): HealthTransitionProducer must emit all
+# four real transition-provenance attributes (availability_from,
+# availability_to, health_from, health_to) from data it already holds
+# internally (self.previous) — no new provider I/O. Gate 2b remains
+# responsible for producer provenance, daemon fresh-snapshot dwell
+# advancement, the real P2-API-001 integration fixture, and symmetric
+# recovery integration — explicitly NOT confidence policy, which stays
+# owned by this Gate 2a repair.
+next_gate = "phase2-2b-health-lifecycle-integration-repair (parked, separate task)"

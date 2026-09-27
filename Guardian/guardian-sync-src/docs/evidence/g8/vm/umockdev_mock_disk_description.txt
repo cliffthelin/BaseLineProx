@@ -1,0 +1,14 @@
+P: /devices/mock/block/sdz
+N: sdz
+E: DEVTYPE=disk
+E: SUBSYSTEM=block
+E: ID_SERIAL=MOCK_SERIAL_001
+E: ID_SERIAL_SHORT=MOCK001
+E: ID_VENDOR=MockVendor
+E: ID_MODEL=MockDisk
+E: ID_BUS=usb
+E: MAJOR=8
+E: MINOR=16
+A: size=2097152
+A: removable=1
+A: ro=0

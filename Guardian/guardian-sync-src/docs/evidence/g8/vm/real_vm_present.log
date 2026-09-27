@@ -1,0 +1,69 @@
+candidate_head=196523fcf7a1df14818236a371f2b85eafebdd47
+4b7214808006a9829e26064fbaaf60615471608857dd5e77d8d3874746065b17  -
+
+=== PSI (P1-PSI-001..005) — production crate::psi reuse, kernel files ===
+  path(cpu) = /proc/pressure/cpu
+  read(cpu) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.14, avg60: 1.8, avg300: 1.67, total: 88178242 }, full: Some(PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 0 }) }))
+  path(memory) = /proc/pressure/memory
+  read(memory) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 213019 }, full: Some(PsiLine { avg10: 0.0, avg60: 0.0, avg300: 0.0, total: 159962 }) }))
+  path(io) = /proc/pressure/io
+  read(io) = Ok(Present(PsiResource { some: PsiLine { avg10: 0.39, avg60: 0.52, avg300: 0.33, total: 22792041 }, full: Some(PsiLine { avg10: 0.39, avg60: 0.33, avg300: 0.16, total: 18991147 }) }))
+
+=== systemd (P1-SYS-001..003) ===
+  probe() = true
+  unit_state(systemd-logind.service) = Ok(UnitState { load_state: "loaded", active_state: "active", sub_state: "running", description: "User Login Management" })
+  unit_state(cron.service) = Ok(UnitState { load_state: "loaded", active_state: "active", sub_state: "running", description: "Regular background program processing daemon" })
+  unit_state(nonexistent) = Err(UnitNotFound("guardian-g8-nonexistent-unit-evidence.service"))
+
+=== logind (P1-LGI-001..002) ===
+  probe() = true
+  list_inhibitors() = Ok([Inhibitor { what: "sleep", who: "UPower", why: "Pause device polling", mode: "delay", uid: 0, pid: 19688 }])
+
+=== UPower (P1-UPW-001..002) ===
+  probe() = true
+  display_device() = Ok(DisplayDeviceState { kind: 0, percentage: 0.0, state: 0, is_present: false })
+  battery_presence() = Ok(NotPresent)
+
+=== AccountsService (P1-ACC-001..003) ===
+  probe() = true
+  list_cached_users() = Ok([OwnedObjectPath(ObjectPath("/org/freedesktop/Accounts/User1000"))])
+  scan_installed_sessions() = []
+  validate_session_id("nonexistent") = Err(InvalidSession("nonexistent-session-id"))
+
+=== UDisks2 (P1-UDS-001..004) ===
+  probe() = true
+  topology(): 5 drives, 17 blocks
+    drive: DriveInfo { object_path: "/org/freedesktop/UDisks2/drives/Linux_scsi_debug_12000", id: "Linux-scsi_debug-12000", vendor: "Linux", model: "scsi_debug", can_power_off: false, removable: false }
+      siblings (1): ["/dev/sdc"]
+      validate_power_off_preconditions(user_initiated=true) = Err(NotSupported)
+      validate_power_off_preconditions(user_initiated=false) = Err(NotUserInitiated)
+    drive: DriveInfo { object_path: "/org/freedesktop/UDisks2/drives/Floppy_Drive", id: "/org/freedesktop/UDisks2/drives/Floppy_Drive", vendor: "", model: "Floppy Drive", can_power_off: false, removable: true }
+      siblings (1): ["/dev/fd0"]
+      validate_power_off_preconditions(user_initiated=true) = Err(NotSupported)
+      validate_power_off_preconditions(user_initiated=false) = Err(NotUserInitiated)
+    drive: DriveInfo { object_path: "/org/freedesktop/UDisks2/drives/QEMU_QEMU_HARDDISK_hda", id: "QEMU-QEMU-HARDDISK-hda", vendor: "QEMU", model: "QEMU HARDDISK", can_power_off: false, removable: false }
+      siblings (5): ["/dev/sda15", "/dev/sda", "/dev/sda1", "/dev/sda14", "/dev/sda13"]
+      validate_power_off_preconditions(user_initiated=true) = Err(NotSupported)
+      validate_power_off_preconditions(user_initiated=false) = Err(NotUserInitiated)
+    drive: DriveInfo { object_path: "/org/freedesktop/UDisks2/drives/Linux_scsi_debug_10000", id: "Linux-scsi_debug-10000", vendor: "Linux", model: "scsi_debug", can_power_off: false, removable: false }
+      siblings (1): ["/dev/sdb"]
+      validate_power_off_preconditions(user_initiated=true) = Err(NotSupported)
+      validate_power_off_preconditions(user_initiated=false) = Err(NotUserInitiated)
+    drive: DriveInfo { object_path: "/org/freedesktop/UDisks2/drives/QEMU_DVD_ROM_QM00003", id: "QEMU-DVD-ROM-QM00003", vendor: "", model: "QEMU DVD-ROM", can_power_off: false, removable: true }
+      siblings (1): ["/dev/sr0"]
+      validate_power_off_preconditions(user_initiated=true) = Err(NotSupported)
+      validate_power_off_preconditions(user_initiated=false) = Err(NotUserInitiated)
+  validate_power_off_preconditions(stale id) = Err(StaleOrRemovedIdentity)
+
+=== Capability Registry (handoff §11) ===
+  systemd.unit.state <- guardian.g8.systemd availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  psi.pressure.cpu <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  psi.pressure.memory <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  psi.pressure.io <- guardian.g8.psi availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  logind.inhibitors <- guardian.g8.logind availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  upower.display-device <- guardian.g8.upower availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  upower.battery-presence <- guardian.g8.upower availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  accounts.user.cache <- guardian.g8.accounts availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  accounts.session.enumeration <- guardian.g8.accounts availability=Degraded health=Warning read=true write=false authz=Unknown priv=NoDirectPrivilege iface=KernelInterface
+  storage.drive.topology <- guardian.g8.udisks availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus
+  storage.drive.poweroff-preconditions <- guardian.g8.udisks availability=Available health=Healthy read=true write=false authz=Unknown priv=NoDirectPrivilege iface=DBus

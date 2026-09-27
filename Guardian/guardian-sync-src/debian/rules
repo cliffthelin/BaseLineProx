@@ -1,0 +1,30 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export CARGO_HOME = $(CURDIR)/debian/.cargo-home
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --workspace --locked
+
+override_dh_auto_install:
+	install -D -m0755 target/release/guardian-daemon debian/guardian/usr/bin/guardian-daemon
+	install -D -m0755 target/release/guardian-helper debian/guardian/usr/bin/guardian-helper
+	install -D -m0755 target/release/guardian debian/guardian/usr/bin/guardian
+	install -D -m0755 target/release/guardian-tui debian/guardian/usr/bin/guardian-tui
+	install -D -m0755 target/release/guardian-gui debian/guardian/usr/bin/guardian-gui
+	install -D -m0755 target/release/guardian-indicator debian/guardian/usr/bin/guardian-indicator
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start --name=guardian-daemon
+	dh_installsystemd --no-enable --no-start --name=guardian-helper
+
+override_dh_auto_test:
+	# Real workspace test suite (per-crate unit/integration tests); no
+	# network access, no privileged operations, matches CI/dev-host
+	# verification. guardian-gui's own tests are exercised here too,
+	# since this target runs in a real build environment with
+	# libadwaita-1-dev present (unlike the primary dev host).
+	cargo test --release --workspace --locked

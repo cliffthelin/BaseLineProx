@@ -1,0 +1,38 @@
+G9 real panel-restart reconnect / no-duplicate-icon / icon-render evidence
+=============================================================================
+
+Setup: real Xfce 4.20 session (lightdm autologin), guardian-indicator
+autostarted via the real /etc/xdg/autostart entry (PID 2551), systray
+plugin (plugin-id 6, xfconf-committed) added to the real panel.
+
+1. Panel restart (xfce4-panel -r) spawned a brand-new xfce4-panel
+   process and a brand-new systray-plugin wrapper process (confirmed:
+   org.kde.StatusNotifierWatcher's owning PID changed from the old
+   wrapper to the new one, via
+   org.freedesktop.DBus.GetConnectionUnixProcessID).
+2. guardian-indicator's own PID (2551) never changed across the panel
+   restart -- the indicator process itself was not relaunched.
+3. After the restart, org.kde.StatusNotifierItem-2551-1 was still
+   present on ListNames, registered against the NEW watcher instance --
+   this is a genuine reconnect (ksni's own watcher-loss/re-registration
+   handling), not a stale name left over from before.
+4. Exactly one StatusNotifierItem-2551-* name existed at all times --
+   no duplicate registration was created by the reconnect.
+
+5. Icon-render investigation: a full-desktop screenshot
+   (xfce-panel-with-icon.png / xfce-tray-zoom.png) shows the systray
+   slot as a flat blue rectangle, not a recognizable glyph. Checked
+   whether this is a guardian-side problem: queried GTK3's icon theme
+   directly for every name guardian-indicator ever sets
+   (computer, dialog-warning, dialog-error, application-exit) --
+   Gtk.IconTheme.get_default().has_icon() returned True for all four.
+   The icon names guardian-indicator advertises are real, resolvable,
+   standard theme names; the D-Bus IconName/Title properties are
+   correct and live (see the other evidence files). The blank render
+   is therefore attributed to xfce4-panel's systray plugin's own
+   SNI-icon compositing in this minimal, software-rendered VM
+   environment, not to guardian-indicator -- this remains an open,
+   honestly-documented visual gap (no legible icon glyph screenshot
+   obtained on either desktop), distinct from and much narrower than
+   the previously-open "icon appears" test as a whole, which is now
+   otherwise proven at every level except the final pixel render.

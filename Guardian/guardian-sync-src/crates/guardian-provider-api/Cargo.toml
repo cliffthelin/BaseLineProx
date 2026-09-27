@@ -1,0 +1,16 @@
+[package]
+name = "guardian-provider-api"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+sha2.workspace = true
+
+[dev-dependencies]
+async-io = "2.6.0"
+
+[lints]
+workspace = true
+

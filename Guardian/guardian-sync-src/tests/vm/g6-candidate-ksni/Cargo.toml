@@ -1,0 +1,16 @@
+[workspace]
+
+[package]
+name = "g6-candidate-ksni"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "g6-candidate-ksni"
+path = "src/main.rs"
+
+[dependencies]
+ksni = "0.3"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "signal"] }
+zbus = "5"

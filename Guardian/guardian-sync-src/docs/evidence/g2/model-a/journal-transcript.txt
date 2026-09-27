@@ -1,0 +1,39 @@
+Aug 31 01:57:55 guardian-g2-vm systemd[1]: Started guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon).
+Aug 31 01:57:55 guardian-g2-vm g2-model-a-daemon[5964]: [g2-model-a] serving io.github.cliffthelin.Guardian1.G2ModelA at /io/github/cliffthelin/Guardian1/G2ModelA, unique_name=:1.28
+Aug 31 01:58:04 guardian-g2-vm g2-model-a-daemon[5964]: [g2-model-a] real polkit result: Err(ProviderUnavailable("CheckAuthorization failed: org.freedesktop.PolicyKit1.Error.NotAuthorized: Only trusted callers (e.g. uid 0 or an action owner) can use CheckAuthorization() for subjects belonging to other identities"))
+Aug 31 01:58:04 guardian-g2-vm g2-model-a-daemon[5964]: [g2-model-a] real polkit result: Err(ProviderUnavailable("CheckAuthorization failed: org.freedesktop.PolicyKit1.Error.NotAuthorized: Only trusted callers (e.g. uid 0 or an action owner) can use CheckAuthorization() for subjects belonging to other identities"))
+Aug 31 01:58:18 guardian-g2-vm systemd[1]: Stopping guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon)...
+Aug 31 01:58:18 guardian-g2-vm systemd[1]: guardian-model-a.service: Deactivated successfully.
+Aug 31 01:58:18 guardian-g2-vm systemd[1]: Stopped guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon).
+Aug 31 01:59:17 guardian-g2-vm systemd[1]: Started guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon).
+Aug 31 01:59:17 guardian-g2-vm g2-model-a-daemon[6409]: [g2-model-a] serving io.github.cliffthelin.Guardian1.G2ModelA at /io/github/cliffthelin/Guardian1/G2ModelA, unique_name=:1.39
+Aug 31 01:59:18 guardian-g2-vm g2-model-a-daemon[6409]: [g2-model-a] real polkit result: Ok(Authorized)
+Aug 31 01:59:18 guardian-g2-vm g2-model-a-daemon[6409]: [g2-model-a] real polkit result: Ok(Denied)
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:36: Unknown key 'ProtectClock' in section [Install], ignoring.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:37: Unknown key 'SystemCallArchitectures' in section [Install], ignoring.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:38: Unknown key 'ProtectHostname' in section [Install], ignoring.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:39: Unknown key 'ProtectProc' in section [Install], ignoring.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:40: Unknown key 'ProcSubset' in section [Install], ignoring.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:41: Unknown key 'PrivateNetwork' in section [Install], ignoring.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:42: Unknown key 'UMask' in section [Install], ignoring.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: Stopping guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon)...
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: guardian-model-a.service: Deactivated successfully.
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: Stopped guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon).
+Aug 31 01:59:50 guardian-g2-vm systemd[1]: Started guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon).
+Aug 31 01:59:50 guardian-g2-vm g2-model-a-daemon[6600]: [g2-model-a] serving io.github.cliffthelin.Guardian1.G2ModelA at /io/github/cliffthelin/Guardian1/G2ModelA, unique_name=:1.43
+Aug 31 01:59:51 guardian-g2-vm g2-model-a-daemon[6600]: [g2-model-a] real polkit result: Ok(Authorized)
+Aug 31 01:59:51 guardian-g2-vm g2-model-a-daemon[6600]: [g2-model-a] real polkit result: Ok(Denied)
+Aug 31 01:59:57 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:36: Unknown key 'ProtectClock' in section [Install], ignoring.
+Aug 31 01:59:57 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:37: Unknown key 'SystemCallArchitectures' in section [Install], ignoring.
+Aug 31 01:59:57 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:38: Unknown key 'ProtectHostname' in section [Install], ignoring.
+Aug 31 01:59:57 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:39: Unknown key 'ProtectProc' in section [Install], ignoring.
+Aug 31 01:59:57 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:40: Unknown key 'ProcSubset' in section [Install], ignoring.
+Aug 31 01:59:57 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:41: Unknown key 'PrivateNetwork' in section [Install], ignoring.
+Aug 31 01:59:57 guardian-g2-vm systemd[1]: /etc/systemd/system/guardian-model-a.service:42: Unknown key 'UMask' in section [Install], ignoring.
+Aug 31 02:00:14 guardian-g2-vm systemd[1]: Stopping guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon)...
+Aug 31 02:00:14 guardian-g2-vm systemd[1]: guardian-model-a.service: Deactivated successfully.
+Aug 31 02:00:14 guardian-g2-vm systemd[1]: Stopped guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon).
+Aug 31 02:00:14 guardian-g2-vm systemd[1]: Started guardian-model-a.service - Guardian G2 Model A prototype (hardened privileged daemon).
+Aug 31 02:00:14 guardian-g2-vm g2-model-a-daemon[6841]: [g2-model-a] serving io.github.cliffthelin.Guardian1.G2ModelA at /io/github/cliffthelin/Guardian1/G2ModelA, unique_name=:1.47
+Aug 31 02:00:15 guardian-g2-vm g2-model-a-daemon[6841]: [g2-model-a] real polkit result: Ok(Authorized)
+Aug 31 02:00:15 guardian-g2-vm g2-model-a-daemon[6841]: [g2-model-a] real polkit result: Ok(Denied)

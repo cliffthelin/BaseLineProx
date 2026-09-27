@@ -1,0 +1,46 @@
+#!/bin/sh
+# ADR-008 §4: create the guardiand system user/group and the two disjoint
+# state directories. guardian-helper runs as root (ADR-002, unchanged by
+# G9) so no system user is created for it.
+#
+# ADR-008 §5: install the real XDG autostart entry at
+# /etc/xdg/autostart/guardian-indicator.desktop from the package's own
+# staged copy under /usr/share/guardian/xdg-autostart/. This is done
+# here, at configure time, rather than by shipping the file directly
+# under /etc/ in the package's build-time file tree, because debhelper
+# unconditionally treats every regular file staged under /etc/ as a
+# conffile -- which `apt remove` then preserves. This file is package-
+# owned vendor session integration, not administrator configuration
+# Guardian intends to survive removal, so it must not be a conffile;
+# copying it into place here keeps the real installed path exactly at
+# the standard XDG vendor-autostart location while postrm (below)
+# removes it explicitly on both remove and purge.
+set -e
+
+case "$1" in
+    configure)
+        if ! getent passwd guardiand >/dev/null 2>&1; then
+            adduser --system --group --no-create-home \
+                --home /var/lib/guardian/daemon guardiand
+        fi
+
+        install -d -m0750 -o guardiand -g guardiand /var/lib/guardian/daemon
+        install -d -m0750 -o root -g root /var/lib/guardian/helper
+
+        install -D -m0644 \
+            /usr/share/guardian/xdg-autostart/guardian-indicator.desktop \
+            /etc/xdg/autostart/guardian-indicator.desktop
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

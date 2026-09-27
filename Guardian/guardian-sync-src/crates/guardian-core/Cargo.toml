@@ -1,0 +1,18 @@
+[package]
+name = "guardian-core"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+guardian-provider-api = { path = "../guardian-provider-api" }
+zbus.workspace = true
+rustix = { version = "1.1.4", features = ["event", "fs", "time"] }
+
+[dev-dependencies]
+async-io = "2.6.0"
+guardian-testkit = { path = "../guardian-testkit" }
+
+[lints]
+workspace = true

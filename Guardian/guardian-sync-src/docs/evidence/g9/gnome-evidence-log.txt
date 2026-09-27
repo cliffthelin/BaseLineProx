@@ -1,0 +1,58 @@
+G9 real GNOME 50 / Wayland evidence
+=====================================
+
+Setup: installed ubuntu-desktop-minimal (real gnome-shell 50, mutter,
+gdm3), switched from lightdm to gdm with AutomaticLoginEnable for user
+ubuntu, AutomaticLogin=ubuntu, WaylandEnable=true, autologin-session
+ubuntu (GNOME). Real dummy-KMS/software-rendered X session used only
+as an Xwayland compatibility shim to capture screenshots (import
+against the specific Xwayland window ID) since GNOME Shell's own
+org.gnome.Shell.Screenshot D-Bus API returns AccessDenied when called
+from outside the graphical session's own cgroup even after joining the
+session-N.scope cgroup manually -- a real GNOME hardening restriction,
+not a defect in guardian.
+
+1. guardian-gui: launched with GDK_BACKEND=x11 against Xwayland (DISPLAY=:0,
+   XAUTHORITY=mutter's own Xwayland auth file) to make the window
+   X11-capturable; screenshot confirms live daemon data rendering
+   correctly (gnome-guardian-gui.png). Notably accounts.user.cache
+   shows availability=available/health=healthy here, vs
+   unavailable/error on the earlier Xfce run -- a real difference
+   because accounts-daemon is now actually present from the full
+   desktop install, not a fabricated inconsistency.
+
+2. guardian-indicator: real StatusNotifierItem registered
+   (org.kde.StatusNotifierItem-<pid>-N) with live Title/IconName
+   matching real daemon capability health, same as the Xfce test.
+
+3. IMPORTANT REAL FINDING (now fixed): on a genuinely fresh boot ->
+   GDM autologin -> gnome-session autostart of
+   /etc/xdg/autostart/guardian-indicator.desktop, the FIRST
+   tray.spawn() attempt failed with
+   Watcher(ServiceUnknown("org.kde.StatusNotifierWatcher")) --
+   GNOME's watcher-providing extension had not registered on the
+   session bus yet when guardian-indicator autostarted in parallel
+   with many other autostart apps. The original code exited
+   immediately (std::process::exit(1)) on any spawn failure, so the
+   real installed indicator was silently absent after every real
+   cold-boot login on GNOME.
+
+   Fixed in crates/guardian-indicator/src/main.rs: tray.spawn() is now
+   retried up to 15 times with a 2s delay (spawn_tray_with_retry),
+   logging each attempt, only exiting after genuinely exhausting
+   retries. Re-verified end to end: rebuilt, repackaged into a fresh
+   .deb, reinstalled, real VM reboot, real GDM autologin, real
+   gnome-session autostart -- journalctl shows
+   "tray.spawn() attempt 1/15 failed: Watcher(ServiceUnknown(...))"
+   followed by a successful registration
+   (org.kde.StatusNotifierItem-2045-2 present on the session bus,
+   process alive and stable). This was a real defect only a real
+   fresh-boot GNOME test could have caught -- neither the earlier Xfce
+   test (indicator launched manually mid-session, watcher already
+   present) nor unit tests would have surfaced it.
+
+4. Session teardown re-verified on GNOME: real gdm-autologin session
+   (Type=wayland, Service=gdm-autologin), sudo loginctl
+   terminate-session confirmed guardian-indicator is cleanly killed
+   along with the rest of the session -- no orphan, consistent with
+   the earlier Xfce/lightdm result.

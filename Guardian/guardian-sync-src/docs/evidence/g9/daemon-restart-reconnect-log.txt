@@ -1,0 +1,25 @@
+G9 real daemon-restart-while-indicator-alive evidence
+========================================================
+
+Real StatusNotifierItem: org.kde.StatusNotifierItem-11451-1
+guardian-indicator PID 11451 throughout this entire sequence -- the
+indicator process was never restarted at any point.
+
+1. Before: sudo systemctl stop guardian-daemon.
+2. Waited a full poll cycle (35s > the 30s watch_daemon interval).
+3. Queried real Title/IconName via D-Bus Properties.Get:
+     Title = "Guardian — Daemon Unavailable"
+     IconName = "dialog-error"
+   Confirmed guardian-indicator PID unchanged (11451).
+4. sudo systemctl start guardian-daemon.
+5. Waited a full poll cycle again.
+6. Queried real Title/IconName again:
+     Title = "Guardian — Degraded"
+     IconName = "dialog-warning"
+   Confirmed guardian-indicator PID STILL unchanged (11451) -- this is
+   the real daemon reconnecting into the same live indicator process,
+   not a relaunch.
+
+This directly satisfies the contract's "reconnect after daemon restart"
+and "daemon unavailable shows degraded state" required tests (§30),
+for the real production binary against a real daemon process restart.

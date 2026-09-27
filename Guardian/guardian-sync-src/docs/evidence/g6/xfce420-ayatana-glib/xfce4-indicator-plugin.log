@@ -1,0 +1,9 @@
+DEBUG      libindicator-plugin       Looking at Module: libayatana-application.so
+DEBUG      libindicator-plugin       Loading Module: libayatana-application.so
+DEBUG      libindicator-plugin       Load indicator: libayatana-application.so
+WARNING    libindicator-plugin       Error opening directory "/usr/share/ayatana/indicators": No such file or directory
+DEBUG      Ayatana-Indicator-Application Connected to Application Indicator Service.
+DEBUG      Ayatana-Indicator-Application Request current apps
+DEBUG      Ayatana-Indicator-Application Building new application entry: :1.60  with icon: emblem-default at position 0
+DEBUG      libindicator-plugin       Entry added for io=libayatana-application.so
+WARNING    LIBDBUSMENU-GLIB          Getting layout failed: GDBus.Error:org.freedesktop.DBus.Error.UnknownMethod: No such interface "com.canonical.dbusmenu" on object at path /org/ayatana/appindicator/guardian_g6_evidence_ayatana_glib

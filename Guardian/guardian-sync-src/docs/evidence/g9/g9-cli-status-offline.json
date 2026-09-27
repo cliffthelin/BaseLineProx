@@ -1,0 +1,2 @@
+{"error":"guardian-daemon unavailable: org.freedesktop.DBus.Error.ServiceUnknown: The name io.github.cliffthelin.Guardian1 was not provided by any .service files"}
+exit=2

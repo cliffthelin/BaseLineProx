@@ -1,0 +1,15 @@
+guardian (0.1.0-1) unstable; urgency=medium
+
+  * Initial G9 packaging candidate: guardian-daemon, guardian-helper,
+    and the four read-only D-Bus clients (guardian CLI, guardian-tui,
+    guardian-gui, guardian-indicator).
+  * systemd units, D-Bus system policy, and polkit policy promoted
+    verbatim from G7's evidenced artifacts per ADR-008 (only the
+    ExecStart= path changed, /usr/local/bin -> /usr/bin).
+  * guardian-indicator autostarts via /etc/xdg/autostart per ADR-008 §5.
+  * guardiand system user and disjoint /var/lib/guardian/{daemon,helper}
+    state directories created in postinst; purge removes both and the
+    guardiand user per ADR-008 §6.
+  * Not yet independently audited or VM-evidenced; not yet tagged.
+
+ -- Cliff <cliffthelin@gmail.com>  Wed, 02 Sep 2026 04:36:08 -0600

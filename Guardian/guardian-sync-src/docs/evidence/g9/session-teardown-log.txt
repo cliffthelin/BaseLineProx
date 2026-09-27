@@ -1,0 +1,29 @@
+G9 real logind session-teardown evidence for guardian-indicator
+=================================================================
+
+Setup: lightdm (real display manager, seat0, dummy X driver) with
+autologin-user=ubuntu, autologin-session=xfce, so a real
+systemd-logind session/scope is created for the login (unlike an
+earlier manual Xvfb+startxfce4 test over SSH, which had NO logind
+session backing it and left guardian-indicator orphaned under PID 1
+after xfce4-session died -- that earlier result was a test-harness
+artifact, not a packaging defect, and is superseded by this test).
+
+guardian-indicator was installed via the real ADR-008 XDG autostart
+mechanism: /etc/xdg/autostart/guardian-indicator.desktop.
+
+1. Session created: session-79.scope on seat0, Service=lightdm-autologin,
+   Desktop=xfce. guardian-indicator (PID 27287) confirmed via
+   `loginctl session-status 79` to be a member of session-79.scope,
+   spawned as a child of xfce4-session (PID 27049) via autostart.
+
+2. `sudo loginctl terminate-session 79` (real session termination).
+
+3. After termination: `ps -o pid,cmd -C guardian-indicator` returns
+   NO rows -- guardian-indicator was torn down along with the rest of
+   the session, not left as an orphaned background process.
+
+This confirms ADR-006 forward constraint / ADR-008 Decision 5:
+guardian-indicator, launched via XDG autostart, is a normal member of
+the login session and is cleaned up by systemd-logind session
+teardown on logout, never a detached background process.

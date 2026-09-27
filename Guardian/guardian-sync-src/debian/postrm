@@ -1,0 +1,42 @@
+#!/bin/sh
+# ADR-008 §6: `remove` preserves /var/lib/guardian/{daemon,helper} and the
+# guardiand system user. `purge` additionally deletes both state
+# directories and removes guardiand. Never touches anything outside
+# Guardian's own package-owned paths.
+#
+# ADR-008 §5: the real /etc/xdg/autostart/guardian-indicator.desktop is
+# installed by postinst rather than shipped directly under /etc/ in the
+# package's file tree (see postinst for why), so it is never a
+# conffile and dpkg will not remove it automatically -- remove it here
+# ourselves, on both `remove` and `purge`, matching ADR-008's explicit
+# requirement that removal delete the autostart entry alongside the
+# binaries/units/policy it ships with.
+set -e
+
+case "$1" in
+    remove|purge)
+        rm -f /etc/xdg/autostart/guardian-indicator.desktop
+        ;;
+esac
+
+case "$1" in
+    purge)
+        rm -rf /var/lib/guardian/daemon /var/lib/guardian/helper
+
+        if getent passwd guardiand >/dev/null 2>&1; then
+            deluser --system guardiand || true
+        fi
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,149 @@
+Sep 01 12:28:23 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:28:23 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:28:23 guardian-g7-vm guardian-helper[5759]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.30
+Sep 01 12:28:23 guardian-g7-vm guardian-daemon[5758]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.31
+Sep 01 12:29:14 guardian-g7-vm guardian-daemon[5758]: [guardian-daemon] recorder: len=1 dropped=0 policy=Normal free_space=Sufficient
+Sep 01 12:29:14 guardian-g7-vm guardian-daemon[5758]: [guardian-daemon] recorder: len=2 dropped=0 policy=Normal free_space=Sufficient
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:31:57 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:31:57 guardian-g7-vm guardian-helper[8306]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.45
+Sep 01 12:31:57 guardian-g7-vm guardian-daemon[8305]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.46
+Sep 01 12:32:03 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:32:03 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:32:03 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:32:03 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:32:04 guardian-g7-vm guardian-helper[8440]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.47
+Sep 01 12:32:14 guardian-g7-vm systemd[1]: guardian-helper.service: Main process exited, code=killed, status=9/KILL
+Sep 01 12:32:14 guardian-g7-vm systemd[1]: guardian-helper.service: Failed with result 'signal'.
+Sep 01 12:32:14 guardian-g7-vm systemd[1]: guardian-helper.service: Scheduled restart job, restart counter is at 1.
+Sep 01 12:32:14 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:32:14 guardian-g7-vm guardian-helper[8518]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:32:14 guardian-g7-vm guardian-helper[8518]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.50
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:32:38 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:32:38 guardian-g7-vm guardian-daemon[8704]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.51
+Sep 01 12:32:38 guardian-g7-vm guardian-helper[8710]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:32:38 guardian-g7-vm guardian-helper[8710]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.52
+Sep 01 12:32:45 guardian-g7-vm guardian-daemon[8704]: [guardian-daemon] recorder: len=1 dropped=0 policy=Normal free_space=Sufficient
+Sep 01 12:32:48 guardian-g7-vm systemd[1]: guardian-daemon.service: Main process exited, code=killed, status=9/KILL
+Sep 01 12:32:48 guardian-g7-vm systemd[1]: guardian-daemon.service: Failed with result 'signal'.
+Sep 01 12:32:48 guardian-g7-vm systemd[1]: guardian-daemon.service: Scheduled restart job, restart counter is at 1.
+Sep 01 12:32:48 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:32:48 guardian-g7-vm guardian-daemon[8786]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-6410e36e725b state=Applying classification=SafeToResume
+Sep 01 12:32:48 guardian-g7-vm guardian-daemon[8786]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.55
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:00 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:00 guardian-g7-vm guardian-daemon[8921]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-6410e36e725b state=Applying classification=SafeToResume
+Sep 01 12:33:00 guardian-g7-vm guardian-daemon[8921]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.56
+Sep 01 12:33:00 guardian-g7-vm guardian-helper[8927]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:33:00 guardian-g7-vm guardian-helper[8927]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.57
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:07 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:07 guardian-g7-vm guardian-daemon[9001]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-6410e36e725b state=Applying classification=SafeToResume
+Sep 01 12:33:07 guardian-g7-vm guardian-daemon[9001]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.58
+Sep 01 12:33:07 guardian-g7-vm guardian-helper[9007]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:33:07 guardian-g7-vm guardian-helper[9007]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.59
+Sep 01 12:33:18 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:33:18 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:33:18 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:18 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:18 guardian-g7-vm guardian-helper[9098]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:33:18 guardian-g7-vm guardian-helper[9098]: [guardian-helper] recovery: transaction_id=40008000-0000-0001-18d1-65377cb4d2a1 state=Observing classification=MustObserve
+Sep 01 12:33:18 guardian-g7-vm guardian-helper[9098]: [guardian-helper] transaction 40008000-0000-0001-18d1-65377cb4d2a1 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:18 guardian-g7-vm guardian-helper[9098]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-653949f4935c state=Observing classification=MustObserve
+Sep 01 12:33:18 guardian-g7-vm guardian-helper[9098]: [guardian-helper] transaction 40008000-0000-0000-18d1-653949f4935c requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:18 guardian-g7-vm guardian-helper[9098]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.62
+Sep 01 12:33:24 guardian-g7-vm guardian-daemon[9001]: [guardian-daemon] recorder: len=1 dropped=0 policy=Normal free_space=Sufficient
+Sep 01 12:33:24 guardian-g7-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 12:33:24 guardian-g7-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 12:33:24 guardian-g7-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:24 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:24 guardian-g7-vm guardian-daemon[9176]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-653314c5d86f state=Observing classification=MustObserve
+Sep 01 12:33:24 guardian-g7-vm guardian-daemon[9176]: [guardian-daemon] transaction 40008000-0000-0000-18d1-653314c5d86f requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:24 guardian-g7-vm guardian-daemon[9176]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-6410e36e725b state=Applying classification=SafeToResume
+Sep 01 12:33:24 guardian-g7-vm guardian-daemon[9176]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.65
+Sep 01 12:33:25 guardian-g7-vm guardian-daemon[9176]: [guardian-daemon] recorder: len=1 dropped=0 policy=Normal free_space=Sufficient
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:33:32 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] recovery: transaction_id=40008000-0000-0001-18d1-65377cb4d2a1 state=Observing classification=MustObserve
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] transaction 40008000-0000-0001-18d1-65377cb4d2a1 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-6592bc4c5221 state=Observing classification=MustObserve
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] transaction 40008000-0000-0000-18d1-6592bc4c5221 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-653949f4935c state=Observing classification=MustObserve
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] transaction 40008000-0000-0000-18d1-653949f4935c requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:32 guardian-g7-vm guardian-helper[9268]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.69
+Sep 01 12:33:32 guardian-g7-vm guardian-daemon[9267]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-65c25432c421 state=Observing classification=MustObserve
+Sep 01 12:33:32 guardian-g7-vm guardian-daemon[9267]: [guardian-daemon] transaction 40008000-0000-0000-18d1-65c25432c421 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:32 guardian-g7-vm guardian-daemon[9267]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-653314c5d86f state=Observing classification=MustObserve
+Sep 01 12:33:32 guardian-g7-vm guardian-daemon[9267]: [guardian-daemon] transaction 40008000-0000-0000-18d1-653314c5d86f requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:33:32 guardian-g7-vm guardian-daemon[9267]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-6410e36e725b state=Applying classification=SafeToResume
+Sep 01 12:33:32 guardian-g7-vm guardian-daemon[9267]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.70
+Sep 01 12:34:11 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:34:11 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:34:11 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:34:11 guardian-g7-vm guardian-daemon[9267]: [guardian-daemon] recorder: len=1 dropped=0 policy=Normal free_space=Sufficient
+Sep 01 12:34:11 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] recovery: transaction_id=40008000-0000-0001-18d1-65377cb4d2a1 state=Observing classification=MustObserve
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] transaction 40008000-0000-0001-18d1-65377cb4d2a1 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-6592bc4c5221 state=Observing classification=MustObserve
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] transaction 40008000-0000-0000-18d1-6592bc4c5221 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-653949f4935c state=Observing classification=MustObserve
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] transaction 40008000-0000-0000-18d1-653949f4935c requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:11 guardian-g7-vm guardian-helper[9427]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.74
+Sep 01 12:34:28 guardian-g7-vm systemd[1]: Stopping guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process)...
+Sep 01 12:34:28 guardian-g7-vm systemd[1]: Stopping guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process)...
+Sep 01 12:34:28 guardian-g7-vm systemd[1]: guardian-daemon.service: Deactivated successfully.
+Sep 01 12:34:28 guardian-g7-vm systemd[1]: Stopped guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:34:28 guardian-g7-vm systemd[1]: guardian-helper.service: Deactivated successfully.
+Sep 01 12:34:28 guardian-g7-vm systemd[1]: Stopped guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+-- Boot ef408fa2def54287a3f754270c44f655 --
+Sep 01 12:34:38 guardian-g7-vm systemd[1]: Started guardian-daemon.service - Guardian production daemon (unprivileged core/monitoring process).
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-6217f350d6a0 state=Observing classification=MustObserve
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] transaction 40008000-0000-0000-18d1-6217f350d6a0 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-65c25432c421 state=Observing classification=MustObserve
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] transaction 40008000-0000-0000-18d1-65c25432c421 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-653314c5d86f state=Observing classification=MustObserve
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] transaction 40008000-0000-0000-18d1-653314c5d86f requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] recovery: transaction_id=40008000-0000-0000-18d1-6410e36e725b state=Applying classification=SafeToResume
+Sep 01 12:34:38 guardian-g7-vm guardian-daemon[1069]: [guardian-daemon] serving io.github.cliffthelin.Guardian1 at /io/github/cliffthelin/Guardian1 and /io/github/cliffthelin/Guardian1/Transactions, unique_name=:1.5
+Sep 01 12:34:39 guardian-g7-vm systemd[1]: Started guardian-helper.service - Guardian production helper (narrow privileged Class A mutation process).
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-66f11dc3116a state=Applying classification=SafeToResume
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] recovery: transaction_id=40008000-0000-0001-18d1-65377cb4d2a1 state=Observing classification=MustObserve
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] transaction 40008000-0000-0001-18d1-65377cb4d2a1 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-6592bc4c5221 state=Observing classification=MustObserve
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] transaction 40008000-0000-0000-18d1-6592bc4c5221 requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] recovery: transaction_id=40008000-0000-0000-18d1-653949f4935c state=Observing classification=MustObserve
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] transaction 40008000-0000-0000-18d1-653949f4935c requires attention: MustObserve (not auto-resumed by this evidence build)
+Sep 01 12:34:39 guardian-g7-vm guardian-helper[1238]: [guardian-helper] serving io.github.cliffthelin.GuardianHelper1 at /io/github/cliffthelin/GuardianHelper1, unique_name=:1.12

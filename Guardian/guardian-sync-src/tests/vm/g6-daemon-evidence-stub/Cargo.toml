@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "g6-daemon-evidence-stub"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "g6-daemon-evidence-stub"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "signal"] }
+zbus = "5"

@@ -1,0 +1,490 @@
+candidate_head=196523fcf7a1df14818236a371f2b85eafebdd47
+source_digest=fa4d24ae528b46684f343b06ade34244d3495a8fb820fbc721672ddfa0b60064
+Linux guardian-g8-repair 7.0.0-30-generic #30-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 31 18:22:54 UTC 2026 x86_64 GNU/Linux
+rustc 1.93.1 (01f6ddf75 2026-02-11) (built from a source tarball)
+cargo 1.93.1 (083ac5135 2025-12-15) (built from a source tarball)
+accountsservice	23.13.9-8ubuntu5.2
+python3-dbusmock	0.38.1-1
+udisks2	2.10.91-1ubuntu2.1
+upower	1.91.1-1
+command=cargo_fmt
+command=cargo_clippy
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+command=cargo_build
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+command=cargo_test_workspace
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/debug/deps/guardian_core-66586fd6f105ccf6)
+
+running 55 tests
+test providers::accounts::tests::invalid_session_id_is_rejected_before_any_write ... ok
+test providers::accounts::tests::list_cached_users_failure_is_provider_unavailable_not_malformed ... ok
+test providers::accounts::tests::list_cached_users_signature_mismatch_is_malformed_not_provider_unavailable ... ok
+test providers::accounts::tests::nonexistent_directory_yields_empty_not_an_error ... ok
+test providers::accounts::tests::valid_session_id_validates_successfully ... ok
+test providers::accounts::tests::scans_valid_desktop_files_and_skips_unreadable_ones ... ok
+test providers::accounts::tests::wayland_directory_is_marked_correctly ... ok
+test providers::logind::tests::empty_inhibitor_list_normalizes_to_empty_and_is_not_an_error ... ok
+test providers::logind::tests::list_inhibitors_signature_mismatch_is_malformed_not_provider_unavailable ... ok
+test providers::logind::tests::list_inhibitors_failure_is_provider_unavailable_not_malformed ... ok
+test providers::logind::tests::multiple_inhibitors_are_all_preserved_independently ... ok
+test providers::logind::tests::one_inhibitor_normalizes_every_required_field ... ok
+test providers::psi::tests::malformed_present_file_is_a_real_parse_error_not_silently_ignored ... ok
+test providers::psi::tests::accepted_monitor_crossing_becomes_a_guardian_event ... ok
+test providers::psi::tests::missing_file_is_unavailable_not_a_parse_error ... ok
+test providers::psi::tests::path_for_each_resource_kind_matches_the_real_kernel_layout ... ok
+test providers::psi::tests::reads_a_real_present_file_through_the_unmodified_g5_model ... ok
+test providers::psi::tests::trigger_registration_writes_kernel_abi_payload_with_nul_terminator ... ok
+test providers::psi::tests::repeated_wakes_emit_only_real_crossings ... ok
+test providers::psi::tests::unavailable_and_malformed_sources_cannot_generate_events ... ok
+test providers::registry::tests::absent_read_is_unavailable_and_valid_read_is_healthy ... ok
+test providers::registry::tests::live_malformed_read_is_degraded_and_never_healthy ... ok
+test providers::registry::tests::no_capability_this_module_produces_ever_claims_write_support ... ok
+test providers::registry::tests::probe_record_down_is_unavailable_never_healthy ... ok
+test providers::registry::tests::probe_record_up_is_available_and_healthy ... ok
+test providers::registry::tests::psi_capabilities_never_marks_a_genuinely_absent_resource_as_a_hard_error ... ok
+test providers::systemd::tests::classify_load_unit_error_treats_absent_provider_as_unavailable ... ok
+test providers::systemd::tests::classify_load_unit_error_recognizes_no_such_unit ... ok
+test providers::systemd::tests::classify_load_unit_error_treats_live_failures_as_malformed ... ok
+test providers::systemd::tests::missing_field_is_a_real_typed_error_not_a_default ... ok
+test providers::systemd::tests::normalizes_a_complete_real_property_map ... ok
+test providers::tests::fdo_service_unknown_is_provider_absent ... ok
+test providers::tests::invalid_reply_is_not_provider_absent ... ok
+test providers::tests::method_error_with_service_unknown_name_is_provider_absent ... ok
+test providers::tests::method_error_with_unrelated_name_is_not_provider_absent ... ok
+test providers::udisks::tests::can_power_off_false_rejects ... ok
+test providers::udisks::tests::changing_dev_name_does_not_break_identity_across_two_snapshots ... ok
+test providers::udisks::tests::empty_provider_id_falls_back_to_stable_drive_object_path ... ok
+test providers::udisks::tests::get_managed_objects_unknown_method_is_malformed_not_provider_unavailable ... ok
+test providers::udisks::tests::get_managed_objects_failure_is_provider_unavailable_not_malformed ... ok
+test providers::udisks::tests::identity_is_the_stable_id_never_the_dev_node ... ok
+test providers::udisks::tests::not_user_initiated_rejects_before_anything_else ... ok
+test providers::udisks::tests::removal_between_validation_and_apply_rejects ... ok
+test providers::udisks::tests::siblings_are_visible_for_a_shared_physical_parent ... ok
+test providers::udisks::tests::stale_identity_rejects ... ok
+test providers::udisks::tests::topology_preserves_drive_block_relationship ... ok
+test providers::udisks::tests::tracker_emits_removal_and_stale_reference_rejects ... ok
+test providers::udisks::tests::tracker_emits_reenumeration_for_same_identity_with_new_node ... ok
+test providers::udisks::tests::zero_siblings_is_a_real_distinct_case ... ok
+test providers::udisks::tests::valid_request_discloses_siblings_before_any_authorization ... ok
+test providers::upower::tests::display_device_live_failure_is_malformed_not_provider_unavailable ... ok
+test providers::upower::tests::enumerate_devices_failure_is_provider_unavailable_not_malformed ... ok
+test providers::upower::tests::enumerate_devices_signature_mismatch_is_malformed_not_provider_unavailable ... ok
+test providers::upower::tests::missing_field_is_a_real_typed_error ... ok
+test providers::upower::tests::normalizes_a_complete_display_device ... ok
+
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/arbitration_contract.rs (target/debug/deps/arbitration_contract-4d210ce2529c02fb)
+
+running 14 tests
+test ambiguity_is_not_resolved_by_lexicographically_smaller_provider_id ... ok
+test arbitration_decision_carries_no_field_resembling_authorization_proof ... ok
+test decision_reason_is_never_an_empty_placeholder ... ok
+test deterministic_regardless_of_candidate_order ... ok
+test deterministic_across_many_construction_orders ... ok
+test external_writer_is_represented_distinctly_and_denies_write ... ok
+test guardian_owned_writer_is_distinguishable_from_provider_owned_writer ... ok
+test p0_arb_001_single_writer_two_candidates_cannot_both_win ... ok
+test p0_arb_002_ambiguous_equal_priority_fails_closed ... ok
+test p0_arb_003_owner_change_invalidates_stale_arbitration_state ... ok
+test p0_arb_004_rollback_kind_is_disclosed_in_the_decision ... ok
+test provider_absence_produces_no_writer_not_a_guessed_owner ... ok
+test read_only_observer_is_never_selected_as_writer ... ok
+test unknown_authorization_ownership_fails_closed_even_with_an_unambiguous_winner ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authorization_contract.rs (target/debug/deps/authorization_contract-5132e87285bf26cc)
+
+running 10 tests
+test all_four_g1_test_actions_have_the_exact_polkit_action_ids_from_the_tdd_contract ... ok
+test authorized_outcome_maps_to_no_error_at_all ... ok
+test error_mapping_interaction_disallowed_maps_to_not_authorized_not_a_new_error ... ok
+test error_mapping_explicit_denial_maps_to_not_authorized ... ok
+test error_mapping_no_authentication_agent_maps_to_authentication_unavailable ... ok
+test guardian_dbus_error_type_used_by_the_mapping_is_the_real_public_error_type ... ok
+test infrastructure_internal_maps_to_internal ... ok
+test infrastructure_provider_unavailable_maps_to_provider_unavailable_never_authentication_unavailable ... ok
+test p0_auth_001_authorization_request_has_no_field_a_client_claim_could_occupy ... ok
+test real_polkit_authorizer_maps_unreachable_provider_to_provider_unavailable ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/budget_contract.rs (target/debug/deps/budget_contract-4135435ac2e69528)
+
+running 10 tests
+test no_permitted_alternative_falls_back_to_denied ... ok
+test budget_decision_carries_no_authorization_arbitration_or_transaction_vocabulary ... ok
+test nominal_io_pressure_permits_high_io_write_cost ... ok
+test nominal_memory_pressure_permits_high_memory_cost ... ok
+test p0_diag_001_critical_io_pressure_vetoes_high_io_write_cost ... ok
+test p0_diag_003_disk_full_forces_memory_first_recorder_policy ... ok
+test p0_diag_002_critical_memory_pressure_vetoes_high_memory_cost ... ok
+test p0_diag_004_denial_carries_a_distinguishing_reason ... ok
+test permitted_request_never_consults_alternatives ... ok
+test p0_diag_005_selects_cheapest_permitted_alternative_not_by_accident_of_order ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/error_contract.rs (target/debug/deps/error_contract-6045dbcf57c915e0)
+
+running 1 test
+test p0_dbus_004_every_error_has_the_exact_native_dbus_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/event_contract.rs (target/debug/deps/event_contract-de6bcc02a20865b9)
+
+running 4 tests
+test normalize_key_is_pure_and_deterministic ... ok
+test p0_evt_001_monotonic_ordering_survives_backward_wall_clock_adjustment ... ok
+test p0_evt_002_equivalent_raw_variants_share_a_normalized_key ... ok
+test p0_evt_003_normalization_preserves_each_events_raw_reference ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/incident_contract.rs (target/debug/deps/incident_contract-9be7fee2008597ad)
+
+running 6 tests
+test an_incident_can_close_without_a_known_root_cause ... ok
+test confidence_changes_are_recorded_not_silently_overwritten ... ok
+test correlation_can_be_updated_as_new_evidence_arrives ... ok
+test incident_ids_do_not_regenerate_across_equivalent_constructions ... ok
+test linking_the_same_event_twice_does_not_duplicate_the_reference ... ok
+test p0_evt_004_multiple_events_link_into_one_incident_without_deletion ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/psi_contract.rs (target/debug/deps/psi_contract-b845ee6ebbe49b36)
+
+running 14 tests
+test cpu_lacking_a_full_line_parses_as_a_legitimate_distinct_state ... ok
+test malformed_field_within_an_otherwise_valid_line_is_a_typed_error ... ok
+test malformed_line_alongside_an_otherwise_valid_some_line_is_still_rejected ... ok
+test malformed_line_is_a_typed_error_never_a_panic_never_zero_pressure ... ok
+test missing_required_field_is_a_typed_error ... ok
+test non_monotonic_total_is_detected_not_assumed ... ok
+test monotonic_total_sequence_is_accepted ... ok
+test present_but_malformed_source_still_surfaces_a_real_parse_error ... ok
+test severity_classification_thresholds ... ok
+test threshold_event_triggers_exactly_on_crossing ... ok
+test threshold_monitor_teardown_stops_further_events ... ok
+test threshold_monitor_api_has_no_polling_method_only_push_based_observe ... ok
+test unavailable_source_is_distinct_from_present_text ... ok
+test valid_some_and_full_parse ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/recorder_contract.rs (target/debug/deps/recorder_contract-13b785e9f79711d5)
+
+running 8 tests
+test eviction_is_deterministic_oldest_first ... ok
+test p0_rec_001_buffer_never_exceeds_configured_capacity_at_any_point ... ok
+test p0_rec_002_dropped_counter_increments_exactly_once_per_eviction ... ok
+test p0_rec_003_persistence_failure_never_blocks_or_crashes_the_record_loop ... ok
+test p0_rec_004_removable_critical_target_is_rejected_fixed_target_is_accepted ... ok
+test retains_monotonic_timestamp_ordering ... ok
+test zero_capacity_is_rejected_at_construction ... ok
+test capacity_is_a_real_parameter_not_a_hard_coded_constant ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/risk_contract.rs (target/debug/deps/risk_contract-2012b1328d579695)
+
+running 1 test
+test risk_ladder_orders_from_observe_to_very_high ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transaction_apply_persistence_contract.rs (target/debug/deps/transaction_apply_persistence_contract-74f6733791780fa7)
+
+running 8 tests
+test crash_boundary_2_durable_intent_before_provider_invocation_is_safe_to_resume_not_successful ... ok
+test crash_boundary_1_persistence_failure_before_durable_intent_blocks_provider_call ... ok
+test crash_boundary_3_provider_may_have_run_outcome_not_persisted_requires_observe ... ok
+test crash_boundary_5_corrupt_record_never_reaches_safe_to_resume_or_committed ... ok
+test crash_boundary_4_apply_success_durable_outcome_survives_independent_reload ... ok
+test crash_boundary_6_persisted_nonterminal_record_reload_and_classify_as_one_flow ... ok
+test persist_durability_barrier_leaves_no_temp_file_and_is_independently_loadable ... ok
+test persisted_last_observation_changes_recovery_classification_from_disk ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transaction_engine_contract.rs (target/debug/deps/transaction_engine_contract-7a28a81a6b143a83)
+
+running 43 tests
+test arbitration_result_revision_is_populated_by_the_engine_not_the_caller ... ok
+test authorized_outcome_never_implies_a_specific_caller_was_verified_by_core ... ok
+test best_effort_rollback_confirmed_reaches_rolled_back ... ok
+test best_effort_rollback_unconfirmed_reaches_rollback_failed_not_rolled_back ... ok
+test cancellation_requested_before_apply_reaches_cancelled_no_apply_ever_occurs ... ok
+test cancellation_or_expiry_requested_then_transaction_reaches_committed_stands ... ok
+test cancellation_requested_during_rolling_back_does_not_bypass_rollback_reconciliation ... ok
+test confirmed_failed_and_attempted_unconfirmed_are_distinguishable_at_rollback_result_level ... ok
+test cancellation_requested_during_applying_does_not_short_circuit_reconciliation ... ok
+test emulated_rollback_confirmed_reaches_rolled_back ... ok
+test expiry_requested_before_apply_reaches_expired_no_apply_ever_occurs ... ok
+test expiry_requested_during_applying_does_not_short_circuit_reconciliation ... ok
+test expiry_requested_during_rolling_back_does_not_bypass_rollback_reconciliation ... ok
+test finding1_apply_from_bare_applying_state_with_no_apply_record_is_rejected ... ok
+test finding1_apply_from_created_state_is_rejected_before_any_provider_call ... ok
+test finding1_apply_from_validating_state_is_rejected_before_any_provider_call ... ok
+test finding1_apply_from_rejected_terminal_state_is_rejected_before_any_provider_call ... ok
+test finding2_recovered_authorized_record_with_stale_revision_cannot_reach_provider_mutation ... ok
+test finding1_duplicate_apply_after_confirmed_failure_no_mutation_is_rejected_state_stays_failed ... ok
+test known_completed_apply_is_not_re_invoked_on_retry ... ok
+test p0_txn_001_happy_path_reaches_committed_only_through_valid_transitions ... ok
+test p0_txn_002_invalid_precondition_ends_in_rejected_no_apply_occurs ... ok
+test p0_txn_002_unknown_privilege_requirement_is_rejected_before_apply_nb1 ... ok
+test p0_txn_003_denied_authorization_performs_no_apply ... ok
+test p0_txn_004_partial_uncertain_apply_failure_enters_rolling_back ... ok
+test p0_txn_004_clean_apply_failure_reaches_failed_no_mutation ... ok
+test p0_txn_005_provider_success_followed_by_failed_observation_does_not_commit ... ok
+test p0_txn_006_native_rollback_confirmed_reaches_rolled_back ... ok
+test p0_txn_007_explicit_rollback_failure_reaches_rollback_failed ... ok
+test p0_txn_008_committed_transaction_cannot_re_enter_applying ... ok
+test p0_txn_010_provider_identity_change_between_validate_and_snapshot_blocks_apply ... ok
+test p0_txn_009_same_idempotency_key_never_invokes_apply_twice_after_response_loss ... ok
+test p0_txn_012_client_disconnect_does_not_lose_the_audit_record ... ok
+test provider_disappearing_between_validate_and_apply_is_detected ... ok
+test provider_apply_unsupported_is_treated_as_clean_failure_not_silently_ignored ... ok
+test provider_observe_unsupported_is_treated_as_ambiguous_never_as_success ... ok
+test revision_change_via_authoritative_state_source_blocks_apply_not_via_field_mutation ... ok
+test revision_unchanged_between_validate_and_apply_proceeds ... ok
+test provider_rollback_unsupported_reaches_rollback_failed_via_not_supported ... ok
+test snapshot_failure_prevents_apply ... ok
+test rollback_kind_none_never_reaches_rolled_back ... ok
+test unknown_authorization_ownership_is_also_rejected_before_apply ... ok
+test transaction_record_carries_no_field_resembling_authorization_proof ... ok
+
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transaction_id_contract.rs (target/debug/deps/transaction_id_contract-d8274a0fdf55d9b6)
+
+running 4 tests
+test generated_ids_are_unique_and_well_formed ... ok
+test display_and_new_round_trip ... ok
+test rejects_capability_id_style_dotted_names ... ok
+test rejects_uppercase_and_malformed_groups ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transaction_persistence_contract.rs (target/debug/deps/transaction_persistence_contract-88ce5b999c492d68)
+
+running 8 tests
+test corrupt_record_surfaces_as_corrupt_never_silently_safe ... ok
+test atomic_persist_then_load_round_trips ... ok
+test missing_record_is_not_found_not_corrupt ... ok
+test persist_never_leaves_a_partial_file_at_the_final_path ... ok
+test p0_txn_011_restart_load_reads_back_all_records_corrupt_one_does_not_block_others ... ok
+test unrecognized_rollback_kind_wire_token_is_a_typed_parse_failure ... ok
+test unsupported_schema_version_fails_closed_not_misinterpreted ... ok
+test rollback_outcome_and_rollback_kind_round_trip_through_persistence ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transaction_recovery_contract.rs (target/debug/deps/transaction_recovery_contract-3686026fad0f0609)
+
+running 10 tests
+test already_committed_when_state_is_committed ... ok
+test must_observe_when_apply_confirmed_success_but_not_yet_observed ... ok
+test must_rollback_when_observation_determined_postcondition_not_met ... ok
+test requires_human_recovery_when_rollback_failed ... ok
+test must_rollback_when_rolling_back_was_interrupted ... ok
+test response_lost_routes_to_must_observe_not_already_committed ... ok
+test safe_to_resume_when_no_apply_attempted ... ok
+test safe_to_resume_when_applying_but_provider_never_invoked ... ok
+test state_ambiguous_when_apply_outcome_is_partial_or_uncertain ... ok
+test state_ambiguous_when_observation_itself_was_ambiguous ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transaction_state_contract.rs (target/debug/deps/transaction_state_contract-50496186e2f48c0e)
+
+running 9 tests
+test cancelled_and_expired_are_legal_successors_of_every_pre_mutation_state ... ok
+test cancelled_and_expired_are_not_legal_successors_of_applying_or_rolling_back ... ok
+test cancelled_and_expired_are_not_legal_successors_of_observing ... ok
+test happy_path_transitions_are_legal ... ok
+test illegal_transition_from_a_nonterminal_state_is_also_rejected ... ok
+test p0_txn_008_illegal_transition_is_rejected_not_panicked ... ok
+test p0_txn_008_terminal_states_reject_every_transition ... ok
+test wire_tokens_round_trip ... ok
+test unrecognized_wire_token_is_a_typed_parse_failure ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/guardian_daemon-b5fa251c3ade68f1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/guardian-daemon.rs (target/debug/deps/guardian_daemon-4cb576e5e0cb0736)
+
+running 5 tests
+test tests::monitoring_tick_records_a_real_event_and_does_not_panic ... ok
+test tests::monitoring_tick_respects_the_recorder_bound_across_many_ticks ... ok
+test tests::probe_free_space_does_not_leave_the_probe_file_behind ... ok
+test tests::probe_free_space_reports_sufficient_for_a_real_writable_directory ... ok
+test tests::registry_snapshot_is_replaced_not_retained_after_outage ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/dbus_contract.rs (target/debug/deps/dbus_contract-155960d18b8ed424)
+
+running 1 test
+test p0_dbus_001_through_005_live_private_bus_contract_suite ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/g1_authorization_contract.rs (target/debug/deps/g1_authorization_contract-34b58b50b16e52a0)
+
+running 6 tests
+test granting_low_risk_does_not_authorize_high_risk ... ok
+test caller_identity_is_re_resolved_fresh_never_cached_across_connections ... ok
+test p0_auth_002_denied_action_never_reaches_the_mutation_step ... ok
+test p0_auth_001_caller_identity_cannot_be_spoofed ... ok
+test p0_auth_003_background_request_fails_closed_without_prompting ... ok
+test p0_auth_004_explicit_interactive_request_may_proceed_once_granted ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/g2_privilege_topology_contract.rs (target/debug/deps/g2_privilege_topology_contract-18f427426230120c)
+
+running 3 tests
+test adversarial_forged_claim_would_succeed_against_the_pattern_g2_deliberately_avoids ... ok
+test bounded_write_is_typed_ordered_and_denies_cleanly ... ok
+test model_b_helper_cannot_be_influenced_by_a_relaying_process_because_no_claim_field_exists ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (target/debug/deps/guardian_helper-f313fd526de2b690)
+
+running 19 tests
+test tests::adapter_apply_is_idempotent_for_the_same_key ... ok
+test tests::adapter_apply_increments_atomically ... ok
+test tests::adapter_read_defaults_to_zero_when_counter_file_missing ... ok
+test tests::adapter_apply_saturates_instead_of_overflowing ... ok
+test tests::adapter_read_treats_corrupt_counter_file_as_zero ... ok
+test tests::adapter_rollback_decrements_and_is_idempotent ... ok
+test tests::corrupt_persisted_record_does_not_crash_startup_recovery ... ok
+test tests::exactly_two_apply_call_sites_and_the_client_facing_one_is_strictly_after_authorize ... ok
+test tests::must_observe_confirms_without_replaying_apply ... ok
+test tests::must_rollback_executes_and_does_not_replay_apply ... ok
+test tests::must_rollback_resumes_directly_from_a_crash_during_rollback_itself ... ok
+test tests::persist_failure_during_recovery_does_not_crash_and_does_not_fabricate_a_durable_record ... ok
+test tests::recovery_does_not_double_apply_on_resume ... ok
+test tests::recovery_skips_a_committed_record_via_the_terminal_short_circuit_not_the_classify_arm ... ok
+test tests::recovery_resumes_a_genuinely_crashed_applying_transaction_to_a_terminal_state ... ok
+test tests::requires_human_recovery_never_mutates_and_never_invents_a_transition ... ok
+test tests::repeated_restart_does_not_loop_forever_on_the_same_stuck_record ... ok
+test tests::rollback_failure_during_recovery_is_surfaced_not_silently_successful ... ok
+test tests::state_ambiguous_fails_closed_to_rollback_not_apply ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/guardian_provider_api-e1e302c3e319c895)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authorization_dimension_contract.rs (target/debug/deps/authorization_dimension_contract-acbc8d6bc2c05120)
+
+running 10 tests
+test guardian_owned_authorization_does_not_imply_root_privilege ... ok
+test authorization_ownership_and_privilege_requirement_vary_independently ... ok
+test known_guardian_owned_row_round_trips ... ok
+test known_provider_owned_row_round_trips ... ok
+test known_no_authorization_required_differs_from_unknown ... ok
+test provider_owned_authorization_does_not_imply_root_privilege ... ok
+test root_privilege_requirement_does_not_imply_guardian_owned_authorization ... ok
+test unknown_authorization_ownership_round_trips_distinctly_from_known_no_auth ... ok
+test unsupported_future_wire_token_is_a_typed_parse_failure_not_unknown ... ok
+test unresearched_privilege_requirement_wire_value_becomes_explicit_unknown_not_no_direct ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/capability_contract.rs (target/debug/deps/capability_contract-a770148f3a2138ce)
+
+running 5 tests
+test changing_privilege_requirement_does_not_alter_capability_identity ... ok
+test changing_authorization_ownership_does_not_alter_provider_identity ... ok
+test cost_level_defaults_to_negligible_not_an_unsafe_zero ... ok
+test provider_swap_does_not_alter_capability_identity ... ok
+test unrecognized_availability_value_is_explicit_unknown_not_a_panic_or_available ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/g2_inventory_contract.rs (target/debug/deps/g2_inventory_contract-11f041520b85d6fa)
+
+running 5 tests
+test all_eight_unresearched_rows_have_unknown_privilege_requirement ... ok
+test all_eight_unresearched_rows_have_unknown_authorization_ownership ... ok
+test category_counts_reconcile_with_the_g2_evidence_summary ... ok
+test inventory_row_count_matches_the_g2_evidence_summary ... ok
+test known_rows_preserve_their_researched_authorization_ownership ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ids_contract.rs (target/debug/deps/ids_contract-c044bf4cafe4fd89)
+
+running 3 tests
+test event_and_incident_ids_are_independently_typed ... ok
+test capability_id_and_provider_id_are_structurally_distinct_types ... ok
+test rejects_empty_and_malformed_identifiers ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/provenance_contract.rs (target/debug/deps/provenance_contract-696ee5fa5ee4a472)
+
+running 2 tests
+test p0_reg_003_provider_contract_provenance_preserves_unknowns ... ok
+test p0_reg_004_source_interface_drift_is_meaningfully_detected ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/provider_contract.rs (target/debug/deps/provider_contract-c9754197f8f257cf)
+
+running 4 tests
+test fixture_provider_a_is_deterministic_and_never_touches_a_real_provider ... ok
+test p0_reg_001_provider_unavailable_yields_unavailable_not_healthy ... ok
+test p0_reg_002_degraded_provider_yields_degraded_with_distinguishable_health ... ok
+test read_only_adapter_returns_unsupported_for_every_write_operation ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/guardian_testkit-e3a9b995a41b60bb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests guardian_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests guardian_daemon
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests guardian_provider_api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests guardian_testkit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+command=cargo_build_examples
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s

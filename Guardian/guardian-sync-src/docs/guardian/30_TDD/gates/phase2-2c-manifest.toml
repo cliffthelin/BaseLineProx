@@ -1,0 +1,60 @@
+# Guardian gate manifest — configuration only.
+# Read alongside docs/guardian/30_TDD/GUARDIAN_EXECUTION_PROTOCOL.md.
+
+schema_version = 1
+gate_id = "phase2-2c"
+status = "not-started"
+
+baseline_sha = "89ff50f0e0bcb7dcfc5df0438bddfe4e218219b7"
+
+tdd_file = "docs/guardian/30_TDD/gates/phase2-2c-tdd.md"
+
+owned_normative_ids = [
+    "P2-VM-001",
+    "P2-VM-002",
+]
+
+dependencies = ["phase2-2a", "phase2-2b"]
+
+[allowed_scope]
+paths = [
+    # This gate produces evidence, not new production code (implementation
+    # handoff §20: "Implementation scope: none — this gate produces
+    # evidence, not new code, beyond whatever minimal test harness the VM
+    # run itself needs").
+    "docs/evidence/p2/**",
+    # A minimal VM-only test harness, if genuinely needed, is the only
+    # code-shaped exception.
+    "crates/guardian-daemon/tests/**",
+]
+
+[forbidden_scope]
+paths = [
+    "crates/guardian-core/**",
+    "crates/guardian-daemon/src/**",
+    "crates/guardian-helper/**",
+    "crates/guardian-gui/**",
+    "crates/guardian-tui/**",
+    "crates/guardian-cli/**",
+    "crates/guardian-indicator/**",
+    "crates/guardian-client/**",
+]
+
+required_test_layers = ["layer4-vm"]
+
+[validation_commands]
+fmt = "cargo fmt --check"
+clippy = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+test = "cargo test --workspace"
+vm = "real disposable Ubuntu 26.04.1 VM run (guardian-g9 or equivalent) — see gate TDD"
+expected_baseline = "unchanged from Gate 2b's closing count; this gate adds no new unit/integration tests beyond an optional minimal VM harness"
+
+required_evidence = [
+    "docs/evidence/p2/ — a real, safe, reversible VM action that flips a genuinely registry-observed capability/provider's Availability or Health (per the Gate 2b health-diff producer, guardian-core/src/providers/health.rs), producing a real, observable Incidents1 transition over the real system bus (P2-VM-001). It is NOT a stop/start of an arbitrary unrelated unit (e.g. cups.service) — the registry never reads that unit at all — and it is NOT merely a stop/start of systemd-logind.service either: guardian-core/src/providers/registry.rs's systemd_capabilities() only asks whether org.freedesktop.systemd1's LoadUnit+property read for systemd-logind.service succeeds, and read_state() maps any Ok(_) result to Available/Healthy regardless of the unit's own ActiveState — so an ordinary stop/start of systemd-logind.service produces no Availability/Health change at all through this code path. Confirmed candidate (validated live on guardian-g9): `sudo systemctl mask --now upower.service` causes guardian-core/src/providers/upower.rs's display_device() read to fail with a real org.freedesktop.systemd1.UnitMasked D-Bus error, which registry.rs's read_state() maps to a real Available/Healthy -> Degraded/Error transition of the upower.display-device capability; `sudo systemctl unmask upower.service && sudo systemctl start upower.service` reverses it back to Available/Healthy. Both directions were empirically confirmed via busctl/dbus-send on guardian-g9 during the Gate 2c preflight correction. The Gate 2c implementer may use this candidate directly or, per AGENTS.md's required lookup workflow, confirm an equivalent candidate against another of the six registry providers.",
+    "docs/evidence/p2/ — real guardian-daemon restart during an open incident, confirmed to lose that incident (P2-VM-002). The restart's process-level facts (fresh process, no cross-restart incident state) are what Layer 4 proves; the fresh IngressClock epoch/sequence-0 *mechanism* is already proven deterministically at Gate 2a (crates/guardian-core/tests/correlation_contract.rs, p2_evt_004_fresh_ingress_clock_resets_epoch) plus the fact that guardian-daemon's main() constructs a fresh IngressClock::new() at process start (crates/guardian-daemon/src/bin/guardian-daemon.rs) — Gate 2c must not claim an external VM observation of the raw ingress-sequence value itself: IncidentWire (crates/guardian-daemon/src/dbus_surface.rs, crates/guardian-client/src/lib.rs) is confirmed to be exactly a 7-field String tuple with no ingress-sequence field exposed on any public surface, and no production log line emits ingress_sequence today.",
+    "both artifacts reproducible from a fresh VM clone at this gate's baseline_sha",
+]
+
+commit_policy = "leave-uncommitted-for-independent-review"
+
+next_gate = "none — closes TDD-contract Phase 2's internal gate sequence"
