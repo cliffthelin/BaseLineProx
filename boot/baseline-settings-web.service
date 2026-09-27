@@ -1,7 +1,8 @@
 [Unit]
 Description=Baseline browser settings UI (PRD SS5.16) - LAN-scoped, login-gated
-After=network-online.target baseline-firstboot.service
+After=network-online.target baseline-firstboot.service baseline-persist-bind-mounts.service
 Wants=network-online.target
+Requires=baseline-persist-bind-mounts.service
 
 [Service]
 Type=simple

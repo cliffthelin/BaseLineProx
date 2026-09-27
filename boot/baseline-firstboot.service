@@ -4,6 +4,7 @@ Conflicts=getty@tty1.service
 After=getty@tty1.service network-online.target baseline-persist-bind-mounts.service
 Before=baseline.service
 Wants=network-online.target
+Requires=baseline-persist-bind-mounts.service
 
 [Service]
 Type=oneshot

@@ -2,6 +2,7 @@
 Description=Baseline scripts inbox - CRUD server for pushing scripts to run later (login-gated)
 After=network-online.target baseline-persist-bind-mounts.service
 Wants=network-online.target
+Requires=baseline-persist-bind-mounts.service
 
 [Service]
 Type=simple
