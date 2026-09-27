@@ -46,9 +46,16 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 
 DEFAULT_VG_NAME = "pve"
 
-# name, size, GPT/ext4 label, mountpoint - the three real volumes this
-# session's own decision records 46-49 settled on.
+# name, size, GPT/ext4 label, mountpoint - the four real volumes this
+# session's own decision records 46-49 (USER_PERSISTENCE/INSTALLER_CACHE/
+# SESSION_TEMP) and 68 (BASELINE) settled on. BASELINE holds
+# application/VM/LXC state changes - separate from USER_PERSISTENCE
+# (credentials/config/logs, meant to survive a reinstall) and from the
+# disposable substrate itself (Proxmox's own root LV, wiped by any
+# fresh install) - a real, persistent-but-app-scoped location, not
+# something a fresh install would already imply.
 BASELINE_VOLUMES = (
+    ("baseline_app_state", "200G", "BASELINE", "/mnt/BASELINE"),
     ("baseline_user_persistence", "300G", "USER_PERSISTENCE", "/mnt/USER_PERSISTENCE"),
     ("baseline_installer_cache", "100G", "INSTALLER_CACHE", "/mnt/INSTALLER_CACHE"),
     ("baseline_session_temp", "50G", "SESSION_TEMP", "/mnt/SESSION_TEMP"),

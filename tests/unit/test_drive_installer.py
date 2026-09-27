@@ -12,6 +12,11 @@ this module. Idempotent throughout: re-running this against an
 already-provisioned drive (e.g. to push an update) must never reformat
 an existing, already-created volume - only ever create what's missing.
 
+BASELINE (app/VM/LXC state, decision record 68) was added as a fourth
+real volume after this module's docstring had named it from the start
+without the code ever actually creating it - a real, previously-latent
+gap, not a hypothetical one.
+
 No real lvm/mount is ever invoked - the FakeRunner records every argv
 and returns scripted results."""
 from fake_runner import FakeProc, FakeRunner
@@ -141,13 +146,13 @@ def test_ensure_baseline_volumes_checks_free_space_before_creating_anything():
     assert not any(c[0] == "lvcreate" for c in runner.calls)
 
 
-def test_ensure_baseline_volumes_creates_all_three_when_space_allows():
+def test_ensure_baseline_volumes_creates_all_four_when_space_allows():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["vgs"], FakeProc(0, "500000000000\n", "")),  # 500GB free - plenty
+        (lambda a: a[:1] == ["vgs"], FakeProc(0, "800000000000\n", "")),  # 800GB free - plenty for all four (650G)
         (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   root  \n", "")),
     ])
     results = di.ensure_baseline_volumes(runner, vg_name="pve")
-    assert set(results) == {"USER_PERSISTENCE", "INSTALLER_CACHE", "SESSION_TEMP"}
+    assert set(results) == {"BASELINE", "USER_PERSISTENCE", "INSTALLER_CACHE", "SESSION_TEMP"}
     assert all(r.ok for r in results.values())
 
 
@@ -169,11 +174,12 @@ def test_ensure_baseline_volumes_never_touches_boot_or_efi():
 # that could drift out of sync with it.
 # --------------------------------------------------------------------------
 
-def test_detect_existing_baseline_install_true_when_all_three_volumes_present():
+def test_detect_existing_baseline_install_true_when_all_four_volumes_present():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["lvs"], FakeProc(
             0,
             "  pve  root\n"
+            "  pve  baseline_app_state\n"
             "  pve  baseline_user_persistence\n"
             "  pve  baseline_installer_cache\n"
             "  pve  baseline_session_temp\n",
@@ -182,7 +188,7 @@ def test_detect_existing_baseline_install_true_when_all_three_volumes_present():
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is True
     assert set(result["found_volumes"]) == {
-        "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
+        "baseline_app_state", "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
     assert result["missing_volumes"] == []
 
 
@@ -194,7 +200,7 @@ def test_detect_existing_baseline_install_false_when_none_present():
     assert result["has_existing_install"] is False
     assert result["found_volumes"] == []
     assert set(result["missing_volumes"]) == {
-        "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
+        "baseline_app_state", "baseline_user_persistence", "baseline_installer_cache", "baseline_session_temp"}
 
 
 def test_detect_existing_baseline_install_false_when_only_some_present():
@@ -207,7 +213,7 @@ def test_detect_existing_baseline_install_false_when_only_some_present():
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is False
     assert result["found_volumes"] == ["baseline_user_persistence"]
-    assert set(result["missing_volumes"]) == {"baseline_installer_cache", "baseline_session_temp"}
+    assert set(result["missing_volumes"]) == {"baseline_app_state", "baseline_installer_cache", "baseline_session_temp"}
 
 
 def test_detect_existing_baseline_install_handles_a_real_lvs_failure():
