@@ -11,18 +11,22 @@ tested `handle_*` functions in `settings_web.py`/`control_panel_web.py`/
 composes them under one HTTP server and one nav bar.
 
 **The sudo-password modal (direct instruction: "this application will
-never get off the ground if your solution is terminal commands")**:
-every Drive Administration action is real code this already-root
-process executes itself. Before running one, the operator sees a
-modal describing exactly what will change (the same description text
-`drive_admin.ACTIONS` associates with that action - one source of
-truth, never a second copy that could drift) and types their real
-system password into it. `POST /drive-admin/action` verifies that
-password via the configured `elevation_verify_fn` (real deployment:
-`settings_web.SystemPasswordVerifier`, checking the machine's actual
-`/etc/shadow` account) before calling `drive_admin.perform_action` -
-never on session/login alone, and never by handing the operator a
-script to run in a terminal themselves.
+never get off the ground if your solution is terminal commands", then
+- once an earlier design assumed the process already ran as root -
+"if the application wants root then the application is going to have
+to ask for it and run it as root")**: every Drive Administration
+action is real code this process executes itself, and this process is
+**not** required to already be root. Before running an action, the
+operator sees a modal describing exactly what will change (the same
+description text `drive_admin.ACTIONS` associates with that action -
+one source of truth, never a second copy that could drift) and types
+their real system password into it. `POST /drive-admin/action` pipes
+that password straight to a real `sudo -S`
+(`drive_admin.verify_sudo_password` as a cheap preflight, then
+`drive_admin.SudoRunner` for the action itself) - the exact identity
+check any terminal `sudo` prompt would make, just made by this process
+instead of a shell. Never on session/login alone, and never by handing
+the operator a script to run in a terminal themselves.
 """
 from __future__ import annotations
 
@@ -92,6 +96,11 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 .drive-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
 .drive-card.selected::before { background: #5b7fd4; }
 .drive-card input[type="radio"] { position: absolute; top: 14px; right: 14px; margin: 0; accent-color: #5b7fd4; }
+.drive-card.acted-on-ok { border-color: #38c98f; box-shadow: 0 0 0 2px rgba(56,201,143,.35); }
+.drive-card.acted-on-ok::before { background: #38c98f; }
+.drive-card.acted-on-fail { border-color: #d64949; box-shadow: 0 0 0 2px rgba(214,73,73,.35); }
+.drive-card.acted-on-fail::before { background: #d64949; }
+.acted-on-pill { display: inline-block; float: right; font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 99px; letter-spacing: .03em; background: rgba(255,255,255,.1); color: #cfd2e0; }
 .drive-type-pill { display: inline-block; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 99px; letter-spacing: .03em; background: rgba(91,127,212,.18); color: #9db4ec; margin-bottom: 8px; }
 .drive-card .drive-name { font-weight: 700; font-size: .96rem; margin-bottom: 2px; padding-right: 20px; }
 .drive-card .drive-path { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #7d84a0; font-size: .82rem; margin-bottom: 10px; }
@@ -111,6 +120,9 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 .action-card button { margin-top: 0; width: 100%; background: #2a4d8f; }
 .action-card.danger button { background: #a63333; }
 .notice { background: #1a2233; border: 1px solid #2f4573; color: #cfe0ff; padding: .6rem .9rem; border-radius: 8px; font-size: .88rem; margin: 1rem 0; }
+.action-banner { font-size: 1.05rem; font-weight: 700; padding: 16px 20px; border-radius: 10px; margin: 1.25rem 0 1.5rem; display: flex; align-items: center; gap: 10px; }
+.action-banner.ok { background: rgba(56,201,143,.16); border: 2px solid #38c98f; color: #6ee8bb; }
+.action-banner.fail { background: rgba(214,73,73,.16); border: 2px solid #d64949; color: #ff9d9d; }
 #driveAdminModal { position: fixed; inset: 0; background: rgba(6,7,12,.72); display: none; align-items: center; justify-content: center; z-index: 50; }
 #driveAdminModal.open { display: flex; }
 #driveAdminModal .box { background: #171923; border: 1px solid #2c2f42; color: #e7e9f0; padding: 26px 28px; border-radius: 14px; width: 420px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
@@ -125,8 +137,32 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 """
 
 
-def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notice: str = "") -> bytes:
-    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notice: str = "",
+                             notice_ok: bool | None = None, acted_on_path: str | None = None) -> bytes:
+    """`notice_ok`: `True` (real success), `False` (real refusal/
+    failure), or `None` (no action just ran - e.g. a plain page load).
+    A prior version rendered every notice with the same quiet blue
+    styling that blended into the dark page - a real rebuild had
+    genuinely succeeded and the operator couldn't tell (direct
+    feedback: "it took me back to previous screen and nothing
+    happened" - something *had* happened, the banner just failed to
+    say so clearly). Success and failure now get visibly distinct,
+    impossible-to-miss banners instead of one generic one.
+
+    `acted_on_path`: the real device path a just-completed action
+    targeted (threaded through from the modal's own device select, via
+    the real redirect after `/drive-admin/action` returns), so *that*
+    specific card can be marked - direct feedback: the page showed a
+    real failure banner but gave no visual link to which of a dozen
+    drive cards it was actually about."""
+    if not notice:
+        notice_html = ""
+    elif notice_ok is True:
+        notice_html = f'<div class="action-banner ok">&#10003; {notice}</div>'
+    elif notice_ok is False:
+        notice_html = f'<div class="action-banner fail">&#10007; {notice}</div>'
+    else:
+        notice_html = f'<p class="notice">{notice}</p>'
 
     if drives:
         # A radio group can only ever have ONE genuinely checked option
@@ -137,23 +173,27 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
         # one the browser really checks.
         default_path = next((d["path"] for d in drives if d.get("is_default")), drives[0]["path"])
         drive_cards = "".join(f"""
-<label class="drive-card {'selected' if d['path'] == default_path else ''}">
+<label class="drive-card {'selected' if d['path'] == default_path else ''} {'acted-on-ok' if d['path'] == acted_on_path and notice_ok is True else ''} {'acted-on-fail' if d['path'] == acted_on_path and notice_ok is False else ''}">
   <input type="radio" name="targetDrive" value="{d['path']}" {"checked" if d['path'] == default_path else ""}>
   <span class="drive-type-pill">{d.get('drive_type', 'Other')}</span>
+  {'<span class="acted-on-pill">last action</span>' if d['path'] == acted_on_path and notice_ok is not None else ''}
   <div class="drive-name">{d.get('model', 'Unknown model')}</div>
   <div class="drive-path">{d['path']}</div>
   <div class="detail-row"><span>Size</span><span>{d.get('size', '—')}</span></div>
+  <div class="detail-row"><span>Partitions</span><span>{d.get('partition_count') if d.get('partition_count') is not None else '—'}</span></div>
+  <div class="detail-row"><span>Data</span><span>{d.get('usage_text', 'unknown')}</span></div>
 </label>""" for d in drives)
     else:
         drive_cards = '<p class="empty-note">No real candidate drives found (or the enumeration failed) - nothing selectable right now.</p>'
 
     if volumes:
         volume_rows = "".join(
-            f"<tr><td>{v['label']}</td><td class='mono'>{v['mountpoint']}</td><td class='mono'>{v.get('used', '-')}</td></tr>"
+            f"""<tr><td><input type="checkbox" class="volume-select" value="{v['label']}"></td>"""
+            f"<td>{v['label']}</td><td class='mono'>{v['mountpoint']}</td><td class='mono'>{v.get('used', '-')}</td></tr>"
             for v in volumes
         )
         volumes_html = f"""<table class="volume-table">
-<tr><th>Volume</th><th>Mountpoint</th><th>Used</th></tr>{volume_rows}</table>"""
+<tr><th>Select</th><th>Volume</th><th>Mountpoint</th><th>Used</th></tr>{volume_rows}</table>"""
     else:
         volumes_html = '<p class="empty-note">No volumes currently mounted and reporting usage.</p>'
 
@@ -175,6 +215,7 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
 <div class="drive-grid">{drive_cards}</div>
 
 <h2 class="section-title">Mounted volumes</h2>
+<p class="subtitle">Select one or more volumes here, then use the Update action below to choose which types of update to apply to the selection.</p>
 {volumes_html}
 
 <h2 class="section-title">Actions</h2>
@@ -222,6 +263,20 @@ function deviceSelectHtml(selectedPath) {{
     <select id="paramDevicePath">${{options}}</select></label>`;
 }}
 
+function selectedVolumeLabels() {{
+  return Array.from(document.querySelectorAll(".volume-select:checked")).map(cb => cb.value);
+}}
+
+function updateSelectedParamsHtml() {{
+  const selected = selectedVolumeLabels();
+  const selectedText = selected.length ? selected.join(", ") : "(none selected above)";
+  return `<p>Selected: ${{selectedText}}</p>
+    <label><input type="checkbox" id="paramTypeVolumeMode"> Apply volume mount mode</label>
+    <label><input type="checkbox" id="paramTypeSwitchPersona"> Switch active persona</label>
+    <label>Persona to switch to (only used if "Switch active persona" is checked)
+      <input id="paramToPersona" value="personal"></label>`;
+}}
+
 let pendingActionId = null;
 document.querySelectorAll(".drive-admin-action").forEach(btn => {{
   btn.addEventListener("click", () => {{
@@ -230,10 +285,8 @@ document.querySelectorAll(".drive-admin-action").forEach(btn => {{
     document.getElementById("driveAdminModalParams").innerHTML =
       requiresDeviceById[pendingActionId]
         ? deviceSelectHtml(currentlySelectedDrivePath())
-        : pendingActionId === "switch_persona"
-        ? '<label>Persona <input id="paramToPersona" value="personal"></label>'
-        : pendingActionId === "apply_volume_mode"
-        ? '<label>Volume label <input id="paramLabel" value="BASELINE"></label>'
+        : pendingActionId === "update_selected"
+        ? updateSelectedParamsHtml()
         : "";
     document.getElementById("driveAdminModal").classList.add("open");
     document.getElementById("driveAdminModalPassword").focus();
@@ -246,12 +299,19 @@ document.getElementById("driveAdminModalCancel").addEventListener("click", () =>
 document.getElementById("driveAdminModalConfirm").addEventListener("click", async () => {{
   const password = document.getElementById("driveAdminModalPassword").value;
   const params = {{}};
-  const toPersona = document.getElementById("paramToPersona");
-  const label = document.getElementById("paramLabel");
   const devicePath = document.getElementById("paramDevicePath");
-  if (toPersona) params.to_persona = toPersona.value;
-  if (label) params.label = label.value;
+  const toPersona = document.getElementById("paramToPersona");
+  const typeVolumeMode = document.getElementById("paramTypeVolumeMode");
+  const typeSwitchPersona = document.getElementById("paramTypeSwitchPersona");
   if (devicePath) params.device_path = devicePath.value;
+  if (pendingActionId === "update_selected") {{
+    params.selected = selectedVolumeLabels();
+    params.update_types = [
+      ...(typeVolumeMode && typeVolumeMode.checked ? ["apply_volume_mode"] : []),
+      ...(typeSwitchPersona && typeSwitchPersona.checked ? ["switch_persona"] : []),
+    ];
+    if (toPersona) params.to_persona = toPersona.value;
+  }}
   document.getElementById("driveAdminModalPassword").value = "";
   const res = await fetch("/drive-admin/action", {{
     method: "POST", headers: {{"Content-Type": "application/json"}},
@@ -259,7 +319,10 @@ document.getElementById("driveAdminModalConfirm").addEventListener("click", asyn
   }});
   const body = await res.json();
   document.getElementById("driveAdminModal").classList.remove("open");
-  window.location = "/drive-admin?notice=" + encodeURIComponent(body.detail || body.error || body.reason || "done");
+  const ok = res.ok && body.outcome === "applied" ? "1" : "0";
+  const text = body.detail || body.error || body.reason || "done";
+  const deviceQs = devicePath ? "&device=" + encodeURIComponent(devicePath.value) : "";
+  window.location = "/drive-admin?notice=" + encodeURIComponent(text) + "&ok=" + ok + deviceQs;
 }});
 </script>
 </body></html>""".encode()
@@ -395,8 +458,12 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             drives = real_drive_state(runner, pds_runner=deps.get("pds_runner"))
             volumes = real_volume_state(runner) if runner is not None else []
             notice = qs.get("notice", [""])[0]
+            notice_ok = qs.get("ok", [None])[0]
+            notice_ok = {"1": True, "0": False}.get(notice_ok)  # None when no action just ran at all
+            acted_on_path = qs.get("device", [None])[0]  # which drive card an action just targeted, if any
             return self._html_response(200, _with_nav(
-                render_drive_admin_page(drives=drives, volumes=volumes, actions=da.describe_actions(), notice=notice), path))
+                render_drive_admin_page(drives=drives, volumes=volumes, actions=da.describe_actions(),
+                                         notice=notice, notice_ok=notice_ok, acted_on_path=acted_on_path), path))
 
         if path.startswith("/master-config"):
             return self._html_response(200, _with_nav(cpw.render_index_page().encode(), path))
@@ -426,9 +493,33 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 return self._redirect("/settings", set_cookie=f"session={result.body['token']}; Path=/; HttpOnly")
             return self._html_response(401, _with_nav(sw.render_login_page("Invalid username or password."), "/login"))
 
+        if path.startswith("/settings/"):
+            section = path[len("/settings/"):]
+            if self._is_json_request():
+                values = body
+            else:
+                current = deps["source"].current_settings().get(section, {}) if deps.get("source") else {}
+                values = sw.reconstruct_typed_form_values(body, list(current.keys()))
+            result = sw.handle_settings_edit(deps["sessions"], deps["applier"], self._cookie_token(),
+                                              section, values, now, persona_provider=deps.get("persona_provider"))
+            if result.outcome == "refused" and result.status == 401:
+                return self._redirect("/login")
+            notice = result.body.get("detail") or result.body.get("reason", "")
+            settings = deps["source"].current_settings() if deps.get("source") else {}
+            return self._html_response(result.status, _with_nav(sw.render_settings_page(settings, notice), "/settings"))
+
         if path == "/admin/elevate":
             result = sw.handle_admin_elevate(deps["elevation_store"], deps.get("elevation_verify_fn"),
                                               deps["sessions"], self._cookie_token(), body.get("passphrase", ""), now)
+            notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
+            return self._redirect(f"/admin?notice={notice}")
+
+        if path.startswith("/admin/settings/"):
+            rest = path[len("/admin/settings/"):]
+            group, _, key = rest.partition("/")
+            values = body if self._is_json_request() else sw.reconstruct_typed_form_values(body, ["value"])
+            result = sw.handle_admin_edit(deps["sessions"], deps.get("runner"), deps["elevation_store"],
+                                           self._cookie_token(), group, key, values.get("value"), now)
             notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
             return self._redirect(f"/admin?notice={notice}")
 
@@ -441,10 +532,11 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             action_id = body.get("action_id", "")
             params = body.get("params", {})
             password = body.get("password", "")
-            verify_fn = deps.get("elevation_verify_fn")
-            if verify_fn is None or not verify_fn(password):
+            sudo_executor = deps.get("sudo_executor")  # None in real deployment -> real subprocess.run
+            if not da.verify_sudo_password(password, executor=sudo_executor):
                 return self._json(401, {"error": "invalid password - action refused"})
-            result = da.perform_action(deps.get("runner"), action_id, params)
+            sudo_runner = da.SudoRunner(password, executor=sudo_executor)
+            result = da.perform_action(sudo_runner, action_id, params)
             return self._json(200 if result.ok else 422, {"outcome": "applied" if result.ok else "refused", "detail": result.detail})
 
         if path == "/api/backup":
@@ -465,16 +557,24 @@ def make_server(*, deps: dict, host: str = "127.0.0.1", port: int = 8200) -> htt
 
 def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
                        elevation_username: str = "root") -> http.server.HTTPServer:
-    """The real, systemd-launched merged app. `elevation_username`
-    (default `"root"`) is who Drive Administration's elevation gate
-    checks the real system password against - deliberately real, via
-    `settings_web.SystemElevationVerifier`, never the DEV-ONLY
-    JsonFileStore-seeded elevation `sw.build_real_server` wires for its
-    own standalone/no-root evaluation use. This module's own login
-    (`root`/`baseline`) stays the separate, lighter Baseline-web-app
-    account per `settings_web.py`'s own layered design - elevation is
-    the real machine credential, checked only for the genuinely
-    dangerous actions on the Drive Administration tab."""
+    """The real, systemd-launched merged app.
+
+    Drive Administration does **not** use `elevation_verify_fn` at all
+    (decision record 84) - it authenticates via a real `sudo -S`
+    directly (`drive_admin.verify_sudo_password`/`SudoRunner`), using
+    the password the operator just typed into the modal, so this app
+    never needs to already be running as root - real self-elevation,
+    not a pre-elevated process. `deps["sudo_executor"]` is left unset
+    here (`None`), which both of those real production calls
+    already treat as "use the real `subprocess.run`" - only tests
+    inject a fake one.
+
+    `elevation_username` (default `"root"`) and
+    `settings_web.SystemElevationVerifier` remain real and in use for
+    the separate Admin tab's own settings-editing gate
+    (`handle_admin_edit`, decision record 80) - a different, lighter
+    check for a different, lighter class of change than Drive
+    Administration's real destructive actions."""
     from pathlib import Path
     from repair import RealRunner
 

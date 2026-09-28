@@ -512,7 +512,11 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
 
         if self.path.startswith("/settings/"):
             section = self.path[len("/settings/"):]
-            values = body if json_mode else self._parse_values_json(body)
+            if json_mode:
+                values = body
+            else:
+                current = deps["source"].current_settings().get(section, {})
+                values = reconstruct_typed_form_values(body, list(current.keys()))
             result = handle_settings_edit(deps["sessions"], deps["applier"],
                                            self._token(), section, values, now,
                                            persona_provider=deps.get("persona_provider"))
@@ -563,7 +567,7 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/admin/settings/"):
             rest = self.path[len("/admin/settings/"):]
             group, _, key = rest.partition("/")
-            values = body if json_mode else self._parse_values_json(body)
+            values = body if json_mode else reconstruct_typed_form_values(body, ["value"])
             result = handle_admin_edit(deps["sessions"], deps.get("runner"), deps["elevation_store"],
                                         self._token(), group, key, values.get("value"), now)
             if json_mode:
@@ -575,15 +579,6 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
 
         result = RouteResult("handed_off", 404, {"reason": f"no route for {self.path!r}; no automatic action taken"})
         self._json(result.status, {"outcome": result.outcome, **result.body})
-
-    def _parse_values_json(self, form_body: dict) -> dict:
-        raw = form_body.get("values_json", "").strip()
-        if not raw:
-            return {}
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return {"_parse_error": raw}
 
     # -- GET ------------------------------------------------------------
 
@@ -1006,13 +1001,80 @@ or change any current setting. Nothing here is reinstalled or wiped.</p>
 """)
 
 
+def render_field_input(name: str, value, *, options: list | None = None) -> str:
+    """A real, typed HTML control for one settings value - a checkbox
+    for a real boolean, a number field for a real number, a dropdown
+    for a known string enum (`options`), plain text otherwise - never
+    a JSON text box for an ordinary scalar. Only a genuinely nested
+    value (list/dict) falls back to a labeled, clearly-advanced raw
+    JSON textarea, since that's real structured data no simple control
+    could represent anyway.
+
+    Emits a hidden `<name>__type` field alongside the control so the
+    server can reconstruct the real Python type from the submitted
+    form without re-querying the current stored value - self-
+    describing, one shared parser (`reconstruct_typed_form_values`)
+    for every settings form on this app."""
+    type_name = ("bool" if isinstance(value, bool) else
+                 "int" if isinstance(value, int) else
+                 "float" if isinstance(value, float) else
+                 "str" if isinstance(value, str) else "json")
+    hidden = f'<input type="hidden" name="{name}__type" value="{type_name}">'
+    if type_name == "bool":
+        checked = "checked" if value else ""
+        return hidden + f'<input type="checkbox" name="{name}" value="true" {checked}>'
+    if options is not None:
+        opts = "".join(f'<option value="{o}" {"selected" if o == value else ""}>{o}</option>' for o in options)
+        return hidden + f'<select name="{name}">{opts}</select>'
+    if type_name in ("int", "float"):
+        step = "1" if type_name == "int" else "any"
+        return hidden + f'<input type="number" name="{name}" value="{value}" step="{step}">'
+    if type_name == "str":
+        return hidden + f'<input type="text" name="{name}" value="{value}">'
+    return hidden + f'<textarea name="{name}" rows="3">{json.dumps(value, indent=2)}</textarea>'
+
+
+def reconstruct_typed_form_values(form_body: dict, field_names: list) -> dict:
+    """The other half of `render_field_input`: rebuilds real Python-
+    typed values from a submitted HTML form using each field's own
+    `<name>__type` hidden hint. Checkboxes only appear in the
+    submitted body at all when checked (standard HTML form behavior),
+    so presence/absence alone tells us True/False - no hidden
+    always-present fallback field needed for booleans specifically."""
+    result = {}
+    for name in field_names:
+        type_name = form_body.get(f"{name}__type", "str")
+        if type_name == "bool":
+            result[name] = name in form_body
+            continue
+        raw = form_body.get(name)
+        if raw is None or raw == "":
+            continue
+        if type_name == "int":
+            try:
+                result[name] = int(raw)
+            except ValueError:
+                pass
+        elif type_name == "float":
+            try:
+                result[name] = float(raw)
+            except ValueError:
+                pass
+        elif type_name == "json":
+            try:
+                result[name] = json.loads(raw)
+            except ValueError:
+                pass
+        else:
+            result[name] = raw
+    return result
+
+
 def render_settings_page(settings: dict, notice: str = "") -> bytes:
     rows = "".join(
         f"""<h2>{section}</h2>
 <form method="post" action="/settings/{section}">
-<pre>{json.dumps(values, indent=2)}</pre>
-<label>New value (JSON object, merged into this section)
-<input name="values_json" placeholder='{{"key": "value"}}'></label>
+{"".join(f'<label>{key} {render_field_input(key, value)}</label>' for key, value in values.items())}
 <button type="submit">Save {section}</button>
 </form>"""
         for section, values in settings.items() if not section.startswith("_")
@@ -1039,18 +1101,26 @@ def render_recovery_page(discovery: dict, notice: str = "") -> bytes:
     missing = ", ".join(discovery.get("personas_missing") or []) or "none"
     active = discovery.get("active_persona") or "none"
     recovery_active = discovery.get("recovery_active")
-    status = "Recovery mode is currently ACTIVE." if recovery_active else "Recovery mode is not active."
+    # The exit control only makes sense to show while recovery mode is
+    # genuinely active - showing "leave recovery mode" when it isn't
+    # implies there's something to leave, which there isn't.
+    if recovery_active:
+        status = "Recovery mode is currently ACTIVE."
+        exit_html = """<form method="post" action="/recovery/exit">
+  <button type="submit">Attempt to leave recovery mode</button>
+</form>
+<p class="hint">Leaving is refused until at least one persona volume is
+confirmed mounted read-write - this page cannot bypass that.</p>"""
+    else:
+        status = "Recovery mode is not active - nothing to leave."
+        exit_html = ""
     return _html("Recovery", f"""
 {notice_html}
 <p>{status}</p>
 <p>Personas with a real, currently-mounted persistence volume: {found}</p>
 <p>Personas missing a volume: {missing}</p>
 <p>Currently active persona: {active}</p>
-<form method="post" action="/recovery/exit">
-  <button type="submit">Attempt to leave recovery mode</button>
-</form>
-<p class="hint">Leaving is refused until at least one persona volume is
-confirmed mounted read-write - this page cannot bypass that.</p>
+{exit_html}
 """)
 
 
@@ -1067,11 +1137,12 @@ def render_admin_page(settings: dict, notice: str = "", elevated: bool = False) 
 </form>
 <p class="hint">Required before any Admin setting below can be changed - a separate
 passphrase from your login, matching real sudo's own short-lived cache.</p>"""
+    volume_mode_options = ["read-write", "read-only", "write-only"]
+    volume_mode_keys = {"baseline_mode", "installer_cache_mode", "session_temp_mode"}
     sections = "".join(
         f"""<h2>{group}</h2>""" + "".join(
             f"""<form method="post" action="/admin/settings/{group}/{key}">
-<label>{key} (currently {value!r})
-<input name="values_json" placeholder='{{"value": ...}}'></label>
+<label>{key} {render_field_input("value", value, options=volume_mode_options if key in volume_mode_keys else None)}</label>
 <button type="submit" {"disabled" if not elevated else ""}>Save</button>
 </form>"""
             for key, value in values.items()

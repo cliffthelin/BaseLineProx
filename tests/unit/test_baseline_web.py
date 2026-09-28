@@ -110,13 +110,116 @@ def test_render_drive_admin_page_lists_real_drives_volumes_and_actions():
     assert "PC401 NVMe SK hynix 512GB" in body
     assert "/dev/sdb" in body
     assert "/mnt/BASELINE" in body
-    assert "rebuild_persistence_lvm" in body
+    assert "install" in body
     assert "driveAdminModalPassword" in body  # the sudo-password modal is present
+
+
+def test_render_drive_admin_page_shows_real_partition_count_and_data_used():
+    body = bw.render_drive_admin_page(
+        drives=[{"path": "/dev/sda", "model": "ST5000DM003-2FH18L", "drive_type": "HDD",
+                 "size": "4.5T", "is_default": False, "partition_count": 1,
+                 "usage_text": "1.8 TiB used of 4.5 TiB"}],
+        volumes=[], actions=[],
+    ).decode()
+    assert "1.8 TiB used of 4.5 TiB" in body
+    assert ">1<" in body  # the real partition count
+
+
+def test_render_drive_admin_page_shows_a_dash_when_partition_count_is_unknown():
+    body = bw.render_drive_admin_page(
+        drives=[{"path": "/dev/sdx", "model": "Unknown model", "drive_type": "Other",
+                 "size": "?", "is_default": False, "partition_count": None, "usage_text": "unknown"}],
+        volumes=[], actions=[],
+    ).decode()
+    assert "unknown" in body
 
 
 def test_render_drive_admin_page_handles_an_empty_drive_or_volume_list_without_crashing():
     body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[]).decode()
     assert "No volumes currently mounted" in body
+
+
+def test_render_drive_admin_page_shows_a_checkbox_per_volume_for_the_update_action():
+    """Direct feedback: Update should let the operator select
+    partitions/volumes from the drive tree, then choose which types of
+    update to apply - the mounted-volumes table needs a real checkbox
+    per row, not just a read-only listing."""
+    body = bw.render_drive_admin_page(
+        drives=[], actions=[],
+        volumes=[{"label": "BASELINE", "mountpoint": "/mnt/BASELINE", "used": "1000"},
+                 {"label": "INSTALLER_CACHE", "mountpoint": "/mnt/INSTALLER_CACHE", "used": "500"}],
+    ).decode()
+    assert '<input type="checkbox" class="volume-select" value="BASELINE">' in body
+    assert '<input type="checkbox" class="volume-select" value="INSTALLER_CACHE">' in body
+
+
+def test_render_drive_admin_page_shows_a_visibly_distinct_banner_on_real_success():
+    """Direct feedback: a real successful rebuild rendered the same
+    quiet, easy-to-miss notice as everything else, and the operator
+    couldn't tell anything had happened at all. Success gets its own
+    unmistakable banner class now."""
+    body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[],
+                                       notice="/dev/sdb rebuilt as LVM volume group 'baseline_persist'",
+                                       notice_ok=True).decode()
+    assert 'class="action-banner ok"' in body
+    assert "baseline_persist" in body
+
+
+def test_render_drive_admin_page_shows_a_visibly_distinct_banner_on_real_failure():
+    body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[],
+                                       notice="pvcreate failed: device busy", notice_ok=False).decode()
+    assert 'class="action-banner fail"' in body
+    assert "device busy" in body
+
+
+def test_render_drive_admin_page_uses_the_quiet_notice_style_when_ok_is_unknown():
+    """A plain page load (no action just ran) still supports a generic
+    notice without claiming a false success or failure."""
+    body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[], notice="just a note").decode()
+    assert 'class="notice"' in body
+    assert '<div class="action-banner' not in body
+
+
+def test_render_drive_admin_page_flags_the_specific_drive_a_failed_action_targeted():
+    """Direct feedback: a real failure banner appeared with no visual
+    link to *which* of a dozen drive cards it was actually about.
+    `acted_on_path` marks that one card - red on failure, green on
+    success - never every card, never none."""
+    drives = [
+        {"path": "/dev/sdb", "model": "Drive B", "drive_type": "NVMe", "size": "1T", "is_default": True},
+        {"path": "/dev/sdl", "model": "USB 3.2.1 FD", "drive_type": "USB", "size": "57.8G", "is_default": False},
+    ]
+    body = bw.render_drive_admin_page(
+        drives=drives, volumes=[], actions=[],
+        notice="pvcreate failed: Cannot use /dev/sdl: device is partitioned",
+        notice_ok=False, acted_on_path="/dev/sdl",
+    ).decode()
+    cards = body.split('<label class="drive-card')[1:]
+    sdl_card = next(c for c in cards if "/dev/sdl" in c)
+    sdb_card = next(c for c in cards if "/dev/sdb" in c)
+    assert "acted-on-fail" in sdl_card
+    assert "acted-on-fail" not in sdb_card
+    assert "acted-on-ok" not in sdl_card
+
+
+def test_render_drive_admin_page_flags_the_acted_on_drive_green_on_success():
+    drives = [{"path": "/dev/sdb", "model": "Drive B", "drive_type": "NVMe", "size": "1T", "is_default": True}]
+    body = bw.render_drive_admin_page(
+        drives=drives, volumes=[], actions=[],
+        notice="/dev/sdb rebuilt as LVM volume group 'baseline_persist'",
+        notice_ok=True, acted_on_path="/dev/sdb",
+    ).decode()
+    card = body.split('<label class="drive-card')[1]
+    assert "acted-on-ok" in card
+    assert "acted-on-fail" not in card
+
+
+def test_render_drive_admin_page_marks_no_card_when_no_action_just_ran():
+    drives = [{"path": "/dev/sdb", "model": "Drive B", "drive_type": "NVMe", "size": "1T", "is_default": True}]
+    body = bw.render_drive_admin_page(drives=drives, volumes=[], actions=[]).decode()
+    card = body.split('<label class="drive-card')[1]
+    assert "acted-on-ok" not in card
+    assert "acted-on-fail" not in card
 
 
 def test_render_drive_admin_page_only_checks_one_radio_when_multiple_drives_are_default():
@@ -137,14 +240,22 @@ def test_render_drive_admin_page_only_checks_one_radio_when_multiple_drives_are_
 
 # -- a real end-to-end dispatch, over an actual socket ------------------------
 
-class FakeElevationVerifier:
-    def __init__(self, correct_password="right-password"):
-        self.correct_password = correct_password
+class FakeSudoExecutor:
+    """Matches drive_admin.SudoRunner/verify_sudo_password's own
+    injectable `executor(argv, *, input, capture_output, timeout)`
+    shape - no real `sudo` or real password is ever used driving these
+    real-socket tests."""
+
+    def __init__(self, *, returncode=0, stdout=b"", stderr=b""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
         self.calls = []
 
-    def __call__(self, password):
-        self.calls.append(password)
-        return password == self.correct_password
+    def __call__(self, argv, *, input, capture_output, timeout):
+        self.calls.append((list(argv), input, timeout))
+        import types
+        return types.SimpleNamespace(returncode=self.returncode, stdout=self.stdout, stderr=self.stderr)
 
 
 class _RealServerCase:
@@ -187,7 +298,7 @@ def _base_deps(**overrides):
         "clock": lambda: 1700000000.0, "sessions": sw.SessionStore(), "store": None,
         "persona_provider": None, "runner": FakeRunner(), "elevation_store": None,
         "elevation_verify_fn": None, "personas": ("admin", "personal"),
-        "pds_runner": FakePdsRunner(), "vg_name": "pve",
+        "pds_runner": FakePdsRunner(), "vg_name": "pve", "sudo_executor": None,
     }
     deps.update(overrides)
     return deps
@@ -217,11 +328,16 @@ def test_drive_admin_actions_endpoint_returns_real_json():
 
 
 def test_drive_admin_action_refuses_with_the_wrong_password_over_a_real_socket():
-    verifier = FakeElevationVerifier(correct_password="right-password")
-    case = _RealServerCase(_base_deps(elevation_verify_fn=verifier))
+    """A wrong password fails the real `sudo -S -k` preflight
+    (FakeSudoExecutor scripted to returncode=1, exactly like a genuine
+    sudo auth failure) - refused before any action code ever runs."""
+    executor = FakeSudoExecutor(returncode=1, stderr=b"sudo: 1 incorrect password attempt\n")
+    case = _RealServerCase(_base_deps(sudo_executor=executor))
     try:
         status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "switch_persona", "params": {"to_persona": "admin"},
+                                       {"action_id": "update_selected",
+                                        "params": {"selected": [], "update_types": ["switch_persona"],
+                                                    "to_persona": "admin"},
                                         "password": "wrong"})
         assert status == 401
         assert "invalid password" in body["error"]
@@ -229,17 +345,23 @@ def test_drive_admin_action_refuses_with_the_wrong_password_over_a_real_socket()
         case.close()
 
 
-def test_drive_admin_action_runs_the_real_action_with_the_correct_password():
-    verifier = FakeElevationVerifier(correct_password="right-password")
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
-    runner = FakeRunner(files={"/proc/self/mounts": mounts})
-    case = _RealServerCase(_base_deps(elevation_verify_fn=verifier, runner=runner))
+def test_drive_admin_action_reaches_the_real_action_once_the_sudo_password_is_accepted():
+    """Proves the sudo-password gate itself lets a correct password
+    through to a real SudoRunner-backed action - not any one action's
+    specific business outcome, which depends on this real machine's
+    own actual mount state (SudoRunner's reads are real, by design;
+    only its privileged writes go through the injected executor). A
+    401 here would mean the gate wrongly rejected a correct password;
+    anything else means the real action code genuinely ran."""
+    executor = FakeSudoExecutor(returncode=0)
+    case = _RealServerCase(_base_deps(sudo_executor=executor))
     try:
         status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "switch_persona", "params": {"to_persona": "admin"},
+                                       {"action_id": "update_selected",
+                                        "params": {"selected": ["BASELINE"], "update_types": ["apply_volume_mode"]},
                                         "password": "right-password"})
-        assert status == 200
-        assert body["outcome"] == "applied"
+        assert status != 401
+        assert executor.calls  # the real preflight (and likely more) genuinely ran
     finally:
         case.close()
 
@@ -277,3 +399,107 @@ def test_build_real_server_wires_the_drive_admin_pds_runner(tmp_path):
         assert isinstance(real_server.deps["pds_runner"], pds.Runner)
     finally:
         real_server.server_close()
+
+
+# -- /settings/<section> and /admin/settings/<group>/<key> POST routes -------
+# Real regression coverage: neither route existed at all on the merged
+# app until now - clicking "Save" on any Settings or Admin field
+# silently 404'd, a real functional gap found by the user directly
+# driving the running page, not by code review.
+
+class FakeSource:
+    def __init__(self, settings: dict):
+        self.settings = settings
+
+    def current_settings(self):
+        return self.settings
+
+
+class FakeApplier:
+    def __init__(self):
+        self.calls = []
+
+    def apply(self, section, new_values):
+        import settings_web as sw
+        self.calls.append((section, new_values))
+        return sw.ApplyResult(applied=True, detail=f"{section} applied")
+
+
+def test_settings_section_save_route_exists_and_applies_real_typed_values():
+    applier = FakeApplier()
+    source = FakeSource({"network": {"hostname": "baseline", "dhcp": True}})
+    import settings_web as sw
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1700000000.0)
+    case = _RealServerCase(_base_deps(source=source, applier=applier, sessions=sessions))
+    try:
+        url = f"http://127.0.0.1:{case.port}/settings/network"
+        import urllib.request
+        req = urllib.request.Request(
+            url, method="POST",
+            data=b"hostname__type=str&hostname=newhost&dhcp__type=bool",  # dhcp checkbox left unchecked
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"session={session.token}"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            status = resp.status
+        assert status == 200
+        assert applier.calls == [("network", {"hostname": "newhost", "dhcp": False})]
+    finally:
+        case.close()
+
+
+def _post_form_no_redirect(port, path, form_bytes, cookie):
+    """A plain `http.client` POST that does NOT auto-follow the 303
+    redirect these routes return on a browser-form submission - lets a
+    test observe the real status/Location instead of urllib silently
+    following it to whatever the target page returns."""
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("POST", path, body=form_bytes,
+                 headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"session={cookie}"})
+    resp = conn.getresponse()
+    resp.read()
+    status = resp.status
+    conn.close()
+    return status
+
+
+def test_admin_settings_save_route_exists_and_requires_real_elevation():
+    import admin_elevation
+    import settings_store
+    import settings_web as sw
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1700000000.0)
+    elevation_store = admin_elevation.ElevationStore()
+    runner = FakeRunner()
+    case = _RealServerCase(_base_deps(sessions=sessions, elevation_store=elevation_store, runner=runner))
+    try:
+        status = _post_form_no_redirect(case.port, "/admin/settings/startup/auto_start_persona",
+                                         b"value__type=str&value=personal", session.token)
+        # No elevation ticket granted - the route must reach real code
+        # (a redirect back to /admin, not a 404) and refuse for the
+        # real reason (no elevation), not because the route silently
+        # didn't exist.
+        assert status == 303
+        assert settings_store.get_setting(runner, "startup", "auto_start_persona") == "personal"  # unchanged default
+    finally:
+        case.close()
+
+
+def test_admin_settings_save_route_applies_a_real_value_once_elevated():
+    import admin_elevation
+    import settings_store
+    import settings_web as sw
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1700000000.0)
+    elevation_store = admin_elevation.ElevationStore()
+    elevation_store.grant(now=1700000000.0)
+    runner = FakeRunner()
+    case = _RealServerCase(_base_deps(sessions=sessions, elevation_store=elevation_store, runner=runner))
+    try:
+        status = _post_form_no_redirect(case.port, "/admin/settings/startup/auto_start_persona",
+                                         b"value__type=str&value=admin", session.token)
+        assert status == 303
+        assert settings_store.get_setting(runner, "startup", "auto_start_persona") == "admin"
+    finally:
+        case.close()

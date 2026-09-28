@@ -64,6 +64,28 @@ def get_device_serial(runner: Runner, path: str) -> str | None:
     return _parse_udevadm_property(output, "ID_SERIAL_SHORT")
 
 
+def get_usb_bridge_model(runner: Runner, path: str) -> str | None:
+    """Reads ID_USB_MODEL via udevadm - the real, verifiable identity
+    of the USB bridge chip itself (when the device sits behind one),
+    not the drive's own marketing model string. Real finding: a USB-
+    NVMe bridge chip's own model routinely says nothing that
+    identifies it as NVMe in the *drive's* reported model (e.g.
+    "Samsung SSD 980 PRO with Heatsink 2TB" - no "NVMe" anywhere in
+    that string) while the *bridge's* own model does - both of this
+    project's confirmed-real NVMe drives report a Realtek `RTL92xx`
+    bridge (`RTL9220DP_PCIe0` for one, `RTL9210B-CG` for the other),
+    and a third, independently confirmed-NVMe drive behind the same
+    `RTL9220DP` chip reports `RTL9220DP_PCIe1` - a real, non-privileged,
+    generalizable signal `drive_admin.classify_drive_type` uses ahead
+    of the marketing-string heuristic. A consumer HDD/SSD USB
+    enclosure (Seagate "Backup+_Hub_BK", WD "Elements_25A3" in this
+    project's own real hardware) reports its own brand name here
+    instead, not a bridge-chip identifier - correctly gives no false
+    NVMe signal."""
+    output = runner.run(["udevadm", "info", "--query=property", f"--name={path}"])
+    return _parse_udevadm_property(output, "ID_USB_MODEL")
+
+
 def get_device_size_bytes(runner: Runner, resolved_path: str) -> int:
     dev_name = os.path.basename(resolved_path)
     sectors = int(runner.read_size_file(dev_name).strip())

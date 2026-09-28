@@ -614,6 +614,91 @@ def test_render_admin_page_omits_the_elevation_form_when_already_elevated():
     assert "/admin/elevate" not in body
 
 
+# --------------------------------------------------------------------------
+# render_field_input / reconstruct_typed_form_values: real typed form
+# controls, never a raw JSON textarea for an ordinary scalar (direct
+# feedback: "this is not a user experience").
+# --------------------------------------------------------------------------
+
+def test_render_field_input_renders_a_real_checkbox_for_a_bool():
+    html = sw.render_field_input("dhcp", True)
+    assert 'type="checkbox"' in html
+    assert "checked" in html
+    assert 'name="dhcp__type" value="bool"' in html
+
+
+def test_render_field_input_unchecked_checkbox_for_false():
+    html = sw.render_field_input("dhcp", False)
+    assert 'type="checkbox"' in html
+    assert html.count("checked") == 0
+
+
+def test_render_field_input_renders_a_real_number_input_for_an_int():
+    html = sw.render_field_input("default_session_ttl_hours", 24)
+    assert 'type="number"' in html
+    assert 'value="24"' in html
+    assert 'step="1"' in html
+    assert 'name="default_session_ttl_hours__type" value="int"' in html
+
+
+def test_render_field_input_renders_text_for_a_string():
+    html = sw.render_field_input("hostname", "baseline")
+    assert 'type="text"' in html
+    assert 'value="baseline"' in html
+
+
+def test_render_field_input_renders_a_dropdown_when_options_given():
+    html = sw.render_field_input("baseline_mode", "read-only", options=["read-write", "read-only", "write-only"])
+    assert "<select" in html
+    assert '<option value="read-only" selected>' in html
+    assert '<option value="read-write" >' in html
+
+
+def test_render_field_input_falls_back_to_a_raw_json_textarea_only_for_nested_values():
+    html = sw.render_field_input("restored_categories", ["network", "firewall"])
+    assert "<textarea" in html
+    assert "network" in html
+
+
+def test_reconstruct_typed_form_values_true_when_checkbox_present():
+    form = {"dhcp": "true", "dhcp__type": "bool"}
+    assert sw.reconstruct_typed_form_values(form, ["dhcp"]) == {"dhcp": True}
+
+
+def test_reconstruct_typed_form_values_false_when_checkbox_absent():
+    """An unchecked checkbox simply isn't submitted at all - standard
+    HTML form behavior - so absence must mean False, not "no change"."""
+    form = {"dhcp__type": "bool"}
+    assert sw.reconstruct_typed_form_values(form, ["dhcp"]) == {"dhcp": False}
+
+
+def test_reconstruct_typed_form_values_casts_int_and_float_correctly():
+    form = {"ttl__type": "int", "ttl": "12", "ratio__type": "float", "ratio": "0.5"}
+    result = sw.reconstruct_typed_form_values(form, ["ttl", "ratio"])
+    assert result == {"ttl": 12, "ratio": 0.5}
+    assert isinstance(result["ttl"], int)
+    assert isinstance(result["ratio"], float)
+
+
+def test_reconstruct_typed_form_values_real_round_trip_through_render_field_input():
+    """The two halves genuinely agree with each other - render a real
+    field, simulate submitting it unchanged, get the same real value
+    back, for every type this app actually uses."""
+    for name, value in [("dhcp", True), ("hostname", "baseline"), ("ttl", 24), ("ratio", 1.5)]:
+        rendered = sw.render_field_input(name, value)
+        # Simulate the browser's own submission: a checked checkbox
+        # sends name=true; everything else sends its real value.
+        form = {f"{name}__type": ("bool" if isinstance(value, bool) else
+                                   "int" if isinstance(value, int) else
+                                   "float" if isinstance(value, float) else "str")}
+        if isinstance(value, bool):
+            if value:
+                form[name] = "true"
+        else:
+            form[name] = str(value)
+        assert sw.reconstruct_typed_form_values(form, [name]) == {name: value}
+
+
 def test_render_recovery_page_shows_real_discovery_and_no_login_form():
     body = sw.render_recovery_page({
         "personas_found": ["admin"], "personas_missing": ["personal"],
@@ -623,6 +708,26 @@ def test_render_recovery_page_shows_real_discovery_and_no_login_form():
     assert "personal" in body
     assert "ACTIVE" in body
     assert "password" not in body.lower()  # userless - no credential form anywhere on this page
+
+
+def test_render_recovery_page_shows_the_exit_button_only_when_recovery_mode_is_active():
+    body = sw.render_recovery_page({
+        "personas_found": ["admin"], "personas_missing": [],
+        "active_persona": "admin", "recovery_active": True,
+    }).decode()
+    assert "Attempt to leave recovery mode" in body
+
+
+def test_render_recovery_page_hides_the_exit_button_when_recovery_mode_is_not_active():
+    """Showing "leave recovery mode" when it isn't active implies
+    there's something to leave - there isn't, so the control shouldn't
+    be there at all."""
+    body = sw.render_recovery_page({
+        "personas_found": [], "personas_missing": ["admin", "personal"],
+        "active_persona": None, "recovery_active": False,
+    }).decode()
+    assert "Attempt to leave recovery mode" not in body
+    assert "not active" in body
 
 
 def test_render_recovery_page_handles_the_handed_off_case_without_crashing():

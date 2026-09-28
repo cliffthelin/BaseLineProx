@@ -325,3 +325,32 @@ def test_wipe_signatures_has_no_bare_path_parameter():
     params = list(sig.parameters)
     assert params[0] == "validated"
     assert "path" not in params
+
+
+# -- get_usb_bridge_model - a real, non-privileged NVMe-behind-USB signal --
+
+class _UdevadmOnlyRunner:
+    """A minimal Runner returning a real, multi-line udevadm property
+    block for exactly one path - enough to prove the parser reads
+    ID_USB_MODEL specifically, not any other property on the line."""
+
+    def __init__(self, output: str):
+        self.output = output
+
+    def run(self, argv):
+        return self.output
+
+
+def test_get_usb_bridge_model_reads_a_real_nvme_bridge_chip():
+    output = "ID_BUS=usb\nID_SERIAL_SHORT=MD89N41071210AP4E\nID_USB_MODEL=RTL9220DP_PCIe0\nID_USB_VENDOR=Realtek\n"
+    assert pds.get_usb_bridge_model(_UdevadmOnlyRunner(output), "/dev/sdb") == "RTL9220DP_PCIe0"
+
+
+def test_get_usb_bridge_model_reads_a_real_consumer_enclosure_brand():
+    output = "ID_BUS=usb\nID_USB_MODEL=Backup+_Hub_BK\nID_USB_VENDOR=Seagate\n"
+    assert pds.get_usb_bridge_model(_UdevadmOnlyRunner(output), "/dev/sdf") == "Backup+_Hub_BK"
+
+
+def test_get_usb_bridge_model_none_when_the_device_is_not_behind_usb_at_all():
+    output = "ID_BUS=ata\nID_SERIAL_SHORT=WCV00YLT\n"
+    assert pds.get_usb_bridge_model(_UdevadmOnlyRunner(output), "/dev/sda") is None
