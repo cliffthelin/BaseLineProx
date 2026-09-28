@@ -1,5 +1,55 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-27 continuation - v0.1 work queue fully closed; V0.2 ready to start
+
+A later continuation of the same day's session below (the disk-merge
+investigation there is separate, unrelated work - still accurate as
+its own historical record, not superseded by this note).
+
+**What closed this pass:** `docs/design/v0.1-work-queue.md` items
+25-29 - the entire multi-persona/recovery/settings arc decision record
+76 started is now fully landed:
+
+- **25** - persona-aware wiring (decision record 78): real
+  mount/unmount + `switch_active_persona` in `persist_bind_mounts.py`;
+  `scripts_inbox.py`'s `inbox_dir_for`; a stale-session refusal in
+  `settings_web.py`; `/api/active-persona` on `control_panel_web.py`.
+- **26** - Recovery Mode itself (decision record 81): real automatic
+  entry wired into `persist_bind_mounts.main`, a guest-tier
+  `/recovery` discovery page with no login anywhere on it, and the
+  hard exit condition (refuses to leave without a real read-write
+  persona volume) - explicitly not touching the withdrawn USB
+  mechanism (decision record 77).
+- **27** - automated recurring encrypted backup (decision record 79):
+  new `backup_recurring.py` + systemd timer, honestly flagged as not
+  yet targeting a genuinely separate physical device (none exists in
+  this dev session).
+- **28** - the Admin settings tab (decision record 80): a real
+  `/admin` page on `settings_web.py`, gated on a real `admin_elevation`
+  ticket for edits - the direct instruction itself had already
+  answered "web vs TUI" ("essentially a version of the installer Web
+  application").
+- **29** - the full TDD audit itself (decision record 82) - see that
+  record for the actual findings; short version: every module built
+  across decision records 62-81 already had real, substantial
+  FakeRunner-driven tests going in, so the audit's main output is
+  confirmation plus one closed provision.sh staging gap
+  (`settings_store.py`/`admin_elevation.py`/`recovery_mode.py`, caught
+  by `tools/check_provision_deploys_all_imports.py` during this pass).
+
+**Full suite at close: see decision record 82 for the exact count.**
+`docs/design/v0.1-work-queue.md` has no remaining `[ ]` rows.
+
+**V0.2 focus, per the user's own framing:** "Virtual Machines and User
+Persistence capturing of data." One real, unresolved architecture
+tension flagged directly to the user and **not** resolved by this
+pass: `drive_installer.py`'s LVM-based multi-persona model
+(`USER_PERSISTENCE_<PERSONA>` volumes inside Proxmox's own VG) does
+not match the real, already-deployed `/dev/sdb` layout (plain GPT
+partitions on a separate physical drive, no LVM at all) - reconciling
+this is likely foundational V0.2 work, not a pre-existing decision to
+build on.
+
 ## 2026-09-27 handoff - v0.1 queue items #14-16 closed; real install-ISO tooling proven; a live disk-merge is mid-flight, NOT executed
 
 **Ending this session because it's out of tokens, not because the work is done.** The disk-merge work below is genuinely in progress - read the "Right now, unfinished" section before doing anything to either physical drive.
