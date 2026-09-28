@@ -114,6 +114,29 @@ def test_render_drive_admin_page_lists_real_drives_volumes_and_actions():
     assert "driveAdminModalPassword" in body  # the sudo-password modal is present
 
 
+def test_render_drive_admin_page_exposes_a_collapsed_overrides_section_for_technicians():
+    """Direct instruction: technical fields (serial, source ISO path,
+    cert/key paths, server host, MAC/DMI override) "should not be
+    invisible to a technician/developer but should be hidden away in
+    an override tab" - a real, always-rendered <details> disclosure,
+    collapsed by default (no `open` attribute), gated to
+    build_self_installer specifically since that's the only action
+    with technical params to override."""
+    body = bw.render_drive_admin_page(
+        drives=[{"path": "/dev/sdb", "model": "PC401 NVMe SK hynix 512GB", "drive_type": "NVMe",
+                 "size": "476.9G", "is_default": True}],
+        volumes=[], actions=da.describe_actions(),
+    ).decode()
+    assert "overridesHtml" in body
+    assert '<details class="overrides">' in body  # the real markup overridesHtml() builds
+    assert "<details class=\"overrides\" open>" not in body  # collapsed by default, not forced open
+    assert 'pendingActionId === "build_self_installer" ? overridesHtml() : ""' in body
+    assert "SELF_INSTALLER_OVERRIDE_FIELDS" in body
+    for param in ("expected_serial", "proxmox_source_iso", "server_host", "cert_path", "key_path",
+                  "target_mac", "target_dmi_product"):
+        assert param in body
+
+
 def test_render_drive_admin_page_shows_real_partition_count_and_data_used():
     body = bw.render_drive_admin_page(
         drives=[{"path": "/dev/sda", "model": "ST5000DM003-2FH18L", "drive_type": "HDD",

@@ -133,6 +133,9 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 #driveAdminModal .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 #driveAdminModal .modal-actions button { flex: 1; margin-top: 0; }
 #driveAdminModalCancel { background: #262838; }
+#driveAdminModal details.overrides { margin-top: 16px; border-top: 1px solid #2c2f42; padding-top: 10px; }
+#driveAdminModal details.overrides summary { cursor: pointer; font-size: .8rem; color: #8890a6; text-transform: uppercase; letter-spacing: .04em; }
+#driveAdminModal details.overrides label { margin-top: 10px; }
 #driveAdminModal .hint { margin-top: 10px; }
 """
 
@@ -267,6 +270,34 @@ function selectedVolumeLabels() {{
   return Array.from(document.querySelectorAll(".volume-select:checked")).map(cb => cb.value);
 }}
 
+// Technical override fields - direct instruction: "should not be
+// invisible to a technician/developer but they should be hidden away
+// in an override tab" - a real, always-present <details> disclosure,
+// collapsed by default so the primary flow stays "pick a drive and
+// click", but never removed or buried behind a separate permission.
+// Every value here is optional; leaving a field blank means "let
+// self_installer.py auto-derive/generate/locate it, same as if this
+// section didn't exist at all."
+const SELF_INSTALLER_OVERRIDE_FIELDS = [
+  {{id: "paramExpectedSerial", param: "expected_serial", label: "Expected drive serial", placeholder: "auto-read from the selected drive"}},
+  {{id: "paramProxmoxSourceIso", param: "proxmox_source_iso", label: "Proxmox source ISO path", placeholder: "auto-located in INSTALLER_CACHE"}},
+  {{id: "paramServerHost", param: "server_host", label: "Answer-server host", placeholder: "10.0.2.2 (QEMU gateway)"}},
+  {{id: "paramCertPath", param: "cert_path", label: "TLS certificate path", placeholder: "auto-generated"}},
+  {{id: "paramKeyPath", param: "key_path", label: "TLS key path", placeholder: "auto-generated"}},
+  {{id: "paramTargetMac", param: "target_mac", label: "Target MAC address", placeholder: "none"}},
+  {{id: "paramTargetDmiProduct", param: "target_dmi_product", label: "Target DMI product string", placeholder: "none"}},
+];
+
+function overridesHtml() {{
+  const fields = SELF_INSTALLER_OVERRIDE_FIELDS.map(f =>
+    `<label>${{f.label}} <input id="${{f.id}}" placeholder="${{f.placeholder}}"></label>`
+  ).join("");
+  return `<details class="overrides">
+    <summary>Overrides (technical - leave blank to auto-detect)</summary>
+    ${{fields}}
+  </details>`;
+}}
+
 function updateSelectedParamsHtml() {{
   const selected = selectedVolumeLabels();
   const selectedText = selected.length ? selected.join(", ") : "(none selected above)";
@@ -284,7 +315,8 @@ document.querySelectorAll(".drive-admin-action").forEach(btn => {{
     document.getElementById("driveAdminModalDescription").textContent = btn.dataset.description;
     document.getElementById("driveAdminModalParams").innerHTML =
       requiresDeviceById[pendingActionId]
-        ? deviceSelectHtml(currentlySelectedDrivePath())
+        ? deviceSelectHtml(currentlySelectedDrivePath()) +
+          (pendingActionId === "build_self_installer" ? overridesHtml() : "")
         : pendingActionId === "update_selected"
         ? updateSelectedParamsHtml()
         : "";
@@ -304,6 +336,12 @@ document.getElementById("driveAdminModalConfirm").addEventListener("click", asyn
   const typeVolumeMode = document.getElementById("paramTypeVolumeMode");
   const typeSwitchPersona = document.getElementById("paramTypeSwitchPersona");
   if (devicePath) params.device_path = devicePath.value;
+  if (pendingActionId === "build_self_installer") {{
+    for (const f of SELF_INSTALLER_OVERRIDE_FIELDS) {{
+      const el = document.getElementById(f.id);
+      if (el && el.value.trim() !== "") params[f.param] = el.value.trim();
+    }}
+  }}
   if (pendingActionId === "update_selected") {{
     params.selected = selectedVolumeLabels();
     params.update_types = [
