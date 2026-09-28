@@ -20,6 +20,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import registry
+
 EVENT_LOG = Path("/var/log/baseline/network.events.jsonl")
 LLM_PROBE_HOST = "api.anthropic.com"
 LLM_PROBE_PORT = 443
@@ -82,28 +84,29 @@ def is_wired(ifname: str) -> bool:
         return False
 
 
-ALIAS_FILE = Path("/etc/baseline/interface_aliases.json")
+# Interface aliases moved onto registry.py directly (decision record
+# 91), not through settings_store.py's SettingDef layer: one interface
+# name per real, physically-present NIC is a dynamic key space known
+# only at runtime, not a fixed set of (group, key) pairs settings_store
+# expects to be declared up front - exactly the case registry.py's own
+# generic entries exist for.
+ALIASES_TYPE_ID = "network_aliases"
 
 
 def load_aliases() -> dict:
-    try:
-        return json.loads(ALIAS_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+    entries = registry.list_entries(ALIASES_TYPE_ID, scope=registry.PROTECTED)
+    return {ifname: e["value"] for ifname, e in entries.items() if e["value"]}
 
 
 def save_alias(ifname: str, alias: str) -> None:
     """An operator-chosen name overriding the driver-based default, e.g.
     renaming "Ethernet" to "Office Uplink". Empty alias clears it, going
     back to the driver-based default."""
-    aliases = load_aliases()
+    registry.register_type(ALIASES_TYPE_ID, "Operator-chosen interface display names (network.py)",
+                            default_scope=registry.PROTECTED)
+    registry.upsert_entry(ALIASES_TYPE_ID, ifname, attributes={}, scope=registry.PROTECTED)
     alias = alias.strip()
-    if alias:
-        aliases[ifname] = alias
-    else:
-        aliases.pop(ifname, None)
-    ALIAS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ALIAS_FILE.write_text(json.dumps(aliases))
+    registry.set_value(ALIASES_TYPE_ID, ifname, alias if alias else None, scope=registry.PROTECTED)
 
 
 def friendly_name(ifname: str, show_hardware_id: bool = False) -> str:

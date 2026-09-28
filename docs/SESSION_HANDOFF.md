@@ -1,5 +1,24 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - completed the settings-to-SQL migration (6-item queue)
+
+**Read decision record 91 first** (`docs/design/decision-records/91-settings-migration-completion.md`).
+
+Asked "what further steps are needed to complete the settings to SQL migration" - answered with a prioritized 6-item list, then told "they all need fixed, just queue them up and resolve them." Did all six:
+
+1. `registry.py` gained real schema versioning (`PRAGMA user_version`, `register_migration`) - scaffolding for a future table change, no migration needed yet since only version 1 has ever shipped.
+2. `settings_store.export_bootstrap_snapshot` (built in decision record 87, never called) is now actually used by `drive_admin.build_self_installer`.
+3. `netpref.py`'s `network_preference.json` moved onto `settings_store.py` (new `"network"` group) - the first real external use of `register_schema` outside its own seed data. Had zero test coverage before; now has 5 tests.
+4. `network.py`'s `interface_aliases.json` moved onto `registry.py` **directly**, not through `settings_store.py` - a dynamic, hardware-dependent key space doesn't fit a fixed schema. Had zero test coverage before; now has 7 tests.
+5. `install-config.json` (config_pipeline.py/control_panel_web.py/backup_restore.py) reviewed and deliberately **not** migrated - it's an external tool's export format, read/diffed/backed-up as a file by design; forcing it onto the registry would break the real workflow.
+6. `settings_web.py`'s `JsonFileStore` renamed to `LocalAppStore`, rewritten onto SQLite, same public API - deliberately **not** routed through registry.py's GLOBAL/PROTECTED scope, since it's reused by multiple independently-deployed local apps (settings_web's own standalone server, scripts_inbox_web's separate store) each at its own injected path; forcing it onto fixed machine-wide paths would break the "no root, no install required" standalone-evaluation property it exists for.
+
+Also, surfaced while building #6: the Admin tab had zero visibility into dependencies/health-check results - `dump_configuration_snapshot()` existed but nothing in the UI called it. `handle_admin_view`/`render_admin_page` now show every dependency and its latest result, read-only (never triggers a run itself - that's the adhoc action's job).
+
+**One item explicitly not done**: production-equivalent verification (confirming the PROTECTED-scope checks pass, not just fail gracefully, against a real root-owned `/etc/baseline`) - closing this means creating that directory on this real machine, a system-level action outside the repo that needs to be asked for separately, not folded into a broad "resolve everything" instruction.
+
+Full suite: 1420/1420 (was 1414).
+
 ## 2026-09-28 continuation - ran run_health_check for real, found and fixed two real GLOBAL/PROTECTED bugs
 
 **Read decision record 90 first** (`docs/design/decision-records/90-health-check-real-run-fixes.md`).

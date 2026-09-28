@@ -632,11 +632,19 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     if failed:
         summary = "; ".join(f"{r.id}: {r.detail}" for r in failed)
         return ActionResult(False, f"refusing to start - loud dependency check(s) failed: {summary}")
-    lvm_preset = params.get("lvm_size_preset") or settings_store.get_setting(
-        "self_installer", "lvm_size_preset")
+    # The one real consumer export_bootstrap_snapshot was actually built
+    # for (its own docstring): every one of these values gets baked as
+    # a literal string into the Proxmox answer.toml, which is applied
+    # by the Proxmox installer's own separate environment - it can
+    # never open this database itself. One snapshot call, not three
+    # separate get_setting calls repeating the same (group, key) pairs.
+    snapshot = settings_store.export_bootstrap_snapshot([
+        ("self_installer", "lvm_size_preset"), ("self_installer", "fqdn"), ("self_installer", "memory_mb"),
+    ])
+    lvm_preset = params.get("lvm_size_preset") or snapshot["self_installer.lvm_size_preset"]
     lvm_sizes = si.LVM_SIZE_PRESETS[lvm_preset]
-    fqdn = params.get("fqdn") or settings_store.get_setting("self_installer", "fqdn")
-    memory_mb = int(params.get("memory_mb") or settings_store.get_setting("self_installer", "memory_mb"))
+    fqdn = params.get("fqdn") or snapshot["self_installer.fqdn"]
+    memory_mb = int(params.get("memory_mb") or snapshot["self_installer.memory_mb"])
 
     workspace = Path(params.get("workspace", "/var/tmp/baseline-self-installer"))
     result = si.build_and_write_self_installer(

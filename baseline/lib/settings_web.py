@@ -310,7 +310,23 @@ def handle_admin_view(sessions: SessionStore, token: str, now: float) -> RouteRe
     if session is None:
         return RouteResult("refused", 401, {"error": "not authenticated"})
     import settings_store
-    return RouteResult("applied", 200, {"settings": settings_store.all_effective_settings()})
+    import dependencies as dep
+    # Decision record 91: "know what is in place" for troubleshooting
+    # means the Admin tab, not just a diagnostic dump function nobody
+    # opens - shows every registered dependency's most recent check
+    # result alongside settings. Read-only: viewing this page never
+    # triggers a fresh run itself (that's the adhoc action's job,
+    # deliberately kept separate) - it shows whatever boot/interval/
+    # pre-install/adhoc last recorded, which may be "never" on a
+    # freshly deployed machine.
+    return RouteResult("applied", 200, {
+        "settings": settings_store.all_effective_settings(),
+        "dependencies": [
+            {"id": d.id, "level": d.level, "severity": d.severity, "description": d.description}
+            for d in dep.all_dependencies()
+        ],
+        "dependency_results": dep.latest_check_results(),
+    })
 
 
 def handle_admin_elevate(elevation_store, verify_fn, sessions: SessionStore, token: str,
@@ -620,7 +636,10 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
                 return self._html_response(result.status, render_admin_page({}, result.body.get("reason", "")))
             notice = parse_qs(urlparse(self.path).query).get("notice", [""])[0]
             elevated = deps["elevation_store"].is_elevated(deps.get("runner"), now) if deps.get("runner") else False
-            return self._html_response(200, render_admin_page(result.body["settings"], notice, elevated=elevated))
+            return self._html_response(200, render_admin_page(
+                result.body["settings"], notice, elevated=elevated,
+                dependencies=result.body.get("dependencies"),
+                dependency_results=result.body.get("dependency_results")))
 
         result = RouteResult("handed_off", 404, {"reason": f"no route for {self.path!r}; no automatic action taken"})
         self._json(result.status, {"outcome": result.outcome, **result.body})
@@ -635,119 +654,162 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
 # text - functional today, honest about what it's actually doing.
 # ---------------------------------------------------------------------------
 
-class JsonFileStore:
-    """One small on-disk JSON file backing users/settings/rebuild
-    markers for a real, working local deployment. Not a database -
-    this module's whole footprint is meant to stay this small."""
+_DEFAULT_SETTINGS_SECTIONS = {
+    "network": {"hostname": "baseline", "dhcp": True},
+    "firewall": {"allow_lan_only": True},
+    "tether": {"enabled": False},
+    "ssh": {"password_auth": False},
+    "handoff": {"restored_categories": []},
+    "diagnostics": {
+        # Per decision record 22: all 5 install and run cleanly
+        # via apt on a real automated-install target. Fields
+        # below are what an operator actually needs to
+        # configure/select for each tool's *use*, not its
+        # install (install itself needs no fields - plain
+        # noninteractive apt-get). lm-sensors/nvme-cli need
+        # no fields at all - pure passive discovery.
+        "lm-sensors": {"install": "automatic", "fields": []},
+        "nvme-cli": {"install": "automatic", "fields": []},
+        "smartmontools": {
+            "install": "automatic",
+            "fields": [
+                {"name": "device", "type": "select", "source": "smartctl --scan-open",
+                 "label": "Device to inspect"},
+                {"name": "self_test_type", "type": "select", "options": ["short", "long"],
+                 "label": "Self-test type", "requires_explicit_confirm": True},
+            ],
+        },
+        "ethtool": {
+            "install": "automatic",
+            "fields": [
+                {"name": "interface", "type": "select", "source": "network.list_interfaces()",
+                 "label": "Interface to inspect"},
+            ],
+        },
+        "iperf3": {
+            "install": "automatic",
+            "fields": [
+                {"name": "role", "type": "select", "options": ["client", "server"],
+                 "label": "This host's role"},
+                {"name": "peer_address", "type": "text", "label": "Peer address"},
+                {"name": "port", "type": "number", "default": 5201, "label": "Port"},
+            ],
+            "requires_explicit_confirm": True,
+            "note": "Active network test with real side effects (PRD SS5.9a) - "
+                    "never auto-triggered, always operator-confirmed with both "
+                    "endpoints explicitly chosen.",
+        },
+        "tools_installed": [],
+    },
+}
+
+
+class LocalAppStore:
+    """One small, real SQLite database (decision record 91 - this used
+    to be a single on-disk JSON file, `JsonFileStore`, rewritten whole
+    on every single change) backing users/settings/rebuild markers for
+    a real, working local deployment - reused as-is by both
+    `settings_web.py`'s own standalone server and
+    `scripts_inbox_web.py`'s separate login store, each at its own
+    injected path; not tied to `registry.py`'s fixed GLOBAL/PROTECTED
+    paths, which would break exactly that "many small, independently
+    deployed local apps" use case this class exists for.
+
+    Every public method here keeps `JsonFileStore`'s exact prior
+    signature and return shape - only the storage underneath changed,
+    so no caller (`FileBackedPasswordVerifier`, `FileBackedSettingsSource`,
+    `FileBackedSectionApplier`, `FileBackedElevationVerifier`,
+    `LoggingRebuildTrigger`, `scripts_inbox_web.py`) needed to change."""
 
     def __init__(self, path: Path):
         self.path = path
-        if not self.path.exists():
+        import sqlite3
+        is_new = not self.path.exists()
+        if is_new:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._write({
-                "users": {
-                    # DEV-ONLY seed account so this is usable the moment
-                    # it's launched: username "root", password "baseline".
-                    # A real deployment wires PasswordVerifier to the
-                    # actual system account instead of this file.
-                    "root": _sha512crypt("baseline", _new_salt()),
-                },
-                "settings": {
-                    "network": {"hostname": "baseline", "dhcp": True},
-                    "firewall": {"allow_lan_only": True},
-                    "tether": {"enabled": False},
-                    "ssh": {"password_auth": False},
-                    "handoff": {"restored_categories": []},
-                    "diagnostics": {
-                        # Per decision record 22: all 5 install and run cleanly
-                        # via apt on a real automated-install target. Fields
-                        # below are what an operator actually needs to
-                        # configure/select for each tool's *use*, not its
-                        # install (install itself needs no fields - plain
-                        # noninteractive apt-get). lm-sensors/nvme-cli need
-                        # no fields at all - pure passive discovery.
-                        "lm-sensors": {"install": "automatic", "fields": []},
-                        "nvme-cli": {"install": "automatic", "fields": []},
-                        "smartmontools": {
-                            "install": "automatic",
-                            "fields": [
-                                {"name": "device", "type": "select", "source": "smartctl --scan-open",
-                                 "label": "Device to inspect"},
-                                {"name": "self_test_type", "type": "select", "options": ["short", "long"],
-                                 "label": "Self-test type", "requires_explicit_confirm": True},
-                            ],
-                        },
-                        "ethtool": {
-                            "install": "automatic",
-                            "fields": [
-                                {"name": "interface", "type": "select", "source": "network.list_interfaces()",
-                                 "label": "Interface to inspect"},
-                            ],
-                        },
-                        "iperf3": {
-                            "install": "automatic",
-                            "fields": [
-                                {"name": "role", "type": "select", "options": ["client", "server"],
-                                 "label": "This host's role"},
-                                {"name": "peer_address", "type": "text", "label": "Peer address"},
-                                {"name": "port", "type": "number", "default": 5201, "label": "Port"},
-                            ],
-                            "requires_explicit_confirm": True,
-                            "note": "Active network test with real side effects (PRD SS5.9a) - "
-                                    "never auto-triggered, always operator-confirmed with both "
-                                    "endpoints explicitly chosen.",
-                        },
-                        "tools_installed": [],
-                    },
-                },
-                "pending_accounts": {},
-                "rebuild_log": [],
-                # DEV-ONLY seed elevation passphrase (work-queue item
-                # 28): "baseline-admin" - deliberately different from
-                # the login password above, matching decision record
-                # 76's "a SEPARATE, additional passphrase - not the
-                # same secret as admin's own base login."
-                "elevation_password_hash": _sha512crypt("baseline-admin", _new_salt()),
-            })
+        self._conn = sqlite3.connect(str(self.path))
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS kv (namespace TEXT NOT NULL, key TEXT NOT NULL, "
+            "value TEXT NOT NULL, PRIMARY KEY (namespace, key))"
+        )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS rebuild_log (row_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "target TEXT NOT NULL, config TEXT NOT NULL, at REAL NOT NULL)"
+        )
+        self._conn.commit()
+        if is_new:
+            # DEV-ONLY seed account so this is usable the moment it's
+            # launched: username "root", password "baseline". A real
+            # deployment wires PasswordVerifier to the actual system
+            # account instead of this store.
+            self._put("users", "root", _sha512crypt("baseline", _new_salt()))
+            for section, values in _DEFAULT_SETTINGS_SECTIONS.items():
+                self._put("settings", section, values)
+            # DEV-ONLY seed elevation passphrase (work-queue item 28):
+            # "baseline-admin" - deliberately different from the login
+            # password above, matching decision record 76's "a
+            # SEPARATE, additional passphrase - not the same secret as
+            # admin's own base login."
+            self._put("auth", "elevation_password_hash", _sha512crypt("baseline-admin", _new_salt()))
 
-    def _read(self) -> dict:
-        return json.loads(self.path.read_text())
+    def _get(self, namespace: str, key: str):
+        row = self._conn.execute(
+            "SELECT value FROM kv WHERE namespace = ? AND key = ?", (namespace, key)
+        ).fetchone()
+        return json.loads(row[0]) if row is not None else None
 
-    def _write(self, data: dict) -> None:
-        self.path.write_text(json.dumps(data, indent=2))
+    def _put(self, namespace: str, key: str, value) -> None:
+        self._conn.execute(
+            "INSERT INTO kv (namespace, key, value) VALUES (?, ?, ?) "
+            "ON CONFLICT(namespace, key) DO UPDATE SET value = excluded.value",
+            (namespace, key, json.dumps(value)),
+        )
+        self._conn.commit()
+
+    def _namespace(self, namespace: str) -> dict:
+        rows = self._conn.execute("SELECT key, value FROM kv WHERE namespace = ?", (namespace,)).fetchall()
+        return {k: json.loads(v) for k, v in rows}
 
     def get_user_hash(self, username: str) -> str | None:
-        return self._read()["users"].get(username)
+        return self._get("users", username)
 
     def get_elevation_hash(self) -> str | None:
-        return self._read().get("elevation_password_hash")
+        return self._get("auth", "elevation_password_hash")
 
     def add_user(self, username: str, password_hash: str) -> None:
-        data = self._read()
-        data["users"][username] = password_hash
-        self._write(data)
+        self._put("users", username, password_hash)
 
     def settings(self) -> dict:
-        return self._read()["settings"]
+        return self._namespace("settings")
 
     def update_section(self, section: str, values: dict) -> None:
-        data = self._read()
-        data["settings"].setdefault(section, {}).update(values)
-        self._write(data)
+        current = self._get("settings", section) or {}
+        current.update(values)
+        self._put("settings", section, current)
 
     def save_pending_account(self, username: str, password_hash: str) -> None:
-        data = self._read()
-        data["pending_accounts"][username] = {"password_hash": password_hash, "config": {}}
-        self._write(data)
+        self._put("pending_accounts", username, {"password_hash": password_hash, "config": {}})
 
     def record_rebuild(self, target: str, config: dict, now: float) -> None:
-        data = self._read()
-        data["rebuild_log"].append({"target": target, "config": config, "at": now})
-        self._write(data)
+        self._conn.execute(
+            "INSERT INTO rebuild_log (target, config, at) VALUES (?, ?, ?)",
+            (target, json.dumps(config), now),
+        )
+        self._conn.commit()
+
+    def rebuild_log(self) -> list:
+        """Every recorded rebuild, oldest first - the real, public way
+        to read back what `record_rebuild` wrote (there was no way to
+        do this at all under the old JSON-file shape without reaching
+        into the file directly)."""
+        rows = self._conn.execute("SELECT target, config, at FROM rebuild_log ORDER BY row_id").fetchall()
+        return [{"target": t, "config": json.loads(c), "at": a} for t, c, a in rows]
 
 
 class FileBackedPasswordVerifier(PasswordVerifier):
-    def __init__(self, store: JsonFileStore):
+    def __init__(self, store: LocalAppStore):
         self.store = store
 
     def verify(self, username: str, password: str) -> bool:
@@ -835,7 +897,7 @@ class FileBackedElevationVerifier:
     JsonFileStore, but under its own separate hash field, never the
     login password's."""
 
-    def __init__(self, store: JsonFileStore):
+    def __init__(self, store: LocalAppStore):
         self.store = store
 
     def __call__(self, passphrase: str) -> bool:
@@ -867,7 +929,7 @@ class FileBackedSettingsSource(SettingsSource):
     (falls back cleanly per-item, matching hardware.py's own
     tolerance philosophy, rather than crashing the whole page)."""
 
-    def __init__(self, store: JsonFileStore):
+    def __init__(self, store: LocalAppStore):
         self.store = store
 
     def current_settings(self) -> dict:
@@ -885,7 +947,7 @@ class FileBackedSectionApplier(SectionApplier):
     the actual subsystem apply mechanisms (PRD SS5.10's firewall
     transaction, etc.) is future integration work, not pretended here."""
 
-    def __init__(self, store: JsonFileStore):
+    def __init__(self, store: LocalAppStore):
         self.store = store
 
     def apply(self, section: str, new_values: dict) -> ApplyResult:
@@ -925,7 +987,7 @@ class LoggingRebuildTrigger(RebuildTrigger):
     image/virtual-disk targets in Gate C) - wiring that in is the next
     integration step, not duplicated here."""
 
-    def __init__(self, store: JsonFileStore, clock=time.time):
+    def __init__(self, store: LocalAppStore, clock=time.time):
         self.store = store
         self.clock = clock
 
@@ -1119,7 +1181,35 @@ confirmed mounted read-write - this page cannot bypass that.</p>"""
 """)
 
 
-def render_admin_page(settings: dict, notice: str = "", elevated: bool = False) -> bytes:
+def render_dependencies_section(dependencies: list, dependency_results: dict) -> str:
+    """Decision record 91's Admin-tab surface for "know what is in
+    place" - every registered dependency (system/install/future
+    levels) alongside its most recent check result, if any has ever
+    run. Read-only by design (matches `handle_admin_view` never
+    triggering a run itself) - use the "Run Health Check" action on
+    Drive Administration to produce a fresh result."""
+    if not dependencies:
+        return ""
+    rows = "".join(
+        (lambda r: f"""<tr>
+<td>{d['id']}</td><td>{d['level']}</td><td>{d['severity']}</td>
+<td>{'OK' if r and r['ok'] else ('FAIL' if r else 'never checked')}</td>
+<td>{(r['detail'] if r else '') or ''}</td>
+</tr>""")(dependency_results.get(d["id"]))
+        for d in dependencies
+    )
+    return f"""<h2>Dependencies</h2>
+<p class="hint">Every predefined system/install-level check and its most recent result -
+run automatically before an install, at boot, and on an interval, or on demand via the
+"Run Health Check" action on Drive Administration.</p>
+<table>
+<tr><th>ID</th><th>Level</th><th>Severity</th><th>Last result</th><th>Detail</th></tr>
+{rows}
+</table>"""
+
+
+def render_admin_page(settings: dict, notice: str = "", elevated: bool = False,
+                       dependencies: list | None = None, dependency_results: dict | None = None) -> bytes:
     """The Admin tab (work-queue item 28): every settings_store.py
     group as its own sub-tab section. Editing a value is refused
     server-side without a real elevation ticket regardless of what
@@ -1145,12 +1235,14 @@ passphrase from your login, matching real sudo's own short-lived cache.</p>"""
         for group, values in settings.items()
     )
     notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    deps_html = render_dependencies_section(dependencies or [], dependency_results or {})
     return _html("Admin", f"""
 {notice_html}
 {elevate_html}
 <p>Every current Admin setting is shown below, grouped by sub-tab. Changing one
 requires elevation (above) first - matching admin's own "sudo or root" design.</p>
 {sections}
+{deps_html}
 <p><a href="/settings">Back to Settings</a> &middot; <a href="/logout">Log out</a></p>
 """)
 
@@ -1220,10 +1312,10 @@ class SettingsWebServer:
 
 def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
                        data_path: Path | None = None, runner=None) -> SettingsWebServer:
-    """A genuinely working, standalone deployment - one JSON file, no
-    root, no real Proxmox install required. Default login is
-    root/baseline (see JsonFileStore's seed) until PasswordVerifier is
-    wired to the real system account.
+    """A genuinely working, standalone deployment - one small SQLite
+    database, no root, no real Proxmox install required. Default login
+    is root/baseline (see `LocalAppStore`'s seed) until PasswordVerifier
+    is wired to the real system account.
 
     `runner` (optional, real-deployment only) wires a real
     `RunnerBackedActivePersonaProvider` so a session becomes stale if
@@ -1231,7 +1323,7 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
     omitted (the default) keeps this fully usable standalone with no
     Runner/persistence layer available at all, matching this
     function's own "no root, no real hardware required" design."""
-    store = JsonFileStore(data_path or Path("/tmp/baseline-settings-web/store.json"))
+    store = LocalAppStore(data_path or Path("/tmp/baseline-settings-web/store.db"))
     persona_provider = RunnerBackedActivePersonaProvider(runner) if runner is not None else None
     return SettingsWebServer(
         bind_host, bind_port,
@@ -1258,7 +1350,7 @@ def resolve_data_path(env: dict) -> Path:
     override = env.get("BASELINE_SETTINGS_WEB_DATA")
     if override:
         return Path(override)
-    return Path("/tmp/baseline-settings-web/store.json")
+    return Path("/tmp/baseline-settings-web/store.db")
 
 
 def main() -> int:

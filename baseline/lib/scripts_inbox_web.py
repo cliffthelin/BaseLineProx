@@ -7,7 +7,7 @@ anything itself - it only stores files.
 
 Login-gated the same way settings_web.py already is -
 `PasswordVerifier`, `SessionStore`, `handle_login`,
-`FileBackedPasswordVerifier`, and `JsonFileStore` are all reused
+`FileBackedPasswordVerifier`, and `LocalAppStore` are all reused
 directly from settings_web.py, not duplicated. This is a deliberate,
 important difference from control_panel_web.py, which has no
 authentication at all and is kept operator-invoked-only for exactly
@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote
 
 import scripts_inbox as si
-from settings_web import FileBackedPasswordVerifier, JsonFileStore, SessionStore, handle_login
+from settings_web import FileBackedPasswordVerifier, LocalAppStore, SessionStore, handle_login
 
 
 @dataclass
@@ -158,7 +158,7 @@ def build_real_server(*, bind_host: str = "0.0.0.0", bind_port: int = 8200,
 
     from repair import RealRunner
 
-    store = JsonFileStore(Path(data_path))
+    store = LocalAppStore(Path(data_path))
     verifier = FileBackedPasswordVerifier(store)
     sessions = SessionStore()
     httpd = http.server.HTTPServer((bind_host, bind_port), ScriptsInboxHandler)
@@ -174,7 +174,7 @@ def main() -> int:
     import sys
 
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8200
-    data_path = os.environ.get("BASELINE_SCRIPTS_INBOX_DATA", "/tmp/baseline-scripts-inbox/store.json")
+    data_path = os.environ.get("BASELINE_SCRIPTS_INBOX_DATA", "/tmp/baseline-scripts-inbox/store.db")
     inbox_dir = os.environ.get("BASELINE_SCRIPTS_INBOX_DIR", si.DEFAULT_INBOX_DIR)
     server = build_real_server(bind_port=port, data_path=data_path, inbox_dir=inbox_dir)
     print(f"Baseline scripts inbox on http://0.0.0.0:{port}/  (login: root / baseline)")

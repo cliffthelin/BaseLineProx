@@ -91,6 +91,59 @@ def _path_for_scope(scope: str) -> str:
     return GLOBAL_DB_PATH if scope == GLOBAL else _protected_db_path()
 
 
+# Schema version for THIS file's own three tables - bumped whenever
+# their shape changes. `_MIGRATIONS` maps "upgrade from this version"
+# to a function that mutates an open connection to the next version;
+# `_apply_migrations` walks forward one step at a time so a database
+# created by an old build of this code still opens correctly under a
+# newer one. No migrations exist yet (only version 1 has ever
+# shipped) - this is the scaffolding a future table change needs, not
+# a change being made right now.
+SCHEMA_VERSION = 1
+_MIGRATIONS: dict = {}
+
+
+def register_migration(from_version: int, upgrade) -> None:
+    """`upgrade(conn: sqlite3.Connection) -> None` - mutates the schema
+    from `from_version` to `from_version + 1`. Refuses a duplicate
+    registration for the same version outright, same discipline as
+    `register_schema`/`register_dependencies`."""
+    if from_version in _MIGRATIONS:
+        raise ValueError(f"a migration from version {from_version} is already registered")
+    _MIGRATIONS[from_version] = upgrade
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version == 0:
+        # sqlite's own default for a database that has never had
+        # PRAGMA user_version set - indistinguishable from "created
+        # before this versioning scheme existed." Both cases are
+        # exactly version 1's shape (the CREATE TABLE IF NOT EXISTS
+        # statements below describe version 1's original tables, never
+        # mutated in place - every later change is a registered
+        # migration layered on top), so treat 0 as 1 and let the walk
+        # below carry it forward normally, rather than special-casing
+        # a jump straight to SCHEMA_VERSION.
+        version = 1
+        conn.execute("PRAGMA user_version = 1")
+    if version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"this database's schema is version {version}, newer than this code understands "
+            f"({SCHEMA_VERSION}) - refusing to open it rather than risk corrupting data a newer "
+            f"version of this code relies on")
+    while version < SCHEMA_VERSION:
+        upgrade = _MIGRATIONS.get(version)
+        if upgrade is None:
+            raise RuntimeError(
+                f"no migration registered to move this database from schema version {version} "
+                f"to {version + 1} - refusing to guess at the shape")
+        upgrade(conn)
+        version += 1
+        conn.execute(f"PRAGMA user_version = {version}")
+        conn.commit()
+
+
 def _connect(path: str) -> sqlite3.Connection:
     if path != ":memory:":
         parent = os.path.dirname(path)
@@ -119,6 +172,7 @@ def _connect(path: str) -> sqlite3.Connection:
         "row_id INTEGER PRIMARY KEY AUTOINCREMENT, type_id TEXT NOT NULL, entry_id TEXT NOT NULL, "
         "kind TEXT NOT NULL, at REAL NOT NULL, data TEXT NOT NULL)"
     )
+    _apply_migrations(conn)
     return conn
 
 

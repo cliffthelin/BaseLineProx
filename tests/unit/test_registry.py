@@ -113,6 +113,62 @@ def test_get_entry_rejects_an_unknown_scope():
         reg.get_entry("demo_type", "e1", scope="nowhere")
 
 
+# -- Schema versioning - forward-looking scaffolding, no real migration
+# exists yet (only version 1 has ever shipped), but a future table
+# change needs this in place before it can ship safely. ---------------
+
+def test_a_fresh_database_is_stamped_at_the_current_schema_version(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "fresh.db")
+    reg._connect(path).close()
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == reg.SCHEMA_VERSION
+
+
+def test_apply_migrations_refuses_a_database_newer_than_this_code_understands(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "future.db")
+    reg._connect(path).close()
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"PRAGMA user_version = {reg.SCHEMA_VERSION + 1}")
+    with pytest.raises(RuntimeError, match="newer than this code understands"):
+        reg._connect(path)
+
+
+def test_apply_migrations_refuses_when_no_migration_is_registered_for_a_gap(tmp_path, monkeypatch):
+    import sqlite3
+    path = str(tmp_path / "gap.db")
+    reg._connect(path).close()
+    monkeypatch.setattr(reg, "SCHEMA_VERSION", reg.SCHEMA_VERSION + 1)
+    with pytest.raises(RuntimeError, match="no migration registered"):
+        reg._connect(path)
+
+
+def test_register_migration_refuses_a_duplicate_from_version():
+    reg.register_migration(999, lambda conn: None)
+    try:
+        with pytest.raises(ValueError):
+            reg.register_migration(999, lambda conn: None)
+    finally:
+        del reg._MIGRATIONS[999]
+
+
+def test_a_registered_migration_actually_runs_and_advances_the_version(tmp_path, monkeypatch):
+    import sqlite3
+    path = str(tmp_path / "migrate.db")
+    reg._connect(path).close()  # starts at SCHEMA_VERSION
+    monkeypatch.setattr(reg, "SCHEMA_VERSION", reg.SCHEMA_VERSION + 1)
+    calls = []
+    reg.register_migration(1, lambda conn: calls.append(conn))
+    try:
+        reg._connect(path).close()
+        assert len(calls) == 1
+        with sqlite3.connect(path) as conn:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == reg.SCHEMA_VERSION
+    finally:
+        del reg._MIGRATIONS[1]
+
+
 # -- Real concurrency (direct instruction: "many app helpers" reading
 # config at once, "multithreading is a must") - WAL mode's actual
 # guarantee is that any number of readers proceed without blocking

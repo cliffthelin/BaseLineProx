@@ -223,6 +223,62 @@ def test_admin_view_returns_real_effective_settings():
     assert result.body["settings"]["startup"]["auto_start_persona"] == "personal"
 
 
+def test_admin_view_lists_every_registered_dependency():
+    """Decision record 91: the Admin tab is the "know what is in
+    place" surface - real dependency definitions must be reachable
+    from the same view as settings, not only via a function nobody
+    calls from the UI."""
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    result = sw.handle_admin_view(sessions, token=session.token, now=1001.0)
+    ids = {d["id"] for d in result.body["dependencies"]}
+    assert "system.sqlite3_importable" in ids
+    assert "install.self_installer_lvm_preset_valid" in ids
+
+
+def test_admin_view_reflects_a_real_prior_health_check_result():
+    import dependencies as dep
+    dep.run_checks(phase=dep.ADHOC)
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    result = sw.handle_admin_view(sessions, token=session.token, now=1001.0)
+    assert result.body["dependency_results"]["system.sqlite3_importable"]["ok"] is True
+
+
+def test_admin_view_has_no_results_yet_on_a_never_checked_machine():
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    result = sw.handle_admin_view(sessions, token=session.token, now=1001.0)
+    assert result.body["dependency_results"] == {}
+
+
+def test_render_admin_page_shows_a_real_dependency_and_its_last_result():
+    body = sw.render_admin_page(
+        {}, elevated=True,
+        dependencies=[{"id": "system.sqlite3_importable", "level": "system", "severity": "loud",
+                       "description": "x"}],
+        dependency_results={"system.sqlite3_importable": {"ok": True, "detail": "'sqlite3' is importable"}},
+    ).decode()
+    assert "system.sqlite3_importable" in body
+    assert "OK" in body
+    assert "'sqlite3' is importable" in body
+
+
+def test_render_admin_page_shows_never_checked_when_no_result_exists():
+    body = sw.render_admin_page(
+        {}, elevated=True,
+        dependencies=[{"id": "install.self_installer_fqdn_valid", "level": "install", "severity": "silent",
+                       "description": "x"}],
+        dependency_results={},
+    ).decode()
+    assert "never checked" in body
+
+
+def test_render_admin_page_omits_the_dependencies_section_when_none_given():
+    body = sw.render_admin_page({}, elevated=True).decode()
+    assert "<h2>Dependencies</h2>" not in body
+
+
 def test_admin_elevate_requires_a_valid_session():
     import admin_elevation
     sessions = sw.SessionStore()
@@ -430,11 +486,13 @@ def test_path_prefix_eligibility_rejects_everything_else():
 
 
 # --------------------------------------------------------------------------
-# Real default implementations (JsonFileStore-backed), exercised for real
+# Real default implementations (LocalAppStore-backed, decision record
+# 91 - previously a single flat JSON file, JsonFileStore), exercised
+# for real
 # --------------------------------------------------------------------------
 
 def test_file_backed_verifier_round_trips_a_real_sha512crypt_hash(tmp_path):
-    store = sw.JsonFileStore(tmp_path / "store.json")
+    store = sw.LocalAppStore(tmp_path / "store.db")
     store.add_user("alice", sw._sha512crypt("correct horse", sw._new_salt()))
     verifier = sw.FileBackedPasswordVerifier(store)
     assert verifier.verify("alice", "correct horse") is True
@@ -443,7 +501,7 @@ def test_file_backed_verifier_round_trips_a_real_sha512crypt_hash(tmp_path):
 
 
 def test_file_backed_elevation_verifier_accepts_the_real_dev_seed_passphrase(tmp_path):
-    store = sw.JsonFileStore(tmp_path / "store.json")  # creates the store, seeding elevation_password_hash
+    store = sw.LocalAppStore(tmp_path / "store.db")  # creates the store, seeding elevation_password_hash
     verifier = sw.FileBackedElevationVerifier(store)
     assert verifier("baseline-admin") is True
     assert verifier("baseline") is False  # the login password must not also work as elevation
@@ -495,35 +553,59 @@ def test_system_elevation_verifier_defaults_to_a_real_system_password_verifier()
 
 
 def test_file_backed_elevation_verifier_refuses_when_no_hash_is_stored(tmp_path):
-    path = tmp_path / "store.json"
-    import json as _json
-    path.write_text(_json.dumps({"users": {}, "settings": {}, "pending_accounts": {}, "rebuild_log": []}))
-    store = sw.JsonFileStore(path)
+    # A freshly created store always seeds an elevation hash (its own
+    # dev-only default) - to prove the "nothing stored" case for real,
+    # remove that row directly rather than faking a pre-sqlite file
+    # shape that no longer exists.
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    store._conn.execute("DELETE FROM kv WHERE namespace = 'auth' AND key = 'elevation_password_hash'")
+    store._conn.commit()
     verifier = sw.FileBackedElevationVerifier(store)
     assert verifier("anything") is False
 
 
 def test_file_backed_applier_persists_across_a_new_store_instance(tmp_path):
-    path = tmp_path / "store.json"
-    store1 = sw.JsonFileStore(path)
+    path = tmp_path / "store.db"
+    store1 = sw.LocalAppStore(path)
     sw.FileBackedSectionApplier(store1).apply("firewall", {"allow_lan_only": False})
 
-    store2 = sw.JsonFileStore(path)  # fresh instance, same file
+    store2 = sw.LocalAppStore(path)  # fresh instance, same file
     assert store2.settings()["firewall"]["allow_lan_only"] is False
 
 
 def test_logging_rebuild_trigger_records_a_real_observable_entry(tmp_path):
-    store = sw.JsonFileStore(tmp_path / "store.json")
+    store = sw.LocalAppStore(tmp_path / "store.db")
     trigger = sw.LoggingRebuildTrigger(store, clock=lambda: 42.0)
     result = trigger.rebuild("/tmp/x.img", {"a": 1})
     assert result.applied is True
-    log = store._read()["rebuild_log"]
-    assert log == [{"target": "/tmp/x.img", "config": {"a": 1}, "at": 42.0}]
+    assert store.rebuild_log() == [{"target": "/tmp/x.img", "config": {"a": 1}, "at": 42.0}]
+
+
+def test_rebuild_log_preserves_order_across_multiple_real_entries(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    store.record_rebuild("/tmp/a.img", {}, 1.0)
+    store.record_rebuild("/tmp/b.img", {}, 2.0)
+    assert [r["target"] for r in store.rebuild_log()] == ["/tmp/a.img", "/tmp/b.img"]
+
+
+def test_add_user_does_not_disturb_the_seeded_root_account(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    root_hash_before = store.get_user_hash("root")
+    store.add_user("alice", sw._sha512crypt("x", sw._new_salt()))
+    assert store.get_user_hash("root") == root_hash_before
+    assert store.get_user_hash("alice") is not None
+
+
+def test_update_section_only_touches_the_named_section(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    store.update_section("firewall", {"allow_lan_only": False})
+    assert store.settings()["firewall"]["allow_lan_only"] is False
+    assert store.settings()["ssh"]["password_auth"] is False  # untouched default
 
 
 def test_resolve_data_path_defaults_to_tmp_when_env_unset():
     from pathlib import Path
-    assert sw.resolve_data_path({}) == Path("/tmp/baseline-settings-web/store.json")
+    assert sw.resolve_data_path({}) == Path("/tmp/baseline-settings-web/store.db")
 
 
 def test_resolve_data_path_honors_env_override():

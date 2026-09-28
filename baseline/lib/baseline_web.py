@@ -480,7 +480,10 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 return self._html_response(result.status, _with_nav(sw.render_admin_page({}, result.body.get("reason", "")), path))
             notice = qs.get("notice", [""])[0]
             elevated = deps["elevation_store"].is_elevated(deps.get("runner"), now) if deps.get("runner") else False
-            return self._html_response(200, _with_nav(sw.render_admin_page(result.body["settings"], notice, elevated=elevated), path))
+            return self._html_response(200, _with_nav(sw.render_admin_page(
+                result.body["settings"], notice, elevated=elevated,
+                dependencies=result.body.get("dependencies"),
+                dependency_results=result.body.get("dependency_results")), path))
 
         if path.startswith("/recovery"):
             result = sw.handle_recovery_view(deps.get("runner"), personas=deps.get("personas", ()))

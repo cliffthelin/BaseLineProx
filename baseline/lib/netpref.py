@@ -3,31 +3,40 @@
 default route, not just a stored label. Demotes other live default
 routes to a higher metric instead of removing them, so they stay
 available as an automatic fallback rather than needing to be re-added.
-"""
-import ipaddress
-import json
-import subprocess
-from pathlib import Path
 
-PREF_FILE = Path("/etc/baseline/network_preference.json")
+Preference storage moved onto settings_store.py's own registry
+(decision record 91) - this used to be its own flat JSON file
+(`/etc/baseline/network_preference.json`), one of several scattered
+config files found during the settings-to-SQL migration review.
+`load_preference`/`save_preference` keep their exact prior signatures
+and return shape so `bin/baseline` (the only real caller) needed no
+changes."""
+import ipaddress
+import subprocess
+
+import settings_store
+
+settings_store.register_schema([
+    settings_store.SettingDef("network", "preferred_primary_interface", None,
+                               "Interface apply_primary last made the kernel's actual default route."),
+    settings_store.SettingDef("network", "preferred_fallback_interface", None,
+                               "Interface demoted to a fallback default route (metric 100) rather than removed."),
+])
 
 
 def load_preference():
-    try:
-        return json.loads(PREF_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {"primary": None, "fallback": None}
+    return {
+        "primary": settings_store.get_setting("network", "preferred_primary_interface"),
+        "fallback": settings_store.get_setting("network", "preferred_fallback_interface"),
+    }
 
 
 def save_preference(primary=None, fallback=None):
-    pref = load_preference()
     if primary is not None:
-        pref["primary"] = primary
+        settings_store.set_setting("network", "preferred_primary_interface", primary)
     if fallback is not None:
-        pref["fallback"] = fallback
-    PREF_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PREF_FILE.write_text(json.dumps(pref))
-    return pref
+        settings_store.set_setting("network", "preferred_fallback_interface", fallback)
+    return load_preference()
 
 
 def _device_gateway(dev: str):
