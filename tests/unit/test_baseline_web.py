@@ -504,7 +504,7 @@ def test_admin_settings_save_route_exists_and_requires_real_elevation():
         # real reason (no elevation), not because the route silently
         # didn't exist.
         assert status == 303
-        assert settings_store.get_setting(runner, "startup", "auto_start_persona") == "personal"  # unchanged default
+        assert settings_store.get_setting("startup", "auto_start_persona") == "personal"  # unchanged default
     finally:
         case.close()
 
@@ -523,6 +523,6 @@ def test_admin_settings_save_route_applies_a_real_value_once_elevated():
         status = _post_form_no_redirect(case.port, "/admin/settings/startup/auto_start_persona",
                                          b"value__type=str&value=admin", session.token)
         assert status == 303
-        assert settings_store.get_setting(runner, "startup", "auto_start_persona") == "admin"
+        assert settings_store.get_setting("startup", "auto_start_persona") == "admin"
     finally:
         case.close()

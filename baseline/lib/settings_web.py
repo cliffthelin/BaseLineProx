@@ -305,17 +305,12 @@ def handle_settings_edit(sessions: SessionStore, applier: SectionApplier,
 # allowed on a valid session alone, matching every other settings page.
 # ---------------------------------------------------------------------------
 
-def handle_admin_view(sessions: SessionStore, runner, token: str, now: float) -> RouteResult:
+def handle_admin_view(sessions: SessionStore, token: str, now: float) -> RouteResult:
     session = sessions.get(token, now)
     if session is None:
         return RouteResult("refused", 401, {"error": "not authenticated"})
-    if runner is None:
-        return RouteResult(
-            "handed_off", 409,
-            {"reason": "no Runner configured for this deployment - the Admin tab needs one to "
-                        "reach settings_store.py's real storage on BASELINE"})
     import settings_store
-    return RouteResult("applied", 200, {"settings": settings_store.all_effective_settings(runner)})
+    return RouteResult("applied", 200, {"settings": settings_store.all_effective_settings()})
 
 
 def handle_admin_elevate(elevation_store, verify_fn, sessions: SessionStore, token: str,
@@ -350,7 +345,7 @@ def handle_admin_edit(sessions: SessionStore, runner, elevation_store, token: st
             {"error": "admin elevation required - enter the elevation passphrase first"})
     import settings_store
     try:
-        settings_store.set_setting(runner, group, key, value)
+        settings_store.set_setting(group, key, value)
     except KeyError as exc:
         return RouteResult("handed_off", 409, {"reason": str(exc)})
     return RouteResult("applied", 200, {"detail": f"{group}.{key} set to {value!r}"})
@@ -616,7 +611,7 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, render_recovery_page(result.body))
 
         if self.path.startswith("/admin"):
-            result = handle_admin_view(deps["sessions"], deps.get("runner"), self._token(), now)
+            result = handle_admin_view(deps["sessions"], self._token(), now)
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "refused" and result.status == 401:

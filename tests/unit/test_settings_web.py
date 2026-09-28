@@ -208,25 +208,16 @@ def test_settings_edit_refuses_a_stale_session_after_persona_switches_without_ca
 # --------------------------------------------------------------------------
 
 def test_admin_view_requires_a_valid_session():
-    from fake_runner import FakeRunner
     sessions = sw.SessionStore()
-    result = sw.handle_admin_view(sessions, FakeRunner(), token="bogus", now=1000.0)
+    result = sw.handle_admin_view(sessions, token="bogus", now=1000.0)
     assert result.outcome == "refused"
     assert result.status == 401
 
 
-def test_admin_view_hands_off_when_no_runner_is_configured():
-    sessions = sw.SessionStore()
-    session = sessions.create("root", now=1000.0)
-    result = sw.handle_admin_view(sessions, None, token=session.token, now=1001.0)
-    assert result.outcome == "handed_off"
-
-
 def test_admin_view_returns_real_effective_settings():
-    from fake_runner import FakeRunner
     sessions = sw.SessionStore()
     session = sessions.create("root", now=1000.0)
-    result = sw.handle_admin_view(sessions, FakeRunner(), token=session.token, now=1001.0)
+    result = sw.handle_admin_view(sessions, token=session.token, now=1001.0)
     assert result.outcome == "applied"
     assert result.body["settings"]["sessions"]["default_session_ttl_hours"] == 24
     assert result.body["settings"]["startup"]["auto_start_persona"] == "personal"
@@ -310,7 +301,7 @@ def test_admin_edit_applies_a_real_setting_once_elevated():
     result = sw.handle_admin_edit(sessions, runner, store, token=session.token,
                                    group="startup", key="auto_start_persona", value="admin", now=1001.0)
     assert result.outcome == "applied"
-    assert settings_store.get_setting(runner, "startup", "auto_start_persona") == "admin"
+    assert settings_store.get_setting("startup", "auto_start_persona") == "admin"
 
 
 def test_admin_edit_hands_off_an_unknown_setting_without_a_ticket_bypass():

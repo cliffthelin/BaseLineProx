@@ -1,41 +1,41 @@
 """The generic, extensible mechanism behind the "Admin" settings tab
-and its many groups - potentially hundreds of individual settings
-covering things like the drive to auto-start, read-only/write-only/
-read-write mode, and session durations (decision record 76). This is
-the storage/schema mechanism the eventual full taxonomy gets built on,
-not the taxonomy itself - `SCHEMA` below is the real, concrete seed
-this pass needs.
+and its many groups - potentially hundreds, eventually thousands, of
+individual settings covering every OS-level preference and every
+application's own preferences (decision record 87, direct instruction:
+"this is going to have to record everything an OS has for user
+preferences, everything every application has for user preferences...
+likely turn into a SQLite database"). `SCHEMA` below is the real,
+concrete built-in seed; `register_schema` is how an application adds
+its own settings later without this file growing forever.
 
-Real, Runner-injectable JSON storage on the BASELINE volume - shared,
-system-level, survives a reinstall of the disposable stage, not scoped
-to any one persona (auto-start-drive and session-duration policy apply
-across the whole machine, not to one persona's own preferences).
+**Storage engine: SQLite, not Postgres or DuckDB** - the deciding
+requirement was "available once proxmox is loaded and preferable
+prior... utilized from a standing proxmox and/or a core linux kernel."
+Postgres needs a running server process and is a nonstarter before
+Proxmox (or any userspace) is up. DuckDB is embedded like SQLite but is
+an OLAP engine built for large columnar scans, not the many small,
+frequent point reads/writes (`get_setting`/`set_setting`) this store
+actually does. SQLite is a library, not a service - it works from a
+rescue shell or the installer's own minimal environment with nothing
+but the Python stdlib, and its WAL mode gives real concurrent-reader/
+single-writer semantics for the "many processes each writing their own
+settings" case a flat JSON file never had.
 
 `get_setting` always returns a real value - the schema default when
 nothing's been explicitly set, never `None`/missing - so callers never
-need a second "is this configured yet" check.
+need a second "is this configured yet" check. No `Runner` injection
+here (unlike most of this codebase) - sqlite3 is a stdlib embedded
+library call, not an external process/network boundary, so a real
+temp-file or in-memory database in a test IS the real implementation,
+not a fake standing in for one.
 """
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
-
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def path_exists(self, path):
-            raise NotImplementedError
-
-        def read_text(self, path):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def makedirs(self, path):
-            raise NotImplementedError
-
 
 # Direct instruction: "All user data including credentials and config
 # and logs should go to the User Persistence partition" / "[USER
@@ -44,8 +44,8 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 # is already bind-redirected onto USER_PERSISTENCE for every active
 # persona (persist_bind_mounts.py's own REDIRECTS table) - this reuses
 # that existing redirect rather than adding a new bind target, so
-# every setting in this store now survives a disposable-stage rebuild.
-DEFAULT_STORE_PATH = "/etc/baseline/settings/master_config.json"
+# every setting in this store survives a disposable-stage rebuild.
+DEFAULT_DB_PATH = "/etc/baseline/settings/master_config.db"
 
 
 @dataclass(frozen=True)
@@ -62,8 +62,10 @@ class SettingDef:
     options: tuple | None = None
 
 
-# The real, concrete settings this pass actually needs. Meant to grow
-# to "hundreds" over time - this is the seed, not the ceiling.
+# The real, concrete built-in settings this pass needs. Meant to grow
+# to "everything an OS and every application has" over time via
+# `register_schema`, not by this tuple growing forever - this is the
+# seed, not the ceiling.
 SCHEMA = (
     SettingDef("sessions", "default_session_ttl_hours", 24,
                "Max session length before reauthorization is required (non-admin personas)."),
@@ -106,60 +108,118 @@ SCHEMA = (
                options=(2048, 3072, 4096, 8192)),
 )
 
+# The live, growable registry every lookup actually reads from -
+# `SCHEMA` is just its initial contents. Kept separate from `SCHEMA`
+# itself so `SCHEMA` stays a stable, inspectable "what ships built-in"
+# constant even after other modules register more at import time.
+_REGISTRY: list[SettingDef] = list(SCHEMA)
+
+
+def register_schema(defs) -> None:
+    """The real extensibility point for "every application has its own
+    preferences" - a module registers its own settings once (typically
+    at import time) instead of this file growing forever. Refuses a
+    duplicate (group, key) outright rather than silently letting one
+    app's registration shadow another's - a real collision is a real
+    bug in whichever module registered second, not something to paper
+    over."""
+    existing = {(s.group, s.key) for s in _REGISTRY}
+    for d in defs:
+        if (d.group, d.key) in existing:
+            raise ValueError(f"setting {d.group}.{d.key} is already registered")
+        _REGISTRY.append(d)
+        existing.add((d.group, d.key))
+
 
 def _schema_by_key() -> dict:
-    return {(s.group, s.key): s for s in SCHEMA}
+    return {(s.group, s.key): s for s in _REGISTRY}
 
 
 def group_names() -> list:
     seen = []
-    for s in SCHEMA:
+    for s in _REGISTRY:
         if s.group not in seen:
             seen.append(s.group)
     return seen
 
 
 def settings_in_group(group: str) -> list:
-    return [s for s in SCHEMA if s.group == group]
+    return [s for s in _REGISTRY if s.group == group]
 
 
-def _read_store(runner: Runner, path: str) -> dict:
-    if not runner.path_exists(path):
-        return {}
-    try:
-        return json.loads(runner.read_text(path))
-    except ValueError:
-        return {}
+def _connect(path: str) -> sqlite3.Connection:
+    if path != ":memory:":
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings ("
+        "grp TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
+        "PRIMARY KEY (grp, key))"
+    )
+    return conn
 
 
-def get_setting(runner: Runner, group: str, key: str, *, path: str = DEFAULT_STORE_PATH):
+def get_setting(group: str, key: str, *, path: str | None = None):
+    # `path` resolves DEFAULT_DB_PATH at CALL time, not def time - a
+    # default argument value is bound once, when this function object
+    # is created at import, so binding it directly here would freeze
+    # in the very first DEFAULT_DB_PATH this module ever saw and never
+    # see a later override again (real bug, caught by the test suite's
+    # own per-test DB isolation needing to redirect this path).
+    path = path if path is not None else DEFAULT_DB_PATH
     schema_map = _schema_by_key()
     if (group, key) not in schema_map:
         raise KeyError(f"unknown setting {group}.{key}")
-    store = _read_store(runner, path)
-    return store.get(group, {}).get(key, schema_map[(group, key)].default)
+    with closing(_connect(path)) as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE grp = ? AND key = ?", (group, key)
+        ).fetchone()
+    if row is None:
+        return schema_map[(group, key)].default
+    return json.loads(row[0])
 
 
-def set_setting(runner: Runner, group: str, key: str, value, *, path: str = DEFAULT_STORE_PATH) -> None:
+def set_setting(group: str, key: str, value, *, path: str | None = None) -> None:
+    path = path if path is not None else DEFAULT_DB_PATH
     schema_map = _schema_by_key()
     if (group, key) not in schema_map:
         raise KeyError(f"unknown setting {group}.{key}")
     options = schema_map[(group, key)].options
     if options is not None and value not in options:
         raise ValueError(f"{group}.{key} must be one of {options!r}, got {value!r}")
-    store = _read_store(runner, path)
-    store.setdefault(group, {})[key] = value
-    parent = path.rsplit("/", 1)[0]
-    runner.makedirs(parent)
-    runner.write_text_atomic(path, json.dumps(store, indent=2))
+    with closing(_connect(path)) as conn:
+        conn.execute(
+            "INSERT INTO settings (grp, key, value) VALUES (?, ?, ?) "
+            "ON CONFLICT(grp, key) DO UPDATE SET value = excluded.value",
+            (group, key, json.dumps(value)),
+        )
+        conn.commit()
 
 
-def all_effective_settings(runner: Runner, *, path: str = DEFAULT_STORE_PATH) -> dict:
+def all_effective_settings(*, path: str | None = None) -> dict:
     """Every schema-defined setting's current effective value (stored
     override or schema default), grouped - what an Admin settings tab
     would render, without needing to know the storage format."""
-    store = _read_store(runner, path)
+    path = path if path is not None else DEFAULT_DB_PATH
+    with closing(_connect(path)) as conn:
+        stored = {(r[0], r[1]): json.loads(r[2]) for r in conn.execute("SELECT grp, key, value FROM settings")}
     result: dict = {}
-    for s in SCHEMA:
-        result.setdefault(s.group, {})[s.key] = store.get(s.group, {}).get(s.key, s.default)
+    for s in _REGISTRY:
+        result.setdefault(s.group, {})[s.key] = stored.get((s.group, s.key), s.default)
     return result
+
+
+def export_bootstrap_snapshot(pairs, *, path: str | None = None) -> dict:
+    """Pulls a flat, plain-dict snapshot of specific (group, key) pairs
+    out of the database - for the rare real consumer that cannot open
+    this database live (namely: values baked into the Proxmox
+    unattended-install answer file, which is applied by the Proxmox
+    installer's own environment, not this one - see
+    `self_installer.py`, which resolves its settings this way before
+    ever writing an answer.toml). Not a general-purpose export - a
+    caller that CAN reach this database directly should just call
+    `get_setting` instead of taking a snapshot."""
+    return {f"{group}.{key}": get_setting(group, key, path=path) for group, key in pairs}

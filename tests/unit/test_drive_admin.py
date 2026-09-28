@@ -470,7 +470,7 @@ def test_apply_volume_mode_remounts_read_only_when_configured():
     import settings_store
     mounts = "/dev/sdd2 /mnt/INSTALLER_CACHE ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
-    settings_store.set_setting(runner, "volumes", "installer_cache_mode", "read-only")
+    settings_store.set_setting("volumes", "installer_cache_mode", "read-only")
     result = da.apply_volume_mode(runner, label="INSTALLER_CACHE")
     assert result.ok is True
     assert ["mount", "-o", "remount,ro", "/mnt/INSTALLER_CACHE"] in runner.calls
@@ -585,7 +585,6 @@ def test_build_self_installer_needs_nothing_but_device_path(tmp_path):
     pds_fake = FakePdsRunner(size_bytes=1_000_000)  # far under the 400GB minimum
     result = da.build_self_installer(
         FakeRunner(), device_path="/dev/sdx", pds_runner=pds_fake,
-        settings_runner=FakeRunner(),
     )
     assert result.ok is False
     assert "device safety check failed" in result.detail

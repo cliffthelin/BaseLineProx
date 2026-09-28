@@ -51,7 +51,7 @@ def test_elevation_ticket_expires_after_the_default_15_minute_window():
 
 def test_elevation_ticket_respects_a_configured_ttl_override():
     runner = FakeRunner()
-    ss.set_setting(runner, "sessions", "admin_elevation_ttl_minutes", 5)
+    ss.set_setting("sessions", "admin_elevation_ttl_minutes", 5)
     store = ae.ElevationStore()
     ae.attempt_elevation(store, lambda p: True, "x", now=1000.0)
     assert store.is_elevated(runner, now=1000.0 + 6 * 60) is False

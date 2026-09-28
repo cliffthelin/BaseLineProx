@@ -79,3 +79,15 @@ def make_ready_runner(files=None, target="vmbr0", new_addr="10.0.2.20/24", gatew
 @pytest.fixture
 def ready_runner():
     return make_ready_runner()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings_store(tmp_path, monkeypatch):
+    """settings_store.py talks to sqlite directly (no Runner injection
+    - see its own module docstring for why) - without this, any test
+    that doesn't pass an explicit `path=` would hit the real default
+    path (`/etc/baseline/settings/master_config.db`) on whatever
+    machine runs the suite. Autouse so this is true for every test in
+    the suite by construction, not just ones that remember to opt in."""
+    import settings_store
+    monkeypatch.setattr(settings_store, "DEFAULT_DB_PATH", str(tmp_path / "master_config.db"))

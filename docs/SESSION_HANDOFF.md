@@ -1,5 +1,19 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - settings_store.py moved from a flat JSON file to real SQLite
+
+**Read decision record 87 first** (`docs/design/decision-records/87-settings-store-sqlite-backend.md`).
+
+Direct instruction: the configuration surface is going to grow to "everything an OS has for user preferences, everything every application has" - a flat JSON file doesn't scale to that (whole-file read/mutate/rewrite on every single setting change). Considered SQLite/DuckDB/Postgres against the real constraint ("available once proxmox is loaded and preferably prior... from a core linux kernel"): Postgres needs a running server (disqualified), DuckDB is an OLAP engine mismatched to point-lookup config workloads, SQLite is a stdlib-only embedded library with no service dependency - the only one of the three actually available before any userspace is up. Built:
+
+- `settings_store.py` now backed by real SQLite (`/etc/baseline/settings/master_config.db`, same USER_PERSISTENCE redirect as before) behind the *same* `get_setting`/`set_setting`/`all_effective_settings` API - callers didn't need to change shape, just drop the now-unnecessary `Runner` argument.
+- `register_schema()` - the real mechanism for "every application has its own preferences" going forward: a module registers its own settings once instead of one file's `SCHEMA` tuple growing forever.
+- `export_bootstrap_snapshot()` - a flat-dict export for the one real case that can't open this database live (values baked into a Proxmox answer.toml).
+- Found and fixed a real bug in passing: `path: str = DEFAULT_DB_PATH` as a keyword default binds at function-definition time, not call time - would have made the default path unpatchable after import. Caught immediately by the new test isolation fixture raising `PermissionError` against `/etc/baseline` before the fix landed.
+- Full suite: 1351/1351 (was 1349).
+
+**Not done:** no real deployment has read/written this database from an actual pre-Proxmox/rescue environment yet - the "available prior to Proxmox" property holds by construction (no service dependency) but hasn't been observed at an actual early boot.
+
 ## 2026-09-28 - found and fixed why "build self installer" did nothing for real; made it the default, keyboard-free path
 
 **Read decision record 86 first** (`docs/design/decision-records/86-self-installer-is-the-default-path.md`) - it has full detail; this is the short version.

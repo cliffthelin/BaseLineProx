@@ -45,7 +45,7 @@ class ElevationStore:
         ticket = self.tickets.get("elevated")
         if ticket is None:
             return False
-        ttl_minutes = settings_store.get_setting(runner, "sessions", "admin_elevation_ttl_minutes")
+        ttl_minutes = settings_store.get_setting("sessions", "admin_elevation_ttl_minutes")
         if ticket.expired(now, ttl_minutes):
             del self.tickets["elevated"]
             return False

@@ -488,7 +488,7 @@ def apply_volume_mode(runner: Runner, *, label: str) -> ActionResult:
     }
     if label not in key_by_label:
         return ActionResult(False, f"{label!r} is not a shared volume with a configurable mode")
-    mode = settings_store.get_setting(runner, "volumes", key_by_label[label])
+    mode = settings_store.get_setting("volumes", key_by_label[label])
     mountpoint = next((mp for _, _, lbl, mp in drive_installer.SHARED_VOLUMES if lbl == label), None)
     if mountpoint is None or not pbm.is_mounted(runner, mountpoint):
         return ActionResult(False, f"{label} is not currently mounted - nothing to remount")
@@ -616,19 +616,19 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     import drive_setup_install as dsi
     import iso_builder as ib
     import settings_store
-    from repair import RealRunner
 
     if pds_runner is None and hasattr(runner, "as_pds_runner"):
         pds_runner = runner.as_pds_runner()
     pds_runner = pds_runner or pds.Runner()
 
-    settings_runner = params.get("settings_runner") or RealRunner()
+    settings_db_path = params.get("settings_db_path") or settings_store.DEFAULT_DB_PATH
     lvm_preset = params.get("lvm_size_preset") or settings_store.get_setting(
-        settings_runner, "self_installer", "lvm_size_preset")
+        "self_installer", "lvm_size_preset", path=settings_db_path)
     lvm_sizes = si.LVM_SIZE_PRESETS[lvm_preset]
-    fqdn = params.get("fqdn") or settings_store.get_setting(settings_runner, "self_installer", "fqdn")
+    fqdn = params.get("fqdn") or settings_store.get_setting(
+        "self_installer", "fqdn", path=settings_db_path)
     memory_mb = int(params.get("memory_mb") or settings_store.get_setting(
-        settings_runner, "self_installer", "memory_mb"))
+        "self_installer", "memory_mb", path=settings_db_path))
 
     workspace = Path(params.get("workspace", "/var/tmp/baseline-self-installer"))
     result = si.build_and_write_self_installer(

@@ -473,7 +473,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(sw.render_settings_page(result.body["settings"]), path))
 
         if path.startswith("/admin"):
-            result = sw.handle_admin_view(deps["sessions"], deps.get("runner"), self._cookie_token(), now)
+            result = sw.handle_admin_view(deps["sessions"], self._cookie_token(), now)
             if result.outcome == "refused" and result.status == 401:
                 return self._redirect("/login")
             if result.outcome != "applied":
