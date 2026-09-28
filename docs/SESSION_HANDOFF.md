@@ -1,5 +1,13 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - real /etc/baseline confirms the PROTECTED-scope path end-to-end
+
+**Read decision record 92** (`docs/design/decision-records/92-etc-baseline-production-verification.md`) - closes decision record 91's one open item.
+
+User ran `sudo mkdir -p /etc/baseline/settings && sudo chown -R "$USER":"$USER" /etc/baseline` themselves (I have no passwordless sudo and won't handle a password). Re-ran `drive_admin.run_health_check(None)` for real: all 4 seed dependencies now pass, including the two PROTECTED-scope ones that previously failed gracefully for lack of this directory. Inspected both real database files directly - confirmed the GLOBAL/PROTECTED split is genuinely happening as designed: dependency definitions/results live in `/mnt/BASELINE/registry/foundation.db` (GLOBAL), the settings they check live in `/etc/baseline/settings/master_config.db` (PROTECTED). Full suite unchanged at 1420/1420 (this was a real-environment verification, not a code change).
+
+The settings-to-SQL migration (decision records 87-92) is now complete, verified end-to-end on real hardware, not just under test isolation.
+
 ## 2026-09-28 continuation - completed the settings-to-SQL migration (6-item queue)
 
 **Read decision record 91 first** (`docs/design/decision-records/91-settings-migration-completion.md`).
