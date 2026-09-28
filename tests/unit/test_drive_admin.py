@@ -563,17 +563,14 @@ def test_describe_actions_lists_every_registered_action_with_its_real_descriptio
         assert d["description"] == da.ACTIONS[d["action_id"]].description
 
 
-def test_describe_actions_lists_exactly_the_five_real_actions():
-    """The three-action cap (direct feedback at the time) was relaxed
-    by direct instruction once `build_self_installer` (decision record
-    85) was a genuine, distinct, separately-tested capability, not
-    scope creep folded in without asking. `run_health_check` (decision
-    record 88) is the same situation again: direct instruction asked
-    for health validation reachable "as... adhoc calls" specifically,
-    not just at boot/interval/pre-install - a fifth real, separately-
-    tested action, not scope creep."""
-    assert set(da.ACTIONS) == {
-        "install", "update_selected", "repair", "build_self_installer", "run_health_check"}
+def test_describe_actions_lists_every_real_action():
+    """Direct instruction: don't cap a count of things pre-v1 - this
+    project's own action list has already outgrown an exact-set
+    assertion twice (decision records 85 and 88 each had to widen a
+    prior "exactly N actions" test just to add one more real,
+    separately-tested action). Asserts presence, not exclusivity - a
+    future action being added is expected, not a regression to catch."""
+    assert {"install", "update_selected", "repair", "build_self_installer", "run_health_check"} <= set(da.ACTIONS)
 
 
 def test_build_self_installer_needs_nothing_but_device_path(tmp_path):
@@ -594,7 +591,19 @@ def test_build_self_installer_needs_nothing_but_device_path(tmp_path):
     assert "device safety check failed" in result.detail
 
 
-def test_build_self_installer_refuses_before_anything_else_on_a_loud_dependency_failure(tmp_path):
+def _corrupt_lvm_size_preset_directly():
+    """Bypasses settings_store.set_setting's own validation on purpose
+    - simulates a stale/corrupted value getting into the database some
+    other way (an old schema version, a manual edit), which is exactly
+    the real-world case decision record 88's dependency check exists
+    to catch. Writes directly into registry.py's own PROTECTED-scope
+    database (self_installer.lvm_size_preset's real scope)."""
+    import registry
+    registry.upsert_entry("settings", "self_installer.lvm_size_preset",
+                           attributes={"default": "medium"}, scope=registry.PROTECTED, value="gigantic")
+
+
+def test_build_self_installer_refuses_before_anything_else_on_a_loud_dependency_failure():
     """Decision record 88, direct instruction: dependencies "should be
     predefined and validated before install begins." A stale/invalid
     self_installer.lvm_size_preset value is registered as a LOUD
@@ -603,19 +612,9 @@ def test_build_self_installer_refuses_before_anything_else_on_a_loud_dependency_
     real refusal happens up front instead, before the safety gate is
     even reached (a real, valid drive is used here so the ONLY thing
     that can be refusing is the dependency check)."""
-    import settings_store
-    import sqlite3
-    db_path = str(tmp_path / "master_config.db")
-    conn = sqlite3.connect(db_path)
-    conn.execute("CREATE TABLE settings (grp TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (grp, key))")
-    conn.execute("INSERT INTO settings VALUES ('self_installer', 'lvm_size_preset', '\"gigantic\"')")
-    conn.commit()
-    conn.close()
+    _corrupt_lvm_size_preset_directly()
     pds_fake = FakePdsRunner()  # a real, valid drive
-    result = da.build_self_installer(
-        FakeRunner(), device_path="/dev/sdd", pds_runner=pds_fake,
-        settings_db_path=db_path,
-    )
+    result = da.build_self_installer(FakeRunner(), device_path="/dev/sdd", pds_runner=pds_fake)
     assert result.ok is False
     assert "loud dependency check" in result.detail
     assert "install.self_installer_lvm_preset_valid" in result.detail
@@ -627,15 +626,9 @@ def test_run_health_check_reports_ok_when_every_dependency_passes():
     assert "system.sqlite3_importable" in result.detail
 
 
-def test_run_health_check_fails_the_action_on_a_loud_dependency_failure(tmp_path):
-    import sqlite3
-    db_path = str(tmp_path / "master_config.db")
-    conn = sqlite3.connect(db_path)
-    conn.execute("CREATE TABLE settings (grp TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (grp, key))")
-    conn.execute("INSERT INTO settings VALUES ('self_installer', 'lvm_size_preset', '\"gigantic\"')")
-    conn.commit()
-    conn.close()
-    result = da.run_health_check(FakeRunner(), settings_db_path=db_path)
+def test_run_health_check_fails_the_action_on_a_loud_dependency_failure():
+    _corrupt_lvm_size_preset_directly()
+    result = da.run_health_check(FakeRunner())
     assert result.ok is False
     assert "LOUD-FAIL" in result.detail
 

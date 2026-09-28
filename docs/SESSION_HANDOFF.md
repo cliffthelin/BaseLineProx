@@ -1,5 +1,23 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - one foundational registry (registry.py), not a table per registry type
+
+**Read decision record 89 first** (`docs/design/decision-records/89-foundational-registry.md`).
+
+Direct, corrective instruction: settings_store.py (decision record 87) and dependencies.py (decision record 88) had each grown their own bespoke table - exactly the pattern that doesn't scale to "potentially thousands of registries and hundreds of varying registry types." Built `baseline/lib/registry.py`: three generic tables (`registry_types`, `registry_entries`, `registry_events`) reused by every registry type forever. Migrated both existing modules onto it with their public APIs unchanged in shape.
+
+**Scope is real now, per-entry**: GLOBAL resolves to `/mnt/BASELINE/registry/foundation.db` (the shared, non-persona volume - reachable during recovery even when a specific persona's USER_PERSISTENCE is broken); PROTECTED resolves to the existing USER_PERSISTENCE-redirected database. `startup.auto_start_persona` is now GLOBAL (recovery needs to know which persona to try mounting without asking the very volume that might be broken); `dependencies.Dependency` defaults to GLOBAL entirely (health checks must survive diagnosing a broken USER_PERSISTENCE).
+
+**Concurrency concern addressed directly, with a real test, not just words**: the user pushed back hard on SQLite given the earlier lock-contention bug ("If SQLite can't handle multiple threads of calls its not a long term solution" / "multithreading is a must"). Clarified the earlier bug was this codebase's own mistake (a nested connection opened while another held an uncommitted write transaction), not a SQLite limitation - WAL mode's real guarantee is unlimited concurrent readers, never blocked by each other or a writer. Added `tests/unit/test_registry.py::test_many_concurrent_readers_never_block_or_corrupt_a_read` and `test_concurrent_readers_alongside_a_writer_never_crash_or_corrupt_state`, both firing real concurrent load from a thread pool - proven, not asserted. Also added an explicit `PRAGMA busy_timeout=5000` so a genuine writer-vs-writer collision waits and retries instead of failing instantly.
+
+**Also**: "Don't make caps of the number things pre a v1" - relaxed `drive_admin.ACTIONS`' "exactly N actions" test (already widened twice) to a subset assertion; avoid this pattern going forward for anything expected to keep growing.
+
+**Real near-miss caught before it shipped**: the first draft called `registry.register_type()` at `settings_store.py`'s module *import* time - would have caused real I/O against `/etc/baseline`/`/mnt/BASELINE` before any test's isolation fixture ran (the exact same class of bug as decision record 88's lock contention, just at import time instead of at runtime). Caught in review, fixed by moving registration into the lazy `_sync_definition` path.
+
+Full suite: 1391/1391 (was 1376).
+
+**Not done:** no real deployment has exercised the GLOBAL/PROTECTED split against an actually-broken persona's USER_PERSISTENCE yet - correct by construction and unit-tested for isolation, not yet observed on real, failed hardware.
+
 ## 2026-09-28 continuation - real dependencies table + health-validation layer (pre_install/boot/interval/adhoc)
 
 **Read decision record 88 first** (`docs/design/decision-records/88-dependencies-table.md`).

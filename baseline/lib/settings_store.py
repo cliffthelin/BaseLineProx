@@ -8,34 +8,24 @@ likely turn into a SQLite database"). `SCHEMA` below is the real,
 concrete built-in seed; `register_schema` is how an application adds
 its own settings later without this file growing forever.
 
-**Storage engine: SQLite, not Postgres or DuckDB** - the deciding
-requirement was "available once proxmox is loaded and preferable
-prior... utilized from a standing proxmox and/or a core linux kernel."
-Postgres needs a running server process and is a nonstarter before
-Proxmox (or any userspace) is up. DuckDB is embedded like SQLite but is
-an OLAP engine built for large columnar scans, not the many small,
-frequent point reads/writes (`get_setting`/`set_setting`) this store
-actually does. SQLite is a library, not a service - it works from a
-rescue shell or the installer's own minimal environment with nothing
-but the Python stdlib, and its WAL mode gives real concurrent-reader/
-single-writer semantics for the "many processes each writing their own
-settings" case a flat JSON file never had.
+**Storage: built on `registry.py` (decision record 89)**, not its own
+bespoke table - the foundational registry mechanism every registry-
+shaped subsystem in Baseline shares now, so a third/fourth/hundredth
+registry type never needs its own table. This module owns the
+*domain* logic specific to settings (defaults, `options` enum
+enforcement, `is_secret_ref` vault-reference enforcement); `registry.py`
+owns the generic storage and the GLOBAL/PROTECTED scope split - see
+its own module docstring for why there are two physical databases.
 
 `get_setting` always returns a real value - the schema default when
 nothing's been explicitly set, never `None`/missing - so callers never
-need a second "is this configured yet" check. No `Runner` injection
-here (unlike most of this codebase) - sqlite3 is a stdlib embedded
-library call, not an external process/network boundary, so a real
-temp-file or in-memory database in a test IS the real implementation,
-not a fake standing in for one.
+need a second "is this configured yet" check.
 """
 from __future__ import annotations
 
-import json
-import os
-import sqlite3
-from contextlib import closing
 from dataclasses import dataclass
+
+import registry
 
 # Direct instruction: "All user data including credentials and config
 # and logs should go to the User Persistence partition" / "[USER
@@ -44,8 +34,13 @@ from dataclasses import dataclass
 # is already bind-redirected onto USER_PERSISTENCE for every active
 # persona (persist_bind_mounts.py's own REDIRECTS table) - this reuses
 # that existing redirect rather than adding a new bind target, so
-# every setting in this store survives a disposable-stage rebuild.
+# every PROTECTED-scope setting in this store survives a disposable-
+# stage rebuild. `registry.py`'s PROTECTED scope resolves through this
+# exact constant - importing it here keeps one source of truth for the
+# path, not two.
 DEFAULT_DB_PATH = "/etc/baseline/settings/master_config.db"
+
+TYPE_ID = "settings"
 
 
 @dataclass(frozen=True)
@@ -72,6 +67,17 @@ class SettingDef:
     # file) - exactly the class of problem this flag exists to catch
     # before it happens, not after.
     is_secret_ref: bool = False
+    # decision record 89, direct instruction: "Some may be allowed as a
+    # global foundation for recovery while the rest are protected with
+    # the user persistence." Most settings default to PROTECTED
+    # (USER_PERSISTENCE-backed, per decision record 87's own direct
+    # instruction that config belongs there) - a setting only needs
+    # GLOBAL when recovery genuinely depends on reading it independent
+    # of any one persona's own persistence (see
+    # `startup.auto_start_persona` below for the concrete real case:
+    # asking "which persona's volume should I try mounting" from
+    # inside that same volume is circular).
+    scope: str = registry.PROTECTED
 
 
 # Reference-string schemes `set_setting` accepts for an `is_secret_ref`
@@ -95,7 +101,10 @@ SCHEMA = (
                "How long admin's cross-persona passphrase stays cached before it must be "
                "re-entered - sudo-like, deliberately much shorter than the base session."),
     SettingDef("startup", "auto_start_persona", "personal",
-               "Which persona's USER_PERSISTENCE volume mounts automatically on boot."),
+               "Which persona's USER_PERSISTENCE volume mounts automatically on boot. GLOBAL "
+               "scope (decision record 89) - recovery must be able to read this even when a "
+               "persona's own USER_PERSISTENCE volume is exactly the thing that's broken.",
+               scope=registry.GLOBAL),
     # Per-volume mode for the three shared volumes (never persona-scoped
     # - matches drive_installer.SHARED_VOLUMES exactly). Real, storable,
     # editable values ("read-write", "read-only", or "write-only", per
@@ -166,43 +175,43 @@ def settings_in_group(group: str) -> list:
     return [s for s in _REGISTRY if s.group == group]
 
 
-def _connect(path: str) -> sqlite3.Connection:
-    if path != ":memory:":
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS settings ("
-        "grp TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
-        "PRIMARY KEY (grp, key))"
+def _entry_id(group: str, key: str) -> str:
+    return f"{group}.{key}"
+
+
+def _sync_definition(d: SettingDef) -> None:
+    """Keeps this setting's own definition current in the registry -
+    real, queryable "what is in place" (attributes: default/options/
+    description/is_secret_ref), independent of whether it has ever
+    been explicitly set. Deliberately called at real access time
+    (get_setting/set_setting/all_effective_settings), never at this
+    module's own import time - real database I/O during import would
+    run before any test isolation fixture has had a chance to redirect
+    the default paths (the same class of bug already found once in
+    dependencies.py's run_checks)."""
+    registry.register_type(TYPE_ID, "User/OS/application preferences (settings_store.py)",
+                            default_scope=registry.PROTECTED)
+    registry.upsert_entry(
+        TYPE_ID, _entry_id(d.group, d.key), scope=d.scope,
+        attributes={"default": d.default, "description": d.description,
+                    "options": list(d.options) if d.options is not None else None,
+                    "is_secret_ref": d.is_secret_ref},
     )
-    return conn
 
 
-def get_setting(group: str, key: str, *, path: str | None = None):
-    # `path` resolves DEFAULT_DB_PATH at CALL time, not def time - a
-    # default argument value is bound once, when this function object
-    # is created at import, so binding it directly here would freeze
-    # in the very first DEFAULT_DB_PATH this module ever saw and never
-    # see a later override again (real bug, caught by the test suite's
-    # own per-test DB isolation needing to redirect this path).
-    path = path if path is not None else DEFAULT_DB_PATH
+def get_setting(group: str, key: str):
     schema_map = _schema_by_key()
     if (group, key) not in schema_map:
         raise KeyError(f"unknown setting {group}.{key}")
-    with closing(_connect(path)) as conn:
-        row = conn.execute(
-            "SELECT value FROM settings WHERE grp = ? AND key = ?", (group, key)
-        ).fetchone()
-    if row is None:
-        return schema_map[(group, key)].default
-    return json.loads(row[0])
+    definition = schema_map[(group, key)]
+    _sync_definition(definition)
+    entry = registry.get_entry(TYPE_ID, _entry_id(group, key), scope=definition.scope)
+    if entry is None or entry["value"] is None:
+        return definition.default
+    return entry["value"]
 
 
-def set_setting(group: str, key: str, value, *, path: str | None = None) -> None:
-    path = path if path is not None else DEFAULT_DB_PATH
+def set_setting(group: str, key: str, value) -> None:
     schema_map = _schema_by_key()
     if (group, key) not in schema_map:
         raise KeyError(f"unknown setting {group}.{key}")
@@ -215,29 +224,30 @@ def set_setting(group: str, key: str, value, *, path: str | None = None) -> None
             raise ValueError(
                 f"{group}.{key} holds a vault reference, not a raw value - must start with "
                 f"one of {SECRET_REF_SCHEMES!r}, got {value!r}")
-    with closing(_connect(path)) as conn:
-        conn.execute(
-            "INSERT INTO settings (grp, key, value) VALUES (?, ?, ?) "
-            "ON CONFLICT(grp, key) DO UPDATE SET value = excluded.value",
-            (group, key, json.dumps(value)),
-        )
-        conn.commit()
+    _sync_definition(definition)
+    registry.set_value(TYPE_ID, _entry_id(group, key), value, scope=definition.scope)
 
 
-def all_effective_settings(*, path: str | None = None) -> dict:
+def all_effective_settings() -> dict:
     """Every schema-defined setting's current effective value (stored
     override or schema default), grouped - what an Admin settings tab
-    would render, without needing to know the storage format."""
-    path = path if path is not None else DEFAULT_DB_PATH
-    with closing(_connect(path)) as conn:
-        stored = {(r[0], r[1]): json.loads(r[2]) for r in conn.execute("SELECT grp, key, value FROM settings")}
+    would render, without needing to know the storage format. One
+    `list_entries` call per scope actually in use (at most two - GLOBAL
+    and PROTECTED), not one query per setting."""
+    for d in _REGISTRY:
+        _sync_definition(d)
+    by_scope: dict = {}
+    for scope in {d.scope for d in _REGISTRY}:
+        by_scope[scope] = registry.list_entries(TYPE_ID, scope=scope)
     result: dict = {}
     for s in _REGISTRY:
-        result.setdefault(s.group, {})[s.key] = stored.get((s.group, s.key), s.default)
+        entry = by_scope[s.scope].get(_entry_id(s.group, s.key))
+        value = entry["value"] if entry is not None and entry["value"] is not None else s.default
+        result.setdefault(s.group, {})[s.key] = value
     return result
 
 
-def export_bootstrap_snapshot(pairs, *, path: str | None = None) -> dict:
+def export_bootstrap_snapshot(pairs) -> dict:
     """Pulls a flat, plain-dict snapshot of specific (group, key) pairs
     out of the database - for the rare real consumer that cannot open
     this database live (namely: values baked into the Proxmox
@@ -247,4 +257,4 @@ def export_bootstrap_snapshot(pairs, *, path: str | None = None) -> dict:
     ever writing an answer.toml). Not a general-purpose export - a
     caller that CAN reach this database directly should just call
     `get_setting` instead of taking a snapshot."""
-    return {f"{group}.{key}": get_setting(group, key, path=path) for group, key in pairs}
+    return {f"{group}.{key}": get_setting(group, key) for group, key in pairs}

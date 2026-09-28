@@ -622,25 +622,21 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
         pds_runner = runner.as_pds_runner()
     pds_runner = pds_runner or pds.Runner()
 
-    settings_db_path = params.get("settings_db_path") or settings_store.DEFAULT_DB_PATH
-
     # Decision record 88, direct instruction: dependencies "should be
     # predefined and validated before install begins." Only a LOUD
     # failure refuses here - a SILENT one (e.g. a stale fqdn preset) is
     # still recorded for dump_configuration_snapshot/troubleshooting,
     # but was never meant to block an install by itself.
-    check_results = dep.run_checks(phase=dep.PRE_INSTALL, path=settings_db_path)
+    check_results = dep.run_checks(phase=dep.PRE_INSTALL)
     failed = dep.loud_failures(check_results)
     if failed:
         summary = "; ".join(f"{r.id}: {r.detail}" for r in failed)
         return ActionResult(False, f"refusing to start - loud dependency check(s) failed: {summary}")
     lvm_preset = params.get("lvm_size_preset") or settings_store.get_setting(
-        "self_installer", "lvm_size_preset", path=settings_db_path)
+        "self_installer", "lvm_size_preset")
     lvm_sizes = si.LVM_SIZE_PRESETS[lvm_preset]
-    fqdn = params.get("fqdn") or settings_store.get_setting(
-        "self_installer", "fqdn", path=settings_db_path)
-    memory_mb = int(params.get("memory_mb") or settings_store.get_setting(
-        "self_installer", "memory_mb", path=settings_db_path))
+    fqdn = params.get("fqdn") or settings_store.get_setting("self_installer", "fqdn")
+    memory_mb = int(params.get("memory_mb") or settings_store.get_setting("self_installer", "memory_mb"))
 
     workspace = Path(params.get("workspace", "/var/tmp/baseline-self-installer"))
     result = si.build_and_write_self_installer(
@@ -676,8 +672,7 @@ def run_health_check(runner, **params) -> ActionResult:
     the pre-install gate and the boot/interval phases call - one real
     mechanism, four different triggers, not four different checks."""
     import dependencies as dep
-    db_path = params.get("settings_db_path")
-    results = dep.run_checks(phase=dep.ADHOC, path=db_path)
+    results = dep.run_checks(phase=dep.ADHOC)
     failed_loud = dep.loud_failures(results)
     lines = [f"[{'ok' if r.ok else ('LOUD-FAIL' if r.severity == dep.LOUD else 'silent-fail')}] {r.id}: {r.detail}"
              for r in results]

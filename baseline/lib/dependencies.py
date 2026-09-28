@@ -6,15 +6,14 @@ be predefined and validated before install begins and as health
 validations both at boot and intervals and adhoc calls. Some values
 will break things loudly some will break things silently."
 
-Lives in the same primary Baseline database `settings_store.py` uses
-(`settings_store.DEFAULT_DB_PATH`) - not a second database, per direct
-instruction to build this "in that same DB" if one already exists.
-Two tables: `dependencies` (the real, queryable definitions - what is
-in place, inspectable directly via sqlite3 even outside Python) and
-`dependency_check_results` (every check ever run, so the most recent
-result for any dependency is always available for troubleshooting -
-"referenced in things like stack traces or determining the system
-configuration").
+**Storage: built on `registry.py` (decision record 89)**, not its own
+bespoke tables - the foundational registry mechanism every registry-
+shaped subsystem in Baseline shares now. Dependency definitions are
+`registry_entries` of type `"dependencies"`; check results are
+`registry_events` of kind `"check_result"` against those same entries.
+This module owns the domain logic (severity, phases, check kinds);
+`registry.py` owns the generic storage and the GLOBAL/PROTECTED scope
+split.
 
 **Loud vs silent (direct instruction)**: `severity` on each
 `Dependency` is either `LOUD` (a failure here would visibly break
@@ -31,17 +30,26 @@ itself be a surprise.
 is an open string, not an enum - "system" and "install" are the real
 levels this pass needs; `register_dependencies` lets any future module
 add its own level (e.g. "persona", "app") without editing this file.
+
+**Scope**: dependency definitions and their results default to GLOBAL
+(decision record 89) - deliberately, unlike settings_store.py's
+PROTECTED default. A dependency's whole purpose is diagnosing the
+health of the machine, including USER_PERSISTENCE itself - definitions
+and results that only existed *inside* the volume being diagnosed
+would be unreachable exactly when they're needed most (during
+recovery, or troubleshooting a broken persona). A future dependency
+that genuinely needs to read persona-protected state can still declare
+`scope=registry.PROTECTED` per-entry.
 """
 from __future__ import annotations
 
 import importlib
-import json
 import shutil
 import time
-from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import registry
 import settings_store
 
 LOUD = "loud"
@@ -54,6 +62,9 @@ INTERVAL = "interval"
 ADHOC = "adhoc"
 PHASES = (PRE_INSTALL, BOOT, INTERVAL, ADHOC)
 
+TYPE_ID = "dependencies"
+EVENT_KIND_CHECK_RESULT = "check_result"
+
 
 @dataclass(frozen=True)
 class Dependency:
@@ -64,6 +75,7 @@ class Dependency:
     phases: tuple
     check_kind: str
     check_args: dict = field(default_factory=dict)
+    scope: str = registry.GLOBAL
 
 
 @dataclass(frozen=True)
@@ -191,58 +203,27 @@ def dependencies_at_level(level: str) -> list:
     return [d for d in _REGISTRY if d.level == level]
 
 
-# ---------------------------------------------------------------------------
-# Storage - same primary database settings_store.py uses, two new
-# tables. No Runner injection, same reasoning as settings_store.py:
-# sqlite3 is a stdlib embedded call, not an external-process boundary.
-# ---------------------------------------------------------------------------
-
-def _connect(path: str):
-    import os
-    import sqlite3
-    if path != ":memory:":
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS dependencies ("
-        "id TEXT PRIMARY KEY, level TEXT NOT NULL, description TEXT NOT NULL, "
-        "severity TEXT NOT NULL, phases TEXT NOT NULL, check_kind TEXT NOT NULL, "
-        "check_args TEXT NOT NULL)"
+def _sync_definition(d: Dependency) -> None:
+    """Keeps this dependency's own definition current in the registry -
+    real, queryable "what is in place" even from outside Python.
+    Deliberately called at real access time (run_checks), never at
+    this module's own import time - see settings_store.py's own
+    `_sync_definition` docstring for why."""
+    registry.register_type(TYPE_ID, "Predefined system/install/(future) dependency checks (dependencies.py)",
+                            default_scope=registry.GLOBAL)
+    registry.upsert_entry(
+        TYPE_ID, d.id, scope=d.scope,
+        attributes={"level": d.level, "description": d.description, "severity": d.severity,
+                    "phases": list(d.phases), "check_kind": d.check_kind, "check_args": d.check_args},
     )
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS dependency_check_results ("
-        "row_id INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, phase TEXT NOT NULL, "
-        "checked_at REAL NOT NULL, ok INTEGER NOT NULL, detail TEXT NOT NULL, "
-        "severity TEXT NOT NULL, level TEXT NOT NULL)"
-    )
-    return conn
 
 
-def sync_definitions(*, path: str | None = None) -> None:
-    """Persists the current in-memory registry into the `dependencies`
-    table - real, queryable "what is in place" even from outside
-    Python (a plain `sqlite3` CLI against the primary Baseline
-    database), not just whatever happens to be registered in the
-    running process right now."""
-    path = path if path is not None else settings_store.DEFAULT_DB_PATH
-    with closing(_connect(path)) as conn:
-        for d in _REGISTRY:
-            conn.execute(
-                "INSERT INTO dependencies (id, level, description, severity, phases, check_kind, check_args) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET level=excluded.level, description=excluded.description, "
-                "severity=excluded.severity, phases=excluded.phases, check_kind=excluded.check_kind, "
-                "check_args=excluded.check_args",
-                (d.id, d.level, d.description, d.severity, json.dumps(d.phases), d.check_kind,
-                 json.dumps(d.check_args)),
-            )
-        conn.commit()
+def sync_definitions() -> None:
+    for d in _REGISTRY:
+        _sync_definition(d)
 
 
-def run_checks(*, phase: str, level: str | None = None, path: str | None = None) -> list:
+def run_checks(*, phase: str, level: str | None = None) -> list:
     """Runs every registered dependency applicable to `phase` (and,
     optionally, restricted to one `level`), records each result, and
     returns the same results as real `CheckResult` objects. A broken
@@ -251,19 +232,18 @@ def run_checks(*, phase: str, level: str | None = None, path: str | None = None)
 
     Deliberately two passes, not one: a `check_kind` like
     `setting_configured` calls back into `settings_store`, which opens
-    its own fresh connection to this same database file. Running
-    checks *while* holding this function's own connection open with an
-    uncommitted write transaction caused real `SQLITE_BUSY` lock
-    contention against that nested connection - found as a real 10s+
-    hang (two lock-wait timeouts back to back) in this module's own
-    test suite, not a hypothetical. Every check now runs to completion
-    with no database connection of this function's own open at all;
-    only the second pass opens one, purely to persist already-computed
+    its own fresh connection to the registry's database. Running
+    checks *while* holding a connection of this function's own open
+    with an uncommitted write transaction caused real `SQLITE_BUSY`
+    lock contention against that nested connection - found as a real
+    10s+ hang (two lock-wait timeouts back to back) in this module's
+    own test suite, not a hypothetical. Every check now runs to
+    completion with no database connection of this function's own open
+    at all; only the second pass persists the already-computed
     results."""
     if phase not in PHASES:
         raise ValueError(f"unknown phase {phase!r} - must be one of {PHASES}")
-    path = path if path is not None else settings_store.DEFAULT_DB_PATH
-    sync_definitions(path=path)
+    sync_definitions()
     now = time.time()
     results: list = []
     for d in _REGISTRY:
@@ -279,34 +259,31 @@ def run_checks(*, phase: str, level: str | None = None, path: str | None = None)
                 ok, detail = False, f"check raised {exc!r}"
         results.append(CheckResult(d.id, ok, detail, d.severity, d.level))
 
-    with closing(_connect(path)) as conn:
-        for r in results:
-            conn.execute(
-                "INSERT INTO dependency_check_results (id, phase, checked_at, ok, detail, severity, level) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (r.id, phase, now, 1 if r.ok else 0, r.detail, r.severity, r.level),
-            )
-        conn.commit()
+    by_id = {d.id: d for d in _REGISTRY}
+    for r in results:
+        registry.record_event(
+            TYPE_ID, r.id, EVENT_KIND_CHECK_RESULT,
+            {"phase": phase, "ok": r.ok, "detail": r.detail, "severity": r.severity, "level": r.level},
+            scope=by_id[r.id].scope, at=now,
+        )
     return results
 
 
-def latest_check_results(*, path: str | None = None) -> dict:
-    """One entry per dependency id - its most recent result across any
-    phase. What a troubleshooting dump or a stack-trace-adjacent
-    diagnostic actually wants: not a whole history, just "what's true
-    right now, as of the last time anything checked.\""""
-    path = path if path is not None else settings_store.DEFAULT_DB_PATH
-    with closing(_connect(path)) as conn:
-        rows = conn.execute(
-            "SELECT id, phase, checked_at, ok, detail, severity, level FROM dependency_check_results "
-            "WHERE (id, checked_at) IN "
-            "(SELECT id, MAX(checked_at) FROM dependency_check_results GROUP BY id)"
-        ).fetchall()
-    return {
-        r[0]: {"phase": r[1], "checked_at": r[2], "ok": bool(r[3]), "detail": r[4],
-               "severity": r[5], "level": r[6]}
-        for r in rows
-    }
+def latest_check_results() -> dict:
+    """One entry per dependency id - its most recent check result
+    across any phase. What a troubleshooting dump or a stack-trace-
+    adjacent diagnostic actually wants: not a whole history, just
+    "what's true right now, as of the last time anything checked.\"
+    Merged across whichever scopes are actually in use (at most two -
+    GLOBAL and PROTECTED), same pattern as
+    settings_store.all_effective_settings."""
+    result: dict = {}
+    for scope in {d.scope for d in _REGISTRY}:
+        events = registry.latest_events(TYPE_ID, scope=scope, kind=EVENT_KIND_CHECK_RESULT)
+        for entry_id, event in events.items():
+            result[entry_id] = {"phase": event["phase"], "checked_at": event["at"], "ok": event["ok"],
+                                 "detail": event["detail"], "severity": event["severity"], "level": event["level"]}
+    return result
 
 
 def loud_failures(results) -> list:
@@ -318,16 +295,15 @@ def loud_failures(results) -> list:
     return [r for r in results if not r.ok and r.severity == LOUD]
 
 
-def dump_configuration_snapshot(*, path: str | None = None) -> dict:
+def dump_configuration_snapshot() -> dict:
     """A real, single-call diagnostic snapshot - "what is in place" for
     troubleshooting, meant to be referenced from a stack trace or an
     operator asking what's actually configured on this machine right
     now. Explicitly calls out any currently-failing SILENT dependency -
     by definition, nothing else would have surfaced it."""
-    path = path if path is not None else settings_store.DEFAULT_DB_PATH
-    results = latest_check_results(path=path)
+    results = latest_check_results()
     return {
-        "settings": settings_store.all_effective_settings(path=path),
+        "settings": settings_store.all_effective_settings(),
         "dependency_results": results,
         "silent_failures": [i for i, r in results.items() if not r["ok"] and r["severity"] == SILENT],
         "loud_failures": [i for i, r in results.items() if not r["ok"] and r["severity"] == LOUD],

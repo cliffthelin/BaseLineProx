@@ -162,6 +162,10 @@ cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-set
 # wiring that tab in - never staged before now.
 cp "$SRC/baseline/lib/settings_store.py" /opt/baseline/lib/settings_store.py
 cp "$SRC/baseline/lib/admin_elevation.py" /opt/baseline/lib/admin_elevation.py
+# registry.py (decision record 89) - the foundational registry
+# mechanism settings_store.py and dependencies.py are both built on;
+# must be staged before either of them ever imports it for real.
+cp "$SRC/baseline/lib/registry.py" /opt/baseline/lib/registry.py
 # dependencies.py (decision record 88) - the dependency-tracking/
 # health-validation layer sharing settings_store.py's own SQLite
 # database; drive_admin.py's build_self_installer imports it directly,

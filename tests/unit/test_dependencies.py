@@ -163,11 +163,17 @@ def test_register_check_kind_refuses_to_shadow_a_builtin():
         pass
 
 
-def test_sync_definitions_persists_the_registry_into_the_dependencies_table(tmp_path):
+def test_sync_definitions_persists_the_registry_into_the_shared_registry_entries_table():
+    """Decision record 89: dependencies.py has no table of its own
+    anymore - definitions live in registry.py's generic
+    `registry_entries`, type "dependencies". system.* dependencies
+    default to GLOBAL scope, so they land in registry.GLOBAL_DB_PATH
+    (the autouse fixture's isolated tmp file)."""
     import sqlite3
-    db_path = str(tmp_path / "sync-test.db")
-    dep.sync_definitions(path=db_path)
-    with sqlite3.connect(db_path) as conn:
-        ids = {row[0] for row in conn.execute("SELECT id FROM dependencies")}
+    import registry
+    dep.sync_definitions()
+    with sqlite3.connect(registry.GLOBAL_DB_PATH) as conn:
+        ids = {row[0] for row in conn.execute(
+            "SELECT entry_id FROM registry_entries WHERE type_id = 'dependencies'")}
     assert "system.sqlite3_importable" in ids
     assert "install.self_installer_lvm_preset_valid" in ids
