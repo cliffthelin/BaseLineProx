@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for the merged Baseline web app
+(baseline-web.service, decision record 83) - Settings, Admin,
+Recovery, Drive Administration, and Master Config under one server.
+
+Supersedes baseline-settings-web.service for systemd-managed
+auto-start (this app is a strict superset of what it served - every
+existing route still works at the same port). baseline-settings-web
+and baseline-control-panel remain available as separate, standalone
+entry points for direct operator use per their own module docstrings;
+neither is systemd-managed any more.
+
+See lib/baseline_web.py's module docstring.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import baseline_web  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(baseline_web.main())

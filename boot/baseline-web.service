@@ -1,0 +1,18 @@
+[Unit]
+Description=Baseline web app (Settings/Admin/Recovery/Drive Administration/Master Config) - LAN-scoped, login-gated
+After=network-online.target baseline-firstboot.service baseline-persist-bind-mounts.service
+Wants=network-online.target
+Requires=baseline-persist-bind-mounts.service
+
+[Service]
+Type=simple
+ExecStartPre=/opt/baseline/bin/baseline-settings-web-gate
+ExecStart=/opt/baseline/bin/baseline-web 8100
+Restart=on-failure
+RestartSec=5
+Environment=BASELINE_SETTINGS_WEB_DATA=/var/lib/baseline/settings-web/store.json
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

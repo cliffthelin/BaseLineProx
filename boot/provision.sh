@@ -205,15 +205,17 @@ cp "$SRC/baseline/lib/pct_provision.py" /opt/baseline/lib/pct_provision.py
 # The real "Master Config" control-plane: target-drive validation,
 # config diffing, selective update, and encrypted backup/restore
 # (decision record 64) - built and tested but never staged by this
-# script until now (decision record 65). baseline-control-panel is
-# deliberately NOT wired to any systemd unit: control_panel_web.py has
-# no authentication of its own, and its default bind (127.0.0.1) is a
-# mitigation, not a substitute for one - auto-starting it as an
-# always-on service would deploy a real, reachable door to
-# backup/restore/update/encrypt-decrypt with no login. It stays
-# operator-invoked-only, same as vm_scripts.py/quadlet.py above, until
-# it has real auth. baseline-diff/-update/-backup/-config-crypto are
-# plain one-shot CLI tools with no service to wire at all.
+# script until now (decision record 65). Direct correction, decision
+# record 83: control_panel_web.py's routes are no longer standalone
+# and unauthenticated - baseline-web.service (staged below) merges
+# them behind settings_web.py's own real login, so
+# backup/restore/update/encrypt-decrypt now sit behind the same
+# auth every other tab on that app requires. baseline-control-panel
+# itself (staged below too) remains available as a separate,
+# standalone, operator-invoked tool for direct local use, same as
+# vm_scripts.py/quadlet.py - it is simply no longer the only way to
+# reach this functionality. baseline-diff/-update/-backup/-config-crypto
+# are plain one-shot CLI tools with no service to wire at all.
 cp "$SRC/baseline/lib/physical_device_safety.py" /opt/baseline/lib/physical_device_safety.py
 cp "$SRC/baseline/lib/drive_installer.py" /opt/baseline/lib/drive_installer.py
 cp "$SRC/baseline/lib/config_diff.py" /opt/baseline/lib/config_diff.py
@@ -226,6 +228,19 @@ cp "$SRC/baseline/lib/control_panel_web.py" /opt/baseline/lib/control_panel_web.
 # timer, one attempt per real persona.
 cp "$SRC/baseline/lib/backup_recurring.py" /opt/baseline/lib/backup_recurring.py
 cp "$SRC/baseline/bin/baseline-backup-recurring" /opt/baseline/bin/baseline-backup-recurring
+# The merged Baseline web app (decision record 83) - direct
+# instruction: "merge those two together and add a Drive
+# administration tab... this application will never get off the
+# ground if your solution is terminal commands." One real,
+# already-root systemd service (baseline-web.service, staged below)
+# serving Settings/Admin/Recovery/Drive Administration/Master Config
+# behind one real login, with drive_admin.py's privileged actions
+# gated on a real /etc/shadow password check
+# (settings_web.SystemElevationVerifier), never a script handed back
+# to the operator to run themselves.
+cp "$SRC/baseline/lib/drive_admin.py" /opt/baseline/lib/drive_admin.py
+cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
+cp "$SRC/baseline/bin/baseline-web" /opt/baseline/bin/baseline-web
 # Remasters the already-verified Proxmox auto-install ISO to also
 # carry this repo's own boot/provision.sh + baseline/ tree, so a
 # future fresh install needs no separate git-clone/copy step - see
@@ -238,7 +253,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -248,7 +263,11 @@ cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot
 cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sensors-collect.service
 cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-sensors-collect.timer
 cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
-cp "$SRC/boot/baseline-settings-web.service" /etc/systemd/system/baseline-settings-web.service
+# baseline-web.service supersedes baseline-settings-web.service
+# (decision record 83) - the merged app is a strict superset, so the
+# old unit file is no longer staged/enabled; baseline-settings-web
+# the bin script itself remains staged above for standalone use.
+cp "$SRC/boot/baseline-web.service" /etc/systemd/system/baseline-web.service
 cp "$SRC/boot/baseline-scripts-inbox.service" /etc/systemd/system/baseline-scripts-inbox.service
 cp "$SRC/boot/baseline-backup-recurring.service" /etc/systemd/system/baseline-backup-recurring.service
 cp "$SRC/boot/baseline-backup-recurring.timer" /etc/systemd/system/baseline-backup-recurring.timer
@@ -309,6 +328,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/sensors_interval_control.py \
          /opt/baseline/lib/backup_recurring.py /opt/baseline/bin/baseline-backup-recurring \
          /opt/baseline/lib/recovery_mode.py /opt/baseline/bin/baseline-recovery-mode \
+         /opt/baseline/lib/drive_admin.py /opt/baseline/lib/baseline_web.py /opt/baseline/bin/baseline-web \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
@@ -320,7 +340,7 @@ command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after
 [ -d /etc/containers/systemd ] || verify_fail "missing /etc/containers/systemd (Quadlet unit directory)"
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
          baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
-         baseline-settings-web.service baseline-scripts-inbox.service \
+         baseline-web.service baseline-scripts-inbox.service \
          baseline-backup-recurring.service baseline-backup-recurring.timer; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
@@ -334,7 +354,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
          /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate \
          /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring \
-         /opt/baseline/bin/baseline-recovery-mode; do
+         /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
@@ -347,11 +367,11 @@ systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service
-systemctl enable baseline-settings-web.service
+systemctl enable baseline-web.service
 systemctl enable baseline-scripts-inbox.service
 systemctl enable baseline-backup-recurring.timer
 
-for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service baseline-scripts-inbox.service baseline-backup-recurring.timer; do
+for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-backup-recurring.timer; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
 echo "PASS: all eight units confirmed enabled."

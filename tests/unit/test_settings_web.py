@@ -458,6 +458,51 @@ def test_file_backed_elevation_verifier_accepts_the_real_dev_seed_passphrase(tmp
     assert verifier("baseline") is False  # the login password must not also work as elevation
 
 
+def test_system_password_verifier_accepts_the_real_matching_password():
+    entry_hash = sw._sha512crypt("correct horse", sw._new_salt())
+    shadow_text = f"root:{entry_hash}:19000:0:99999:7:::\n"
+    verifier = sw.SystemPasswordVerifier(read_text=lambda path: shadow_text)
+    assert verifier.verify("root", "correct horse") is True
+    assert verifier.verify("root", "wrong") is False
+
+
+def test_system_password_verifier_refuses_an_unknown_username():
+    verifier = sw.SystemPasswordVerifier(read_text=lambda path: "root:$6$abc$def:19000:0:99999:7:::\n")
+    assert verifier.verify("nobody", "anything") is False
+
+
+def test_system_password_verifier_refuses_cleanly_when_shadow_is_unreadable():
+    def _raise(path):
+        raise PermissionError("Permission denied")
+    verifier = sw.SystemPasswordVerifier(read_text=_raise)
+    assert verifier.verify("root", "anything") is False
+
+
+def test_system_password_verifier_refuses_a_non_sha512_hash_scheme():
+    verifier = sw.SystemPasswordVerifier(read_text=lambda path: "root:$y$j9T$abc$def:19000:0:99999:7:::\n")
+    assert verifier.verify("root", "anything") is False
+
+
+def test_system_elevation_verifier_is_callable_with_just_a_password():
+    entry_hash = sw._sha512crypt("correct horse", sw._new_salt())
+    shadow_text = f"cane:{entry_hash}:19000:0:99999:7:::\n"
+    verifier = sw.SystemElevationVerifier("cane", sw.SystemPasswordVerifier(read_text=lambda path: shadow_text))
+    assert verifier("correct horse") is True
+    assert verifier("wrong") is False
+
+
+def test_system_elevation_verifier_checks_its_own_bound_username_only():
+    entry_hash = sw._sha512crypt("correct horse", sw._new_salt())
+    shadow_text = f"someoneelse:{entry_hash}:19000:0:99999:7:::\n"
+    verifier = sw.SystemElevationVerifier("cane", sw.SystemPasswordVerifier(read_text=lambda path: shadow_text))
+    assert verifier("correct horse") is False
+
+
+def test_system_elevation_verifier_defaults_to_a_real_system_password_verifier():
+    verifier = sw.SystemElevationVerifier("root")
+    assert isinstance(verifier.verifier, sw.SystemPasswordVerifier)
+
+
 def test_file_backed_elevation_verifier_refuses_when_no_hash_is_stored(tmp_path):
     path = tmp_path / "store.json"
     import json as _json

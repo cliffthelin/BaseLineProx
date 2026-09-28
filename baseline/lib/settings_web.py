@@ -771,6 +771,74 @@ class FileBackedPasswordVerifier(PasswordVerifier):
         return _sha512crypt(password, salt) == stored_hash
 
 
+class SystemPasswordVerifier(PasswordVerifier):
+    """The real implementation `PasswordVerifier`'s own docstring
+    described as deliberately unbuilt: verifies against the machine's
+    actual `/etc/shadow` account - needs root, which
+    `baseline-settings-web.service`/`baseline.service` already run as
+    (no `User=` override in either unit). "Standard Ubuntu design" in
+    the sense that matters here: this proves the human at the browser
+    genuinely knows the real admin's password, right now, for this
+    specific change - not a re-derivation of privilege the process
+    already has as root.
+
+    Reads `/etc/shadow` directly rather than via the stdlib `spwd`
+    module - `spwd` was removed in Python 3.13, the same real
+    constraint this file's own `_sha512crypt` docstring already
+    documents for the `crypt` module. Reuses `_sha512crypt` itself
+    directly - the exact same technique
+    `FileBackedPasswordVerifier`/`FileBackedElevationVerifier` already
+    use, just against the real shadow hash instead of a JsonFileStore
+    one. Every real Debian/Proxmox account's hash is `$6$...` (SHA-512
+    crypt) by default - a different scheme (e.g. `$y$` yescrypt) is
+    refused cleanly (`False`), never crashes."""
+
+    def __init__(self, shadow_path: str = "/etc/shadow", read_text=None):
+        self.shadow_path = shadow_path
+        self._read_text = read_text or (lambda path: Path(path).read_text())
+
+    def _stored_hash(self, username: str) -> str | None:
+        try:
+            content = self._read_text(self.shadow_path)
+        except (OSError, PermissionError):
+            return None
+        for line in content.splitlines():
+            fields = line.split(":")
+            if len(fields) >= 2 and fields[0] == username:
+                return fields[1]
+        return None
+
+    def verify(self, username: str, password: str) -> bool:
+        stored_hash = self._stored_hash(username)
+        if not stored_hash:
+            return False
+        parts = stored_hash.split("$")
+        if len(parts) < 4 or parts[1] != "6":
+            return False
+        salt = parts[2]
+        return _sha512crypt(password, salt) == stored_hash
+
+
+class SystemElevationVerifier:
+    """Adapts `SystemPasswordVerifier`'s `.verify(username, password)`
+    (the `PasswordVerifier` login contract, two arguments) to the
+    single-argument `verify_fn(password) -> bool` shape
+    `admin_elevation.attempt_elevation` and the Drive Administration
+    action route both actually call. Bound to one real, fixed
+    `username` at construction - real elevation checks the *specific*
+    admin account's own password, not an ambient/unspecified one.
+    Found missing (`SystemPasswordVerifier` used directly as
+    `elevation_verify_fn` would raise `TypeError` - it defines no
+    `__call__`) by direct question, before it ever ran for real."""
+
+    def __init__(self, username: str, verifier: "SystemPasswordVerifier | None" = None):
+        self.username = username
+        self.verifier = verifier or SystemPasswordVerifier()
+
+    def __call__(self, password: str) -> bool:
+        return self.verifier.verify(self.username, password)
+
+
 class FileBackedElevationVerifier:
     """`admin_elevation.attempt_elevation`'s own "verify_fn as a plain
     callable" convention - a real default backed by the same
@@ -892,16 +960,28 @@ def default_hasher(password: str) -> str:
 # ---------------------------------------------------------------------------
 
 _PAGE_CSS = """
-body { font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; color: #1a1a2e; }
-h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
-form { margin: .75rem 0; } label { display: block; margin: .5rem 0 .2rem; font-size: .9rem; }
-input { padding: .4rem; width: 100%; max-width: 320px; box-sizing: border-box; }
-button { margin-top: .75rem; padding: .5rem 1rem; background: #2a4d8f; color: white; border: none; border-radius: 4px; cursor: pointer; }
-button.danger { background: #a63333; }
-.notice { background: #fff6da; border: 1px solid #e0c568; padding: .6rem; border-radius: 4px; font-size: .9rem; }
-.hint { color: #666; font-size: .82rem; }
-pre { background: #f4f4f7; padding: .75rem; border-radius: 4px; overflow-x: auto; font-size: .85rem; }
-a { color: #2a4d8f; }
+:root { color-scheme: dark; }
+html, body { background: #0d0e13; }
+body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; color: #e7e9f0; }
+h1 { font-size: 1.4rem; color: #f2f3f8; } h2 { font-size: 1.1rem; margin-top: 2rem; color: #ccd0e0; border-bottom: 1px solid #262838; padding-bottom: .25rem; }
+form { margin: .75rem 0; } label { display: block; margin: .5rem 0 .2rem; font-size: .9rem; color: #9aa0ba; }
+input { padding: .5rem .6rem; width: 100%; max-width: 320px; box-sizing: border-box; color: #e7e9f0; background: #171923; border: 1px solid #33364a; border-radius: 6px; }
+input::placeholder { color: #5c6180; }
+button { margin-top: .75rem; padding: .5rem 1rem; background: #3f63b8; color: #f2f3f8; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+button:hover { background: #4a72cf; }
+button.danger { background: #b6414a; }
+button.danger:hover { background: #cc4b55; }
+.notice { background: #1a2233; border: 1px solid #2f4573; padding: .6rem .9rem; border-radius: 8px; font-size: .9rem; color: #cfe0ff; }
+.hint { color: #8890a6; font-size: .82rem; }
+pre { background: #171923; border: 1px solid #262838; color: #ccd0e0; padding: .75rem; border-radius: 6px; overflow-x: auto; font-size: .85rem; }
+a { color: #7fa4ec; }
+a:visited { color: #a48ce0; }
+table { border-collapse: collapse; width: 100%; margin: .5rem 0 1.5rem; }
+th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #21232f; font-size: .9rem; color: #ccd0e0; }
+th { color: #8890a6; font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+.baseline-nav { display: flex; gap: 1.25rem; padding: .75rem 0 1rem; margin-bottom: 1rem; border-bottom: 2px solid #262838; font-size: .95rem; }
+.baseline-nav a { color: #9aa0ba; text-decoration: none; padding: .25rem .1rem; }
+.baseline-nav a.active { color: #f2f3f8; font-weight: 700; border-bottom: 2px solid #5b7fd4; }
 """
 
 

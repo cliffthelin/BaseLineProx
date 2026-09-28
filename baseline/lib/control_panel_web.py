@@ -324,6 +324,9 @@ _INDEX_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Baseline Control Panel</title>
 <style>
 body{font-family:ui-sans-serif,system-ui,sans-serif;background:#121319;color:#eceef3;margin:0;padding:24px;}
+.baseline-nav{display:flex;gap:1.25rem;padding:0 0 1rem;margin-bottom:1rem;border-bottom:2px solid #2a2d38;font-size:.95rem;}
+.baseline-nav a{color:#a7abbc;text-decoration:none;padding:.25rem .1rem;}
+.baseline-nav a.active{color:#eceef3;font-weight:700;border-bottom:2px solid #5b93ff;}
 h1{font-size:20px;} h2{font-size:15px;margin-top:28px;}
 .card{background:#191b22;border:1px solid #2a2d38;border-radius:10px;padding:16px 20px;margin-bottom:16px;}
 button{background:#5b93ff;color:#fff;border:none;border-radius:7px;padding:8px 14px;font-weight:700;cursor:pointer;margin-right:8px;}
