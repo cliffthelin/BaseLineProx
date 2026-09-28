@@ -208,6 +208,11 @@ cp "$SRC/baseline/lib/update_pipeline.py" /opt/baseline/lib/update_pipeline.py
 cp "$SRC/baseline/lib/backup_restore.py" /opt/baseline/lib/backup_restore.py
 cp "$SRC/baseline/lib/config_crypto.py" /opt/baseline/lib/config_crypto.py
 cp "$SRC/baseline/lib/control_panel_web.py" /opt/baseline/lib/control_panel_web.py
+# Automated recurring encrypted backup (work-queue item 27, decision
+# record 79) - orchestrates backup_restore.py + config_crypto.py on a
+# timer, one attempt per real persona.
+cp "$SRC/baseline/lib/backup_recurring.py" /opt/baseline/lib/backup_recurring.py
+cp "$SRC/baseline/bin/baseline-backup-recurring" /opt/baseline/bin/baseline-backup-recurring
 # Remasters the already-verified Proxmox auto-install ISO to also
 # carry this repo's own boot/provision.sh + baseline/ tree, so a
 # future fresh install needs no separate git-clone/copy step - see
@@ -220,7 +225,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -232,6 +237,8 @@ cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-senso
 cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
 cp "$SRC/boot/baseline-settings-web.service" /etc/systemd/system/baseline-settings-web.service
 cp "$SRC/boot/baseline-scripts-inbox.service" /etc/systemd/system/baseline-scripts-inbox.service
+cp "$SRC/boot/baseline-backup-recurring.service" /etc/systemd/system/baseline-backup-recurring.service
+cp "$SRC/boot/baseline-backup-recurring.timer" /etc/systemd/system/baseline-backup-recurring.timer
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
@@ -285,6 +292,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/control_panel_web.py /opt/baseline/lib/iso_builder.py \
          /opt/baseline/lib/scripts_inbox.py /opt/baseline/lib/scripts_inbox_web.py /opt/baseline/lib/scripts_inbox_gate.py \
          /opt/baseline/lib/sensors_interval_control.py \
+         /opt/baseline/lib/backup_recurring.py /opt/baseline/bin/baseline-backup-recurring \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
@@ -296,7 +304,8 @@ command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after
 [ -d /etc/containers/systemd ] || verify_fail "missing /etc/containers/systemd (Quadlet unit directory)"
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
          baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
-         baseline-settings-web.service baseline-scripts-inbox.service; do
+         baseline-settings-web.service baseline-scripts-inbox.service \
+         baseline-backup-recurring.service baseline-backup-recurring.timer; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
@@ -308,7 +317,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
          /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate \
-         /opt/baseline/bin/baseline-sensors-set-interval; do
+         /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
@@ -323,11 +332,12 @@ systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service
 systemctl enable baseline-settings-web.service
 systemctl enable baseline-scripts-inbox.service
+systemctl enable baseline-backup-recurring.timer
 
-for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service baseline-scripts-inbox.service; do
+for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-settings-web.service baseline-scripts-inbox.service baseline-backup-recurring.timer; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
-echo "PASS: all seven units confirmed enabled."
+echo "PASS: all eight units confirmed enabled."
 
 echo
 echo "Done. Nothing on this tty/session was touched or disabled - this"

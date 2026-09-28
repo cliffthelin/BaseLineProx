@@ -261,6 +261,35 @@ def test_restore_refuses_with_a_stale_manifest_older_than_24h():
     assert result.ok is False
 
 
+def test_restore_with_explicit_persistence_targets_checks_that_targets_manifest_instead():
+    """decision record 79: a persona-scoped backup's manifest is never
+    recorded under the legacy singular USER_PERSISTENCE path - a
+    caller restoring a real persona's archive must be able to point
+    the freshness check at that persona's own mountpoint."""
+    runner = FakeRunner()
+    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE_PERSONAL", ts=1700000000.0)
+    result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60,
+                                persistence_targets=["/mnt/USER_PERSISTENCE_PERSONAL"])
+    assert result.ok is True
+
+
+def test_restore_with_explicit_persistence_targets_still_refuses_without_a_fresh_one():
+    runner = FakeRunner()
+    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)  # a different target's manifest
+    result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60,
+                                persistence_targets=["/mnt/USER_PERSISTENCE_PERSONAL"])
+    assert result.ok is False
+
+
+def test_restore_omitting_persistence_targets_still_checks_the_legacy_singular_target():
+    """Backward compatibility: persistence_targets=None (the default)
+    reproduces the pre-existing behavior byte-for-byte."""
+    runner = FakeRunner()
+    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60)
+    assert result.ok is True
+
+
 def test_restore_of_non_user_persistence_members_does_not_require_a_manifest():
     """The hard gate is scoped to USER_PERSISTENCE specifically - a
     restore that only touches, say, BASELINE members is unaffected."""

@@ -1,0 +1,9 @@
+[Unit]
+Description=Baseline recurring encrypted USER_PERSISTENCE backup (work-queue item 27)
+Requires=baseline-persist-bind-mounts.service
+After=baseline-persist-bind-mounts.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-backup-recurring
+RemainAfterExit=no

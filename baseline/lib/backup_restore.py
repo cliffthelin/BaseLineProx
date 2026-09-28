@@ -180,7 +180,8 @@ def _restore_touches_user_persistence(members: list = None) -> bool:
 
 def restore_backup(runner: Runner, *, archive_path: str, dest_root: str = "/", members: list = None,
                     now: float = None, max_age_s: float = DEFAULT_MAX_BACKUP_AGE_S,
-                    manifests_dir: str = DEFAULT_MANIFESTS_DIR) -> CommandResult:
+                    manifests_dir: str = DEFAULT_MANIFESTS_DIR,
+                    persistence_targets: list = None) -> CommandResult:
     """Extracts exactly what's asked for, verbatim - `members` (from
     list_backup_contents()) restores only those entries, matching
     create_backup()'s own selective shape; omitted, everything in the
@@ -196,17 +197,29 @@ def restore_backup(runner: Runner, *, archive_path: str, dest_root: str = "/", m
     never even invoked - unless a real, recorded manifest proves a
     successful backup of USER_PERSISTENCE within `max_age_s`. Omitting
     `now` also refuses, rather than silently skipping the check
-    because a caller forgot a parameter."""
+    because a caller forgot a parameter.
+
+    `persistence_targets` (decision record 79): which manifest
+    target(s) count as proof, checked as "any one is fresh enough."
+    Defaults to `[USER_PERSISTENCE_TARGET]` - the legacy singular
+    target, byte-identical to this function's pre-existing behavior -
+    so every existing caller is unaffected. A caller restoring a real
+    persona's own archive passes that persona's own mountpoint(s)
+    instead (e.g. via `persist_bind_mounts.persistence_mountpoint_for`),
+    since a persona-scoped backup's manifest is never recorded under
+    the legacy singular path."""
     if _restore_touches_user_persistence(members):
         if now is None:
             return CommandResult(
                 False, "refusing to restore into/over USER_PERSISTENCE: `now` was not given, "
                        "so backup freshness cannot be verified")
-        if not has_recent_successful_backup(runner, target=USER_PERSISTENCE_TARGET, now=now,
-                                             max_age_s=max_age_s, manifests_dir=manifests_dir):
+        targets_to_check = persistence_targets or [USER_PERSISTENCE_TARGET]
+        if not any(has_recent_successful_backup(runner, target=t, now=now,
+                                                 max_age_s=max_age_s, manifests_dir=manifests_dir)
+                   for t in targets_to_check):
             return CommandResult(
                 False, f"refusing to restore into/over USER_PERSISTENCE: no proof of a successful "
-                       f"backup within {max_age_s:g}s - back it up first")
+                       f"backup of {targets_to_check} within {max_age_s:g}s - back it up first")
 
     runner.run(["mkdir", "-p", dest_root], timeout=10)
     proc = runner.run(restore_backup_argv(archive_path, dest_root, members=members), timeout=600)
