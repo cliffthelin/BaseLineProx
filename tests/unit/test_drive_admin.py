@@ -563,10 +563,13 @@ def test_describe_actions_lists_every_registered_action_with_its_real_descriptio
         assert d["description"] == da.ACTIONS[d["action_id"]].description
 
 
-def test_describe_actions_lists_exactly_install_update_selected_and_repair():
-    """Direct feedback: the action list should be exactly these three,
-    accurately described - nothing else."""
-    assert set(da.ACTIONS) == {"install", "update_selected", "repair"}
+def test_describe_actions_lists_exactly_the_four_real_actions():
+    """The three-action cap (direct feedback at the time) was relaxed
+    by direct instruction once `build_self_installer` (decision record
+    85) was a genuine, distinct, separately-tested capability, not
+    scope creep folded in without asking - accurately described,
+    nothing unlisted."""
+    assert set(da.ACTIONS) == {"install", "update_selected", "repair", "build_self_installer"}
 
 
 def test_describe_actions_exposes_requires_device_for_the_web_pages_device_picker():

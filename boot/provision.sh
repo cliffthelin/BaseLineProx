@@ -240,6 +240,14 @@ cp "$SRC/baseline/bin/baseline-backup-recurring" /opt/baseline/bin/baseline-back
 # to the operator to run themselves.
 cp "$SRC/baseline/lib/drive_admin.py" /opt/baseline/lib/drive_admin.py
 cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
+# self_installer.py (decision record 85) and its own transitive
+# dependencies - test_check_provision_deploys_all_imports.py caught
+# these as a real staging gap, the same class of bug decision records
+# 80/81 already found and fixed for other modules.
+cp "$SRC/baseline/lib/self_installer.py" /opt/baseline/lib/self_installer.py
+cp "$SRC/baseline/lib/drive_setup_acquire.py" /opt/baseline/lib/drive_setup_acquire.py
+cp "$SRC/baseline/lib/drive_setup_answer.py" /opt/baseline/lib/drive_setup_answer.py
+cp "$SRC/baseline/lib/drive_setup_install.py" /opt/baseline/lib/drive_setup_install.py
 cp "$SRC/baseline/bin/baseline-web" /opt/baseline/bin/baseline-web
 # Remasters the already-verified Proxmox auto-install ISO to also
 # carry this repo's own boot/provision.sh + baseline/ tree, so a

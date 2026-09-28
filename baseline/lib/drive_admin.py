@@ -45,6 +45,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 import drive_installer
 import persist_bind_mounts as pbm
@@ -569,6 +570,66 @@ def repair_scan_and_fix(runner, **params) -> ActionResult:
     return ActionResult(False, "Repair is planned for v0.2 and is not implemented in this build yet.")
 
 
+def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> ActionResult:
+    """The real "make this drive prove itself as a self installer"
+    action (decision record 85) - direct instruction: do this through
+    the web application, not a bare CLI invocation. Composes
+    self_installer.build_and_write_self_installer's already-tested
+    pipeline (real acquire -> real prepare-iso --fetch-from http ->
+    real self-contained-ISO remaster -> real QEMU launch against the
+    real device path).
+
+    Unlike `rebuild_persistence_lvm`, none of this pipeline's five
+    stages (acquire/prepare-iso/iso-build/QEMU-launch, plus the
+    read-only device validation itself) needs real root - `udevadm`/
+    `lsblk` device queries are unprivileged reads, and the final QEMU
+    step only needs `disk`-group-level read/write on the device node,
+    a different privilege model than the LVM wipe/create calls
+    `rebuild_persistence_lvm` needs `SudoRunner` for. Plain, real,
+    unauthenticated runner instances are the correct choice here, not
+    an oversight - `pds_runner` still defaults to the same
+    `runner.as_pds_runner()` precedent when available, for consistency,
+    but a plain `pds.Runner()` is equally correct for this read-only use.
+
+    **Honest limitation carried through from self_installer.py: this
+    action's own success means "the real install was launched", never
+    "the install finished correctly."** A human or vision-capable agent
+    must still confirm the final screendump before the drive is
+    actually proven."""
+    import self_installer as si
+    import drive_setup_acquire as dsa
+    import drive_setup_answer as dsan
+    import drive_setup_install as dsi
+    import iso_builder as ib
+
+    if pds_runner is None and hasattr(runner, "as_pds_runner"):
+        pds_runner = runner.as_pds_runner()
+    pds_runner = pds_runner or pds.Runner()
+
+    workspace = Path(params.get("workspace", "/var/tmp/baseline-self-installer"))
+    result = si.build_and_write_self_installer(
+        device_path=device_path,
+        expected_serial=params["expected_serial"],
+        device_min_size_bytes=int(params.get("device_min_size_bytes", 400_000_000_000)),
+        pds_runner=pds_runner,
+        acquire_runner=dsa.RealAcquireRunner(),
+        answer_runner=dsan.RealAnswerRunner(),
+        iso_builder_runner=ib.RealIsoBuilderRunner(),
+        install_runner=dsi.RealInstallRunner(),
+        workspace=workspace,
+        repo_root=Path(params.get("repo_root", "/opt/baseline")).parent,
+        proxmox_source_iso=Path(params["proxmox_source_iso"]),
+        assistant_binary=Path(params.get("assistant_binary", str(workspace / "acquire/extracted/usr/bin/proxmox-auto-install-assistant"))),
+        server_host=params["server_host"],
+        cert_path=Path(params["cert_path"]),
+        key_path=Path(params["key_path"]),
+        fqdn=params.get("fqdn", "baseline.local"),
+        target_mac=params.get("target_mac"),
+        target_dmi_product=params.get("target_dmi_product"),
+    )
+    return ActionResult(result.outcome == "applied", result.detail)
+
+
 @dataclass
 class ActionSpec:
     action_id: str
@@ -592,6 +653,15 @@ ACTIONS = {
         "partitions and volumes selected from the drive tree.",
         lambda runner, selected=(), update_types=(), to_persona=None, **params: update_selected(
             runner, selected=list(selected), update_types=list(update_types), to_persona=to_persona),
+    ),
+    "build_self_installer": ActionSpec(
+        "build_self_installer",
+        "Build a real, self-contained Baseline installer (acquire + prepare-iso --fetch-from "
+        "http + self-contained ISO remaster) and launch the automated install against the "
+        "selected drive for real. Does NOT confirm completion by itself - a human or "
+        "vision-capable agent must review the final screendump before treating the drive as proven.",
+        lambda runner, device_path, **params: build_self_installer(runner, device_path=device_path, **params),
+        requires_device=True,
     ),
     "repair": ActionSpec(
         "repair",
