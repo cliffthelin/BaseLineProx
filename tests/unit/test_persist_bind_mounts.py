@@ -41,6 +41,29 @@ def test_is_mounted_false_when_proc_mounts_unreadable():
     assert pbm.is_mounted(runner, "/mnt/USER_PERSISTENCE") is False
 
 
+# -- is_mounted_read_write (work-queue item 26's hard exit condition) -----
+
+def test_is_mounted_read_write_true_for_a_real_rw_mount():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    assert pbm.is_mounted_read_write(runner, "/mnt/USER_PERSISTENCE") is True
+
+
+def test_is_mounted_read_write_false_for_a_real_ro_mount():
+    mounts = "/dev/sdd2 /mnt/USER_PERSISTENCE ext4 ro,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    assert pbm.is_mounted_read_write(runner, "/mnt/USER_PERSISTENCE") is False
+
+
+def test_is_mounted_read_write_false_when_not_mounted_at_all():
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
+    assert pbm.is_mounted_read_write(runner, "/mnt/USER_PERSISTENCE") is False
+
+
+def test_is_mounted_read_write_false_when_proc_mounts_unreadable():
+    runner = FakeRunner()
+    assert pbm.is_mounted_read_write(runner, "/mnt/USER_PERSISTENCE") is False
+
+
 # -- ensure_persistence_mounted -----------------------------------------
 
 def test_ensure_persistence_mounted_mounts_when_not_already():
@@ -278,6 +301,33 @@ def test_main_returns_1_when_any_result_failed():
     runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})  # persistence unmounted, no mount script configured to succeed
     code = pbm.main(runner=runner, print_fn=lambda *a: None)
     assert code == 1
+
+
+def test_main_records_a_real_recovery_mode_entry_when_the_cascade_fails():
+    """Work-queue item 26's real automatic entry point: a genuine
+    cascade failure durably records that recovery mode is needed,
+    without any separate poller having to notice it later."""
+    import recovery_mode as rm
+    runner = FakeRunner(
+        files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
+        command_responses=[
+            (lambda a: a[:1] == ["mount"] and "LABEL=USER_PERSISTENCE" in a, FakeProc(1, "", "no such partition")),
+            (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
+            (lambda a: a[:1] == ["vgs"], FakeProc(0, "0\n", "")),
+        ],
+    )
+    pbm.main(runner=runner, print_fn=lambda *a: None, now=1700000000.0)
+    assert rm.is_active(runner) is True
+    state = rm.read_state(runner)
+    assert state["reason"] == "cascade_failed"
+    assert state["entered_at"] == 1700000000.0
+
+
+def test_main_never_enters_recovery_mode_when_the_cascade_succeeds():
+    import recovery_mode as rm
+    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    pbm.main(runner=runner, print_fn=lambda *a: None, now=1700000000.0)
+    assert rm.is_active(runner) is False
 
 
 def test_ensure_all_redirects_issues_the_real_mount_command_on_first_boot():

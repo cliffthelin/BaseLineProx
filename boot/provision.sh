@@ -162,6 +162,12 @@ cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-set
 # wiring that tab in - never staged before now.
 cp "$SRC/baseline/lib/settings_store.py" /opt/baseline/lib/settings_store.py
 cp "$SRC/baseline/lib/admin_elevation.py" /opt/baseline/lib/admin_elevation.py
+# Recovery mode itself (work-queue item 26, decision record 81) -
+# settings_web.py's guest-tier /recovery route reaches this directly;
+# persist_bind_mounts.py's own main() also calls it on a real cascade
+# failure (both already staged).
+cp "$SRC/baseline/lib/recovery_mode.py" /opt/baseline/lib/recovery_mode.py
+cp "$SRC/baseline/bin/baseline-recovery-mode" /opt/baseline/bin/baseline-recovery-mode
 # Scripts inbox (decision record 70): "it's just files with server and
 # folder access to CRUD" - a login-gated CRUD server so a script
 # pushed from any client lands in a real folder an operator later runs
@@ -232,7 +238,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -286,6 +292,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
          /opt/baseline/lib/settings_store.py /opt/baseline/lib/admin_elevation.py \
+         /opt/baseline/lib/recovery_mode.py \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
          /opt/baseline/lib/vm_scripts.py /opt/baseline/lib/quadlet.py \
          /opt/baseline/lib/vm_provision.py /opt/baseline/lib/pct_provision.py \
@@ -301,6 +308,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/scripts_inbox.py /opt/baseline/lib/scripts_inbox_web.py /opt/baseline/lib/scripts_inbox_gate.py \
          /opt/baseline/lib/sensors_interval_control.py \
          /opt/baseline/lib/backup_recurring.py /opt/baseline/bin/baseline-backup-recurring \
+         /opt/baseline/lib/recovery_mode.py /opt/baseline/bin/baseline-recovery-mode \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
@@ -325,7 +333,8 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
          /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate \
-         /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring; do
+         /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring \
+         /opt/baseline/bin/baseline-recovery-mode; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."

@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Real entry point for the on-demand half of Recovery Mode
+(work-queue item 26, decision record 81) - an operator invokes this
+directly rather than waiting for the automatic
+`persist_bind_mounts.main`-triggered entry (a real cascade failure).
+
+    baseline-recovery-mode --status
+    baseline-recovery-mode --enter
+    baseline-recovery-mode --exit
+
+`--exit` is refused (real, non-zero exit code) unless at least one
+persona volume is genuinely confirmed mounted read-write - the same
+hard exit condition `recovery_mode.can_exit` enforces everywhere else;
+this tool cannot bypass it.
+"""
+import argparse
+import sys
+import time
+
+sys.path.insert(0, "/opt/baseline/lib")
+import drive_installer  # noqa: E402
+import recovery_mode as rm  # noqa: E402
+import repair  # noqa: E402
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="baseline-recovery-mode")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--status", action="store_true", help="print real discovery + active state")
+    group.add_argument("--enter", action="store_true", help="record a deliberate on-demand entry")
+    group.add_argument("--exit", action="store_true", help="attempt to leave recovery mode")
+    args = parser.parse_args(argv)
+
+    runner = repair.RealRunner()
+    personas = drive_installer.DEFAULT_PERSONAS
+
+    if args.status:
+        report = rm.discover(runner, personas=personas)
+        print(f"recovery mode active: {rm.is_active(runner)}")
+        print(f"personas found: {', '.join(report.personas_found) or 'none'}")
+        print(f"personas missing: {', '.join(report.personas_missing) or 'none'}")
+        print(f"active persona: {report.active_persona or 'none'}")
+        return 0
+
+    if args.enter:
+        rm.record_entry(runner, now=time.time(), reason="on_demand")
+        print("recovery mode entry recorded (reason=on_demand)")
+        return 0
+
+    result = rm.attempt_exit(runner, personas=personas, now=time.time())
+    print(f"[{'ok' if result.applied else 'FAILED'}] {result.detail}")
+    return 0 if result.applied else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

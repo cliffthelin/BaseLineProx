@@ -356,6 +356,42 @@ def handle_admin_edit(sessions: SessionStore, runner, elevation_store, token: st
     return RouteResult("applied", 200, {"detail": f"{group}.{key} set to {value!r}"})
 
 
+# ---------------------------------------------------------------------------
+# Recovery mode's userless discovery view (work-queue item 26, decision
+# record 81). Deliberately no `sessions`/`token` parameter anywhere in
+# this section - guest-tier by construction, matching
+# `recovery_tiers.GUEST_ACTIONS`' `view_recovery_screen` being always
+# present, never conditionally withheld. `runner=None` hands off rather
+# than crashing, same convention as the Admin tab above.
+# ---------------------------------------------------------------------------
+
+def handle_recovery_view(runner, *, personas: tuple) -> RouteResult:
+    if runner is None:
+        return RouteResult(
+            "handed_off", 409,
+            {"reason": "no Runner configured for this deployment - recovery discovery needs one"})
+    import recovery_mode
+    report = recovery_mode.discover(runner, personas=personas)
+    return RouteResult("applied", 200, {
+        "personas_found": report.personas_found,
+        "personas_missing": report.personas_missing,
+        "active_persona": report.active_persona,
+        "recovery_active": recovery_mode.is_active(runner),
+    })
+
+
+def handle_recovery_exit(runner, *, personas: tuple, now: float) -> RouteResult:
+    if runner is None:
+        return RouteResult(
+            "handed_off", 409,
+            {"reason": "no Runner configured for this deployment - recovery exit needs one"})
+    import recovery_mode
+    result = recovery_mode.attempt_exit(runner, personas=personas, now=now)
+    if not result.applied:
+        return RouteResult("refused", 409, {"reason": result.detail})
+    return RouteResult("applied", 200, {"detail": result.detail})
+
+
 def handle_new_account(hasher, username: str, password: str) -> RouteResult:
     """`hasher` is a callable(password: str) -> str, reusing
     drive_setup_answer.hash_password_sha512crypt-shaped injection
@@ -506,6 +542,13 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             notice = result.body.get("detail") or result.body.get("reason", "")
             return self._html_response(result.status, render_setup_page("rebuild", notice))
 
+        if self.path == "/recovery/exit":
+            result = handle_recovery_exit(deps.get("runner"), personas=deps.get("personas", ()), now=now)
+            if json_mode:
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            notice = result.body.get("detail") or result.body.get("reason", "")
+            return self._redirect(f"/recovery?notice={notice}")
+
         if self.path == "/admin/elevate":
             result = handle_admin_elevate(deps["elevation_store"], deps.get("elevation_verify_fn"),
                                            deps["sessions"], self._token(), body.get("passphrase", ""), now)
@@ -568,6 +611,14 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             if result.outcome != "applied":
                 return self._redirect("/login")
             return self._html_response(200, render_settings_page(result.body["settings"]))
+
+        if self.path.startswith("/recovery"):
+            result = handle_recovery_view(deps.get("runner"), personas=deps.get("personas", ()))
+            if json_mode:
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            if result.outcome != "applied":
+                return self._html_response(result.status, render_recovery_page({}, result.body.get("reason", "")))
+            return self._html_response(200, render_recovery_page(result.body))
 
         if self.path.startswith("/admin"):
             result = handle_admin_view(deps["sessions"], deps.get("runner"), self._token(), now)
@@ -896,6 +947,33 @@ only that section is re-applied, nothing else is touched.</p>
 """)
 
 
+def render_recovery_page(discovery: dict, notice: str = "") -> bytes:
+    """The userless discovery view (work-queue item 26) - no login
+    form anywhere on this page, matching guest-tier access being
+    always present. `discovery` is `handle_recovery_view`'s own body
+    dict; an empty dict (the hand-off case) renders a plain notice."""
+    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    if not discovery:
+        return _html("Recovery", f"{notice_html}<p>Recovery discovery is not available on this deployment.</p>")
+    found = ", ".join(discovery.get("personas_found") or []) or "none"
+    missing = ", ".join(discovery.get("personas_missing") or []) or "none"
+    active = discovery.get("active_persona") or "none"
+    recovery_active = discovery.get("recovery_active")
+    status = "Recovery mode is currently ACTIVE." if recovery_active else "Recovery mode is not active."
+    return _html("Recovery", f"""
+{notice_html}
+<p>{status}</p>
+<p>Personas with a real, currently-mounted persistence volume: {found}</p>
+<p>Personas missing a volume: {missing}</p>
+<p>Currently active persona: {active}</p>
+<form method="post" action="/recovery/exit">
+  <button type="submit">Attempt to leave recovery mode</button>
+</form>
+<p class="hint">Leaving is refused until at least one persona volume is
+confirmed mounted read-write - this page cannot bypass that.</p>
+""")
+
+
 def render_admin_page(settings: dict, notice: str = "", elevated: bool = False) -> bytes:
     """The Admin tab (work-queue item 28): every settings_store.py
     group as its own sub-tab section. Editing a value is refused
@@ -971,15 +1049,18 @@ class SettingsWebServer:
                  eligibility: RebuildEligibility, trigger: RebuildTrigger,
                  hasher, store=None, clock=time.time,
                  persona_provider: ActivePersonaProvider | None = None,
-                 runner=None, elevation_verify_fn=None):
+                 runner=None, elevation_verify_fn=None, personas: tuple | None = None):
         import admin_elevation
+        if personas is None:
+            import drive_installer
+            personas = drive_installer.DEFAULT_PERSONAS
         self.deps = {
             "verifier": verifier, "source": source, "applier": applier,
             "eligibility": eligibility, "trigger": trigger, "hasher": hasher,
             "clock": clock, "sessions": SessionStore(), "store": store,
             "persona_provider": persona_provider,
             "runner": runner, "elevation_store": admin_elevation.ElevationStore(),
-            "elevation_verify_fn": elevation_verify_fn,
+            "elevation_verify_fn": elevation_verify_fn, "personas": personas,
         }
         self.httpd = http.server.HTTPServer((bind_host, bind_port), SettingsHandler)
         self.httpd.deps = self.deps  # type: ignore[attr-defined]

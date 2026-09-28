@@ -155,6 +155,26 @@ def is_mounted(runner: Runner, path: str) -> bool:
     return False
 
 
+def is_mounted_read_write(runner: Runner, path: str) -> bool:
+    """Real kernel-reported mount *mode*, not just presence - a real
+    corrupted volume can mount successfully but read-only, which
+    `is_mounted` alone would call "mounted" while it is not actually
+    usable. Checks the real comma-separated options field
+    (/proc/self/mounts' 4th column) for the kernel's own authoritative
+    `rw`/`ro` token - used by recovery_mode.py's hard exit condition
+    (work-queue item 26)."""
+    try:
+        content = runner.read_text("/proc/self/mounts")
+    except Exception:
+        return False
+    for line in content.splitlines():
+        parts = line.split()
+        if len(parts) >= 4 and parts[1] == path:
+            options = parts[3].split(",")
+            return "rw" in options
+    return False
+
+
 def _fstab_has_line(runner: Runner, line: str) -> bool:
     try:
         content = runner.read_text(FSTAB_PATH)
@@ -407,13 +427,28 @@ def switch_active_persona(runner: Runner, *, to_persona: str, credential_ok: boo
     return ApplyResult(True, f"switched active persona from {from_persona!r} to {to_persona!r}")
 
 
-def main(runner: Runner = None, print_fn=print) -> int:
+def main(runner: Runner = None, print_fn=print, now: float = None) -> int:
     """Real entry point, matching this project's own boot-invoked
     scripts (e.g. repair_additive_persist.main()): print each result,
-    exit 0 only if every one of them actually applied."""
+    exit 0 only if every one of them actually applied.
+
+    Work-queue item 26's real automatic recovery-mode entry point: when
+    this cascade genuinely fails (never on a mere slow start - only
+    the real, exhausted-fallback failure `ensure_all_redirects` itself
+    already reports), records a durable recovery-mode entry via
+    `recovery_mode.record_entry` before returning - the fact of
+    needing recovery is captured the moment it actually happens, not
+    left for some later poller to notice."""
     if runner is None:
         runner = RealRunner()
+    if now is None:
+        import time
+        now = time.time()
     results = ensure_all_redirects(runner)
     for result in results:
         print_fn(f"[{'ok' if result.applied else 'FAILED'}] {result.detail}")
-    return 0 if all(r.applied for r in results) else 1
+    ok = all(r.applied for r in results)
+    if not ok:
+        import recovery_mode
+        recovery_mode.record_entry(runner, now=now, reason="cascade_failed")
+    return 0 if ok else 1

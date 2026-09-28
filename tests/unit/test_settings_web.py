@@ -325,6 +325,53 @@ def test_admin_edit_hands_off_an_unknown_setting_without_a_ticket_bypass():
     assert result.outcome == "handed_off"
 
 
+# --------------------------------------------------------------------------
+# Recovery mode's userless discovery view (work-queue item 26, decision
+# record 81) - no session/token anywhere here, guest-tier by construction.
+# --------------------------------------------------------------------------
+
+def test_recovery_view_hands_off_when_no_runner_is_configured():
+    result = sw.handle_recovery_view(None, personas=("admin", "personal"))
+    assert result.outcome == "handed_off"
+
+
+def test_recovery_view_needs_no_session_at_all():
+    from fake_runner import FakeRunner
+    result = sw.handle_recovery_view(FakeRunner(), personas=("admin", "personal"))
+    assert result.outcome == "applied"
+    assert result.body["personas_missing"] == ["admin", "personal"]
+
+
+def test_recovery_view_reports_real_discovery_and_active_state():
+    from fake_runner import FakeRunner
+    import recovery_mode
+    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    recovery_mode.record_entry(runner, now=1000.0, reason="cascade_failed")
+    result = sw.handle_recovery_view(runner, personas=("admin", "personal"))
+    assert result.body["personas_found"] == ["admin"]
+    assert result.body["recovery_active"] is True
+
+
+def test_recovery_exit_hands_off_when_no_runner_is_configured():
+    result = sw.handle_recovery_exit(None, personas=("admin",), now=1000.0)
+    assert result.outcome == "handed_off"
+
+
+def test_recovery_exit_refuses_without_a_real_read_write_persona():
+    from fake_runner import FakeRunner
+    result = sw.handle_recovery_exit(FakeRunner(), personas=("admin",), now=1000.0)
+    assert result.outcome == "refused"
+
+
+def test_recovery_exit_succeeds_once_a_persona_is_confirmed_read_write():
+    from fake_runner import FakeRunner
+    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    result = sw.handle_recovery_exit(runner, personas=("admin",), now=1000.0)
+    assert result.outcome == "applied"
+
+
 def test_settings_view_without_a_persona_provider_ignores_persona_entirely():
     """A caller that never opts into persona-awareness (the pre-existing
     single-persona behavior) is fully unaffected, even for a session
@@ -520,3 +567,19 @@ def test_render_admin_page_shows_settings_grouped_and_the_elevation_form_when_no
 def test_render_admin_page_omits_the_elevation_form_when_already_elevated():
     body = sw.render_admin_page({"startup": {"auto_start_persona": "personal"}}, elevated=True).decode()
     assert "/admin/elevate" not in body
+
+
+def test_render_recovery_page_shows_real_discovery_and_no_login_form():
+    body = sw.render_recovery_page({
+        "personas_found": ["admin"], "personas_missing": ["personal"],
+        "active_persona": "admin", "recovery_active": True,
+    }).decode()
+    assert "admin" in body
+    assert "personal" in body
+    assert "ACTIVE" in body
+    assert "password" not in body.lower()  # userless - no credential form anywhere on this page
+
+
+def test_render_recovery_page_handles_the_handed_off_case_without_crashing():
+    body = sw.render_recovery_page({}, "no Runner configured").decode()
+    assert "not available" in body
