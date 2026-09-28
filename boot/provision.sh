@@ -155,6 +155,13 @@ cp "$SRC/baseline/lib/settings_web.py" /opt/baseline/lib/settings_web.py
 cp "$SRC/baseline/lib/settings_web_gate.py" /opt/baseline/lib/settings_web_gate.py
 cp "$SRC/baseline/bin/baseline-settings-web" /opt/baseline/bin/baseline-settings-web
 cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-settings-web-gate
+# settings_store.py + admin_elevation.py (decision record 76) - real
+# modules settings_web.py's own Admin tab now imports for real
+# (decision record 80); found genuinely missing from this file
+# entirely by tools/check_provision_deploys_all_imports.py while
+# wiring that tab in - never staged before now.
+cp "$SRC/baseline/lib/settings_store.py" /opt/baseline/lib/settings_store.py
+cp "$SRC/baseline/lib/admin_elevation.py" /opt/baseline/lib/admin_elevation.py
 # Scripts inbox (decision record 70): "it's just files with server and
 # folder access to CRUD" - a login-gated CRUD server so a script
 # pushed from any client lands in a real folder an operator later runs
@@ -278,6 +285,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/proxmox_vm_metrics.py /opt/baseline/lib/sensors_history.py /opt/baseline/lib/sensors_collect.py \
          /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
+         /opt/baseline/lib/settings_store.py /opt/baseline/lib/admin_elevation.py \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
          /opt/baseline/lib/vm_scripts.py /opt/baseline/lib/quadlet.py \
          /opt/baseline/lib/vm_provision.py /opt/baseline/lib/pct_provision.py \

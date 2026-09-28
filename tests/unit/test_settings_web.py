@@ -201,6 +201,130 @@ def test_settings_edit_refuses_a_stale_session_after_persona_switches_without_ca
     assert applier.calls == []
 
 
+# --------------------------------------------------------------------------
+# The Admin tab (work-queue item 28, decision record 80): a real web
+# surface over settings_store.py's schema-driven groups, gated on a
+# real admin_elevation ticket for edits.
+# --------------------------------------------------------------------------
+
+def test_admin_view_requires_a_valid_session():
+    from fake_runner import FakeRunner
+    sessions = sw.SessionStore()
+    result = sw.handle_admin_view(sessions, FakeRunner(), token="bogus", now=1000.0)
+    assert result.outcome == "refused"
+    assert result.status == 401
+
+
+def test_admin_view_hands_off_when_no_runner_is_configured():
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    result = sw.handle_admin_view(sessions, None, token=session.token, now=1001.0)
+    assert result.outcome == "handed_off"
+
+
+def test_admin_view_returns_real_effective_settings():
+    from fake_runner import FakeRunner
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    result = sw.handle_admin_view(sessions, FakeRunner(), token=session.token, now=1001.0)
+    assert result.outcome == "applied"
+    assert result.body["settings"]["sessions"]["default_session_ttl_hours"] == 24
+    assert result.body["settings"]["startup"]["auto_start_persona"] == "personal"
+
+
+def test_admin_elevate_requires_a_valid_session():
+    import admin_elevation
+    sessions = sw.SessionStore()
+    store = admin_elevation.ElevationStore()
+    result = sw.handle_admin_elevate(store, lambda p: True, sessions, token="bogus",
+                                      passphrase="x", now=1000.0)
+    assert result.outcome == "refused"
+    assert result.status == 401
+
+
+def test_admin_elevate_hands_off_when_no_verifier_is_configured():
+    import admin_elevation
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    store = admin_elevation.ElevationStore()
+    result = sw.handle_admin_elevate(store, None, sessions, token=session.token,
+                                      passphrase="x", now=1001.0)
+    assert result.outcome == "handed_off"
+
+
+def test_admin_elevate_refuses_a_wrong_passphrase():
+    import admin_elevation
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    store = admin_elevation.ElevationStore()
+    result = sw.handle_admin_elevate(store, lambda p: p == "correct", sessions, token=session.token,
+                                      passphrase="wrong", now=1001.0)
+    assert result.outcome == "refused"
+    assert result.status == 401
+
+
+def test_admin_elevate_grants_a_real_ticket_on_the_correct_passphrase():
+    import admin_elevation
+    from fake_runner import FakeRunner
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    store = admin_elevation.ElevationStore()
+    result = sw.handle_admin_elevate(store, lambda p: p == "correct", sessions, token=session.token,
+                                      passphrase="correct", now=1001.0)
+    assert result.outcome == "applied"
+    assert store.is_elevated(FakeRunner(), now=1001.0) is True
+
+
+def test_admin_edit_requires_a_valid_session():
+    import admin_elevation
+    from fake_runner import FakeRunner
+    sessions = sw.SessionStore()
+    store = admin_elevation.ElevationStore()
+    result = sw.handle_admin_edit(sessions, FakeRunner(), store, token="bogus",
+                                   group="startup", key="auto_start_persona", value="admin", now=1000.0)
+    assert result.outcome == "refused"
+    assert result.status == 401
+
+
+def test_admin_edit_refuses_without_an_elevation_ticket():
+    import admin_elevation
+    from fake_runner import FakeRunner
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    store = admin_elevation.ElevationStore()  # never elevated
+    result = sw.handle_admin_edit(sessions, FakeRunner(), store, token=session.token,
+                                   group="startup", key="auto_start_persona", value="admin", now=1001.0)
+    assert result.outcome == "refused"
+    assert result.status == 403
+
+
+def test_admin_edit_applies_a_real_setting_once_elevated():
+    import admin_elevation
+    from fake_runner import FakeRunner
+    import settings_store
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    store = admin_elevation.ElevationStore()
+    store.grant(now=1001.0)
+    runner = FakeRunner()
+    result = sw.handle_admin_edit(sessions, runner, store, token=session.token,
+                                   group="startup", key="auto_start_persona", value="admin", now=1001.0)
+    assert result.outcome == "applied"
+    assert settings_store.get_setting(runner, "startup", "auto_start_persona") == "admin"
+
+
+def test_admin_edit_hands_off_an_unknown_setting_without_a_ticket_bypass():
+    import admin_elevation
+    from fake_runner import FakeRunner
+    sessions = sw.SessionStore()
+    session = sessions.create("root", now=1000.0)
+    store = admin_elevation.ElevationStore()
+    store.grant(now=1001.0)
+    result = sw.handle_admin_edit(sessions, FakeRunner(), store, token=session.token,
+                                   group="ghost", key="nope", value=1, now=1001.0)
+    assert result.outcome == "handed_off"
+
+
 def test_settings_view_without_a_persona_provider_ignores_persona_entirely():
     """A caller that never opts into persona-awareness (the pre-existing
     single-persona behavior) is fully unaffected, even for a session
@@ -280,6 +404,22 @@ def test_file_backed_verifier_round_trips_a_real_sha512crypt_hash(tmp_path):
     assert verifier.verify("nobody", "x") is False
 
 
+def test_file_backed_elevation_verifier_accepts_the_real_dev_seed_passphrase(tmp_path):
+    store = sw.JsonFileStore(tmp_path / "store.json")  # creates the store, seeding elevation_password_hash
+    verifier = sw.FileBackedElevationVerifier(store)
+    assert verifier("baseline-admin") is True
+    assert verifier("baseline") is False  # the login password must not also work as elevation
+
+
+def test_file_backed_elevation_verifier_refuses_when_no_hash_is_stored(tmp_path):
+    path = tmp_path / "store.json"
+    import json as _json
+    path.write_text(_json.dumps({"users": {}, "settings": {}, "pending_accounts": {}, "rebuild_log": []}))
+    store = sw.JsonFileStore(path)
+    verifier = sw.FileBackedElevationVerifier(store)
+    assert verifier("anything") is False
+
+
 def test_file_backed_applier_persists_across_a_new_store_instance(tmp_path):
     path = tmp_path / "store.json"
     store1 = sw.JsonFileStore(path)
@@ -342,3 +482,41 @@ def test_build_real_server_with_a_runner_wires_a_real_persona_provider(tmp_path)
         assert server.deps["persona_provider"].current_persona() == "admin"
     finally:
         server.httpd.server_close()
+
+
+def test_build_real_server_always_wires_a_real_elevation_verifier(tmp_path):
+    server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json")
+    try:
+        assert isinstance(server.deps["elevation_verify_fn"], sw.FileBackedElevationVerifier)
+        assert server.deps["elevation_verify_fn"]("baseline-admin") is True
+    finally:
+        server.httpd.server_close()
+
+
+def test_build_real_server_deps_include_a_fresh_elevation_store(tmp_path):
+    import admin_elevation
+    server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json")
+    try:
+        assert isinstance(server.deps["elevation_store"], admin_elevation.ElevationStore)
+    finally:
+        server.httpd.server_close()
+
+
+# --------------------------------------------------------------------------
+# render_admin_page: a real smoke test, matching render_settings_page's own
+# lack of dedicated tests (server-rendered HTML is otherwise verified via
+# manual browser checks per this module's docstring) - just proving it
+# doesn't crash and reflects real input.
+# --------------------------------------------------------------------------
+
+def test_render_admin_page_shows_settings_grouped_and_the_elevation_form_when_not_elevated():
+    body = sw.render_admin_page({"startup": {"auto_start_persona": "personal"}}, elevated=False).decode()
+    assert "startup" in body
+    assert "auto_start_persona" in body
+    assert "personal" in body
+    assert "/admin/elevate" in body
+
+
+def test_render_admin_page_omits_the_elevation_form_when_already_elevated():
+    body = sw.render_admin_page({"startup": {"auto_start_persona": "personal"}}, elevated=True).decode()
+    assert "/admin/elevate" not in body

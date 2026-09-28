@@ -40,7 +40,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 
 def _sha512crypt(password: str, salt: str) -> str:
@@ -286,6 +286,76 @@ def handle_settings_edit(sessions: SessionStore, applier: SectionApplier,
     return RouteResult("refused", 422, {"detail": result.detail})
 
 
+# ---------------------------------------------------------------------------
+# The Admin tab (work-queue item 28, decision record 80): a real web
+# surface over settings_store.py's schema-driven groups (session TTLs,
+# auto-start persona, per-volume mode, and whatever else the schema
+# grows to hold - "potentially hundreds of settings," per direct
+# instruction). Deliberately separate from handle_settings_view/_edit's
+# own flat KNOWN_SECTIONS model above (network/firewall/...), which
+# predates settings_store.py and stays scoped to that older
+# subsystem-config surface - the two are different stores with
+# different data, not two ways to reach the same one.
+#
+# Editing an Admin setting requires a real, currently-elevated
+# admin_elevation ticket, not just a valid login session - these
+# settings are cross-persona-consequential (auto-start-persona, session
+# TTLs affecting every persona, per-volume mode) matching admin's own
+# "essentially sudo or root" design (decision record 76). Viewing is
+# allowed on a valid session alone, matching every other settings page.
+# ---------------------------------------------------------------------------
+
+def handle_admin_view(sessions: SessionStore, runner, token: str, now: float) -> RouteResult:
+    session = sessions.get(token, now)
+    if session is None:
+        return RouteResult("refused", 401, {"error": "not authenticated"})
+    if runner is None:
+        return RouteResult(
+            "handed_off", 409,
+            {"reason": "no Runner configured for this deployment - the Admin tab needs one to "
+                        "reach settings_store.py's real storage on BASELINE"})
+    import settings_store
+    return RouteResult("applied", 200, {"settings": settings_store.all_effective_settings(runner)})
+
+
+def handle_admin_elevate(elevation_store, verify_fn, sessions: SessionStore, token: str,
+                          passphrase: str, now: float) -> RouteResult:
+    session = sessions.get(token, now)
+    if session is None:
+        return RouteResult("refused", 401, {"error": "not authenticated"})
+    if verify_fn is None:
+        return RouteResult(
+            "handed_off", 409,
+            {"reason": "no elevation verifier configured for this deployment"})
+    import admin_elevation
+    if admin_elevation.attempt_elevation(elevation_store, verify_fn, passphrase, now):
+        return RouteResult("applied", 200, {"detail": "elevated"})
+    return RouteResult("refused", 401, {"error": "invalid elevation passphrase"})
+
+
+def handle_admin_edit(sessions: SessionStore, runner, elevation_store, token: str,
+                       group: str, key: str, value, now: float) -> RouteResult:
+    session = sessions.get(token, now)
+    if session is None:
+        return RouteResult("refused", 401, {"error": "not authenticated"})
+    if runner is None:
+        return RouteResult(
+            "handed_off", 409,
+            {"reason": "no Runner configured for this deployment - the Admin tab needs one to "
+                        "reach settings_store.py's real storage on BASELINE"})
+    import admin_elevation
+    if not admin_elevation.require_elevation(elevation_store, runner, now):
+        return RouteResult(
+            "refused", 403,
+            {"error": "admin elevation required - enter the elevation passphrase first"})
+    import settings_store
+    try:
+        settings_store.set_setting(runner, group, key, value)
+    except KeyError as exc:
+        return RouteResult("handed_off", 409, {"reason": str(exc)})
+    return RouteResult("applied", 200, {"detail": f"{group}.{key} set to {value!r}"})
+
+
 def handle_new_account(hasher, username: str, password: str) -> RouteResult:
     """`hasher` is a callable(password: str) -> str, reusing
     drive_setup_answer.hash_password_sha512crypt-shaped injection
@@ -436,6 +506,30 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             notice = result.body.get("detail") or result.body.get("reason", "")
             return self._html_response(result.status, render_setup_page("rebuild", notice))
 
+        if self.path == "/admin/elevate":
+            result = handle_admin_elevate(deps["elevation_store"], deps.get("elevation_verify_fn"),
+                                           deps["sessions"], self._token(), body.get("passphrase", ""), now)
+            if json_mode:
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            if result.outcome == "refused" and result.status == 401 and \
+                    result.body.get("error") != "invalid elevation passphrase":
+                return self._redirect("/login")
+            notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
+            return self._redirect(f"/admin?notice={notice}")
+
+        if self.path.startswith("/admin/settings/"):
+            rest = self.path[len("/admin/settings/"):]
+            group, _, key = rest.partition("/")
+            values = body if json_mode else self._parse_values_json(body)
+            result = handle_admin_edit(deps["sessions"], deps.get("runner"), deps["elevation_store"],
+                                        self._token(), group, key, values.get("value"), now)
+            if json_mode:
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            if result.outcome == "refused" and result.status == 401:
+                return self._redirect("/login")
+            notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
+            return self._redirect(f"/admin?notice={notice}")
+
         result = RouteResult("handed_off", 404, {"reason": f"no route for {self.path!r}; no automatic action taken"})
         self._json(result.status, {"outcome": result.outcome, **result.body})
 
@@ -474,6 +568,18 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             if result.outcome != "applied":
                 return self._redirect("/login")
             return self._html_response(200, render_settings_page(result.body["settings"]))
+
+        if self.path.startswith("/admin"):
+            result = handle_admin_view(deps["sessions"], deps.get("runner"), self._token(), now)
+            if json_mode:
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            if result.outcome == "refused" and result.status == 401:
+                return self._redirect("/login")
+            if result.outcome != "applied":
+                return self._html_response(result.status, render_admin_page({}, result.body.get("reason", "")))
+            notice = parse_qs(urlparse(self.path).query).get("notice", [""])[0]
+            elevated = deps["elevation_store"].is_elevated(deps.get("runner"), now) if deps.get("runner") else False
+            return self._html_response(200, render_admin_page(result.body["settings"], notice, elevated=elevated))
 
         result = RouteResult("handed_off", 404, {"reason": f"no route for {self.path!r}; no automatic action taken"})
         self._json(result.status, {"outcome": result.outcome, **result.body})
@@ -555,6 +661,12 @@ class JsonFileStore:
                 },
                 "pending_accounts": {},
                 "rebuild_log": [],
+                # DEV-ONLY seed elevation passphrase (work-queue item
+                # 28): "baseline-admin" - deliberately different from
+                # the login password above, matching decision record
+                # 76's "a SEPARATE, additional passphrase - not the
+                # same secret as admin's own base login."
+                "elevation_password_hash": _sha512crypt("baseline-admin", _new_salt()),
             })
 
     def _read(self) -> dict:
@@ -565,6 +677,9 @@ class JsonFileStore:
 
     def get_user_hash(self, username: str) -> str | None:
         return self._read()["users"].get(username)
+
+    def get_elevation_hash(self) -> str | None:
+        return self._read().get("elevation_password_hash")
 
     def add_user(self, username: str, password_hash: str) -> None:
         data = self._read()
@@ -603,6 +718,26 @@ class FileBackedPasswordVerifier(PasswordVerifier):
             return False
         salt = parts[2]
         return _sha512crypt(password, salt) == stored_hash
+
+
+class FileBackedElevationVerifier:
+    """`admin_elevation.attempt_elevation`'s own "verify_fn as a plain
+    callable" convention - a real default backed by the same
+    JsonFileStore, but under its own separate hash field, never the
+    login password's."""
+
+    def __init__(self, store: JsonFileStore):
+        self.store = store
+
+    def __call__(self, passphrase: str) -> bool:
+        stored_hash = self.store.get_elevation_hash()
+        if stored_hash is None:
+            return False
+        parts = stored_hash.split("$")
+        if len(parts) < 4:
+            return False
+        salt = parts[2]
+        return _sha512crypt(passphrase, salt) == stored_hash
 
 
 class RunnerBackedActivePersonaProvider(ActivePersonaProvider):
@@ -761,6 +896,41 @@ only that section is re-applied, nothing else is touched.</p>
 """)
 
 
+def render_admin_page(settings: dict, notice: str = "", elevated: bool = False) -> bytes:
+    """The Admin tab (work-queue item 28): every settings_store.py
+    group as its own sub-tab section. Editing a value is refused
+    server-side without a real elevation ticket regardless of what
+    this page renders - the elevation form below is a convenience, not
+    the enforcement point."""
+    elevate_html = "" if elevated else """
+<form method="post" action="/admin/elevate">
+  <label>Admin elevation passphrase <input name="passphrase" type="password"></label>
+  <button type="submit">Elevate</button>
+</form>
+<p class="hint">Required before any Admin setting below can be changed - a separate
+passphrase from your login, matching real sudo's own short-lived cache.</p>"""
+    sections = "".join(
+        f"""<h2>{group}</h2>""" + "".join(
+            f"""<form method="post" action="/admin/settings/{group}/{key}">
+<label>{key} (currently {value!r})
+<input name="values_json" placeholder='{{"value": ...}}'></label>
+<button type="submit" {"disabled" if not elevated else ""}>Save</button>
+</form>"""
+            for key, value in values.items()
+        )
+        for group, values in settings.items()
+    )
+    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    return _html("Admin", f"""
+{notice_html}
+{elevate_html}
+<p>Every current Admin setting is shown below, grouped by sub-tab. Changing one
+requires elevation (above) first - matching admin's own "sudo or root" design.</p>
+{sections}
+<p><a href="/settings">Back to Settings</a> &middot; <a href="/logout">Log out</a></p>
+""")
+
+
 def render_setup_page(step: str = "account", notice: str = "") -> bytes:
     notice_html = f'<p class="notice">{notice}</p>' if notice else ""
     if step == "account":
@@ -800,12 +970,16 @@ class SettingsWebServer:
                  source: SettingsSource, applier: SectionApplier,
                  eligibility: RebuildEligibility, trigger: RebuildTrigger,
                  hasher, store=None, clock=time.time,
-                 persona_provider: ActivePersonaProvider | None = None):
+                 persona_provider: ActivePersonaProvider | None = None,
+                 runner=None, elevation_verify_fn=None):
+        import admin_elevation
         self.deps = {
             "verifier": verifier, "source": source, "applier": applier,
             "eligibility": eligibility, "trigger": trigger, "hasher": hasher,
             "clock": clock, "sessions": SessionStore(), "store": store,
             "persona_provider": persona_provider,
+            "runner": runner, "elevation_store": admin_elevation.ElevationStore(),
+            "elevation_verify_fn": elevation_verify_fn,
         }
         self.httpd = http.server.HTTPServer((bind_host, bind_port), SettingsHandler)
         self.httpd.deps = self.deps  # type: ignore[attr-defined]
@@ -842,6 +1016,8 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
         hasher=default_hasher,
         store=store,
         persona_provider=persona_provider,
+        runner=runner,
+        elevation_verify_fn=FileBackedElevationVerifier(store),
     )
 
 

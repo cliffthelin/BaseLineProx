@@ -61,6 +61,20 @@ SCHEMA = (
                "re-entered - sudo-like, deliberately much shorter than the base session."),
     SettingDef("startup", "auto_start_persona", "personal",
                "Which persona's USER_PERSISTENCE volume mounts automatically on boot."),
+    # Per-volume mode for the three shared volumes (never persona-scoped
+    # - matches drive_installer.SHARED_VOLUMES exactly). Real, storable,
+    # editable values ("read-write", "read-only", or "write-only", per
+    # direct instruction); wiring an effective value here into
+    # drive_installer.py's actual mount behavior is a separate, deferred
+    # integration step, matching FileBackedSectionApplier's own
+    # "saved here, real application is a follow-up" precedent - this is
+    # the settings-tab storage half, not the enforcement half.
+    SettingDef("volumes", "baseline_mode", "read-write",
+               "Mount mode for the shared BASELINE volume: read-write, read-only, or write-only."),
+    SettingDef("volumes", "installer_cache_mode", "read-write",
+               "Mount mode for the shared INSTALLER_CACHE volume: read-write, read-only, or write-only."),
+    SettingDef("volumes", "session_temp_mode", "read-write",
+               "Mount mode for the shared SESSION_TEMP volume: read-write, read-only, or write-only."),
 )
 
 

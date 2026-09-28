@@ -14,8 +14,17 @@ def test_group_names_lists_every_real_group_at_least_once():
     names = ss.group_names()
     assert "sessions" in names
     assert "startup" in names
+    assert "volumes" in names
     # no duplicates
     assert len(names) == len(set(names))
+
+
+def test_volumes_group_covers_every_shared_volume_and_defaults_to_read_write():
+    runner = FakeRunner()
+    volume_settings = ss.settings_in_group("volumes")
+    assert {s.key for s in volume_settings} == {"baseline_mode", "installer_cache_mode", "session_temp_mode"}
+    for s in volume_settings:
+        assert ss.get_setting(runner, "volumes", s.key) == "read-write"
 
 
 def test_settings_in_group_returns_only_that_groups_definitions():
