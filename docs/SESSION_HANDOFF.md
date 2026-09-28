@@ -1,5 +1,24 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 - found and fixed why "build self installer" did nothing for real; made it the default, keyboard-free path
+
+**Read decision record 86 first** (`docs/design/decision-records/86-self-installer-is-the-default-path.md`) - it has full detail; this is the short version.
+
+**The actual bug behind "I typed my sudo password in to the install option and nothing happened":** decision record 85's `drive_admin.build_self_installer()` required `params["expected_serial"]`, `params["proxmox_source_iso"]`, `params["server_host"]`, `params["cert_path"]`, `params["key_path"]` - but `baseline_web.py`'s own JS never had a form field for any of them, only `device_path`. Every real click raised a server-side `KeyError`. This was a real design mistake caught by direct user feedback ("I will never fill in a serial number... everything must be selectable without a keyboard"), not a UI polish issue.
+
+**What changed:**
+- `self_installer.py`: `expected_serial`/`proxmox_source_iso`/`server_host`/`cert_path`/`key_path` are all now optional - auto-derived (real hardware serial via udevadm), auto-generated (fresh ephemeral TLS cert via `openssl req`), defaulted (`10.0.2.2`, the QEMU SLIRP gateway - the only address this mechanism can ever need), or auto-located (a fixed, real INSTALLER_CACHE-style search path list), each refusing clearly rather than guessing when it can't.
+- `settings_store.py`: new `"self_installer"` group (`lvm_size_preset`/`fqdn`/`memory_mb`, all enum-constrained via a new `SettingDef.options` field, enforced in `set_setting`) - this is the actual "pre-populated data" mechanism the user asked for, reusing the existing Admin-tab schema store rather than a new config file. `DEFAULT_STORE_PATH` moved onto the `/etc/baseline` -> USER_PERSISTENCE redirect that already existed, per direct instruction that nothing outside USER_PERSISTENCE should be expected to survive reboot.
+- `settings_web.py`: Admin tab's dropdown rendering generalized off `SettingDef.options` (was hardcoded to just the three volume-mode keys) - the new settings get real `<select>` controls for free.
+- `drive_admin.build_self_installer()` now needs nothing but `device_path`. `ACTIONS` reordered so it's listed first; `install`'s description now says plainly it's a human-override-only path (persistence only, no bootloader, no OS) - not removed, just no longer presented as an equal, parallel option.
+- Full suite: 1348/1348 (was 1339).
+
+**Not done / left for next session:**
+1. No real click-through of the corrected action against physical hardware yet this pass - the fix was found by code inspection (comparing what the JS sends to what the server required), not by re-running the failed attempt. `/dev/sdd` is still the real target (512GB SK Hynix, serial `FD01N6557110C271B`); `/dev/sdb` still has the empty `baseline_persist` LVM VG left over from the earlier "Install" mishap (harmless - drive was empty - but still real, current state).
+2. Real hardware needs a Proxmox source ISO at one of `DEFAULT_SOURCE_ISO_SEARCH_PATHS` in `self_installer.py`, or the action will now cleanly refuse ("no Proxmox source ISO found") instead of crashing - check that path exists on the actual box before the next click.
+3. QEMU SLIRP's `10.0.2.2` reaching the host-run `EphemeralAnswerServer` is still not empirically verified on this host - reasoned as correct, distinguished from the different, confirmed-broken `guestfwd` mechanism (decision records 15-16), but nobody has watched a real round-trip succeed yet.
+4. Work-queue item #18 (run `homeassistant-lxc`/`haos-vm` under real QEMU) still untouched.
+
 ## 2026-09-27 late continuation - massive context gap discovered; one uncommitted test fixed; the physical disk-merge is confirmed still untouched
 
 **Read this before touching anything.** This entry is from the same conversation thread as the original "2026-09-27 handoff" entry below (the one that starts the disk-merge investigation) - but a huge amount of work landed on this repo *from elsewhere* (git history, not this thread's own visible context) between that entry and this one: 19 commits, decision records 62-82, the entire persona/recovery-mode/admin-settings arc, and `docs/design/v0.1-work-queue.md` now shows **fully closed**. The "2026-09-27 continuation" entry immediately below this one is that other work's own handoff, written by whoever/whatever did it - it correctly notes the disk-merge thread is separate and not superseded. Confirmed directly: **the physical drives (`sdd`/`sdb`) were never touched by that other work either** - still exactly as the original handoff entry describes (real backups of VM 202/203 sitting on `/run/media/cane/8TB/Projects/Baseline_v01/`, nothing destructive run, plan agreed but not executed).

@@ -572,6 +572,25 @@ def test_describe_actions_lists_exactly_the_four_real_actions():
     assert set(da.ACTIONS) == {"install", "update_selected", "repair", "build_self_installer"}
 
 
+def test_build_self_installer_needs_nothing_but_device_path(tmp_path):
+    """Decision record 86, direct instruction: "I will never fill in a
+    serial number... everything must be selectable without a
+    keyboard." The web UI's own JS only ever sends `device_path` for
+    this action (baseline_web.py's driveAdminModalConfirm handler) - so
+    this action must resolve everything else itself (settings_store
+    presets, or self_installer.py's own auto-derivation) without
+    raising KeyError. Forces the safety gate itself to refuse (device
+    too small) so this proves the wiring reaches that real check
+    cleanly, without a real network/QEMU call ever starting."""
+    pds_fake = FakePdsRunner(size_bytes=1_000_000)  # far under the 400GB minimum
+    result = da.build_self_installer(
+        FakeRunner(), device_path="/dev/sdx", pds_runner=pds_fake,
+        settings_runner=FakeRunner(),
+    )
+    assert result.ok is False
+    assert "device safety check failed" in result.detail
+
+
 def test_describe_actions_exposes_requires_device_for_the_web_pages_device_picker():
     """Real regression coverage: describe_actions() once silently
     dropped requires_device entirely, so the web page's device-picker

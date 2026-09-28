@@ -37,7 +37,15 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
             raise NotImplementedError
 
 
-DEFAULT_STORE_PATH = "/mnt/BASELINE/settings/master_config.json"
+# Direct instruction: "All user data including credentials and config
+# and logs should go to the User Persistence partition" / "[USER
+# PERSISTENCE] is the first and primary thing user persistence data
+# does. It stores all configuration for the Machine." `/etc/baseline`
+# is already bind-redirected onto USER_PERSISTENCE for every active
+# persona (persist_bind_mounts.py's own REDIRECTS table) - this reuses
+# that existing redirect rather than adding a new bind target, so
+# every setting in this store now survives a disposable-stage rebuild.
+DEFAULT_STORE_PATH = "/etc/baseline/settings/master_config.json"
 
 
 @dataclass(frozen=True)
@@ -46,6 +54,12 @@ class SettingDef:
     key: str
     default: object
     description: str = ""
+    # Fixed, enumerated choices for this setting - when set, this is
+    # the ONLY way a value here may be entered anywhere in the web app
+    # (a <select>, never free text): "everything you asked me to do
+    # must be selectable without a keyboard." `set_setting` refuses any
+    # value not in this set.
+    options: tuple | None = None
 
 
 # The real, concrete settings this pass actually needs. Meant to grow
@@ -75,6 +89,21 @@ SCHEMA = (
                "Mount mode for the shared INSTALLER_CACHE volume: read-write, read-only, or write-only."),
     SettingDef("volumes", "session_temp_mode", "read-write",
                "Mount mode for the shared SESSION_TEMP volume: read-write, read-only, or write-only."),
+    # Pre-populated self-installer configuration (decision record 86):
+    # "the self installer[should] just finish the install from the
+    # pre-populated data added to the User Persistence." Every value
+    # here is a preset chosen from the Admin tab's dropdowns ahead of
+    # time - build_self_installer then needs no input from an operator
+    # beyond which drive to click.
+    SettingDef("self_installer", "lvm_size_preset", "medium",
+               "Disk-space split for a self-installed machine (root/container-storage/swap sizing).",
+               options=("small", "medium", "large")),
+    SettingDef("self_installer", "fqdn", "baseline.local",
+               "Hostname the self-installed machine answers to.",
+               options=("baseline.local", "baseline.home.arpa", "baseline.lan")),
+    SettingDef("self_installer", "memory_mb", 3072,
+               "RAM given to the automated-install process itself while it installs.",
+               options=(2048, 3072, 4096, 8192)),
 )
 
 
@@ -115,6 +144,9 @@ def set_setting(runner: Runner, group: str, key: str, value, *, path: str = DEFA
     schema_map = _schema_by_key()
     if (group, key) not in schema_map:
         raise KeyError(f"unknown setting {group}.{key}")
+    options = schema_map[(group, key)].options
+    if options is not None and value not in options:
+        raise ValueError(f"{group}.{key} must be one of {options!r}, got {value!r}")
     store = _read_store(runner, path)
     store.setdefault(group, {})[key] = value
     parent = path.rsplit("/", 1)[0]

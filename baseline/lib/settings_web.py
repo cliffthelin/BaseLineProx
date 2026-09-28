@@ -1137,12 +1137,12 @@ def render_admin_page(settings: dict, notice: str = "", elevated: bool = False) 
 </form>
 <p class="hint">Required before any Admin setting below can be changed - a separate
 passphrase from your login, matching real sudo's own short-lived cache.</p>"""
-    volume_mode_options = ["read-write", "read-only", "write-only"]
-    volume_mode_keys = {"baseline_mode", "installer_cache_mode", "session_temp_mode"}
+    import settings_store
+    schema_options = {(s.group, s.key): s.options for s in settings_store.SCHEMA}
     sections = "".join(
         f"""<h2>{group}</h2>""" + "".join(
             f"""<form method="post" action="/admin/settings/{group}/{key}">
-<label>{key} {render_field_input("value", value, options=volume_mode_options if key in volume_mode_keys else None)}</label>
+<label>{key} {render_field_input("value", value, options=schema_options.get((group, key)))}</label>
 <button type="submit" {"disabled" if not elevated else ""}>Save</button>
 </form>"""
             for key, value in values.items()

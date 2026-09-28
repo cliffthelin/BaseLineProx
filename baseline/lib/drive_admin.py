@@ -591,6 +591,20 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     `runner.as_pds_runner()` precedent when available, for consistency,
     but a plain `pds.Runner()` is equally correct for this read-only use.
 
+    **The only input this action actually needs is `device_path`**
+    (decision record 86, direct instruction: "I will never fill in a
+    serial number... everything must be selectable without a
+    keyboard") - the web page's drive-picker already supplies that with
+    no typing. Every other value comes from `settings_store.py`'s
+    "self_installer" group, itself only ever set via the Admin tab's
+    dropdowns (never free text - `settings_store.set_setting` refuses
+    anything outside a setting's own `options`), or is derived/
+    generated for real inside `self_installer.py` itself (hardware
+    serial from the selected device, a fresh TLS cert, the QEMU SLIRP
+    gateway as `server_host`, the cached source ISO). A caller MAY still
+    pass any of these explicitly via `params` as a human-override escape
+    hatch - the web UI simply never exposes a text field to do so.
+
     **Honest limitation carried through from self_installer.py: this
     action's own success means "the real install was launched", never
     "the install finished correctly."** A human or vision-capable agent
@@ -601,15 +615,25 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     import drive_setup_answer as dsan
     import drive_setup_install as dsi
     import iso_builder as ib
+    import settings_store
+    from repair import RealRunner
 
     if pds_runner is None and hasattr(runner, "as_pds_runner"):
         pds_runner = runner.as_pds_runner()
     pds_runner = pds_runner or pds.Runner()
 
+    settings_runner = params.get("settings_runner") or RealRunner()
+    lvm_preset = params.get("lvm_size_preset") or settings_store.get_setting(
+        settings_runner, "self_installer", "lvm_size_preset")
+    lvm_sizes = si.LVM_SIZE_PRESETS[lvm_preset]
+    fqdn = params.get("fqdn") or settings_store.get_setting(settings_runner, "self_installer", "fqdn")
+    memory_mb = int(params.get("memory_mb") or settings_store.get_setting(
+        settings_runner, "self_installer", "memory_mb"))
+
     workspace = Path(params.get("workspace", "/var/tmp/baseline-self-installer"))
     result = si.build_and_write_self_installer(
         device_path=device_path,
-        expected_serial=params["expected_serial"],
+        expected_serial=params.get("expected_serial"),
         device_min_size_bytes=int(params.get("device_min_size_bytes", 400_000_000_000)),
         pds_runner=pds_runner,
         acquire_runner=dsa.RealAcquireRunner(),
@@ -618,14 +642,16 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
         install_runner=dsi.RealInstallRunner(),
         workspace=workspace,
         repo_root=Path(params.get("repo_root", "/opt/baseline")).parent,
-        proxmox_source_iso=Path(params["proxmox_source_iso"]),
+        proxmox_source_iso=Path(params["proxmox_source_iso"]) if params.get("proxmox_source_iso") else None,
         assistant_binary=Path(params.get("assistant_binary", str(workspace / "acquire/extracted/usr/bin/proxmox-auto-install-assistant"))),
-        server_host=params["server_host"],
-        cert_path=Path(params["cert_path"]),
-        key_path=Path(params["key_path"]),
-        fqdn=params.get("fqdn", "baseline.local"),
+        server_host=params.get("server_host") or si.DEFAULT_SERVER_HOST,
+        cert_path=Path(params["cert_path"]) if params.get("cert_path") else None,
+        key_path=Path(params["key_path"]) if params.get("key_path") else None,
+        fqdn=fqdn,
+        memory_mb=memory_mb,
         target_mac=params.get("target_mac"),
         target_dmi_product=params.get("target_dmi_product"),
+        **lvm_sizes,
     )
     return ActionResult(result.outcome == "applied", result.detail)
 
@@ -639,11 +665,32 @@ class ActionSpec:
 
 
 ACTIONS = {
+    # Listed first - decision record 86, direct instruction: "there
+    # should not be a version that is not a self installed." This is
+    # the default, primary path: pick a drive, click go. Every other
+    # value it needs is pre-populated (settings_store.py's
+    # "self_installer" group, itself only ever set via the Admin tab's
+    # dropdowns) or derived/generated for real inside self_installer.py
+    # - never typed.
+    "build_self_installer": ActionSpec(
+        "build_self_installer",
+        "Build a real, self-contained Baseline installer (acquire + prepare-iso --fetch-from "
+        "http + self-contained ISO remaster) from your pre-populated Admin settings, and launch "
+        "the automated install against the selected drive for real. Does NOT confirm completion "
+        "by itself - a human or vision-capable agent must review the final screendump before "
+        "treating the drive as proven.",
+        lambda runner, device_path, **params: build_self_installer(runner, device_path=device_path, **params),
+        requires_device=True,
+    ),
+    # Human-override only (direct instruction) - builds bare
+    # persistence with no bootloader and no OS, for someone who
+    # explicitly wants that instead of a self-installed machine.
     "install": ActionSpec(
         "install",
+        "HUMAN OVERRIDE ONLY - not the normal path (use Build Self Installer instead). "
         "PERMANENTLY ERASE the selected drive and install a fresh Baseline persistence "
-        "structure on it (LVM volume group plus BASELINE/INSTALLER_CACHE/SESSION_TEMP and "
-        "per-persona volumes). This cannot be undone.",
+        "structure on it ONLY (LVM volume group plus BASELINE/INSTALLER_CACHE/SESSION_TEMP and "
+        "per-persona volumes) - no bootloader, no OS. This cannot be undone.",
         lambda runner, device_path, **params: install_drive(runner, device_path=device_path),
         requires_device=True,
     ),
@@ -653,15 +700,6 @@ ACTIONS = {
         "partitions and volumes selected from the drive tree.",
         lambda runner, selected=(), update_types=(), to_persona=None, **params: update_selected(
             runner, selected=list(selected), update_types=list(update_types), to_persona=to_persona),
-    ),
-    "build_self_installer": ActionSpec(
-        "build_self_installer",
-        "Build a real, self-contained Baseline installer (acquire + prepare-iso --fetch-from "
-        "http + self-contained ISO remaster) and launch the automated install against the "
-        "selected drive for real. Does NOT confirm completion by itself - a human or "
-        "vision-capable agent must review the final screendump before treating the drive as proven.",
-        lambda runner, device_path, **params: build_self_installer(runner, device_path=device_path, **params),
-        requires_device=True,
     ),
     "repair": ActionSpec(
         "repair",

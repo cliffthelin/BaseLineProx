@@ -85,3 +85,39 @@ def test_never_launches_qemu_when_any_earlier_stage_fails(tmp_path):
     result = si.build_and_write_self_installer(**kwargs)
     assert result.outcome == "refused"
     assert kwargs["install_runner"].calls == []
+
+
+# -- Decision record 86: "everything must be selectable without a
+# keyboard" - device_path is the only thing a human ever supplies;
+# everything else below must be derivable/generatable/locatable on its
+# own, and refuse clearly (never crash) when it genuinely can't be. --
+
+def test_refuses_when_the_selected_device_reports_no_hardware_serial(tmp_path):
+    no_serial_pds = FakePdsRunner(udevadm_by_path={}, findmnt_root="/dev/nvme0n1p2",
+                                   pkname_of_root="nvme0n1", sizes={"sdd": 1_000_000_000_000 // 512})
+    kwargs = _ready_kwargs(tmp_path, pds_runner=no_serial_pds, expected_serial=None)
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "refused"
+    assert "no hardware serial" in result.detail
+
+
+def test_generates_its_own_cert_and_key_when_none_supplied(tmp_path):
+    kwargs = _ready_kwargs(tmp_path, cert_path=None, key_path=None)
+    kwargs["answer_runner"].script(lambda a: a[:2] == ["openssl", "req"], dsan.AnswerProc(0, "", ""))
+    result = si.build_and_write_self_installer(**kwargs)
+    # Reaches (and fails) the next real stage - proves cert generation
+    # itself didn't refuse or raise, and never asked a human for a path.
+    assert result.outcome == "refused"
+    assert "no hardware serial" not in result.detail
+    assert "generating ephemeral TLS cert" not in result.detail
+
+
+def test_refuses_clearly_when_no_proxmox_source_iso_can_be_located(tmp_path):
+    kwargs = _ready_kwargs(tmp_path, proxmox_source_iso=None)
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "refused"
+    assert "no Proxmox source ISO found" in result.detail
+
+
+def test_server_host_defaults_to_the_qemu_slirp_gateway():
+    assert si.DEFAULT_SERVER_HOST == "10.0.2.2"

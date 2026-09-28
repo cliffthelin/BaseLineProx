@@ -107,5 +107,36 @@ def test_all_effective_settings_reflects_a_real_override():
     assert effective["sessions"]["default_session_ttl_hours"] == 24
 
 
-def test_store_lives_on_the_baseline_volume_by_default():
-    assert ss.DEFAULT_STORE_PATH.startswith("/mnt/BASELINE/")
+def test_store_lives_under_the_user_persistence_redirect_by_default():
+    # /etc/baseline is bind-redirected onto USER_PERSISTENCE (persist_bind_mounts.py)
+    # - direct instruction: all config must survive a disposable-stage rebuild.
+    assert ss.DEFAULT_STORE_PATH.startswith("/etc/baseline/")
+
+
+def test_self_installer_group_covers_every_pre_populated_field():
+    settings = ss.settings_in_group("self_installer")
+    assert {s.key for s in settings} == {"lvm_size_preset", "fqdn", "memory_mb"}
+    for s in settings:
+        assert s.options is not None, f"{s.key} must be selectable, never free text"
+
+
+def test_set_setting_rejects_a_value_outside_the_defined_options():
+    runner = FakeRunner()
+    try:
+        ss.set_setting(runner, "self_installer", "lvm_size_preset", "gigantic")
+        assert False, "should have raised"
+    except ValueError:
+        pass
+    assert ss.get_setting(runner, "self_installer", "lvm_size_preset") == "medium"
+
+
+def test_set_setting_accepts_a_value_inside_the_defined_options():
+    runner = FakeRunner()
+    ss.set_setting(runner, "self_installer", "lvm_size_preset", "large")
+    assert ss.get_setting(runner, "self_installer", "lvm_size_preset") == "large"
+
+
+def test_set_setting_with_no_options_defined_accepts_any_value():
+    runner = FakeRunner()
+    ss.set_setting(runner, "sessions", "default_session_ttl_hours", 6)
+    assert ss.get_setting(runner, "sessions", "default_session_ttl_hours") == 6
