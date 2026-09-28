@@ -1,5 +1,20 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - ran run_health_check for real, found and fixed two real GLOBAL/PROTECTED bugs
+
+**Read decision record 90 first** (`docs/design/decision-records/90-health-check-real-run-fixes.md`).
+
+Direct instruction: "Run the health check action for real and fix anything issues found." Ran `drive_admin.run_health_check(None)` for real on this sandbox (non-root, no `/etc/baseline`/`/mnt/BASELINE` yet) - it crashed outright with `PermissionError: /etc/baseline`. Two real bugs, both only visible by actually executing the code:
+
+1. `registry.register_type` wrote into BOTH physical databases unconditionally "for discoverability" - meaning a purely GLOBAL type (dependencies.py) could never even register itself on a machine where PROTECTED isn't reachable, defeating the whole point of GLOBAL existing independent of USER_PERSISTENCE.
+2. Both `settings_store._sync_definition` and `dependencies._sync_definition` hardcoded a fixed scope for `register_type` regardless of which entry was actually being synced - so reading the GLOBAL `startup.auto_start_persona` setting still tried to reach PROTECTED just to register the type's description, and would fail exactly when that setting is supposed to survive a broken USER_PERSISTENCE.
+
+Fixed both (register only into the scope actually being used; pass each entry's own `d.scope`, never a hardcoded default). After the fix, the same real run no longer crashes: GLOBAL checks (sqlite3, openssl) pass; PROTECTED checks (self_installer settings) fail gracefully with a clear message on this non-root sandbox lacking `/etc/baseline` - expected, since real Baseline services already run as root. Three new regression tests prove the actual guarantee (GLOBAL never depends on PROTECTED being reachable), not just the absence of a crash on this one machine.
+
+Full suite: 1394/1394 (was 1391).
+
+**Not done:** the PROTECTED-scope checks haven't been verified to actually pass end-to-end in a root/production-equivalent environment - only that they now fail gracefully instead of crashing when `/etc/baseline` doesn't exist. Creating that directory on this real machine would mean touching root-owned system paths outside the repo - not done without asking first.
+
 ## 2026-09-28 continuation - one foundational registry (registry.py), not a table per registry type
 
 **Read decision record 89 first** (`docs/design/decision-records/89-foundational-registry.md`).

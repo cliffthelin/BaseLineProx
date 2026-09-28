@@ -188,9 +188,17 @@ def _sync_definition(d: SettingDef) -> None:
     module's own import time - real database I/O during import would
     run before any test isolation fixture has had a chance to redirect
     the default paths (the same class of bug already found once in
-    dependencies.py's run_checks)."""
+    dependencies.py's run_checks).
+
+    Registers the type using THIS entry's own scope, not a hardcoded
+    default - found as a real bug by actually running a health check
+    for real: hardcoding PROTECTED here meant reading the GLOBAL
+    `startup.auto_start_persona` setting would still try to reach the
+    PROTECTED (USER_PERSISTENCE-redirected) database just to register
+    the type's description, and fail if that volume is unavailable -
+    exactly the scenario a GLOBAL setting exists to survive."""
     registry.register_type(TYPE_ID, "User/OS/application preferences (settings_store.py)",
-                            default_scope=registry.PROTECTED)
+                            default_scope=d.scope)
     registry.upsert_entry(
         TYPE_ID, _entry_id(d.group, d.key), scope=d.scope,
         attributes={"default": d.default, "description": d.description,

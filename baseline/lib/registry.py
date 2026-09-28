@@ -126,20 +126,35 @@ def register_type(type_id: str, description: str, *, default_scope: str = PROTEC
     """Idempotent - safe to call every time a module registering
     entries of this type is imported, matching `settings_store.py`/
     `dependencies.py`'s own "seed at import, real state in the
-    database" precedent. Registered into BOTH physical databases so a
-    type's own metadata is discoverable regardless of where any
-    individual entry of it ends up scoped."""
+    database" precedent.
+
+    Writes only into `default_scope`'s own database - **not** both.
+    `registry_types` is pure description metadata (nothing else joins
+    against it; there is no foreign key from `registry_entries`), so
+    there is no correctness reason to touch the other database at all.
+    Found as a real bug by actually running a health check for real
+    (not a fake): `dependencies.py` registers its type as GLOBAL-only,
+    but this function used to write into the PROTECTED database too
+    "for discoverability" - meaning a purely GLOBAL type could never
+    even be registered on a machine where PROTECTED (the USER_PERSISTENCE-
+    redirected path) doesn't exist or isn't writable, which defeats the
+    entire point of GLOBAL entries being usable independent of
+    USER_PERSISTENCE - precisely the scenario recovery mode exists
+    for. A caller that later stores entries of this type under the
+    *other* scope as well just won't have this type's description
+    pre-registered there - entries work regardless, since nothing
+    reads `registry_types` to validate an entry write."""
     if default_scope not in SCOPES:
         raise ValueError(f"unknown default_scope {default_scope!r} - must be one of {SCOPES}")
-    for path in (GLOBAL_DB_PATH, _protected_db_path()):
-        with closing(_connect(path)) as conn:
-            conn.execute(
-                "INSERT INTO registry_types (type_id, description, default_scope) VALUES (?, ?, ?) "
-                "ON CONFLICT(type_id) DO UPDATE SET description=excluded.description, "
-                "default_scope=excluded.default_scope",
-                (type_id, description, default_scope),
-            )
-            conn.commit()
+    path = _path_for_scope(default_scope)
+    with closing(_connect(path)) as conn:
+        conn.execute(
+            "INSERT INTO registry_types (type_id, description, default_scope) VALUES (?, ?, ?) "
+            "ON CONFLICT(type_id) DO UPDATE SET description=excluded.description, "
+            "default_scope=excluded.default_scope",
+            (type_id, description, default_scope),
+        )
+        conn.commit()
 
 
 def upsert_entry(type_id: str, entry_id: str, *, attributes: dict, scope: str, value=None) -> None:

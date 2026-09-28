@@ -20,6 +20,23 @@ def test_register_type_rejects_an_unknown_scope():
         reg.register_type("demo_type", "x", default_scope="nowhere")
 
 
+def test_register_type_writes_only_to_its_own_scopes_database(monkeypatch):
+    """Real bug, found by actually running the health check action for
+    real: register_type used to write into BOTH physical databases
+    unconditionally "for discoverability" - meaning even a purely
+    GLOBAL type (dependencies.py) could never be registered on a
+    machine where PROTECTED (USER_PERSISTENCE) isn't reachable, which
+    defeats the entire point of GLOBAL existing independent of
+    USER_PERSISTENCE. Proves the fix: registering a GLOBAL type must
+    never even attempt to touch the PROTECTED database."""
+    monkeypatch.setattr(reg, "_protected_db_path", lambda: "/nonexistent/definitely/not/writable/x.db")
+    reg.register_type("global_only_type", "x", default_scope=reg.GLOBAL)  # must not raise
+    import sqlite3
+    with sqlite3.connect(reg.GLOBAL_DB_PATH) as conn:
+        row = conn.execute("SELECT type_id FROM registry_types WHERE type_id = ?", ("global_only_type",)).fetchone()
+    assert row is not None
+
+
 def test_upsert_entry_then_get_entry_round_trips_attributes_and_value():
     reg.register_type("demo_type", "x", default_scope=reg.PROTECTED)
     reg.upsert_entry("demo_type", "e1", attributes={"default": 1}, scope=reg.PROTECTED, value=42)

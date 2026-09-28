@@ -100,6 +100,20 @@ def test_all_effective_settings_reflects_a_real_override():
     assert effective["sessions"]["default_session_ttl_hours"] == 24
 
 
+def test_get_setting_for_a_global_setting_never_requires_protected_to_be_reachable(monkeypatch):
+    """Real bug, found by actually running the health check action for
+    real on a non-root sandbox: `_sync_definition` used to hardcode
+    PROTECTED as `register_type`'s target regardless of the entry's
+    own scope, so reading a GLOBAL setting (startup.auto_start_persona)
+    would still try to reach the PROTECTED database just to register
+    the "settings" type's description - and raise if PROTECTED wasn't
+    reachable, exactly the scenario a GLOBAL setting exists to
+    survive. Proves the fix: reading a GLOBAL setting must succeed even
+    when PROTECTED cannot be reached at all."""
+    monkeypatch.setattr(ss, "DEFAULT_DB_PATH", "/nonexistent/definitely/not/writable/x.db")
+    assert ss.get_setting("startup", "auto_start_persona") == "personal"
+
+
 def test_store_lives_under_the_user_persistence_redirect_by_default():
     # /etc/baseline is bind-redirected onto USER_PERSISTENCE (persist_bind_mounts.py)
     # - direct instruction: all config must survive a disposable-stage rebuild.

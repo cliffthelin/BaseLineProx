@@ -208,9 +208,17 @@ def _sync_definition(d: Dependency) -> None:
     real, queryable "what is in place" even from outside Python.
     Deliberately called at real access time (run_checks), never at
     this module's own import time - see settings_store.py's own
-    `_sync_definition` docstring for why."""
+    `_sync_definition` docstring for why.
+
+    Registers the type using THIS entry's own scope, not a hardcoded
+    default - a real bug (found the same way, by actually running a
+    health check for real): every seed dependency here is GLOBAL, but
+    hardcoding that as this call's target would have broken a future
+    PROTECTED-scope dependency's sync whenever PROTECTED (the
+    USER_PERSISTENCE-redirected database) is unavailable, even though
+    that entry's own definition/value write is unaffected."""
     registry.register_type(TYPE_ID, "Predefined system/install/(future) dependency checks (dependencies.py)",
-                            default_scope=registry.GLOBAL)
+                            default_scope=d.scope)
     registry.upsert_entry(
         TYPE_ID, d.id, scope=d.scope,
         attributes={"level": d.level, "description": d.description, "severity": d.severity,

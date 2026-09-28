@@ -144,6 +144,22 @@ def test_dump_configuration_snapshot_includes_effective_settings():
     assert snapshot["settings"]["self_installer"]["lvm_size_preset"] == "medium"
 
 
+def test_run_checks_for_global_dependencies_never_requires_protected_to_be_reachable(monkeypatch):
+    """Real bug, found by actually running the health check action for
+    real on a non-root sandbox missing /etc/baseline entirely: syncing
+    a dependency's definition used to hardcode GLOBAL as
+    register_type's target regardless - which happened to work for
+    every current seed dependency (all GLOBAL) but was fixed to use
+    each entry's own scope instead, matching settings_store.py's
+    identical fix. This proves system-level (GLOBAL) checks - the ones
+    a boot-time or recovery health check most needs - keep working
+    even when PROTECTED (USER_PERSISTENCE) is completely unreachable."""
+    import settings_store
+    monkeypatch.setattr(settings_store, "DEFAULT_DB_PATH", "/nonexistent/definitely/not/writable/x.db")
+    results = dep.run_checks(phase=dep.BOOT)  # only system.* deps run at BOOT, both GLOBAL
+    assert all(r.ok for r in results)
+
+
 def test_register_dependencies_refuses_a_duplicate_id():
     try:
         dep.register_dependencies([
