@@ -1,5 +1,21 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-27 late continuation - massive context gap discovered; one uncommitted test fixed; the physical disk-merge is confirmed still untouched
+
+**Read this before touching anything.** This entry is from the same conversation thread as the original "2026-09-27 handoff" entry below (the one that starts the disk-merge investigation) - but a huge amount of work landed on this repo *from elsewhere* (git history, not this thread's own visible context) between that entry and this one: 19 commits, decision records 62-82, the entire persona/recovery-mode/admin-settings arc, and `docs/design/v0.1-work-queue.md` now shows **fully closed**. The "2026-09-27 continuation" entry immediately below this one is that other work's own handoff, written by whoever/whatever did it - it correctly notes the disk-merge thread is separate and not superseded. Confirmed directly: **the physical drives (`sdd`/`sdb`) were never touched by that other work either** - still exactly as the original handoff entry describes (real backups of VM 202/203 sitting on `/run/media/cane/8TB/Projects/Baseline_v01/`, nothing destructive run, plan agreed but not executed).
+
+**Also superseded, no action needed**: the `persist_bind_mounts.py` module this thread was mid-way through hand-writing (the simple 3-path bind-mount version, for "credentials/config/logs should go to USER_PERSISTENCE") - decision records 62-78 already built a far more complete version of the same idea (multi-persona, `drive_installer.py`-integrated, with `switch_active_persona`/recovery mode/admin elevation on top). Don't resurrect the simple draft; read decision record 78 first to see what's actually there now.
+
+**What this pass actually did, concretely:**
+- Found real, substantial, **uncommitted** work already sitting in the tree: `baseline/lib/baseline_web.py` (473 lines) + `baseline/lib/drive_admin.py` (305 lines) + their tests (544 lines combined), plus edits to `control_panel_web.py`/`settings_web.py`/`test_settings_web.py`. `baseline_web.py`'s own docstring names it as **decision record 83** - "the merged Baseline web app... one running server exposing every page settings_web.py/control_panel_web.py already had... plus a new Drive Administration tab" per direct instruction ("merge those two together and add a Drive administration tab"). **No decision-record file for 83 exists yet, and none of this is committed.**
+- Ran the full suite cold: **1 real failure** - `test_drive_admin_page_reachable_over_a_real_socket` expected the literal string `"Persistence backend"` in the rendered `/drive-admin` page; the page had a `<h2>Mounted volumes</h2>` heading instead. Checked what actually populates that table (`real_volume_state` → `drive_installer.collect_volume_usage`) - it's specifically the Baseline-managed persistence volumes, not a generic "any mounted filesystem" list, so `"Persistence backend"` is the semantically correct heading, not just a string the test wanted. Fixed with a one-line rename in `baseline_web.py`. **Full suite now 1276/1276 passing.**
+
+**Left for the next session, in priority order:**
+1. Write the actual decision-record-83 file (`docs/design/decision-records/83-....md`) documenting `baseline_web.py`/`drive_admin.py` properly - it doesn't exist yet despite the code referencing it by number.
+2. Decide whether to commit the `baseline_web.py`/`drive_admin.py` work (it's real and tests pass, but nobody has reviewed it in this thread - it appeared already-written).
+3. **The disk merge is still the oldest open real-world item**: pick a target drive (still "doesn't matter" per the user), get their explicit go/no-go on the QEMU-against-real-`/dev/sdd` install approach, then actually execute it. Nothing physical has changed since the original entry below.
+4. Read decision records 62-83 properly before making further persona/persistence changes - this thread does not have full context on that arc and guessing at its design would be a real mistake.
+
 ## 2026-09-27 continuation - v0.1 work queue fully closed; V0.2 ready to start
 
 A later continuation of the same day's session below (the disk-merge
