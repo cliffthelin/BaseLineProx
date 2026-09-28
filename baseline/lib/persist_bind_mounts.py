@@ -451,4 +451,19 @@ def main(runner: Runner = None, print_fn=print, now: float = None) -> int:
     if not ok:
         import recovery_mode
         recovery_mode.record_entry(runner, now=now, reason="cascade_failed")
+
+    # Decision record 88, direct instruction: health validations "at
+    # boot" - purely observational. A dependency check failing here
+    # (even a LOUD one) never changes this function's own return code:
+    # gating boot itself on a health check would trade a real, working
+    # mount cascade for a new way to fail to boot, which is a worse
+    # outcome than a degraded-but-running machine that a later
+    # troubleshooting pass can actually see the failure on.
+    try:
+        import dependencies as dep
+        for r in dep.run_checks(phase=dep.BOOT):
+            print_fn(f"[dep-{'ok' if r.ok else 'FAIL'}] {r.id}: {r.detail}")
+    except Exception as exc:  # noqa: BLE001 - health reporting must never block or crash boot
+        print_fn(f"[dep-FAIL] dependency checks themselves could not run: {exc!r}")
+
     return 0 if ok else 1

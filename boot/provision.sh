@@ -162,6 +162,15 @@ cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-set
 # wiring that tab in - never staged before now.
 cp "$SRC/baseline/lib/settings_store.py" /opt/baseline/lib/settings_store.py
 cp "$SRC/baseline/lib/admin_elevation.py" /opt/baseline/lib/admin_elevation.py
+# dependencies.py (decision record 88) - the dependency-tracking/
+# health-validation layer sharing settings_store.py's own SQLite
+# database; drive_admin.py's build_self_installer imports it directly,
+# and persist_bind_mounts.py's main() imports it for the boot-phase
+# health check.
+cp "$SRC/baseline/lib/dependencies.py" /opt/baseline/lib/dependencies.py
+cp "$SRC/baseline/bin/baseline-dependency-check" /opt/baseline/bin/baseline-dependency-check
+cp "$SRC/boot/baseline-dependency-check.service" /etc/systemd/system/baseline-dependency-check.service
+cp "$SRC/boot/baseline-dependency-check.timer" /etc/systemd/system/baseline-dependency-check.timer
 # Recovery mode itself (work-queue item 26, decision record 81) -
 # settings_web.py's guest-tier /recovery route reaches this directly;
 # persist_bind_mounts.py's own main() also calls it on a real cascade
@@ -261,7 +270,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check
 
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
@@ -349,7 +358,8 @@ command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
          baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
          baseline-web.service baseline-scripts-inbox.service \
-         baseline-backup-recurring.service baseline-backup-recurring.timer; do
+         baseline-backup-recurring.service baseline-backup-recurring.timer \
+         baseline-dependency-check.service baseline-dependency-check.timer; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
@@ -362,7 +372,8 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
          /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate \
          /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring \
-         /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web; do
+         /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web \
+         /opt/baseline/bin/baseline-dependency-check; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
 echo "PASS: all staged files and units present and correctly permissioned."
@@ -378,11 +389,12 @@ systemctl enable baseline-kiosk.service
 systemctl enable baseline-web.service
 systemctl enable baseline-scripts-inbox.service
 systemctl enable baseline-backup-recurring.timer
+systemctl enable baseline-dependency-check.timer
 
-for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-backup-recurring.timer; do
+for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-backup-recurring.timer baseline-dependency-check.timer; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
-echo "PASS: all eight units confirmed enabled."
+echo "PASS: all nine units confirmed enabled."
 
 echo
 echo "Done. Nothing on this tty/session was touched or disabled - this"

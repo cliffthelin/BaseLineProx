@@ -616,12 +616,24 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     import drive_setup_install as dsi
     import iso_builder as ib
     import settings_store
+    import dependencies as dep
 
     if pds_runner is None and hasattr(runner, "as_pds_runner"):
         pds_runner = runner.as_pds_runner()
     pds_runner = pds_runner or pds.Runner()
 
     settings_db_path = params.get("settings_db_path") or settings_store.DEFAULT_DB_PATH
+
+    # Decision record 88, direct instruction: dependencies "should be
+    # predefined and validated before install begins." Only a LOUD
+    # failure refuses here - a SILENT one (e.g. a stale fqdn preset) is
+    # still recorded for dump_configuration_snapshot/troubleshooting,
+    # but was never meant to block an install by itself.
+    check_results = dep.run_checks(phase=dep.PRE_INSTALL, path=settings_db_path)
+    failed = dep.loud_failures(check_results)
+    if failed:
+        summary = "; ".join(f"{r.id}: {r.detail}" for r in failed)
+        return ActionResult(False, f"refusing to start - loud dependency check(s) failed: {summary}")
     lvm_preset = params.get("lvm_size_preset") or settings_store.get_setting(
         "self_installer", "lvm_size_preset", path=settings_db_path)
     lvm_sizes = si.LVM_SIZE_PRESETS[lvm_preset]
@@ -654,6 +666,23 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
         **lvm_sizes,
     )
     return ActionResult(result.outcome == "applied", result.detail)
+
+
+def run_health_check(runner, **params) -> ActionResult:
+    """The real "adhoc" phase (decision record 88, direct instruction:
+    health validations "both at boot and intervals and adhoc calls") -
+    an operator-triggered run of every registered dependency, right
+    now, on demand. Reuses the exact same `dependencies.run_checks`
+    the pre-install gate and the boot/interval phases call - one real
+    mechanism, four different triggers, not four different checks."""
+    import dependencies as dep
+    db_path = params.get("settings_db_path")
+    results = dep.run_checks(phase=dep.ADHOC, path=db_path)
+    failed_loud = dep.loud_failures(results)
+    lines = [f"[{'ok' if r.ok else ('LOUD-FAIL' if r.severity == dep.LOUD else 'silent-fail')}] {r.id}: {r.detail}"
+             for r in results]
+    detail = "; ".join(lines) if lines else "no dependencies are registered for the adhoc phase"
+    return ActionResult(not failed_loud, detail)
 
 
 @dataclass
@@ -706,6 +735,14 @@ ACTIONS = {
         "(v0.2) Scan the persistence setup for problems and fix what it finds. Not yet "
         "implemented in this build.",
         lambda runner, **params: repair_scan_and_fix(runner),
+    ),
+    "run_health_check": ActionSpec(
+        "run_health_check",
+        "Run every registered dependency check right now (decision record 88's 'adhoc' phase) - "
+        "the same checks that gate before an install begins and run automatically at boot and on "
+        "an interval, just triggered on demand. A LOUD failure is reported as a failed action; a "
+        "silent one is still listed but does not fail this action by itself.",
+        lambda runner, **params: run_health_check(runner, **params),
     ),
 }
 

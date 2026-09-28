@@ -1,0 +1,9 @@
+[Unit]
+Description=Baseline interval-phase dependency health check (decision record 88)
+Requires=baseline-persist-bind-mounts.service
+After=baseline-persist-bind-mounts.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-dependency-check
+RemainAfterExit=no

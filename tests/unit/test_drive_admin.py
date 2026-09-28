@@ -563,13 +563,17 @@ def test_describe_actions_lists_every_registered_action_with_its_real_descriptio
         assert d["description"] == da.ACTIONS[d["action_id"]].description
 
 
-def test_describe_actions_lists_exactly_the_four_real_actions():
+def test_describe_actions_lists_exactly_the_five_real_actions():
     """The three-action cap (direct feedback at the time) was relaxed
     by direct instruction once `build_self_installer` (decision record
     85) was a genuine, distinct, separately-tested capability, not
-    scope creep folded in without asking - accurately described,
-    nothing unlisted."""
-    assert set(da.ACTIONS) == {"install", "update_selected", "repair", "build_self_installer"}
+    scope creep folded in without asking. `run_health_check` (decision
+    record 88) is the same situation again: direct instruction asked
+    for health validation reachable "as... adhoc calls" specifically,
+    not just at boot/interval/pre-install - a fifth real, separately-
+    tested action, not scope creep."""
+    assert set(da.ACTIONS) == {
+        "install", "update_selected", "repair", "build_self_installer", "run_health_check"}
 
 
 def test_build_self_installer_needs_nothing_but_device_path(tmp_path):
@@ -588,6 +592,52 @@ def test_build_self_installer_needs_nothing_but_device_path(tmp_path):
     )
     assert result.ok is False
     assert "device safety check failed" in result.detail
+
+
+def test_build_self_installer_refuses_before_anything_else_on_a_loud_dependency_failure(tmp_path):
+    """Decision record 88, direct instruction: dependencies "should be
+    predefined and validated before install begins." A stale/invalid
+    self_installer.lvm_size_preset value is registered as a LOUD
+    dependency specifically because it would otherwise only surface as
+    a bare KeyError deep inside self_installer.py - this proves the
+    real refusal happens up front instead, before the safety gate is
+    even reached (a real, valid drive is used here so the ONLY thing
+    that can be refusing is the dependency check)."""
+    import settings_store
+    import sqlite3
+    db_path = str(tmp_path / "master_config.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE settings (grp TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (grp, key))")
+    conn.execute("INSERT INTO settings VALUES ('self_installer', 'lvm_size_preset', '\"gigantic\"')")
+    conn.commit()
+    conn.close()
+    pds_fake = FakePdsRunner()  # a real, valid drive
+    result = da.build_self_installer(
+        FakeRunner(), device_path="/dev/sdd", pds_runner=pds_fake,
+        settings_db_path=db_path,
+    )
+    assert result.ok is False
+    assert "loud dependency check" in result.detail
+    assert "install.self_installer_lvm_preset_valid" in result.detail
+
+
+def test_run_health_check_reports_ok_when_every_dependency_passes():
+    result = da.run_health_check(FakeRunner())
+    assert result.ok is True
+    assert "system.sqlite3_importable" in result.detail
+
+
+def test_run_health_check_fails_the_action_on_a_loud_dependency_failure(tmp_path):
+    import sqlite3
+    db_path = str(tmp_path / "master_config.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE settings (grp TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (grp, key))")
+    conn.execute("INSERT INTO settings VALUES ('self_installer', 'lvm_size_preset', '\"gigantic\"')")
+    conn.commit()
+    conn.close()
+    result = da.run_health_check(FakeRunner(), settings_db_path=db_path)
+    assert result.ok is False
+    assert "LOUD-FAIL" in result.detail
 
 
 def test_describe_actions_exposes_requires_device_for_the_web_pages_device_picker():

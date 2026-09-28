@@ -1,0 +1,10 @@
+[Unit]
+Description=Check registered dependencies (system/install/other levels) on an interval (decision record 88)
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=15m
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

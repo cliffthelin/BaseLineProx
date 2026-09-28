@@ -293,8 +293,12 @@ def test_main_returns_0_and_prints_each_result_when_everything_applies():
     printed = []
     code = pbm.main(runner=runner, print_fn=printed.append)
     assert code == 0
-    assert len(printed) == 1 + len(pbm.REDIRECT_PATHS)
-    assert all("[ok]" in line for line in printed)
+    redirect_lines = [line for line in printed if not line.startswith("[dep-")]
+    assert len(redirect_lines) == 1 + len(pbm.REDIRECT_PATHS)
+    assert all("[ok]" in line for line in redirect_lines)
+    # Decision record 88: boot-phase dependency checks run and are
+    # printed, but never change the return code either way.
+    assert any(line.startswith("[dep-") for line in printed)
 
 
 def test_main_returns_1_when_any_result_failed():

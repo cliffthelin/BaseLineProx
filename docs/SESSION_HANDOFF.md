@@ -1,5 +1,24 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - real dependencies table + health-validation layer (pre_install/boot/interval/adhoc)
+
+**Read decision record 88 first** (`docs/design/decision-records/88-dependencies-table.md`).
+
+Direct instruction: a dependencies table recording system/install/(future) other-level dependencies, "predefined and validated before install begins and as health validations both at boot and intervals and adhoc calls," with an explicit loud-vs-silent severity distinction, surfaced for troubleshooting. Built `baseline/lib/dependencies.py` - two new tables (`dependencies`, `dependency_check_results`) in the same primary database `settings_store.py` uses (confirmed a Baseline SQLite already existed - `sensors_history.db` - but that's telemetry, a different domain; kept config+dependencies together in `master_config.db`). Wired into all four phases:
+
+- **pre_install**: `drive_admin.build_self_installer` refuses outright on any LOUD dependency failure, before the pipeline starts.
+- **boot**: `persist_bind_mounts.main()` runs checks and prints results, purely observational - never blocks boot.
+- **interval**: new `baseline-dependency-check.timer`/`.service` (15 min), mirroring `baseline-backup-recurring`'s existing pattern.
+- **adhoc**: new `run_health_check` drive-admin action (a fifth action - broke the "exactly four actions" test from decision record 86, same pattern as before: flagged directly, updated the test with a docstring, did not silently change it).
+
+Also, mid-turn: "Credentials and Tokens and such should just have references to their Vault location" - `settings_store.SettingDef` gained `is_secret_ref`, enforced by `set_setting` (must start with `vault://` or similar). No vault backend exists yet; this is the guardrail that keeps a future one honest.
+
+**Real bug found and fixed in passing**: `run_checks`'s first implementation caused genuine `SQLITE_BUSY` lock contention (~10s hangs, caught by `--durations` in its own test suite) - a `setting_configured` check calls back into `settings_store.get_setting`, which opens its own connection to the same file while `run_checks` held an open write transaction on another connection. Fixed by splitting into two passes: compute all results with no connection open, then persist.
+
+Full suite: 1376/1376 (was 1351).
+
+**Not done:** nobody has watched `baseline-dependency-check.timer` fire on real hardware yet; no real credential-shaped setting exists yet to exercise `is_secret_ref` end-to-end beyond synthetic unit tests.
+
 ## 2026-09-28 continuation - settings_store.py moved from a flat JSON file to real SQLite
 
 **Read decision record 87 first** (`docs/design/decision-records/87-settings-store-sqlite-backend.md`).

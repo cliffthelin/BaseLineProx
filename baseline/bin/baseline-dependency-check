@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for one interval-phase dependency health
+check cycle (decision record 88). Invoked by
+`baseline-dependency-check.timer` - one run of every dependency
+registered for the "interval" phase, recorded into the primary
+Baseline database (settings_store.DEFAULT_DB_PATH) for later
+troubleshooting via dependencies.dump_configuration_snapshot(). A LOUD
+failure here exits non-zero (visible in `systemctl status`/journal);
+a SILENT failure is still recorded but never fails this unit - see
+dependencies.py's own module docstring for why severity is judged
+this way.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import dependencies  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(dependencies.main())

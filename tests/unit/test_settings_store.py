@@ -136,6 +136,33 @@ def test_set_setting_with_no_options_defined_accepts_any_value():
     assert ss.get_setting("sessions", "default_session_ttl_hours") == 6
 
 
+# -- Secret references (direct instruction: "Credentials and Tokens
+# and such should just have references to their Vault location" - no
+# actual vault backend exists yet, this is the enforcement point that
+# keeps a future one honest, not an integration with one) ------------
+
+def test_set_setting_refuses_a_raw_value_for_a_secret_ref_setting():
+    ss.register_schema([ss.SettingDef("demo_secret", "api_token", "vault://secret/data/demo", is_secret_ref=True)])
+    try:
+        try:
+            ss.set_setting("demo_secret", "api_token", "sk-actual-raw-token-value")
+            assert False, "should have raised"
+        except ValueError as exc:
+            assert "vault reference" in str(exc)
+        assert ss.get_setting("demo_secret", "api_token") == "vault://secret/data/demo"  # unchanged
+    finally:
+        ss._REGISTRY[:] = [s for s in ss._REGISTRY if s.group != "demo_secret"]
+
+
+def test_set_setting_accepts_a_real_vault_reference_for_a_secret_ref_setting():
+    ss.register_schema([ss.SettingDef("demo_secret2", "api_token", "vault://secret/data/demo", is_secret_ref=True)])
+    try:
+        ss.set_setting("demo_secret2", "api_token", "vault://secret/data/demo/rotated")
+        assert ss.get_setting("demo_secret2", "api_token") == "vault://secret/data/demo/rotated"
+    finally:
+        ss._REGISTRY[:] = [s for s in ss._REGISTRY if s.group != "demo_secret2"]
+
+
 # -- register_schema (decision record 87: "every application has its
 # own preferences" - the real extensibility point, not a growing
 # hardcoded tuple) --------------------------------------------------

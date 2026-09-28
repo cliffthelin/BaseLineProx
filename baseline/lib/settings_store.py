@@ -60,6 +60,25 @@ class SettingDef:
     # must be selectable without a keyboard." `set_setting` refuses any
     # value not in this set.
     options: tuple | None = None
+    # Direct instruction: "Credentials and Tokens and such should just
+    # have references to their Vault location." When True, this
+    # setting's value is never the actual secret - only a reference
+    # string into wherever secrets are actually kept (a vault path,
+    # e.g. "vault://secret/data/proxmox/api-token"), enforced by
+    # `set_setting` below. This database has no special protection
+    # against being read by anything that can read the file - storing
+    # a raw credential in it directly would be a silent, not loud,
+    # failure (nothing crashes; the secret is just sitting in a config
+    # file) - exactly the class of problem this flag exists to catch
+    # before it happens, not after.
+    is_secret_ref: bool = False
+
+
+# Reference-string schemes `set_setting` accepts for an `is_secret_ref`
+# setting. No actual vault backend exists in this codebase yet - this
+# is the enforcement point that keeps a future one honest, not an
+# integration with one.
+SECRET_REF_SCHEMES = ("vault://",)
 
 
 # The real, concrete built-in settings this pass needs. Meant to grow
@@ -187,9 +206,15 @@ def set_setting(group: str, key: str, value, *, path: str | None = None) -> None
     schema_map = _schema_by_key()
     if (group, key) not in schema_map:
         raise KeyError(f"unknown setting {group}.{key}")
-    options = schema_map[(group, key)].options
+    definition = schema_map[(group, key)]
+    options = definition.options
     if options is not None and value not in options:
         raise ValueError(f"{group}.{key} must be one of {options!r}, got {value!r}")
+    if definition.is_secret_ref:
+        if not isinstance(value, str) or not value.startswith(SECRET_REF_SCHEMES):
+            raise ValueError(
+                f"{group}.{key} holds a vault reference, not a raw value - must start with "
+                f"one of {SECRET_REF_SCHEMES!r}, got {value!r}")
     with closing(_connect(path)) as conn:
         conn.execute(
             "INSERT INTO settings (grp, key, value) VALUES (?, ?, ?) "
