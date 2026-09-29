@@ -1,5 +1,14 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - roadmap cleanup: v0.1 queue corrected, v0.2 queue started
+
+Asked "where is the roadmap completion" - found `docs/design/v0.1-work-queue.md` stale and self-contradicting: row 29 claimed "v0.1 queue fully closed" while row 17 was still `[ ]` in the same table, and nothing since decision record 82 (everything from records 83-93 this session built) was tracked anywhere.
+
+Fixed:
+- Row 17 closed with an honest caveat - `/dev/sdd`'s real, complete install is confirmed by direct inspection (partition table, `pve` VG, two provisioned VMs, live boot to Proxmox's web-UI login), but which of several real-hardware attempts across sessions actually produced it can't be confirmed from disk state alone.
+- Row 29's inaccurate "fully closed" claim removed.
+- New `docs/design/v0.2-work-queue.md`: backfilled with decision records 83-93 as closed items, plus two new open items - confirming which tool produced `/dev/sdd`'s current install, and a direct suggestion to evaluate a read-only QCOW2 base + copy-on-write overlay layered on Proxmox for zero-risk experimentation/instant rollback (not yet scoped against this project's own already-disposable BASELINE/root design), and v0.1's still-outstanding item 18 (homeassistant-lxc/haos-vm under real QEMU) carried forward.
+
 ## 2026-09-28 continuation - QEMU disposable-install smoke test finds a real, would-have-shipped bug
 
 **Read decision record 93 first** (`docs/design/decision-records/93-qemu-smoke-test-for-settings-migration.md`).
