@@ -174,6 +174,13 @@ cp "$SRC/baseline/lib/registry.py" /opt/baseline/lib/registry.py
 cp "$SRC/baseline/lib/dependencies.py" /opt/baseline/lib/dependencies.py
 cp "$SRC/baseline/bin/baseline-dependency-check" /opt/baseline/bin/baseline-dependency-check
 cp "$SRC/boot/baseline-dependency-check.service" /etc/systemd/system/baseline-dependency-check.service
+# gpu_admin.py (decision record 94) - real GPU detection + per-device
+# mode compatibility, registry-backed (GLOBAL scope). Staged proactively
+# ahead of any web UI wiring - not yet imported by another staged
+# module, so tools/check_provision_deploys_all_imports.py can't see it
+# from its own entry points yet, but it will need to be here the moment
+# something does.
+cp "$SRC/baseline/lib/gpu_admin.py" /opt/baseline/lib/gpu_admin.py
 cp "$SRC/boot/baseline-dependency-check.timer" /etc/systemd/system/baseline-dependency-check.timer
 # Recovery mode itself (work-queue item 26, decision record 81) -
 # settings_web.py's guest-tier /recovery route reaches this directly;

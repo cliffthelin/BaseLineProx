@@ -1,5 +1,19 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - GPU Administration: real detection, never auto-decided mode
+
+**Read decision record 94 first** (`docs/design/decision-records/94-gpu-administration-detection.md`).
+
+A long design conversation (VM management scoping -> real hardware review (RTX 3070 + Tesla P40) -> GPU-sharing research -> user's own Ollama models -> Ubuntu iGPU/NVIDIA driver conflict -> converged on: detect real GPUs, compute which of six real sharing modes each one can support, let the operator choose - auto-detection narrows *which GPUs exist*, never *which mode each runs in*, and nothing forces a mode change once picked.
+
+Built `baseline/lib/gpu_admin.py`: real `lspci`/sysfs-based detection (found and fixed a real regex bug by testing against actual captured `lspci` output from this machine, not a guessed format - greedy matching left a trailing space that silently failed every match), six modes (`host_display`/`vfio_passthrough`/`vgpu_mdev_split`/`sriov`/`virtio_gpu_shared`/`container_passthrough`) each with honest per-device evidence (a live sysfs check when one exists, a labeled "hardware-capable but not active" fact otherwise - never collapsed into one bit), storage via `registry.py` directly at GLOBAL scope (not `settings_store` - the device set is hardware-dependent per machine, mirroring `network.py`'s interface-alias precedent). Verified for real against this session's own two real GPUs, including a real write into the actual `/mnt/BASELINE/registry/foundation.db`.
+
+Full suite: 1452/1452 (was 1422).
+
+**Also flagged, not yet acted on**: `settings_store.py` centralizes every domain (sessions/startup/volumes/self_installer/network) under one registry type, unlike `dependencies`/`gpu_devices` which each get their own - direct instruction to fix this next: give each settings group its own registry type, with `settings_store.py` becoming shared validation machinery rather than itself a registrar. Agreed order: gpu_admin.py first (done), this refactor next.
+
+**Real, durable architecture correction from the user this session, saved to memory**: don't treat "wipe and reinstall the substrate" as the general answer to "how does a user safely make changes" - VM/container management (creation UX, golden images, clone/rollback, GPU passthrough, container networking, an API/MCP orchestration layer) is the actual, still-mostly-unbuilt next major area this whole substrate/settings/dependencies/web-app foundation exists to support.
+
 ## 2026-09-28 continuation - roadmap cleanup: v0.1 queue corrected, v0.2 queue started
 
 Asked "where is the roadmap completion" - found `docs/design/v0.1-work-queue.md` stale and self-contradicting: row 29 claimed "v0.1 queue fully closed" while row 17 was still `[ ]` in the same table, and nothing since decision record 82 (everything from records 83-93 this session built) was tracked anywhere.
