@@ -1,5 +1,97 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## READ THIS FIRST - 2026-09-28 session summary (consolidates the 14 entries below)
+
+**Real hardware context, current as of this session** (see memory
+`primary_machine_hardware.md` too): this whole session ran on the same
+machine as the actual repo checkout - ASUS ROG STRIX B650E-F, Ryzen 9
+7900X, 96GB RAM, Ubuntu 26.04.1 desktop as the real, currently-running
+OS. **Two real, separate GPUs**: NVIDIA GeForce RTX 3070 (consumer,
+Ampere, no vGPU support) and **NVIDIA Tesla P40 (24GB, Pascal, real
+officially-supported vGPU/mdev card)**. `/dev/sdd` carries a separate,
+real, *complete and working* Proxmox+Baseline install (confirmed by
+direct inspection: real partition table, `pve` LVM VG, two provisioned
+VMs, a live QEMU process showed it booting to Proxmox's own web-UI
+login) - `/dev/sdb` is explicitly **not** Baseline's to touch; the user
+is repurposing it for an unrelated project.
+
+**What this session actually built, in order** (each with its own
+decision record, detailed entry below, and full test coverage - full
+suite ended at **1465/1465**, started the session at 1391):
+
+1. **Settings-to-SQL migration completed end-to-end** (decision records
+   87-93): `settings_store.py` moved off a flat JSON file onto real
+   SQLite; `dependencies.py` built (predefined system/install-level
+   health checks, loud-vs-silent severity, wired into pre-install/boot/
+   interval/adhoc phases); `registry.py` built as the **one shared
+   foundational mechanism** (three generic tables, GLOBAL vs PROTECTED
+   scope) so no future registry-shaped need ever needs its own bespoke
+   table again; six scattered legacy JSON config files reviewed and
+   either migrated or deliberately excluded; a real `/etc/baseline`
+   was set up by the user (one-time `sudo mkdir`/`chown`) to verify the
+   PROTECTED-scope path actually works, not just fails gracefully.
+2. **A real QEMU disposable-install smoke test found a bug that would
+   have broken every real install** (decision record 93):
+   `self_installer.py`'s answer-file template quoted the LVM size
+   values (`"40G"`), but Proxmox's real parser requires plain numbers -
+   fixed, then proved the whole chain (dependency gate -> real settings
+   from the real DB -> valid answer.toml -> real Proxmox install ->
+   real boot to `baseline login:`) end to end, twice.
+3. **Roadmap corrected** (no code, pure documentation): `v0.1-work-queue.md`
+   had claimed "fully closed" while still carrying an open row in the
+   very same table - fixed; `v0.2-work-queue.md` created, backfilling
+   everything above plus what follows.
+4. **`settings_store.py` split into per-group registry types**
+   (decision record 95) - it had quietly become the one thing that
+   *didn't* follow its own "each registry-shaped thing gets its own
+   type" rule; fixed with zero changes to any caller.
+5. **GPU Administration built** (decision record 94): real `lspci`/
+   sysfs-based detection of every physical GPU, six real hardware-
+   sharing modes each with honest per-device evidence (a live sysfs
+   check when one exists, a labeled "hardware-capable but not active"
+   fact otherwise) - **detection narrows which GPUs exist, it never
+   auto-decides which mode an operator should use**, per direct,
+   repeated instruction. Verified for real against this machine's own
+   RTX 3070 + Tesla P40.
+6. **GPU device wiring landed in `quadlet.py`** (decision record 96):
+   `ContainerSpec.gpu_devices`, resolved via a real `nvidia-smi`-
+   verified CDI identifier for NVIDIA or a plain render node for
+   everything else - found and fixed a real PCI-domain digit-count
+   mismatch between `lspci` and `nvidia-smi` along the way. Verified
+   for real: generates a genuine, ready-to-write Quadlet unit for the
+   actual P40. **Not yet verified: no container has actually been
+   started this way** - `nvidia-ctk` isn't installed on this machine.
+
+**A real, durable architecture correction from the user this session**
+(saved to memory as `qcow2_overlay_vs_disposable_substrate.md`): don't
+treat "wipe and reinstall the substrate" as the general answer to "how
+does a user safely make changes" - **VM/container management is the
+actual, still-mostly-unbuilt next major area** this whole substrate/
+settings/dependencies/web-app foundation exists to support, not a
+peripheral feature.
+
+**What's still open, in priority order** (see `v0.2-work-queue.md` for
+the full table):
+- Item 20: Quadlet `.network` unit generation (container-to-container
+  access by name - only `.container` units exist today).
+- Item 21: an API/MCP layer for programmatic container/GPU
+  orchestration (currently zero RPC surface for either).
+- Item 22: default/enforced persistence wiring for container volumes
+  (nothing stops a container's data landing on the disposable
+  substrate today).
+- v0.1's item 18, still genuinely never closed: run `homeassistant-lxc`
+  and `haos-vm` under real QEMU.
+- A real container has never actually been started with the new GPU
+  device wiring (item 6 above) - the natural next real-world check
+  whenever `nvidia-ctk` gets installed.
+
+**Everything below this point is the detailed, entry-per-topic record
+of how the above got built**, plus this project's own older history
+(pre-dates the current ASUS/RTX3070+P40 hardware entirely - a
+different physical machine, a Dell Latitude, was the subject of the
+oldest entries near the bottom). Read top-to-bottom for full detail;
+read only this summary if you just need to know where things stand.
+
 ## 2026-09-28 continuation - GPU device wiring on quadlet.py's ContainerSpec
 
 **Read decision record 96 first** (`docs/design/decision-records/96-gpu-device-wiring-quadlet.md`).
