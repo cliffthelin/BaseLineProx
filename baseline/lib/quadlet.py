@@ -17,6 +17,14 @@ manages a compositor session and `kiosk_gate.py` gates a systemd unit.
 Podman itself only ever runs as whatever systemd starts from the
 generated unit.
 
+GPU passthrough (`ContainerSpec.gpu_devices`, decision record 96) takes
+already-resolved device strings, never a raw guess - a caller resolves
+them for a specific detected device via
+`gpu_admin.resolve_container_devices` first (a render node path for
+AMD/Intel, a real CDI identifier for NVIDIA when `nvidia-smi` can
+verify one), matching this module's existing "pure generator, caller
+supplies already-real values" design for volumes/network/publish.
+
 Rootless mode is fully implemented, not just a field: `ContainerSpec(rootless=True, user="someuser")`
 runs the container under that user's own per-user Podman/systemd
 session (`runuser -u <user> -- env XDG_RUNTIME_DIR=/run/user/<uid>
@@ -65,6 +73,12 @@ class ContainerSpec:
     environment: dict[str, str] = field(default_factory=dict)
     network: str | None = None                          # e.g. "host", "none", a Quadlet .network name
     publish: list[str] = field(default_factory=list)     # "hostport:containerport" strings
+    gpu_devices: list[str] = field(default_factory=list)  # real device strings - a render node path
+                                                          # ("/dev/dri/renderD128") or a CDI identifier
+                                                          # ("nvidia.com/gpu=<uuid>"), never a raw guess;
+                                                          # see gpu_admin.resolve_container_devices, which
+                                                          # resolves these for a specific gpu_admin.GpuDevice
+                                                          # already validated for container_passthrough mode
     rootless: bool = False                               # see module docstring: True requires .user,
                                                           # there is no sensible default user to fall
                                                           # back to, so this defaults to matching
@@ -147,6 +161,8 @@ def generate_unit(spec: ContainerSpec) -> str:
         lines.append(f"Network={spec.network}")
     for port in spec.publish:
         lines.append(f"PublishPort={port}")
+    for device in spec.gpu_devices:
+        lines.append(f"AddDevice={device}")
     if spec.auto_update:
         lines.append(f"AutoUpdate={spec.auto_update}")
     lines.append("")

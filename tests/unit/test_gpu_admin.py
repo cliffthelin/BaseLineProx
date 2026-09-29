@@ -24,13 +24,16 @@ P40_ADDR = "0000:05:00.0"
 
 class FakeGpuRunner:
     def __init__(self, *, lspci_output=REAL_LSPCI_OUTPUT, paths=None, dirs=None,
-                 realpaths=None, which_map=None, cat_files=None):
+                 realpaths=None, which_map=None, cat_files=None, nvidia_smi_output=None,
+                 nvidia_smi_returncode=0):
         self.lspci_output = lspci_output
         self.paths = paths or set()
         self.dirs = dirs or {}
         self.realpaths = realpaths or {}
         self.which_map = which_map or {}
         self.cat_files = cat_files or {}
+        self.nvidia_smi_output = nvidia_smi_output or ""
+        self.nvidia_smi_returncode = nvidia_smi_returncode
 
     def run(self, argv, timeout=10):
         if argv[0] == "lspci":
@@ -40,6 +43,9 @@ class FakeGpuRunner:
             if path in self.cat_files:
                 return ga.GpuProc(0, self.cat_files[path], "")
             return ga.GpuProc(1, "", "No such file or directory")
+        if argv[0] == "nvidia-smi":
+            return ga.GpuProc(self.nvidia_smi_returncode, self.nvidia_smi_output,
+                               "" if self.nvidia_smi_returncode == 0 else "nvidia-smi not found")
         raise AssertionError(f"unexpected command: {argv}")
 
     def path_exists(self, path):
@@ -325,3 +331,68 @@ def test_list_gpus_with_modes_includes_current_mode_and_evidence():
     assert listing[P40_ADDR]["current_mode"] == ga.VGPU_MDEV_SPLIT
     assert listing[RTX_3070_ADDR]["current_mode"] is None
     assert any(m["mode"] == ga.HOST_DISPLAY for m in listing[RTX_3070_ADDR]["modes"])
+
+
+# -- resolve_container_devices (decision record 96: quadlet.py GPU
+# wiring) - real device-string resolution, never a raw guess. --------
+
+def test_pci_suffix_normalizes_the_domain_digit_count_difference():
+    """lspci uses a 4-hex-digit domain (0000:01:00.0); nvidia-smi
+    reports an 8-hex-digit domain for the exact same real device
+    (00000000:01:00.0) - confirmed against this session's own real
+    hardware. Both must normalize to the same bus:device.function."""
+    assert ga._pci_suffix("0000:01:00.0") == ga._pci_suffix("00000000:01:00.0")
+    assert ga._pci_suffix("0000:01:00.0") == "01:00.0"
+
+
+REAL_NVIDIA_SMI_OUTPUT = (
+    "00000000:01:00.0, GPU-9a55e41f-c22b-755a-fb37-a620504d5d85, 0\n"
+    "00000000:05:00.0, GPU-cb3c914b-d388-318f-66b4-4037b4cfa0ce, 1\n"
+)
+
+
+def test_nvidia_cdi_device_resolves_the_real_uuid_for_this_exact_device():
+    runner = _real_machine_runner(nvidia_smi_output=REAL_NVIDIA_SMI_OUTPUT)
+    device = next(d for d in ga.detect_gpus(runner) if d.pci_address == P40_ADDR)
+    assert ga._nvidia_cdi_device(runner, device) == "nvidia.com/gpu=GPU-cb3c914b-d388-318f-66b4-4037b4cfa0ce"
+
+
+def test_nvidia_cdi_device_returns_none_when_nvidia_smi_unavailable():
+    runner = _real_machine_runner(nvidia_smi_returncode=1)
+    device = next(d for d in ga.detect_gpus(runner) if d.pci_address == P40_ADDR)
+    assert ga._nvidia_cdi_device(runner, device) is None
+
+
+def test_resolve_container_devices_uses_the_real_cdi_uuid_for_nvidia():
+    runner = _real_machine_runner(nvidia_smi_output=REAL_NVIDIA_SMI_OUTPUT)
+    device = next(d for d in ga.detect_gpus(runner) if d.pci_address == P40_ADDR)
+    assert ga.resolve_container_devices(runner, device) == [
+        "nvidia.com/gpu=GPU-cb3c914b-d388-318f-66b4-4037b4cfa0ce"]
+
+
+def test_resolve_container_devices_falls_back_to_render_node_when_nvidia_smi_cant_resolve():
+    runner = _real_machine_runner(nvidia_smi_returncode=1)
+    device = next(d for d in ga.detect_gpus(runner) if d.pci_address == P40_ADDR)
+    assert ga.resolve_container_devices(runner, device) == ["/dev/dri/renderD129"]
+
+
+def test_resolve_container_devices_uses_render_node_directly_for_non_nvidia():
+    runner = _real_machine_runner(
+        lspci_output='0000:10:00.0 "VGA compatible controller [0300]" "Advanced Micro Devices, Inc. [AMD] [1022]" '
+                     '"Raphael [1002]" -ra1 -p00 "" ""\n',
+        dirs={"/sys/class/drm": ["renderD130"]},
+        paths={"/sys/class/drm", "/sys/class/drm/renderD130/device"},
+        realpaths={"/sys/class/drm/renderD130/device": "/sys/devices/pci0000:00/.../0000:10:00.0"},
+    )
+    device = ga.detect_gpus(runner)[0]
+    assert ga.resolve_container_devices(runner, device) == ["/dev/dri/renderD130"]
+
+
+def test_resolve_container_devices_returns_empty_when_no_render_node_and_not_nvidia_resolvable():
+    runner = _real_machine_runner(
+        lspci_output='0000:10:00.0 "VGA compatible controller [0300]" "Advanced Micro Devices, Inc. [AMD] [1022]" '
+                     '"Raphael [1002]" -ra1 -p00 "" ""\n',
+        dirs={"/sys/class/drm": []},
+    )
+    device = ga.detect_gpus(runner)[0]
+    assert ga.resolve_container_devices(runner, device) == []

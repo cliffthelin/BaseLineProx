@@ -264,6 +264,55 @@ def available_modes(runner: Runner, device: GpuDevice) -> list:
     return results
 
 
+def _pci_suffix(pci_address: str) -> str:
+    """Normalizes away PCI *domain* representation differences - lspci
+    (and this module's own `pci_address`) uses a 4-hex-digit domain
+    (`0000:01:00.0`); `nvidia-smi` reports an 8-hex-digit domain for
+    the exact same real device (`00000000:01:00.0`). Compares by
+    `bus:device.function` only, confirmed against this session's own
+    real hardware (both forms resolve to the same `01:00.0`)."""
+    parts = pci_address.split(":")
+    return ":".join(parts[-2:])
+
+
+def _nvidia_cdi_device(runner: Runner, device: GpuDevice) -> str | None:
+    """Real, verifiable lookup: `nvidia-smi --query-gpu=pci.bus_id,uuid`
+    maps this exact device to its own UUID, which is a stable CDI
+    device identifier (`nvidia.com/gpu=<uuid>`) Podman's `--device`
+    flag accepts directly - confirmed against this session's own real
+    P40/3070 (`nvidia-smi` is present even without the NVIDIA Container
+    Toolkit's own CDI-spec generation). Returns None, never a guess,
+    when `nvidia-smi` isn't present or doesn't report this device."""
+    proc = runner.run(["nvidia-smi", "--query-gpu=pci.bus_id,uuid", "--format=csv,noheader"], timeout=15)
+    if proc.returncode != 0:
+        return None
+    target = _pci_suffix(device.pci_address)
+    for line in proc.stdout.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 2:
+            continue
+        bus_id, uuid = parts[0], parts[1]
+        if _pci_suffix(bus_id) == target:
+            return f"nvidia.com/gpu={uuid}"
+    return None
+
+
+def resolve_container_devices(runner: Runner, device: GpuDevice) -> list:
+    """The real device string(s) `quadlet.py`'s `ContainerSpec.gpu_devices`
+    needs for `container_passthrough` mode on this specific device -
+    never a raw path the caller has to know how to construct. NVIDIA:
+    a real, verified CDI identifier for this exact card when
+    `nvidia-smi` can resolve one; falls back to the render node alone
+    (graphics-only, not full CUDA capability) when it can't, rather
+    than asserting an unverified CDI string. Non-NVIDIA: the render
+    node is genuinely sufficient - no vendor-specific runtime needed."""
+    if "nvidia" in device.vendor.lower():
+        cdi = _nvidia_cdi_device(runner, device)
+        if cdi is not None:
+            return [cdi]
+    return [device.render_node] if device.render_node else []
+
+
 # ---------------------------------------------------------------------------
 # Storage - registry.py directly (GLOBAL scope, dynamic per-device
 # entries), same reasoning as network.py's interface aliases: the set

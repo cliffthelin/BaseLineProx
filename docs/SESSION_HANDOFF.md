@@ -1,5 +1,17 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - GPU device wiring on quadlet.py's ContainerSpec
+
+**Read decision record 96 first** (`docs/design/decision-records/96-gpu-device-wiring-quadlet.md`).
+
+v0.2 queue item 19: `ContainerSpec` gained `gpu_devices: list[str]` (rendered as `AddDevice=` lines); `gpu_admin.resolve_container_devices` does the real resolution - a render node for non-NVIDIA, a real `nvidia-smi`-verified CDI UUID for NVIDIA (falls back to the render node alone if `nvidia-smi` can't resolve one, never asserts an unverified CDI string). Found and fixed a real bug along the way: `nvidia-smi` reports an 8-hex-digit PCI domain, `lspci`/`gpu_admin.py`'s own `pci_address` uses 4 hex digits for the same real device - a naive string match would never have matched; fixed with a real domain-normalizing comparison.
+
+Verified for real: `resolve_container_devices` correctly resolved both this machine's real GPUs (P40 and RTX 3070) to their distinct real CDI UUIDs, and `quadlet.generate_unit` produced a genuine, well-formed `.container` file ready to write.
+
+Full suite: 1465/1465 (was 1454).
+
+**Not yet verified**: no container has actually been started with this wiring against real Podman - the NVIDIA Container Toolkit (`nvidia-ctk`) still isn't installed on this machine (confirmed in decision record 94), so the CDI identifier is real and verified, but Podman actually honoring it at container-start time hasn't been observed.
+
 ## 2026-09-28 continuation - each settings group is now its own registry type
 
 **Read decision record 95 first** (`docs/design/decision-records/95-per-group-settings-registrar.md`).

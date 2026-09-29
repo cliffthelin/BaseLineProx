@@ -39,6 +39,37 @@ def test_generate_unit_includes_all_optional_fields():
     assert "AutoUpdate=registry" in content
 
 
+def test_generate_unit_includes_gpu_devices():
+    """Decision record 96: gpu_devices takes already-resolved device
+    strings (a render node path, or a real CDI identifier) - never a
+    raw guess constructed inside generate_unit itself."""
+    spec = ContainerSpec(name="llm", image="localhost/llama-server:latest",
+                          gpu_devices=["nvidia.com/gpu=GPU-cb3c914b-d388-318f-66b4-4037b4cfa0ce"])
+    content = quadlet.generate_unit(spec)
+    assert "AddDevice=nvidia.com/gpu=GPU-cb3c914b-d388-318f-66b4-4037b4cfa0ce" in content
+
+
+def test_generate_unit_includes_a_render_node_device():
+    spec = ContainerSpec(name="transcode", image="localhost/ffmpeg:latest",
+                          gpu_devices=["/dev/dri/renderD128"])
+    content = quadlet.generate_unit(spec)
+    assert "AddDevice=/dev/dri/renderD128" in content
+
+
+def test_generate_unit_supports_multiple_gpu_devices():
+    spec = ContainerSpec(name="multi", image="localhost/x:latest",
+                          gpu_devices=["/dev/dri/renderD128", "/dev/dri/renderD129"])
+    content = quadlet.generate_unit(spec)
+    assert "AddDevice=/dev/dri/renderD128" in content
+    assert "AddDevice=/dev/dri/renderD129" in content
+
+
+def test_generate_unit_omits_add_device_when_no_gpu_devices():
+    spec = ContainerSpec(name="plain", image="localhost/x:latest")
+    content = quadlet.generate_unit(spec)
+    assert "AddDevice=" not in content
+
+
 def test_generate_unit_is_pure_no_io():
     # calling it twice with the same spec must be byte-identical -
     # proof there's no hidden clock/randomness/filesystem read inside.
