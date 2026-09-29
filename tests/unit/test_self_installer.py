@@ -4,6 +4,8 @@ each already-existing module's own test fakes (matching this project's
 cross-test-file reuse precedent, e.g. test_firstboot_statemachine.py
 importing from test_phase0_additive_repair.py) - no real network,
 subprocess, QEMU, or block device anywhere in this file."""
+import tomllib
+
 import self_installer as si
 import drive_setup_answer as dsan
 from test_physical_device_safety import FakeRunner as FakePdsRunner
@@ -11,6 +13,37 @@ from test_drive_setup_acquire import FakeAcquireRunner
 from test_drive_setup_answer import FakeAnswerRunner
 from test_iso_builder import FakeIsoBuilderRunner
 from test_drive_setup_install import FakeInstallRunner
+
+
+# -- Real bug found by the QEMU disposable-install smoke test (decision
+# record 93): Proxmox's own answer-file schema requires
+# lvm.maxroot/maxvz/swapsize as a plain number (f64) - a quoted "40G"
+# string is a hard TOML-schema parse error
+# ("invalid type: string \"40G\", expected f64") that would have
+# failed every real self-installer run. No prior unit test ever
+# actually parsed the rendered answer.toml with a real TOML parser -
+# every one of them used a FakeAnswerRunner that never validated
+# content, only intercepted the call. This test uses tomllib (stdlib)
+# to genuinely parse the rendered template and assert real types,
+# not just string-match for absent quotes. ---------------------------
+
+def test_answer_template_renders_lvm_sizes_as_real_numbers_not_quoted_strings():
+    for preset in si.LVM_SIZE_PRESETS.values():
+        rendered = si.ANSWER_TEMPLATE.format(
+            fqdn="baseline.local", password_hash="$6$x$y", disk_serial="ABC123", **preset,
+        )
+        parsed = tomllib.loads(rendered)
+        disk_setup = parsed["disk-setup"]
+        assert isinstance(disk_setup["lvm"]["maxroot"], (int, float))
+        assert isinstance(disk_setup["lvm"]["maxvz"], (int, float))
+        assert isinstance(disk_setup["lvm"]["swapsize"], (int, float))
+        assert disk_setup["lvm"]["maxroot"] == preset["lvm_maxroot"]
+
+
+def test_lvm_size_presets_are_plain_numbers_not_g_suffixed_strings():
+    for preset in si.LVM_SIZE_PRESETS.values():
+        for key in ("lvm_maxroot", "lvm_maxvz", "lvm_swapsize"):
+            assert isinstance(preset[key], (int, float)), f"{key} must be a real number, not {preset[key]!r}"
 
 
 REAL_SERIAL = "FD01N6557110C271B"

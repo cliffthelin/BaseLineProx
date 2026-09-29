@@ -81,19 +81,28 @@ source = "from-dhcp"
 [disk-setup]
 filesystem = "ext4"
 filter.ID_SERIAL_SHORT = "{disk_serial}"
-lvm.maxroot = "{lvm_maxroot}"
-lvm.maxvz = "{lvm_maxvz}"
-lvm.swapsize = "{lvm_swapsize}"
+lvm.maxroot = {lvm_maxroot}
+lvm.maxvz = {lvm_maxvz}
+lvm.swapsize = {lvm_swapsize}
 """
 
 
 # Matches settings_store.py's "self_installer.lvm_size_preset" options
 # exactly - the pre-populated, dropdown-selected sizing an operator
 # chose ahead of time on the Admin tab, never typed at install time.
+#
+# Plain numbers (GB), never a quoted "NNG" string - real bug found by
+# the QEMU disposable-install smoke test (decision record 93): Proxmox's
+# own answer-file schema requires lvm.maxroot/maxvz/swapsize as f64,
+# and a quoted string value there is a hard TOML-schema parse error
+# ("invalid type: string \"40G\", expected f64") that would have failed
+# every real self-installer run - invisible to every prior unit test,
+# since none of them ever ran the real assistant binary's own
+# `validate-answer`/`prepare-iso` against the actual generated TOML.
 LVM_SIZE_PRESETS = {
-    "small": dict(lvm_maxroot="20G", lvm_maxvz="30G", lvm_swapsize="2G"),
-    "medium": dict(lvm_maxroot="40G", lvm_maxvz="60G", lvm_swapsize="4G"),
-    "large": dict(lvm_maxroot="80G", lvm_maxvz="120G", lvm_swapsize="8G"),
+    "small": dict(lvm_maxroot=20, lvm_maxvz=30, lvm_swapsize=2),
+    "medium": dict(lvm_maxroot=40, lvm_maxvz=60, lvm_swapsize=4),
+    "large": dict(lvm_maxroot=80, lvm_maxvz=120, lvm_swapsize=8),
 }
 
 # The QEMU-launched installer always reaches the host through SLIRP's
@@ -166,9 +175,9 @@ def build_and_write_self_installer(
     key_path: Path | None = None,
     server_port: int = 8443,
     fqdn: str = "baseline.local",
-    lvm_maxroot: str = "40G",
-    lvm_maxvz: str = "60G",
-    lvm_swapsize: str = "4G",
+    lvm_maxroot: int = 40,
+    lvm_maxvz: int = 60,
+    lvm_swapsize: int = 4,
     target_mac: str | None = None,
     target_dmi_product: str | None = None,
     memory_mb: int = 3072,

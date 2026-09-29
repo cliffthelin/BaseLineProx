@@ -1,5 +1,19 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - QEMU disposable-install smoke test finds a real, would-have-shipped bug
+
+**Read decision record 93 first** (`docs/design/decision-records/93-qemu-smoke-test-for-settings-migration.md`).
+
+Asked to run the QEMU disposable-install smoke test against the settings-to-SQL migration changes. Found a real bug on the first attempt: `self_installer.ANSWER_TEMPLATE` rendered `lvm.maxroot`/`maxvz`/`swapsize` as quoted strings (`"40G"`), but Proxmox's real answer-file schema requires them as plain numbers - a hard TOML parse error (`invalid type: string "40G", expected f64`) that would have failed **every** real self-installer run, on real hardware or under QEMU. No unit test ever caught this because they all mock the assistant binary and never validate the rendered TOML against its real parser.
+
+Fixed: `ANSWER_TEMPLATE` unquoted, `LVM_SIZE_PRESETS` changed from `"20G"`/`"40G"`/`"80G"`-style strings to plain ints. New test actually parses the rendered template with `tomllib` and asserts real numeric types - not a string match, a genuine schema-shaped check.
+
+Re-ran the real QEMU install end-to-end: real pre-install dependency gate → real settings resolved from the real database (`export_bootstrap_snapshot`) → valid answer.toml → real Proxmox install (watched package extraction 60%→99%) → hit the known decision-record-04 reboot-loop trap (caught a throwaway driver-script polling gap that let it reinstall once before recovering) → real post-install boot → **`baseline login:`**, the exact `fqdn` value that came from the real database three steps earlier. Direct, literal, first-hand proof the whole migrated chain works.
+
+Full suite: 1422/1422 (was 1420). Disposable QEMU artifacts (8.3GB disk image, 1.6GB ISO) deleted after verification.
+
+**Separate finding, not yet acted on**: while working, noticed a QEMU process has been running against the real `/dev/sdd` since Sep 26 (`-smbios type=1,product=baseline-real-sdd`, VNC display active) - looks like a leftover, possibly-abandoned real self-installer attempt from an earlier session still holding that physical drive open. Not touched or killed - flagged for the user to check, since it's real hardware and not something to act on unilaterally.
+
 ## 2026-09-28 continuation - real /etc/baseline confirms the PROTECTED-scope path end-to-end
 
 **Read decision record 92** (`docs/design/decision-records/92-etc-baseline-production-verification.md`) - closes decision record 91's one open item.
