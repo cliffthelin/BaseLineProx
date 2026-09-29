@@ -17,6 +17,20 @@ enforcement, `is_secret_ref` vault-reference enforcement); `registry.py`
 owns the generic storage and the GLOBAL/PROTECTED scope split - see
 its own module docstring for why there are two physical databases.
 
+**Each settings *group* is its own registry type (decision record 95),
+not one shared `"settings"` type** - direct instruction: this module
+was "too broad," centralizing every domain (sessions, startup, volumes,
+self_installer, network, ...) under one opaque type while
+`dependencies.py`/`gpu_admin.py` each get their own real, independently-
+visible registry type. `settings_store.py` itself is no longer a
+registrar at all - it's shared validation machinery
+(`SettingDef`/`register_schema`/options-enforcement/`is_secret_ref`)
+that any domain reuses; the actual `registry.py` `type_id` for a given
+setting is that setting's own `group` (so `"sessions"`, `"self_installer"`,
+`"network"`, etc. each show up on their own in `registry_types`,
+answering "what level does it have settings at" by construction rather
+than requiring a reader to parse a composite entry_id).
+
 `get_setting` always returns a real value - the schema default when
 nothing's been explicitly set, never `None`/missing - so callers never
 need a second "is this configured yet" check.
@@ -39,8 +53,6 @@ import registry
 # exact constant - importing it here keeps one source of truth for the
 # path, not two.
 DEFAULT_DB_PATH = "/etc/baseline/settings/master_config.db"
-
-TYPE_ID = "settings"
 
 
 @dataclass(frozen=True)
@@ -175,10 +187,6 @@ def settings_in_group(group: str) -> list:
     return [s for s in _REGISTRY if s.group == group]
 
 
-def _entry_id(group: str, key: str) -> str:
-    return f"{group}.{key}"
-
-
 def _sync_definition(d: SettingDef) -> None:
     """Keeps this setting's own definition current in the registry -
     real, queryable "what is in place" (attributes: default/options/
@@ -190,17 +198,19 @@ def _sync_definition(d: SettingDef) -> None:
     the default paths (the same class of bug already found once in
     dependencies.py's run_checks).
 
-    Registers the type using THIS entry's own scope, not a hardcoded
-    default - found as a real bug by actually running a health check
-    for real: hardcoding PROTECTED here meant reading the GLOBAL
-    `startup.auto_start_persona` setting would still try to reach the
-    PROTECTED (USER_PERSISTENCE-redirected) database just to register
-    the type's description, and fail if that volume is unavailable -
-    exactly the scenario a GLOBAL setting exists to survive."""
-    registry.register_type(TYPE_ID, "User/OS/application preferences (settings_store.py)",
-                            default_scope=d.scope)
+    The registry `type_id` is this setting's own `group` (decision
+    record 95) - not a shared "settings" constant - so each group shows
+    up as its own real, independently-visible registry type, matching
+    `dependencies`/`gpu_devices`. Registers using THIS entry's own
+    scope, not a hardcoded default - found as a real bug once already
+    (decision record 90): hardcoding PROTECTED here meant reading a
+    GLOBAL setting would still try to reach the PROTECTED
+    (USER_PERSISTENCE-redirected) database just to register the type's
+    description, and fail if that volume is unavailable - exactly the
+    scenario a GLOBAL setting exists to survive."""
+    registry.register_type(d.group, f"Settings group {d.group!r} (settings_store.py)", default_scope=d.scope)
     registry.upsert_entry(
-        TYPE_ID, _entry_id(d.group, d.key), scope=d.scope,
+        d.group, d.key, scope=d.scope,
         attributes={"default": d.default, "description": d.description,
                     "options": list(d.options) if d.options is not None else None,
                     "is_secret_ref": d.is_secret_ref},
@@ -213,7 +223,7 @@ def get_setting(group: str, key: str):
         raise KeyError(f"unknown setting {group}.{key}")
     definition = schema_map[(group, key)]
     _sync_definition(definition)
-    entry = registry.get_entry(TYPE_ID, _entry_id(group, key), scope=definition.scope)
+    entry = registry.get_entry(group, key, scope=definition.scope)
     if entry is None or entry["value"] is None:
         return definition.default
     return entry["value"]
@@ -233,23 +243,27 @@ def set_setting(group: str, key: str, value) -> None:
                 f"{group}.{key} holds a vault reference, not a raw value - must start with "
                 f"one of {SECRET_REF_SCHEMES!r}, got {value!r}")
     _sync_definition(definition)
-    registry.set_value(TYPE_ID, _entry_id(group, key), value, scope=definition.scope)
+    registry.set_value(group, key, value, scope=definition.scope)
 
 
 def all_effective_settings() -> dict:
     """Every schema-defined setting's current effective value (stored
     override or schema default), grouped - what an Admin settings tab
     would render, without needing to know the storage format. One
-    `list_entries` call per scope actually in use (at most two - GLOBAL
-    and PROTECTED), not one query per setting."""
+    `list_entries` call per (group, scope) actually in use - at most
+    two scopes per group (GLOBAL/PROTECTED can both appear within one
+    group in principle, though no built-in group currently mixes
+    them), never one query per individual setting."""
     for d in _REGISTRY:
         _sync_definition(d)
-    by_scope: dict = {}
-    for scope in {d.scope for d in _REGISTRY}:
-        by_scope[scope] = registry.list_entries(TYPE_ID, scope=scope)
+    by_group_scope: dict = {}
+    for group in group_names():
+        scopes_in_group = {s.scope for s in settings_in_group(group)}
+        for scope in scopes_in_group:
+            by_group_scope[(group, scope)] = registry.list_entries(group, scope=scope)
     result: dict = {}
     for s in _REGISTRY:
-        entry = by_scope[s.scope].get(_entry_id(s.group, s.key))
+        entry = by_group_scope[(s.group, s.scope)].get(s.key)
         value = entry["value"] if entry is not None and entry["value"] is not None else s.default
         result.setdefault(s.group, {})[s.key] = value
     return result

@@ -1,5 +1,13 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## 2026-09-28 continuation - each settings group is now its own registry type
+
+**Read decision record 95 first** (`docs/design/decision-records/95-per-group-settings-registrar.md`).
+
+Direct instruction, flagged mid-`gpu_admin.py`-build: `settings_store.py` centralized every domain (sessions/startup/volumes/self_installer/network) under one shared `registry.py` type (`"settings"`), unlike `dependencies`/`gpu_devices` which each get their own. Fixed: each settings *group* is now its own real registry type; `settings_store.py` is no longer a registrar itself, just shared validation machinery (`SettingDef`, options/`is_secret_ref` enforcement, defaults) any domain reuses. Verified for real against both live databases - `network`/`self_installer`/`startup` etc. each show up as their own distinct `registry_types` row now. Public API unchanged; only one test helper (which had hardcoded the old shared type_id shape) needed updating.
+
+Full suite: 1454/1454 (was 1452).
+
 ## 2026-09-28 continuation - GPU Administration: real detection, never auto-decided mode
 
 **Read decision record 94 first** (`docs/design/decision-records/94-gpu-administration-detection.md`).

@@ -597,9 +597,11 @@ def _corrupt_lvm_size_preset_directly():
     other way (an old schema version, a manual edit), which is exactly
     the real-world case decision record 88's dependency check exists
     to catch. Writes directly into registry.py's own PROTECTED-scope
-    database (self_installer.lvm_size_preset's real scope)."""
+    database, under the "self_installer" group's own registry type
+    (decision record 95 - each settings group is its own type now, not
+    a shared "settings" type)."""
     import registry
-    registry.upsert_entry("settings", "self_installer.lvm_size_preset",
+    registry.upsert_entry("self_installer", "lvm_size_preset",
                            attributes={"default": "medium"}, scope=registry.PROTECTED, value="gigantic")
 
 

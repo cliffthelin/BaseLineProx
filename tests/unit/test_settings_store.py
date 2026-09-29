@@ -8,6 +8,32 @@ disposable file - no Runner/fake needed, matching this module's own
 import settings_store as ss
 
 
+# -- decision record 95: each settings group is its own registry type,
+# not one shared "settings" type - the real property this refactor was
+# for, proven directly against the actual registry tables. -----------
+
+def test_each_settings_group_is_its_own_real_registry_type_not_one_shared_settings_type():
+    import registry
+    import sqlite3
+    ss.set_setting("sessions", "default_session_ttl_hours", 8)
+    ss.set_setting("self_installer", "fqdn", "baseline.lan")
+    with sqlite3.connect(ss.DEFAULT_DB_PATH) as conn:
+        type_ids = {row[0] for row in conn.execute("SELECT DISTINCT type_id FROM registry_types")}
+    assert "sessions" in type_ids
+    assert "self_installer" in type_ids
+    assert "settings" not in type_ids  # the old, shared, now-retired type_id
+
+
+def test_a_groups_entries_land_under_that_groups_own_type_id_in_the_real_db():
+    import sqlite3
+    ss.set_setting("volumes", "baseline_mode", "read-only")
+    with sqlite3.connect(ss.DEFAULT_DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT type_id, entry_id FROM registry_entries WHERE type_id = 'volumes' AND entry_id = 'baseline_mode'"
+        ).fetchone()
+    assert row == ("volumes", "baseline_mode")
+
+
 def test_group_names_lists_every_real_group_at_least_once():
     names = ss.group_names()
     assert "sessions" in names
