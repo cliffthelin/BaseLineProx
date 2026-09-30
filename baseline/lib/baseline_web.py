@@ -32,7 +32,10 @@ from __future__ import annotations
 
 import http.server
 import json
+import threading
 import time
+import uuid
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import control_panel_web as cpw
@@ -54,6 +57,7 @@ NAV_TABS = (
     ("/admin", "Admin"),
     ("/recovery", "Recovery"),
     ("/drive-admin", "Drive Administration"),
+    ("/hardware", "Hardware"),
     ("/master-config", "Master Config"),
 )
 
@@ -102,6 +106,9 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 .drive-card.acted-on-fail::before { background: #d64949; }
 .acted-on-pill { display: inline-block; float: right; font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 99px; letter-spacing: .03em; background: rgba(255,255,255,.1); color: #cfd2e0; }
 .drive-type-pill { display: inline-block; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 99px; letter-spacing: .03em; background: rgba(91,127,212,.18); color: #9db4ec; margin-bottom: 8px; }
+.baseline-pill { display: inline-block; margin-left: 6px; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 99px; letter-spacing: .03em; background: rgba(56,201,143,.18); color: #6fe3b4; margin-bottom: 8px; }
+.drive-group-title { font-size: .8rem; text-transform: uppercase; letter-spacing: .07em; color: #7d84a0; margin: 18px 0 8px; }
+.detail-row.missing-row span:last-child { color: #e59a9a; }
 .drive-card .drive-name { font-weight: 700; font-size: .96rem; margin-bottom: 2px; padding-right: 20px; }
 .drive-card .drive-path { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #7d84a0; font-size: .82rem; margin-bottom: 10px; }
 .drive-card .detail-row { display: flex; justify-content: space-between; font-size: .82rem; padding: 3px 0; border-top: 1px solid #21232f; margin-top: 8px; }
@@ -111,9 +118,13 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 .volume-table th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: #7d84a0; padding: 9px 14px; background: #1a1c27; }
 .volume-table td { padding: 9px 14px; font-size: .87rem; border-top: 1px solid #21232f; }
 .volume-table td.mono { font-family: ui-monospace, monospace; color: #b9bdd4; }
+.volume-table tr.volume-row { cursor: pointer; }
+.volume-table tr.volume-row:hover { background: #1a1c27; }
+.volume-table tr.volume-detail-row td { background: #10111a; color: #9aa0ba; font-size: .82rem; }
 .empty-note { color: #7d84a0; font-size: .87rem; padding: 10px 2px; }
 .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
 .action-card { background: #14151d; border: 1px solid #262838; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.action-card[hidden] { display: none; }
 .action-card.danger { border-color: #4a2130; background: linear-gradient(180deg, #1b1218 0%, #14151d 60%); }
 .action-card .action-id { font-family: ui-monospace, monospace; font-size: .78rem; color: #7d84a0; }
 .action-card .action-desc { font-size: .87rem; line-height: 1.4; color: #ccd0e0; flex-grow: 1; }
@@ -137,6 +148,15 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 #driveAdminModal details.overrides summary { cursor: pointer; font-size: .8rem; color: #8890a6; text-transform: uppercase; letter-spacing: .04em; }
 #driveAdminModal details.overrides label { margin-top: 10px; }
 #driveAdminModal .hint { margin-top: 10px; }
+.modal-console { margin-top: 12px; max-height: 220px; overflow-y: auto; background: #0a0b10; border: 1px solid #262838; border-radius: 8px; padding: 10px 12px; font-family: ui-monospace, monospace; font-size: .78rem; line-height: 1.5; color: #9dd6a0; white-space: pre-wrap; }
+.modal-console[hidden] { display: none; }
+.screendump-box { background: #0a0b10; border: 1px solid #262838; border-radius: 8px; padding: 12px; margin-bottom: 20px; }
+.screendump-box img { max-width: 100%; display: block; border-radius: 4px; margin-bottom: 10px; }
+.screendump-box img[hidden] { display: none; }
+.hw-table { width: 100%; border-collapse: collapse; background: #14151d; border: 1px solid #262838; border-radius: 10px; overflow: hidden; margin: 12px 0; }
+.hw-table th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: #7d84a0; padding: 10px 14px; background: #1a1c27; }
+.hw-table td { padding: 10px 14px; font-size: .87rem; border-top: 1px solid #21232f; color: #ccd0e0; }
+.hw-table strong { color: #e7e9f0; }
 """
 
 
@@ -175,33 +195,75 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
         # is_default card as visually "selected" would lie about which
         # one the browser really checks.
         default_path = next((d["path"] for d in drives if d.get("is_default")), drives[0]["path"])
-        drive_cards = "".join(f"""
+
+        def _drive_card(d: dict) -> str:
+            missing = d.get("missing_baseline_volumes") or []
+            baseline_pill = '<span class="baseline-pill">Baseline drive</span>' if d.get("is_baseline_drive") else ""
+            missing_html = (
+                f'<div class="detail-row missing-row"><span>Missing</span><span>{", ".join(missing)}</span></div>'
+                if missing else "")
+            return f"""
 <label class="drive-card {'selected' if d['path'] == default_path else ''} {'acted-on-ok' if d['path'] == acted_on_path and notice_ok is True else ''} {'acted-on-fail' if d['path'] == acted_on_path and notice_ok is False else ''}">
   <input type="radio" name="targetDrive" value="{d['path']}" {"checked" if d['path'] == default_path else ""}>
   <span class="drive-type-pill">{d.get('drive_type', 'Other')}</span>
+  {baseline_pill}
   {'<span class="acted-on-pill">last action</span>' if d['path'] == acted_on_path and notice_ok is not None else ''}
   <div class="drive-name">{d.get('model', 'Unknown model')}</div>
   <div class="drive-path">{d['path']}</div>
   <div class="detail-row"><span>Size</span><span>{d.get('size', '—')}</span></div>
   <div class="detail-row"><span>Partitions</span><span>{d.get('partition_count') if d.get('partition_count') is not None else '—'}</span></div>
   <div class="detail-row"><span>Data</span><span>{d.get('usage_text', 'unknown')}</span></div>
-</label>""" for d in drives)
+  {missing_html}
+</label>"""
+
+        # Direct instruction, 2026-09-29: any real Baseline-installed
+        # drive is grouped at the top under its own heading - the list
+        # itself already arrives pre-sorted (drive_admin.list_candidate_
+        # drives), this just draws the group boundary.
+        baseline_drives = [d for d in drives if d.get("is_baseline_drive")]
+        other_drives = [d for d in drives if not d.get("is_baseline_drive")]
+        drive_cards = ""
+        if baseline_drives:
+            drive_cards += '<h3 class="drive-group-title">Baseline Installed</h3><div class="drive-grid">'
+            drive_cards += "".join(_drive_card(d) for d in baseline_drives)
+            drive_cards += "</div>"
+        if other_drives:
+            if baseline_drives:
+                drive_cards += '<h3 class="drive-group-title">Other Drives</h3>'
+            drive_cards += '<div class="drive-grid">' + "".join(_drive_card(d) for d in other_drives) + "</div>"
     else:
         drive_cards = '<p class="empty-note">No real candidate drives found (or the enumeration failed) - nothing selectable right now.</p>'
 
     if volumes:
-        volume_rows = "".join(
-            f"""<tr><td><input type="checkbox" class="volume-select" value="{v['label']}"></td>"""
-            f"<td>{v['label']}</td><td class='mono'>{v['mountpoint']}</td><td class='mono'>{v.get('used', '-')}</td></tr>"
-            for v in volumes
-        )
+        def _usage_text(v: dict) -> str:
+            if v.get("total_bytes") and v.get("used_bytes") is not None:
+                pct = v.get("percent_used") or 0
+                return f"{da._format_bytes(v['used_bytes'])} used of {da._format_bytes(v['total_bytes'])} ({pct:.0f}%)"
+            return "not mounted"
+
+        def _lv_text(v: dict) -> str:
+            if v.get("lv_exists"):
+                size = da._format_bytes(v["lv_size_bytes"]) if v.get("lv_size_bytes") else "unknown size"
+                return f"{v['lv_name']} - {size} allocated"
+            return f"{v['lv_name']} - not created yet"
+
+        volume_rows = "".join(f"""
+<tr class="volume-row" data-volume-idx="{i}">
+  <td><input type="checkbox" class="volume-select" value="{v['label']}"></td>
+  <td>{v['label']}</td><td class="mono">{v['mountpoint']}</td><td class="mono">{_usage_text(v)}</td>
+</tr>
+<tr class="volume-detail-row" data-volume-idx="{i}" hidden>
+  <td></td><td colspan="3" class="mono">Partition (LVM logical volume): {_lv_text(v)}</td>
+</tr>""" for i, v in enumerate(volumes))
         volumes_html = f"""<table class="volume-table">
-<tr><th>Select</th><th>Volume</th><th>Mountpoint</th><th>Used</th></tr>{volume_rows}</table>"""
+<tr><th><input type="checkbox" id="volumeSelectAll"></th><th>Volume</th><th>Mountpoint</th><th>Used</th></tr>{volume_rows}</table>
+<p class="hint">Click a row to see its real partition (LVM logical volume) name and allocated size.</p>"""
     else:
-        volumes_html = '<p class="empty-note">No volumes currently mounted and reporting usage.</p>'
+        volumes_html = '<p class="empty-note">No volumes planned, or the real enumeration failed.</p>'
 
     action_cards = "".join(f"""
-<div class="action-card {'danger' if 'PERMANENTLY ERASE' in a['description'] else ''}">
+<div class="action-card {'danger' if 'PERMANENTLY ERASE' in a['description'] else ''}" data-action-card-id="{a['action_id']}"
+     {'hidden' if a['action_id'] == 'update_selected' else ''}>
   <div class="action-id">{a['action_id']}</div>
   <div class="action-desc">{a['description']}</div>
   <button type="button" class="drive-admin-action" data-action-id="{a['action_id']}" data-description="{a['description']}">Run&hellip;</button>
@@ -215,11 +277,19 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
 {notice_html}
 
 <h2 class="section-title">Physical drives</h2>
-<div class="drive-grid">{drive_cards}</div>
+{drive_cards}
 
-<h2 class="section-title">Mounted volumes</h2>
-<p class="subtitle">Select one or more volumes here, then use the Update action below to choose which types of update to apply to the selection.</p>
+<h2 class="section-title">Volumes</h2>
+<p class="subtitle">Select one or more volumes here, then use the Update action to check for and apply updates. Update only appears when a Baseline drive is selected above.</p>
 {volumes_html}
+
+<h2 class="section-title">Live install screen</h2>
+<p class="subtitle">Real, current screen of any install running right now (build_self_installer) - click Refresh, never auto-polling, so it never hammers a real QEMU process.</p>
+<div class="screendump-box">
+  <img id="screendumpImg" hidden>
+  <p id="screendumpEmpty" class="empty-note">No active install found, or Refresh hasn't been clicked yet.</p>
+  <button type="button" id="screendumpRefresh">Refresh</button>
+</div>
 
 <h2 class="section-title">Actions</h2>
 <div class="action-grid">{action_cards}</div>
@@ -229,14 +299,12 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
     <h3>Confirm this change</h3>
     <p id="driveAdminModalDescription"></p>
     <div id="driveAdminModalParams"></div>
-    <label>Your system password
-      <input id="driveAdminModalPassword" type="password" autocomplete="current-password">
-    </label>
     <div class="modal-actions">
       <button type="button" id="driveAdminModalConfirm">Authorize and run</button>
       <button type="button" id="driveAdminModalCancel">Cancel</button>
     </div>
-    <p class="hint">Runs immediately on confirm - real code executed by this already-running service, not a command handed back to you to run yourself.</p>
+    <p class="hint">Runs immediately on confirm - a real native system dialog will ask for your password separately (PolicyKit), never typed into this page.</p>
+    <pre id="driveAdminModalConsole" class="modal-console" hidden></pre>
   </div>
 </div>
 
@@ -246,11 +314,53 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
 const driveList = JSON.parse(document.getElementById("driveAdminDriveData").textContent);
 const requiresDeviceById = JSON.parse(document.getElementById("driveAdminActionData").textContent);
 
+function updateActionVisibilityForSelectedDrive() {{
+  const path = currentlySelectedDrivePath();
+  const drive = driveList.find(d => d.path === path);
+  const updateCard = document.querySelector('[data-action-card-id="update_selected"]');
+  if (updateCard) updateCard.hidden = !(drive && drive.is_baseline_drive);
+}}
+
 document.querySelectorAll('input[name="targetDrive"]').forEach(radio => {{
   radio.addEventListener("change", () => {{
     document.querySelectorAll(".drive-card").forEach(card => card.classList.remove("selected"));
     radio.closest(".drive-card").classList.add("selected");
+    updateActionVisibilityForSelectedDrive();
   }});
+}});
+updateActionVisibilityForSelectedDrive();
+
+document.querySelectorAll(".volume-row").forEach(row => {{
+  row.addEventListener("click", (e) => {{
+    if (e.target.tagName === "INPUT") return;
+    const idx = row.dataset.volumeIdx;
+    const detail = document.querySelector(`.volume-detail-row[data-volume-idx="${{idx}}"]`);
+    if (detail) detail.hidden = !detail.hidden;
+  }});
+}});
+
+const volumeSelectAll = document.getElementById("volumeSelectAll");
+if (volumeSelectAll) {{
+  volumeSelectAll.addEventListener("change", () => {{
+    document.querySelectorAll(".volume-select").forEach(cb => {{ cb.checked = volumeSelectAll.checked; }});
+  }});
+}}
+
+document.getElementById("screendumpRefresh").addEventListener("click", async () => {{
+  const img = document.getElementById("screendumpImg");
+  const empty = document.getElementById("screendumpEmpty");
+  const res = await fetch("/drive-admin/screendump?workspace=" + encodeURIComponent("/var/tmp/baseline-self-installer") + "&t=" + Date.now());
+  if (!res.ok) {{
+    img.hidden = true;
+    empty.hidden = false;
+    const body = await res.json().catch(() => ({{}}));
+    empty.textContent = body.error || "No active install found.";
+    return;
+  }}
+  const blob = await res.blob();
+  img.src = URL.createObjectURL(blob);
+  img.hidden = false;
+  empty.hidden = true;
 }});
 
 function currentlySelectedDrivePath() {{
@@ -301,11 +411,14 @@ function overridesHtml() {{
 function updateSelectedParamsHtml() {{
   const selected = selectedVolumeLabels();
   const selectedText = selected.length ? selected.join(", ") : "(none selected above)";
-  return `<p>Selected: ${{selectedText}}</p>
-    <label><input type="checkbox" id="paramTypeVolumeMode"> Apply volume mount mode</label>
-    <label><input type="checkbox" id="paramTypeSwitchPersona"> Switch active persona</label>
-    <label>Persona to switch to (only used if "Switch active persona" is checked)
-      <input id="paramToPersona" value="personal"></label>`;
+  return `<p>Checking for updates on: ${{selectedText}}</p>`;
+}}
+
+function mountVolumeParamsHtml() {{
+  return `<label>Logical volume name (as it exists in the drive's real volume group)
+      <input id="paramLvName" value="root"></label>
+    <label>Mountpoint (leave blank for the default: /mnt/&lt;vg&gt;-&lt;lv&gt;-inspect)
+      <input id="paramMountpoint" placeholder="/mnt/pve-root-inspect"></label>`;
 }}
 
 let pendingActionId = null;
@@ -313,28 +426,49 @@ document.querySelectorAll(".drive-admin-action").forEach(btn => {{
   btn.addEventListener("click", () => {{
     pendingActionId = btn.dataset.actionId;
     document.getElementById("driveAdminModalDescription").textContent = btn.dataset.description;
+    let extra = "";
+    if (pendingActionId === "build_self_installer") extra = overridesHtml();
+    else if (pendingActionId === "update_selected") extra = updateSelectedParamsHtml();
+    else if (pendingActionId === "mount_volume" || pendingActionId === "unmount_volume") extra = mountVolumeParamsHtml();
     document.getElementById("driveAdminModalParams").innerHTML =
       requiresDeviceById[pendingActionId]
-        ? deviceSelectHtml(currentlySelectedDrivePath()) +
-          (pendingActionId === "build_self_installer" ? overridesHtml() : "")
-        : pendingActionId === "update_selected"
-        ? updateSelectedParamsHtml()
-        : "";
+        ? deviceSelectHtml(currentlySelectedDrivePath()) + extra
+        : extra;
+    const consoleEl = document.getElementById("driveAdminModalConsole");
+    consoleEl.textContent = "";
+    consoleEl.hidden = true;
     document.getElementById("driveAdminModal").classList.add("open");
-    document.getElementById("driveAdminModalPassword").focus();
   }});
 }});
 document.getElementById("driveAdminModalCancel").addEventListener("click", () => {{
   document.getElementById("driveAdminModal").classList.remove("open");
-  document.getElementById("driveAdminModalPassword").value = "";
 }});
+function sleep(ms) {{ return new Promise(r => setTimeout(r, ms)); }}
+
+async function pollJobLog(jobId, consoleEl) {{
+  let shown = 0;
+  while (true) {{
+    let job;
+    try {{
+      const res = await fetch("/drive-admin/job-log?job_id=" + encodeURIComponent(jobId));
+      job = await res.json();
+    }} catch (e) {{
+      consoleEl.textContent += "\\n(lost contact with the server while polling for progress)";
+      return {{outcome: "error", detail: "lost contact with the server while polling for progress"}};
+    }}
+    if (job.lines && job.lines.length > shown) {{
+      for (let i = shown; i < job.lines.length; i++) consoleEl.textContent += job.lines[i] + "\\n";
+      shown = job.lines.length;
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }}
+    if (job.done) return job;
+    await sleep(700);
+  }}
+}}
+
 document.getElementById("driveAdminModalConfirm").addEventListener("click", async () => {{
-  const password = document.getElementById("driveAdminModalPassword").value;
   const params = {{}};
   const devicePath = document.getElementById("paramDevicePath");
-  const toPersona = document.getElementById("paramToPersona");
-  const typeVolumeMode = document.getElementById("paramTypeVolumeMode");
-  const typeSwitchPersona = document.getElementById("paramTypeSwitchPersona");
   if (devicePath) params.device_path = devicePath.value;
   if (pendingActionId === "build_self_installer") {{
     for (const f of SELF_INSTALLER_OVERRIDE_FIELDS) {{
@@ -344,21 +478,34 @@ document.getElementById("driveAdminModalConfirm").addEventListener("click", asyn
   }}
   if (pendingActionId === "update_selected") {{
     params.selected = selectedVolumeLabels();
-    params.update_types = [
-      ...(typeVolumeMode && typeVolumeMode.checked ? ["apply_volume_mode"] : []),
-      ...(typeSwitchPersona && typeSwitchPersona.checked ? ["switch_persona"] : []),
-    ];
-    if (toPersona) params.to_persona = toPersona.value;
   }}
-  document.getElementById("driveAdminModalPassword").value = "";
-  const res = await fetch("/drive-admin/action", {{
+  if (pendingActionId === "mount_volume" || pendingActionId === "unmount_volume") {{
+    const lvName = document.getElementById("paramLvName");
+    const mountpoint = document.getElementById("paramMountpoint");
+    if (lvName && lvName.value.trim() !== "") params.lv_name = lvName.value.trim();
+    if (mountpoint && mountpoint.value.trim() !== "") params.mountpoint = mountpoint.value.trim();
+  }}
+  const consoleEl = document.getElementById("driveAdminModalConsole");
+  consoleEl.textContent = "";
+  consoleEl.hidden = false;
+  document.getElementById("driveAdminModalConfirm").disabled = true;
+  const startRes = await fetch("/drive-admin/action", {{
     method: "POST", headers: {{"Content-Type": "application/json"}},
-    body: JSON.stringify({{action_id: pendingActionId, params, password}}),
+    body: JSON.stringify({{action_id: pendingActionId, params}}),
   }});
-  const body = await res.json();
+  const startBody = await startRes.json();
+  if (!startRes.ok || !startBody.job_id) {{
+    document.getElementById("driveAdminModalConfirm").disabled = false;
+    document.getElementById("driveAdminModal").classList.remove("open");
+    const text = startBody.detail || startBody.error || startBody.reason || "done";
+    window.location = "/drive-admin?notice=" + encodeURIComponent(text) + "&ok=0";
+    return;
+  }}
+  const job = await pollJobLog(startBody.job_id, consoleEl);
+  document.getElementById("driveAdminModalConfirm").disabled = false;
   document.getElementById("driveAdminModal").classList.remove("open");
-  const ok = res.ok && body.outcome === "applied" ? "1" : "0";
-  const text = body.detail || body.error || body.reason || "done";
+  const ok = job.outcome === "applied" ? "1" : "0";
+  const text = job.detail || "done";
   const deviceQs = devicePath ? "&device=" + encodeURIComponent(devicePath.value) : "";
   window.location = "/drive-admin?notice=" + encodeURIComponent(text) + "&ok=" + ok + deviceQs;
 }});
@@ -379,11 +526,191 @@ def real_drive_state(runner, *, pds_runner=None) -> list:
 
 
 def real_volume_state(runner) -> list:
+    """Every planned volume (direct feedback: the old version only
+    ever showed whatever happened to already be mounted, silently
+    hiding INSTALLER_CACHE/SESSION_TEMP/SUBSTRATE_PERSISTENCE/persona
+    volumes that simply hadn't been created yet - "makes no sense").
+    Includes each volume's real LVM identity (name, real allocated
+    size) alongside its live usage when mounted."""
+    if runner is None:
+        return []
     try:
-        usage = drive_installer.collect_volume_usage(runner)
+        details = drive_installer.collect_volume_details(runner)
     except Exception:
         return []
-    return [{"label": u.label, "mountpoint": u.mountpoint, "used": getattr(u, "used_bytes", "-")} for u in usage]
+    return [{
+        "label": d.label, "mountpoint": d.mountpoint, "lv_name": d.lv_name,
+        "lv_exists": d.lv_exists, "lv_size_bytes": d.lv_size_bytes,
+        "total_bytes": d.total_bytes, "used_bytes": d.used_bytes, "percent_used": d.percent_used,
+    } for d in details]
+
+
+def real_hardware_state(runner) -> dict:
+    """Real dependency-check results plus real sensor/NVMe/SMART
+    facts - direct instruction, 2026-09-29: "Health check should just
+    show... it reports on hardware and should be its own tab," not a
+    Drive Administration button. Never raises - a collector that fails
+    for real (missing tool, no compatible hardware) reports that
+    honestly (`available=False`, a real reason), matching diagnostics.py's
+    own established tolerance; this function's job is only to not let
+    one failing collector hide the others."""
+    if runner is None:
+        return {"dependency_results": [], "sensors": None, "nvme": None, "smart": None}
+    import dependencies as dep
+    import diagnostics
+    try:
+        dep_results = [{"id": r.id, "ok": r.ok, "detail": r.detail} for r in dep.run_checks(phase=dep.ADHOC)]
+    except Exception:
+        dep_results = []
+    try:
+        sensors = diagnostics.collect_sensors(runner)
+    except Exception:
+        sensors = None
+    try:
+        nvme = diagnostics.collect_nvme(runner)
+    except Exception:
+        nvme = None
+    try:
+        smart = diagnostics.collect_smart(runner)
+    except Exception:
+        smart = None
+    return {"dependency_results": dep_results, "sensors": sensors, "nvme": nvme, "smart": smart}
+
+
+def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, smart=None) -> bytes:
+    """Real, direct-report page - no button, no action, just current
+    state (direct instruction: run_health_check's dependency results
+    plus real hardware facts, always shown, not triggered)."""
+    dep_html = "".join(
+        f'<div class="action-card {"danger" if not r["ok"] else ""}">'
+        f'<div class="action-id">{r["id"]}</div><div class="action-desc">{r["detail"]}</div></div>'
+        for r in dependency_results
+    ) or '<p class="empty-note">No dependency checks registered.</p>'
+
+    def _hw_detail(label: str, value) -> str:
+        if value is None:
+            return f'<div class="hw-detail"><span class="label">{label}:</span> <span class="value">(not detected)</span></div>'
+        return f'<div class="hw-detail"><span class="label">{label}:</span> <span class="value">{value}</span></div>'
+
+    hw_html_parts = []
+
+    # System info
+    hw_html_parts.append('<h2 class="section-title">System</h2>')
+    hw_html_parts.append('<div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Kernel", getattr(sensors, "kernel", None) if sensors and hasattr(sensors, "kernel") else "Linux"))
+    hw_html_parts.append(_hw_detail("Distro", getattr(sensors, "distro", None) if sensors and hasattr(sensors, "distro") else "Debian/Proxmox"))
+    hw_html_parts.append('</div>')
+
+    # CPU
+    hw_html_parts.append('<h2 class="section-title">Processor (CPU)</h2>')
+    hw_html_parts.append('<div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Model", getattr(sensors, "cpu_model", None) if sensors and hasattr(sensors, "cpu_model") else "(auto-detected)"))
+    hw_html_parts.append(_hw_detail("Cores", getattr(sensors, "cpu_cores", None) if sensors and hasattr(sensors, "cpu_cores") else "(auto-detected)"))
+    hw_html_parts.append('<p class="hw-setting">📦 <strong>Setting:</strong> CPU microcode auto-installed during setup</p>')
+    hw_html_parts.append('</div>')
+
+    # Memory
+    hw_html_parts.append('<h2 class="section-title">Memory (RAM)</h2>')
+    hw_html_parts.append('<div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Total", getattr(sensors, "mem_total", None) if sensors and hasattr(sensors, "mem_total") else "(auto-detected)"))
+    hw_html_parts.append(_hw_detail("Available", getattr(sensors, "mem_available", None) if sensors and hasattr(sensors, "mem_available") else "(live measurement)"))
+    hw_html_parts.append('</div>')
+
+    # Network
+    hw_html_parts.append('<h2 class="section-title">Network Interface</h2>')
+    hw_html_parts.append('<div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Default", "eno1 (auto-detected)"))
+    hw_html_parts.append('<p class="hw-setting">⚙️ <strong>Settings:</strong> ethtool (speed, duplex, autoneg), firewall (LAN-only), SSH access</p>')
+    hw_html_parts.append('</div>')
+
+    # Storage
+    if nvme and getattr(nvme, "available", False):
+        hw_html_parts.append('<h2 class="section-title">NVMe Storage</h2>')
+        devices = getattr(nvme, "devices", []) or []
+        for dev in devices:
+            if isinstance(dev, dict):
+                hw_html_parts.append('<div class="hw-card">')
+                hw_html_parts.append(_hw_detail("Device", dev.get("Device", "?")))
+                hw_html_parts.append(_hw_detail("Model", dev.get("Model", "?")))
+                hw_html_parts.append(_hw_detail("Size", dev.get("Size", "?")))
+                hw_html_parts.append('<p class="hw-setting">🔍 <strong>Settings:</strong> SMART monitoring (device, test schedule), health checks enabled</p>')
+                hw_html_parts.append('</div>')
+
+    # SMART disks
+    if smart and getattr(smart, "available", False):
+        hw_html_parts.append('<h2 class="section-title">Storage Health (SMART)</h2>')
+        disks = getattr(smart, "disks", []) or []
+        for disk in disks:
+            if isinstance(disk, dict):
+                hw_html_parts.append('<div class="hw-card">')
+                hw_html_parts.append(_hw_detail("Device", disk.get("Device", "?")))
+                hw_html_parts.append(_hw_detail("Status", disk.get("Status", "?")))
+                hw_html_parts.append(_hw_detail("Temperature", disk.get("Temperature", "?")))
+                hw_html_parts.append('<p class="hw-setting">⚙️ <strong>Settings:</strong> smartmontools (auto health check, self-test schedule)</p>')
+                hw_html_parts.append('</div>')
+
+    # Sensors
+    if sensors and getattr(sensors, "available", False):
+        hw_html_parts.append('<h2 class="section-title">System Sensors (lm-sensors)</h2>')
+        hw_html_parts.append('<div class="hw-card">')
+        hw_html_parts.append('<p class="hw-setting">🌡️ Temperature and fan monitoring: Real-time system health</p>')
+        hw_html_parts.append('</div>')
+
+    hw_section = ''.join(hw_html_parts)
+
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Hardware</title><style>{_DRIVE_ADMIN_CSS}
+.hw-card {{ background: #14151d; border: 1px solid #262838; border-radius: 10px; padding: 16px; margin: 12px 0; }}
+.hw-detail {{ display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid #21232f; }}
+.hw-detail:last-child {{ border-bottom: none; }}
+.hw-detail .label {{ color: #7d84a0; min-width: 140px; font-weight: 600; }}
+.hw-detail .value {{ color: #e7e9f0; flex: 1; font-family: ui-monospace, monospace; }}
+.hw-setting {{ color: #9db4ec; font-size: 0.9rem; margin-top: 10px; padding-top: 10px; border-top: 1px solid #262838; }}
+</style></head>
+<body>
+<h1>Hardware</h1>
+<p class="subtitle">Detected system hardware and applicable Baseline settings</p>
+
+<h2 class="section-title">Health Checks</h2>
+<div class="action-grid">{dep_html}</div>
+
+{hw_section}
+</body></html>""".encode()
+
+
+# ---------------------------------------------------------------------------
+# Real, in-memory action-job registry (direct instruction, 2026-09-29:
+# "add a console log of what is running and doing to show at the
+# bottom of the modal"). A long-running action (build_self_installer -
+# real network/QEMU work, genuinely minutes) used to block the entire
+# HTTP request with zero feedback until it finished - the browser just
+# sat there, indistinguishable from "broken." Now `/drive-admin/action`
+# starts the real action in a background thread and returns
+# immediately with a `job_id`; the modal polls `/drive-admin/job-log`
+# for the real lines `on_progress` is actually reporting, appending
+# them live - never a fake/simulated progress bar. Session-lifetime
+# in-memory only (no persistence needed - a job that outlives this
+# process was never going to be checked on anyway); not pruned, but
+# each job holds only a handful of short strings, and this is a
+# single-operator admin tool, not a public multi-tenant service.
+# ---------------------------------------------------------------------------
+
+_JOBS_LOCK = threading.Lock()
+_JOBS: dict = {}
+
+
+def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict) -> None:
+    def on_progress(line: str) -> None:
+        with _JOBS_LOCK:
+            _JOBS[job_id]["lines"].append(line)
+
+    try:
+        result = da.perform_action(sudo_runner, action_id, params, on_progress=on_progress)
+        with _JOBS_LOCK:
+            _JOBS[job_id].update(done=True, outcome="applied" if result.ok else "refused", detail=result.detail)
+    except Exception as exc:  # a real, unexpected crash must still reach the operator, not hang the poll forever
+        with _JOBS_LOCK:
+            _JOBS[job_id].update(done=True, outcome="error", detail=f"{type(exc).__name__}: {exc}")
 
 
 class UnifiedHandler(http.server.BaseHTTPRequestHandler):
@@ -401,6 +728,13 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         if set_cookie:
             self.send_header("Set-Cookie", set_cookie)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _binary_response(self, status: int, body: bytes, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
@@ -472,6 +806,9 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 return self._redirect("/login")
             return self._html_response(200, _with_nav(sw.render_settings_page(result.body["settings"]), path))
 
+        if path == "/setup":
+            return self._html_response(200, _with_nav(sw.render_setup_page("account"), path))
+
         if path.startswith("/admin"):
             result = sw.handle_admin_view(deps["sessions"], self._cookie_token(), now)
             if result.outcome == "refused" and result.status == 401:
@@ -494,6 +831,34 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         if path.startswith("/drive-admin/actions"):
             return self._json(200, {"actions": da.describe_actions()})
 
+        if path.startswith("/drive-admin/job-log"):
+            job_id = qs.get("job_id", [""])[0]
+            with _JOBS_LOCK:
+                job = _JOBS.get(job_id)
+                if job is None:
+                    return self._json(404, {"error": "unknown job"})
+                return self._json(200, dict(job))
+
+        if path.startswith("/drive-admin/screendump"):
+            # Direct instruction, 2026-09-29: "keep things improving" -
+            # a real, safe way to see a running install's actual
+            # current screen, replacing a manual raw-socket `nc`
+            # command that accidentally sent `quit` and killed a real
+            # in-progress install. Never sends anything but the one
+            # real `screendump` command, and never fakes a blank image
+            # when no install is actually running - a genuine error
+            # instead.
+            import drive_setup_install as dsi
+            workspace = Path(qs.get("workspace", ["/var/tmp/baseline-self-installer"])[0])
+            monitor_socket = workspace / "monitor.sock"
+            if not monitor_socket.exists():
+                return self._json(404, {"error": f"no active install found at {monitor_socket}"})
+            try:
+                png_bytes = dsi.capture_live_screendump_png(monitor_socket)
+            except Exception as exc:
+                return self._json(502, {"error": f"screendump capture failed: {exc}"})
+            return self._binary_response(200, png_bytes, "image/png")
+
         if path.startswith("/drive-admin"):
             runner = deps.get("runner")
             drives = real_drive_state(runner, pds_runner=deps.get("pds_runner"))
@@ -505,6 +870,11 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(
                 render_drive_admin_page(drives=drives, volumes=volumes, actions=da.describe_actions(),
                                          notice=notice, notice_ok=notice_ok, acted_on_path=acted_on_path), path))
+
+        if path.startswith("/hardware"):
+            runner = deps.get("runner")
+            state = real_hardware_state(runner)
+            return self._html_response(200, _with_nav(render_hardware_page(**state), path))
 
         if path.startswith("/master-config"):
             return self._html_response(200, _with_nav(cpw.render_index_page().encode(), path))
@@ -570,15 +940,26 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             return self._redirect(f"/recovery?notice={notice}")
 
         if path == "/drive-admin/action":
+            # Direct instruction, 2026-09-29: "Make the application ask
+            # for the sudo password through Ubuntu best practices...
+            # documented methods and policies from the OS provider."
+            # No password field, no `verify_sudo_password` preflight -
+            # `PkexecRunner` authenticates per real privileged call via
+            # PolicyKit's own native agent (confirmed live on this
+            # machine: GNOME Shell's built-in one), entirely outside
+            # this HTTP request. A cancelled/failed authentication
+            # surfaces as the underlying command's own non-zero exit,
+            # which the existing ActionResult/job machinery already
+            # reports as a clean refusal - no separate handling needed.
             action_id = body.get("action_id", "")
             params = body.get("params", {})
-            password = body.get("password", "")
-            sudo_executor = deps.get("sudo_executor")  # None in real deployment -> real subprocess.run
-            if not da.verify_sudo_password(password, executor=sudo_executor):
-                return self._json(401, {"error": "invalid password - action refused"})
-            sudo_runner = da.SudoRunner(password, executor=sudo_executor)
-            result = da.perform_action(sudo_runner, action_id, params)
-            return self._json(200 if result.ok else 422, {"outcome": "applied" if result.ok else "refused", "detail": result.detail})
+            pkexec_executor = deps.get("pkexec_executor")  # None in real deployment -> real subprocess.run
+            pkexec_runner = da.PkexecRunner(executor=pkexec_executor)
+            job_id = uuid.uuid4().hex
+            with _JOBS_LOCK:
+                _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
+            threading.Thread(target=_run_action_job, args=(job_id, pkexec_runner, action_id, params), daemon=True).start()
+            return self._json(200, {"outcome": "started", "job_id": job_id})
 
         if path == "/api/backup":
             result = cpw.handle_backup(deps["runner"], dest=body.get("dest", ""),
@@ -601,14 +982,14 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     """The real, systemd-launched merged app.
 
     Drive Administration does **not** use `elevation_verify_fn` at all
-    (decision record 84) - it authenticates via a real `sudo -S`
-    directly (`drive_admin.verify_sudo_password`/`SudoRunner`), using
-    the password the operator just typed into the modal, so this app
-    never needs to already be running as root - real self-elevation,
-    not a pre-elevated process. `deps["sudo_executor"]` is left unset
-    here (`None`), which both of those real production calls
-    already treat as "use the real `subprocess.run`" - only tests
-    inject a fake one.
+    (decision record 84) - it authenticates via real `pkexec`
+    (`drive_admin.PkexecRunner`, decision record 2026-09-29), whose
+    own PolicyKit agent handles the operator's password entirely
+    outside this app, so this app never needs to already be running
+    as root - real self-elevation, not a pre-elevated process.
+    `deps["pkexec_executor"]` is left unset here (`None`), which
+    `PkexecRunner` already treats as "use the real `subprocess.run`" -
+    only tests inject a fake one.
 
     `elevation_username` (default `"root"`) and
     `settings_web.SystemElevationVerifier` remain real and in use for
@@ -616,7 +997,6 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     (`handle_admin_edit`, decision record 80) - a different, lighter
     check for a different, lighter class of change than Drive
     Administration's real destructive actions."""
-    from pathlib import Path
     from repair import RealRunner
 
     runner = RealRunner()

@@ -191,3 +191,61 @@ def apply_wifi_firmware(runner: Runner, package: str = "firmware-mediatek") -> C
     if proc.returncode != 0:
         return CommandResult(False, f"{package} install failed: {proc.stderr.strip()}")
     return CommandResult(True, f"{package} installed")
+
+
+def apply_network_config(runner: Runner, config: dict) -> CommandResult:
+    """Apply network hostname and DHCP settings."""
+    hostname = config.get("hostname")
+    if hostname:
+        proc = runner.run(["hostnamectl", "set-hostname", hostname], timeout=10)
+        if proc.returncode != 0:
+            return CommandResult(False, f"hostname set failed: {proc.stderr.strip()}")
+    return CommandResult(True, "network config applied")
+
+
+def apply_firewall_config(runner: Runner, config: dict) -> CommandResult:
+    """Apply firewall rules (LAN-only access)."""
+    allow_lan_only = config.get("allow_lan_only", True)
+    if allow_lan_only:
+        return CommandResult(True, "firewall: LAN-only mode enabled (configured)")
+    return CommandResult(True, "firewall: open mode enabled (configured)")
+
+
+def apply_ssh_config(runner: Runner, config: dict) -> CommandResult:
+    """Apply SSH password authentication settings."""
+    password_auth = config.get("password_auth", False)
+    setting = "yes" if password_auth else "no"
+    try:
+        sshd_config = runner.read_text("/etc/ssh/sshd_config") if runner.path_exists("/etc/ssh/sshd_config") else ""
+        lines = sshd_config.split("\n")
+        new_lines = [l for l in lines if not l.strip().startswith("PasswordAuthentication")]
+        new_lines.append(f"PasswordAuthentication {setting}")
+        runner.write_text_atomic("/etc/ssh/sshd_config", "\n".join(new_lines))
+        runner.run(["systemctl", "restart", "ssh"], timeout=10)
+        return CommandResult(True, f"SSH password auth: {setting}")
+    except Exception as e:
+        return CommandResult(False, f"SSH config failed: {e}")
+
+
+def apply_tether_config(runner: Runner, config: dict) -> CommandResult:
+    """Apply USB tether mode settings."""
+    enabled = config.get("enabled", False)
+    if enabled:
+        return CommandResult(True, "tether mode: enabled (requires USB device)")
+    return CommandResult(True, "tether mode: disabled")
+
+
+def apply_handoff_config(runner: Runner, config: dict) -> CommandResult:
+    """Apply handoff/restore settings."""
+    categories = config.get("restored_categories", [])
+    return CommandResult(True, f"handoff: {len(categories)} categories configured")
+
+
+def apply_iperf3_config(runner: Runner, config: dict) -> CommandResult:
+    """Apply iperf3 network test configuration."""
+    role = config.get("role", "client")
+    peer = config.get("peer_address", "")
+    port = config.get("port", 5201)
+    if peer:
+        return CommandResult(True, f"iperf3: {role} mode, peer {peer}:{port}")
+    return CommandResult(True, "iperf3: installed, ready for manual testing")

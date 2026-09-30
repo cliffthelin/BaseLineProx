@@ -105,15 +105,44 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
         result = apply_fn()
         (summary["applied"] if result.ok else summary["failed"]).append(name)
 
+    # Network settings
+    network = config.get("network") or {}
+    run_subsystem("network", bool(network),
+                  lambda: config_apply.apply_network_config(runner, network))
+
+    # Firewall
+    firewall = config.get("firewall") or {}
+    run_subsystem("firewall", bool(firewall),
+                  lambda: config_apply.apply_firewall_config(runner, firewall))
+
+    # SSH
+    ssh = config.get("ssh") or {}
+    run_subsystem("ssh", bool(ssh),
+                  lambda: config_apply.apply_ssh_config(runner, ssh))
+
+    # Tether
+    tether = config.get("tether") or {}
+    run_subsystem("tether", bool(tether),
+                  lambda: config_apply.apply_tether_config(runner, tether))
+
+    # Handoff
+    handoff = config.get("handoff") or {}
+    run_subsystem("handoff", bool(handoff),
+                  lambda: config_apply.apply_handoff_config(runner, handoff))
+
+    # Diagnostics tools
     run_subsystem("smartd", _has_any_key(proxmox, _SMARTD_KEYS),
                   lambda: config_apply.apply_smartd_config(runner, proxmox))
     run_subsystem("ethtool", _has_any_key(proxmox, _ETHTOOL_KEYS),
                   lambda: config_apply.apply_ethtool_config(runner, resolved_interface, proxmox))
-    # cpu_microcode_package/wifi_firmware_package default to THIS
-    # session's own detected hardware (AMD, MediaTek) only when the
-    # exported config omits them - a different target machine (a
-    # different CPU vendor, a different Wi-Fi chip) must be able to
-    # override the package actually installed, found missing on audit.
+
+    # iperf3
+    diagnostics = config.get("diagnostics") or {}
+    iperf3 = diagnostics.get("iperf3") or {}
+    run_subsystem("iperf3", bool(iperf3),
+                  lambda: config_apply.apply_iperf3_config(runner, iperf3))
+
+    # Drivers
     run_subsystem("cpu_microcode", bool(drivers.get("cpu_microcode")),
                   lambda: config_apply.apply_cpu_microcode(
                       runner, package=drivers.get("cpu_microcode_package") or "amd64-microcode"))
