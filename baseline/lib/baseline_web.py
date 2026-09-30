@@ -545,19 +545,57 @@ def real_volume_state(runner) -> list:
     } for d in details]
 
 
+def _collect_system_info(runner) -> dict:
+    """Read CPU, memory, kernel from /proc and uname."""
+    info = {}
+    try:
+        proc = runner.run(["uname", "-r"], timeout=5)
+        info["kernel"] = proc.stdout.strip() if proc.returncode == 0 else "Linux"
+    except Exception:
+        info["kernel"] = "Linux"
+    try:
+        info["distro"] = runner.read_text("/etc/os-release").split("PRETTY_NAME=")[1].split("\n")[0].strip('"')
+    except Exception:
+        info["distro"] = "Linux"
+    try:
+        cpuinfo = runner.read_text("/proc/cpuinfo")
+        for line in cpuinfo.splitlines():
+            if line.startswith("model name"):
+                info["cpu_model"] = line.split(":", 1)[1].strip()
+                break
+        cores = sum(1 for l in cpuinfo.splitlines() if l.startswith("processor"))
+        info["cpu_cores"] = str(cores)
+    except Exception:
+        pass
+    try:
+        meminfo = runner.read_text("/proc/meminfo")
+        for line in meminfo.splitlines():
+            if line.startswith("MemTotal:"):
+                kb = int(line.split()[1])
+                info["mem_total"] = f"{kb // 1048576} GiB ({kb // 1024} MiB)"
+            elif line.startswith("MemAvailable:"):
+                kb = int(line.split()[1])
+                info["mem_available"] = f"{kb // 1048576} GiB ({kb // 1024} MiB)"
+    except Exception:
+        pass
+    try:
+        proc = runner.run(["ip", "-o", "route", "show", "default"], timeout=5)
+        if proc.returncode == 0 and "dev " in proc.stdout:
+            info["default_iface"] = proc.stdout.split("dev ")[1].split()[0]
+    except Exception:
+        pass
+    return info
+
+
 def real_hardware_state(runner) -> dict:
     """Real dependency-check results plus real sensor/NVMe/SMART
-    facts - direct instruction, 2026-09-29: "Health check should just
-    show... it reports on hardware and should be its own tab," not a
-    Drive Administration button. Never raises - a collector that fails
-    for real (missing tool, no compatible hardware) reports that
-    honestly (`available=False`, a real reason), matching diagnostics.py's
-    own established tolerance; this function's job is only to not let
-    one failing collector hide the others."""
+    facts and system info from /proc."""
     if runner is None:
-        return {"dependency_results": [], "sensors": None, "nvme": None, "smart": None}
+        return {"dependency_results": [], "sensors": None, "nvme": None, "smart": None,
+                "sysinfo": {}, "inventory": {}}
     import dependencies as dep
     import diagnostics
+    import hardware_inventory as hwinv
     try:
         dep_results = [{"id": r.id, "ok": r.ok, "detail": r.detail} for r in dep.run_checks(phase=dep.ADHOC)]
     except Exception:
@@ -574,13 +612,88 @@ def real_hardware_state(runner) -> dict:
         smart = diagnostics.collect_smart(runner)
     except Exception:
         smart = None
-    return {"dependency_results": dep_results, "sensors": sensors, "nvme": nvme, "smart": smart}
+    sysinfo = _collect_system_info(runner)
+    try:
+        inventory = hwinv.collect_all(runner)
+    except Exception:
+        inventory = {}
+    return {"dependency_results": dep_results, "sensors": sensors, "nvme": nvme,
+            "smart": smart, "sysinfo": sysinfo, "inventory": inventory}
 
 
-def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, smart=None) -> bytes:
+def _render_inventory(inventory: dict) -> str:
+    """Every real device on every bus, grouped - the Hardware tab's
+    primary content (direct instruction, 2026-09-30: "All hardware must
+    show, its not a cpu memory dashboard"). Driver status is shown per
+    device because "no driver bound" is exactly what an installer
+    operator needs to see."""
+    import hardware_inventory as hwinv
+    if not inventory:
+        return ('<h2 class="section-title">Devices</h2><div class="hw-card unavailable">'
+                '<div class="hw-detail"><span class="label">Status:</span>'
+                '<span class="value">Not available</span></div>'
+                '<p class="hw-setting">Device enumeration did not run (no runner configured).</p></div>')
+
+    parts = []
+
+    def _rows(header: list, rows: list) -> str:
+        head = "".join(f"<th>{h}</th>" for h in header)
+        body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+        return f'<table class="hw-table"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+
+    pci = inventory.get("pci") or []
+    if pci:
+        groups = hwinv.group_pci(pci)
+        parts.append(f'<h2 class="section-title">PCI Devices ({len(pci)})</h2>')
+        for group_name, devices in groups.items():
+            parts.append(f'<h3 class="hw-group">{group_name} <span class="count">{len(devices)}</span></h3>')
+            parts.append(_rows(
+                ["Address", "Device", "Vendor", "Driver"],
+                [[d.address, d.model, d.vendor,
+                  f'<span class="{"drv-none" if d.kernel_driver is None else "drv-ok"}">{d.driver_status}</span>']
+                 for d in devices],
+            ))
+
+    block = inventory.get("block") or []
+    if block:
+        parts.append(f'<h2 class="section-title">Storage Devices ({len(block)})</h2>')
+        parts.append(_rows(
+            ["Device", "Size", "Bus", "Model", "Serial"],
+            [[f"/dev/{d.name}", d.size, d.transport or "-", d.model or "-", d.serial or "-"] for d in block],
+        ))
+
+    net = inventory.get("net") or []
+    if net:
+        parts.append(f'<h2 class="section-title">Network Interfaces ({len(net)})</h2>')
+        parts.append(_rows(
+            ["Interface", "State", "MAC"],
+            [[n.name,
+              f'<span class="{"drv-ok" if n.state == "UP" else "drv-none"}">{n.state}</span>',
+              n.mac or "-"] for n in net],
+        ))
+
+    usb = inventory.get("usb") or []
+    if usb:
+        parts.append(f'<h2 class="section-title">USB Devices ({len(usb)})</h2>')
+        parts.append(_rows(
+            ["Bus:Dev", "ID", "Description"],
+            [[f"{d.bus}:{d.device}", d.usb_id, d.description or "-"] for d in usb],
+        ))
+
+    return "".join(parts)
+
+
+def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, smart=None,
+                         sysinfo=None, inventory=None) -> bytes:
     """Real, direct-report page - no button, no action, just current
     state (direct instruction: run_health_check's dependency results
-    plus real hardware facts, always shown, not triggered)."""
+    plus real hardware facts, always shown, not triggered).
+
+    A collector that is absent or reports `available=False` is stated
+    as "Not available" with the real reason it gave - never silently
+    dropped, which would read as "this machine has no NVMe" when the
+    truth is "nvme-cli isn't installed"."""
+    sysinfo = sysinfo or {}
     dep_html = "".join(
         f'<div class="action-card {"danger" if not r["ok"] else ""}">'
         f'<div class="action-id">{r["id"]}</div><div class="action-desc">{r["detail"]}</div></div>'
@@ -588,73 +701,122 @@ def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, s
     ) or '<p class="empty-note">No dependency checks registered.</p>'
 
     def _hw_detail(label: str, value) -> str:
-        if value is None:
-            return f'<div class="hw-detail"><span class="label">{label}:</span> <span class="value">(not detected)</span></div>'
-        return f'<div class="hw-detail"><span class="label">{label}:</span> <span class="value">{value}</span></div>'
+        shown = "(not detected)" if value in (None, "") else value
+        return f'<div class="hw-detail"><span class="label">{label}:</span> <span class="value">{shown}</span></div>'
+
+    def _unavailable(title: str, collector, tool: str) -> str:
+        """One collector's honest 'why not' - the real reason it gave."""
+        reason = getattr(collector, "reason", "") if collector is not None else f"{tool} not run (no runner configured)"
+        return (f'<h2 class="section-title">{title}</h2><div class="hw-card unavailable">'
+                f'<div class="hw-detail"><span class="label">Status:</span>'
+                f'<span class="value">Not available</span></div>'
+                f'<p class="hw-setting">{reason or f"{tool} reported nothing usable"}</p></div>')
 
     hw_html_parts = []
 
-    # System info
-    hw_html_parts.append('<h2 class="section-title">System</h2>')
-    hw_html_parts.append('<div class="hw-card">')
-    hw_html_parts.append(_hw_detail("Kernel", getattr(sensors, "kernel", None) if sensors and hasattr(sensors, "kernel") else "Linux"))
-    hw_html_parts.append(_hw_detail("Distro", getattr(sensors, "distro", None) if sensors and hasattr(sensors, "distro") else "Debian/Proxmox"))
+    hw_html_parts.append('<h2 class="section-title">System</h2><div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Kernel", sysinfo.get("kernel")))
+    hw_html_parts.append(_hw_detail("Distro", sysinfo.get("distro")))
     hw_html_parts.append('</div>')
 
-    # CPU
-    hw_html_parts.append('<h2 class="section-title">Processor (CPU)</h2>')
-    hw_html_parts.append('<div class="hw-card">')
-    hw_html_parts.append(_hw_detail("Model", getattr(sensors, "cpu_model", None) if sensors and hasattr(sensors, "cpu_model") else "(auto-detected)"))
-    hw_html_parts.append(_hw_detail("Cores", getattr(sensors, "cpu_cores", None) if sensors and hasattr(sensors, "cpu_cores") else "(auto-detected)"))
+    hw_html_parts.append('<h2 class="section-title">Processor (CPU)</h2><div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Model", sysinfo.get("cpu_model")))
+    hw_html_parts.append(_hw_detail("Cores", sysinfo.get("cpu_cores")))
     hw_html_parts.append('<p class="hw-setting">📦 <strong>Setting:</strong> CPU microcode auto-installed during setup</p>')
     hw_html_parts.append('</div>')
 
-    # Memory
-    hw_html_parts.append('<h2 class="section-title">Memory (RAM)</h2>')
-    hw_html_parts.append('<div class="hw-card">')
-    hw_html_parts.append(_hw_detail("Total", getattr(sensors, "mem_total", None) if sensors and hasattr(sensors, "mem_total") else "(auto-detected)"))
-    hw_html_parts.append(_hw_detail("Available", getattr(sensors, "mem_available", None) if sensors and hasattr(sensors, "mem_available") else "(live measurement)"))
+    hw_html_parts.append('<h2 class="section-title">Memory (RAM)</h2><div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Total", sysinfo.get("mem_total")))
+    hw_html_parts.append(_hw_detail("Available", sysinfo.get("mem_available")))
     hw_html_parts.append('</div>')
 
-    # Network
-    hw_html_parts.append('<h2 class="section-title">Network Interface</h2>')
-    hw_html_parts.append('<div class="hw-card">')
-    hw_html_parts.append(_hw_detail("Default", "eno1 (auto-detected)"))
+    hw_html_parts.append('<h2 class="section-title">Network Interface</h2><div class="hw-card">')
+    hw_html_parts.append(_hw_detail("Default route via", sysinfo.get("default_iface")))
     hw_html_parts.append('<p class="hw-setting">⚙️ <strong>Settings:</strong> ethtool (speed, duplex, autoneg), firewall (LAN-only), SSH access</p>')
     hw_html_parts.append('</div>')
 
-    # Storage
-    if nvme and getattr(nvme, "available", False):
-        hw_html_parts.append('<h2 class="section-title">NVMe Storage</h2>')
+    # NVMe - real field names from diagnostics.collect_nvme
+    if nvme is not None and getattr(nvme, "available", False):
         devices = getattr(nvme, "devices", []) or []
+        hw_html_parts.append('<h2 class="section-title">NVMe Storage</h2>')
+        if not devices:
+            hw_html_parts.append('<div class="hw-card"><p class="hw-setting">No NVMe devices present on this machine.</p></div>')
         for dev in devices:
-            if isinstance(dev, dict):
-                hw_html_parts.append('<div class="hw-card">')
-                hw_html_parts.append(_hw_detail("Device", dev.get("Device", "?")))
-                hw_html_parts.append(_hw_detail("Model", dev.get("Model", "?")))
-                hw_html_parts.append(_hw_detail("Size", dev.get("Size", "?")))
-                hw_html_parts.append('<p class="hw-setting">🔍 <strong>Settings:</strong> SMART monitoring (device, test schedule), health checks enabled</p>')
-                hw_html_parts.append('</div>')
+            if not isinstance(dev, dict):
+                continue
+            health = dev.get("health") or {}
+            hw_html_parts.append('<div class="hw-card">')
+            hw_html_parts.append(_hw_detail("Device", dev.get("path")))
+            hw_html_parts.append(_hw_detail("Model", dev.get("model")))
+            hw_html_parts.append(_hw_detail("Firmware", dev.get("firmware")))
+            if health.get("temperature") is not None:
+                hw_html_parts.append(_hw_detail("Temperature", f'{health["temperature"]} K'))
+            if health.get("percent_used") is not None:
+                hw_html_parts.append(_hw_detail("Wear", f'{health["percent_used"]}% used'))
+            hw_html_parts.append('<p class="hw-setting">🔍 <strong>Settings:</strong> SMART monitoring (device, test schedule), health checks enabled</p>')
+            hw_html_parts.append('</div>')
+    else:
+        hw_html_parts.append(_unavailable("NVMe Storage", nvme, "nvme-cli"))
 
-    # SMART disks
-    if smart and getattr(smart, "available", False):
-        hw_html_parts.append('<h2 class="section-title">Storage Health (SMART)</h2>')
-        disks = getattr(smart, "disks", []) or []
-        for disk in disks:
-            if isinstance(disk, dict):
-                hw_html_parts.append('<div class="hw-card">')
-                hw_html_parts.append(_hw_detail("Device", disk.get("Device", "?")))
-                hw_html_parts.append(_hw_detail("Status", disk.get("Status", "?")))
-                hw_html_parts.append(_hw_detail("Temperature", disk.get("Temperature", "?")))
-                hw_html_parts.append('<p class="hw-setting">⚙️ <strong>Settings:</strong> smartmontools (auto health check, self-test schedule)</p>')
-                hw_html_parts.append('</div>')
+    # SMART - dataclass field is `devices`, entries are device/model/temperature/smart_passed.
+    # One compact row per disk: `smartctl --scan-open` works unprivileged but
+    # `smartctl -a` does not, so an unprivileged run yields a real device list
+    # with empty details. That is stated once, not as a wall of "(not detected)".
+    if smart is not None and getattr(smart, "available", False):
+        disks = [d for d in (getattr(smart, "devices", []) or []) if isinstance(d, dict)]
+        hw_html_parts.append(f'<h2 class="section-title">Storage Health (SMART) ({len(disks)})</h2>')
+        if not disks:
+            hw_html_parts.append('<div class="hw-card"><p class="hw-setting">No SMART-capable devices found.</p></div>')
+        else:
+            def _smart_status(d: dict) -> str:
+                passed = d.get("smart_passed")
+                if passed is True:
+                    return '<span class="drv-ok">PASSED</span>'
+                if passed is False:
+                    return '<span class="smart-failed">FAILED</span>'
+                return '<span class="drv-none">not readable</span>'
 
-    # Sensors
-    if sensors and getattr(sensors, "available", False):
+            rows = "".join(
+                "<tr>"
+                f'<td>{d.get("device") or "-"}</td>'
+                f'<td>{d.get("model") or "-"}</td>'
+                f'<td>{_smart_status(d)}</td>'
+                f'<td>{str(d["temperature"]) + " °C" if d.get("temperature") is not None else "-"}</td>'
+                f'<td>{d.get("power_on_hours") if d.get("power_on_hours") is not None else "-"}</td>'
+                "</tr>"
+                for d in disks
+            )
+            hw_html_parts.append(
+                '<table class="hw-table"><thead><tr><th>Device</th><th>Model</th>'
+                '<th>SMART</th><th>Temp</th><th>Power-on hrs</th></tr></thead>'
+                f'<tbody>{rows}</tbody></table>'
+            )
+            if all(d.get("smart_passed") is None for d in disks):
+                hw_html_parts.append(
+                    '<p class="hw-note">Devices were discovered, but per-device detail needs '
+                    'root: <code>smartctl --scan-open</code> runs unprivileged while '
+                    '<code>smartctl -a</code> does not. Run the app with privilege to populate '
+                    'model, health and temperature.</p>'
+                )
+    else:
+        hw_html_parts.append(_unavailable("Storage Health (SMART)", smart, "smartmontools"))
+
+    # Sensors - real chip readings, not a generic blurb
+    if sensors is not None and getattr(sensors, "available", False):
         hw_html_parts.append('<h2 class="section-title">System Sensors (lm-sensors)</h2>')
-        hw_html_parts.append('<div class="hw-card">')
-        hw_html_parts.append('<p class="hw-setting">🌡️ Temperature and fan monitoring: Real-time system health</p>')
-        hw_html_parts.append('</div>')
+        for chip in getattr(sensors, "chips", []) or []:
+            if not isinstance(chip, dict):
+                continue
+            hw_html_parts.append('<div class="hw-card">')
+            hw_html_parts.append(f'<div class="hw-detail"><span class="label">Chip:</span><span class="value">{chip.get("chip", "?")}</span></div>')
+            for feature in chip.get("features", [])[:12]:
+                unit = f' {feature["unit"]}' if feature.get("unit") else ""
+                hw_html_parts.append(_hw_detail(feature.get("label", "?"), f'{feature.get("value")}{unit}'))
+            hw_html_parts.append('</div>')
+    else:
+        hw_html_parts.append(_unavailable("System Sensors (lm-sensors)", sensors, "lm-sensors"))
+
+    hw_html_parts.append(_render_inventory(inventory or {}))
 
     hw_section = ''.join(hw_html_parts)
 
@@ -666,6 +828,25 @@ def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, s
 .hw-detail .label {{ color: #7d84a0; min-width: 140px; font-weight: 600; }}
 .hw-detail .value {{ color: #e7e9f0; flex: 1; font-family: ui-monospace, monospace; }}
 .hw-setting {{ color: #9db4ec; font-size: 0.9rem; margin-top: 10px; padding-top: 10px; border-top: 1px solid #262838; }}
+.hw-card.unavailable {{ border-style: dashed; border-color: #3a3d54; }}
+.hw-card.unavailable .value {{ color: #c8a24a; }}
+.hw-card.danger {{ border-color: #b6414a; }}
+h3.hw-group {{ font-size: .85rem; color: #9aa0ba; margin: 1.4rem 0 .5rem; font-weight: 600; }}
+h3.hw-group .count {{ color: #5c6180; font-weight: 400; }}
+.hw-table {{ width: 100%; border-collapse: collapse; margin: 0 0 .5rem; font-size: .84rem;
+  background: #14151d; border: 1px solid #262838; border-radius: 8px; overflow: hidden; }}
+.hw-table th {{ text-align: left; padding: .5rem .7rem; color: #7d84a0; font-weight: 600;
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  background: #171923; border-bottom: 1px solid #262838; }}
+.hw-table td {{ padding: .45rem .7rem; border-bottom: 1px solid #1c1e29;
+  color: #ccd0e0; font-family: ui-monospace, monospace; }}
+.hw-table tr:last-child td {{ border-bottom: none; }}
+.hw-table tr:hover td {{ background: #171b26; }}
+.drv-ok {{ color: #6fc28a; }}
+.drv-none {{ color: #c8a24a; }}
+.smart-failed {{ color: #e5646e; font-weight: 700; }}
+.hw-note {{ color: #8890a6; font-size: .82rem; margin: -.1rem 0 1rem; line-height: 1.5; }}
+.hw-note code {{ color: #9db4ec; background: #171923; padding: .05rem .3rem; border-radius: 4px; }}
 </style></head>
 <body>
 <h1>Hardware</h1>

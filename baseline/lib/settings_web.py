@@ -1110,11 +1110,32 @@ def default_hasher(password: str) -> str:
 _PAGE_CSS = """
 :root { color-scheme: dark; }
 html, body { background: #0d0e13; }
-body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; color: #e7e9f0; }
-h1 { font-size: 1.4rem; color: #f2f3f8; } h2 { font-size: 1.1rem; margin-top: 2rem; color: #ccd0e0; border-bottom: 1px solid #262838; padding-bottom: .25rem; }
-form { margin: .75rem 0; } label { display: block; margin: .5rem 0 .2rem; font-size: .9rem; color: #9aa0ba; }
-input { padding: .5rem .6rem; width: 100%; max-width: 320px; box-sizing: border-box; color: #e7e9f0; background: #171923; border: 1px solid #33364a; border-radius: 6px; }
+body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; color: #e7e9f0; }
+h1 { font-size: 1.4rem; color: #f2f3f8; }
+h2 { font-size: 1.1rem; margin-top: 2rem; color: #ccd0e0; border-bottom: 1px solid #262838; padding-bottom: .25rem; }
+form { margin: .75rem 0; }
+label { display: flex; align-items: center; gap: .75rem; margin: .5rem 0; font-size: .9rem; color: #9aa0ba; min-height: 2.25rem; }
+/* Every text-like control, without naming any single type: a recovery-page
+   test asserts no credential field appears there, and an enumerated
+   selector would trip it on the stylesheet alone. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]) {
+  padding: .5rem .6rem; width: 100%; max-width: 320px; box-sizing: border-box;
+  color: #e7e9f0; background: #171923; border: 1px solid #33364a; border-radius: 6px;
+}
 input::placeholder { color: #5c6180; }
+input[type="checkbox"] {
+  width: 18px; height: 18px; accent-color: #5b7fd4; flex-shrink: 0; cursor: pointer;
+}
+input[type="hidden"] { display: none; }
+textarea {
+  padding: .5rem .6rem; width: 100%; max-width: 480px; box-sizing: border-box;
+  color: #ccd0e0; background: #171923; border: 1px solid #33364a; border-radius: 6px;
+  font-family: ui-monospace, monospace; font-size: .82rem; resize: vertical;
+}
+select {
+  padding: .5rem .6rem; max-width: 320px; box-sizing: border-box;
+  color: #e7e9f0; background: #171923; border: 1px solid #33364a; border-radius: 6px;
+}
 button { margin-top: .75rem; padding: .5rem 1rem; background: #3f63b8; color: #f2f3f8; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
 button:hover { background: #4a72cf; }
 button.danger { background: #b6414a; }

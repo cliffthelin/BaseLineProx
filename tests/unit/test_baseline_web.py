@@ -11,6 +11,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 from fake_runner import FakeRunner
@@ -94,24 +95,97 @@ def test_real_drive_state_returns_empty_list_when_no_runner_is_configured():
     assert bw.real_drive_state(None, pds_runner=FakePdsRunner()) == []
 
 
-def test_real_volume_state_returns_empty_list_on_a_real_failure_rather_than_crashing():
-    assert bw.real_volume_state(FakeRunner()) == []
+def test_real_volume_state_returns_the_full_planned_volume_list_even_when_nothing_exists_yet():
+    """collect_volume_details always returns one entry per planned
+    volume, existing or not - a bare FakeRunner (nothing created, real
+    lvs/df calls returning empty output) is a real, honest "not
+    provisioned yet" state, not a failure."""
+    details = bw.real_volume_state(FakeRunner())
+    assert len(details) == 6
+    assert all(d["lv_exists"] is False for d in details)
+
+
+def test_real_volume_state_returns_empty_list_when_no_runner_is_configured():
+    assert bw.real_volume_state(None) == []
+
+
+def test_real_volume_state_returns_empty_list_on_a_real_exception_rather_than_crashing():
+    class ExplodingRunner:
+        def run(self, *a, **k):
+            raise RuntimeError("real subprocess failure")
+    assert bw.real_volume_state(ExplodingRunner()) == []
 
 
 # -- render_drive_admin_page ---------------------------------------------------
+
+def test_render_drive_admin_page_groups_baseline_drives_at_the_top():
+    """Direct instruction, 2026-09-29: a real Baseline-installed drive
+    goes at the top of the drive list, under a "Baseline Installed"
+    heading."""
+    body = bw.render_drive_admin_page(
+        drives=[
+            {"path": "/dev/sda", "model": "Other Drive", "drive_type": "HDD", "size": "1T",
+             "is_default": False, "is_baseline_drive": False},
+            {"path": "/dev/sdd", "model": "Baseline Drive", "drive_type": "NVMe", "size": "476.9G",
+             "is_default": True, "is_baseline_drive": True, "missing_baseline_volumes": []},
+        ],
+        volumes=[], actions=[],
+    ).decode()
+    assert "Baseline Installed" in body
+    baseline_heading_pos = body.index("Baseline Installed")
+    sdd_pos = body.index("/dev/sdd")
+    sda_pos = body.index("/dev/sda")
+    assert baseline_heading_pos < sdd_pos < sda_pos
+
+
+def test_render_drive_admin_page_shows_a_baseline_pill_and_missing_volumes():
+    body = bw.render_drive_admin_page(
+        drives=[{"path": "/dev/sdd", "model": "Baseline Drive", "drive_type": "NVMe", "size": "476.9G",
+                 "is_default": True, "is_baseline_drive": True,
+                 "missing_baseline_volumes": ["baseline_installer_cache", "baseline_session_temp"]}],
+        volumes=[], actions=[],
+    ).decode()
+    assert "Baseline drive" in body
+    assert "baseline_installer_cache" in body
+    assert "baseline_session_temp" in body
+
+
+def test_render_drive_admin_page_does_not_group_when_no_drive_is_a_baseline_drive():
+    body = bw.render_drive_admin_page(
+        drives=[{"path": "/dev/sda", "model": "Other Drive", "drive_type": "HDD", "size": "1T",
+                 "is_default": True, "is_baseline_drive": False}],
+        volumes=[], actions=[],
+    ).decode()
+    assert "Baseline Installed" not in body
+
+
+def test_render_drive_admin_page_hides_update_selected_action_card_by_default():
+    """Direct instruction, 2026-09-29: "Update options are only shown
+    when a Baseline drive is selected" - hidden server-side by default,
+    JS reveals it only when the selected drive is a real Baseline
+    drive."""
+    body = bw.render_drive_admin_page(drives=[], volumes=[], actions=da.describe_actions()).decode()
+    card_start = body.index('data-action-card-id="update_selected"')
+    # the `hidden` attribute must appear on the same opening tag
+    tag = body[body.rindex("<div", 0, card_start):body.index(">", card_start)]
+    assert "hidden" in tag
+
 
 def test_render_drive_admin_page_lists_real_drives_volumes_and_actions():
     body = bw.render_drive_admin_page(
         drives=[{"path": "/dev/sdb", "model": "PC401 NVMe SK hynix 512GB", "drive_type": "NVMe",
                  "size": "476.9G", "is_default": True}],
-        volumes=[{"label": "BASELINE", "mountpoint": "/mnt/BASELINE", "used": "1000"}],
+        volumes=[{"label": "BASELINE", "mountpoint": "/mnt/BASELINE", "lv_name": "baseline_app_state",
+                   "lv_exists": True, "lv_size_bytes": 5368709120, "total_bytes": 5368709120,
+                   "used_bytes": 1073741824, "percent_used": 20.0}],
         actions=da.describe_actions(),
     ).decode()
     assert "PC401 NVMe SK hynix 512GB" in body
     assert "/dev/sdb" in body
     assert "/mnt/BASELINE" in body
     assert "install" in body
-    assert "driveAdminModalPassword" in body  # the sudo-password modal is present
+    assert "driveAdminModalConfirm" in body  # the confirm modal is present
+    assert "driveAdminModalPassword" not in body  # no password field - real pkexec native dialog instead
 
 
 def test_render_drive_admin_page_exposes_a_collapsed_overrides_section_for_technicians():
@@ -130,7 +204,7 @@ def test_render_drive_admin_page_exposes_a_collapsed_overrides_section_for_techn
     assert "overridesHtml" in body
     assert '<details class="overrides">' in body  # the real markup overridesHtml() builds
     assert "<details class=\"overrides\" open>" not in body  # collapsed by default, not forced open
-    assert 'pendingActionId === "build_self_installer" ? overridesHtml() : ""' in body
+    assert 'if (pendingActionId === "build_self_installer") extra = overridesHtml();' in body
     assert "SELF_INSTALLER_OVERRIDE_FIELDS" in body
     for param in ("expected_serial", "proxmox_source_iso", "server_host", "cert_path", "key_path",
                   "target_mac", "target_dmi_product"):
@@ -159,7 +233,7 @@ def test_render_drive_admin_page_shows_a_dash_when_partition_count_is_unknown():
 
 def test_render_drive_admin_page_handles_an_empty_drive_or_volume_list_without_crashing():
     body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[]).decode()
-    assert "No volumes currently mounted" in body
+    assert "No volumes planned" in body
 
 
 def test_render_drive_admin_page_shows_a_checkbox_per_volume_for_the_update_action():
@@ -169,11 +243,37 @@ def test_render_drive_admin_page_shows_a_checkbox_per_volume_for_the_update_acti
     per row, not just a read-only listing."""
     body = bw.render_drive_admin_page(
         drives=[], actions=[],
-        volumes=[{"label": "BASELINE", "mountpoint": "/mnt/BASELINE", "used": "1000"},
-                 {"label": "INSTALLER_CACHE", "mountpoint": "/mnt/INSTALLER_CACHE", "used": "500"}],
+        volumes=[{"label": "BASELINE", "mountpoint": "/mnt/BASELINE", "lv_name": "baseline_app_state",
+                  "lv_exists": True, "lv_size_bytes": 5368709120, "total_bytes": None,
+                  "used_bytes": None, "percent_used": None},
+                 {"label": "INSTALLER_CACHE", "mountpoint": "/mnt/INSTALLER_CACHE",
+                  "lv_name": "baseline_installer_cache", "lv_exists": False, "lv_size_bytes": None,
+                  "total_bytes": None, "used_bytes": None, "percent_used": None}],
     ).decode()
     assert '<input type="checkbox" class="volume-select" value="BASELINE">' in body
     assert '<input type="checkbox" class="volume-select" value="INSTALLER_CACHE">' in body
+
+
+def test_render_drive_admin_page_shows_real_lv_name_and_size_in_the_detail_row():
+    body = bw.render_drive_admin_page(
+        drives=[], actions=[],
+        volumes=[{"label": "BASELINE", "mountpoint": "/mnt/BASELINE", "lv_name": "baseline_app_state",
+                  "lv_exists": True, "lv_size_bytes": 5368709120, "total_bytes": None,
+                  "used_bytes": None, "percent_used": None}],
+    ).decode()
+    assert "baseline_app_state" in body
+    assert "allocated" in body
+
+
+def test_render_drive_admin_page_reports_a_not_yet_created_volume_honestly():
+    body = bw.render_drive_admin_page(
+        drives=[], actions=[],
+        volumes=[{"label": "INSTALLER_CACHE", "mountpoint": "/mnt/INSTALLER_CACHE",
+                  "lv_name": "baseline_installer_cache", "lv_exists": False, "lv_size_bytes": None,
+                  "total_bytes": None, "used_bytes": None, "percent_used": None}],
+    ).decode()
+    assert "not created yet" in body
+    assert "not mounted" in body
 
 
 def test_render_drive_admin_page_shows_a_visibly_distinct_banner_on_real_success():
@@ -264,10 +364,13 @@ def test_render_drive_admin_page_only_checks_one_radio_when_multiple_drives_are_
 # -- a real end-to-end dispatch, over an actual socket ------------------------
 
 class FakeSudoExecutor:
-    """Matches drive_admin.SudoRunner/verify_sudo_password's own
-    injectable `executor(argv, *, input, capture_output, timeout)`
-    shape - no real `sudo` or real password is ever used driving these
-    real-socket tests."""
+    """Matches drive_admin.PkexecRunner's own injectable
+    `executor(argv, *, input, capture_output, timeout)` shape - no real
+    `pkexec` or real password is ever used driving these real-socket
+    tests. Name kept as `FakeSudoExecutor` (a real pre-pkexec-migration
+    name) since it's still exactly what `drive_admin.SudoRunner`
+    (still real and in use by `settings_web.SudoPasswordVerifier` for
+    login) needs too - one shape, two real callers."""
 
     def __init__(self, *, returncode=0, stdout=b"", stderr=b""):
         self.returncode = returncode
@@ -321,7 +424,7 @@ def _base_deps(**overrides):
         "clock": lambda: 1700000000.0, "sessions": sw.SessionStore(), "store": None,
         "persona_provider": None, "runner": FakeRunner(), "elevation_store": None,
         "elevation_verify_fn": None, "personas": ("admin", "personal"),
-        "pds_runner": FakePdsRunner(), "vg_name": "pve", "sudo_executor": None,
+        "pds_runner": FakePdsRunner(), "vg_name": "pve", "pkexec_executor": None,
     }
     deps.update(overrides)
     return deps
@@ -350,41 +453,148 @@ def test_drive_admin_actions_endpoint_returns_real_json():
         case.close()
 
 
-def test_drive_admin_action_refuses_with_the_wrong_password_over_a_real_socket():
-    """A wrong password fails the real `sudo -S -k` preflight
-    (FakeSudoExecutor scripted to returncode=1, exactly like a genuine
-    sudo auth failure) - refused before any action code ever runs."""
-    executor = FakeSudoExecutor(returncode=1, stderr=b"sudo: 1 incorrect password attempt\n")
-    case = _RealServerCase(_base_deps(sudo_executor=executor))
+def _poll_job(case, job_id, *, max_tries=100):
+    import time as _time
+    job = None
+    for _ in range(max_tries):
+        _, raw = case.get(f"/drive-admin/job-log?job_id={job_id}")
+        job = json.loads(raw)
+        if job["done"]:
+            break
+        _time.sleep(0.02)
+    return job
+
+
+def test_drive_admin_action_reports_a_real_refusal_when_pkexec_authentication_fails():
+    """Direct instruction, 2026-09-29: "Make the application ask for
+    the sudo password through Ubuntu best practices" - there's no
+    separate password-verification HTTP step any more (`PkexecRunner`
+    has no password to check at all; PolicyKit's own native agent
+    handles that entirely outside this app). A cancelled/failed
+    authentication surfaces as the underlying privileged command's own
+    non-zero exit (simulated here via a scripted `FakeSudoExecutor`
+    returncode), which the existing job/ActionResult machinery reports
+    as a real refusal - never a special-cased 401 at the HTTP layer."""
+    executor = FakeSudoExecutor(returncode=127, stderr=b"Not authorized\n")
+    case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
         status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "update_selected",
-                                        "params": {"selected": [], "update_types": ["switch_persona"],
-                                                    "to_persona": "admin"},
-                                        "password": "wrong"})
-        assert status == 401
-        assert "invalid password" in body["error"]
+                                       {"action_id": "repair", "params": {"device_path": "/dev/sdz"}})
+        assert status == 200  # the job itself always starts - the outcome comes later
+        job = _poll_job(case, body["job_id"])
+        assert job["outcome"] == "refused"
     finally:
         case.close()
 
 
-def test_drive_admin_action_reaches_the_real_action_once_the_sudo_password_is_accepted():
-    """Proves the sudo-password gate itself lets a correct password
-    through to a real SudoRunner-backed action - not any one action's
-    specific business outcome, which depends on this real machine's
-    own actual mount state (SudoRunner's reads are real, by design;
-    only its privileged writes go through the injected executor). A
-    401 here would mean the gate wrongly rejected a correct password;
-    anything else means the real action code genuinely ran."""
+def test_drive_admin_action_returns_a_job_id_immediately_instead_of_blocking():
+    """Direct instruction, 2026-09-29: a long-running action used to
+    block the whole request with zero feedback - now it starts in the
+    background and the request returns immediately with a job_id."""
     executor = FakeSudoExecutor(returncode=0)
-    case = _RealServerCase(_base_deps(sudo_executor=executor))
+    case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
         status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "update_selected",
-                                        "params": {"selected": ["BASELINE"], "update_types": ["apply_volume_mode"]},
-                                        "password": "right-password"})
-        assert status != 401
-        assert executor.calls  # the real preflight (and likely more) genuinely ran
+                                       {"action_id": "update_selected", "params": {"selected": []}})
+        assert status == 200
+        assert body["outcome"] == "started"
+        assert body["job_id"]
+    finally:
+        case.close()
+
+
+def test_drive_admin_job_log_reports_real_completion_for_a_started_job():
+    executor = FakeSudoExecutor(returncode=0)
+    case = _RealServerCase(_base_deps(pkexec_executor=executor))
+    try:
+        status, body = case.post_json("/drive-admin/action",
+                                       {"action_id": "update_selected", "params": {"selected": []}})
+        job = _poll_job(case, body["job_id"])
+        assert job is not None and job["done"] is True
+        assert job["outcome"] in ("applied", "refused")
+        assert isinstance(job["lines"], list)
+    finally:
+        case.close()
+
+
+def test_drive_admin_job_log_returns_404_for_an_unknown_job_id():
+    case = _RealServerCase(_base_deps())
+    try:
+        status, _ = case.get("/drive-admin/job-log?job_id=totally-unknown")
+        assert status == 404
+    finally:
+        case.close()
+
+
+def test_drive_admin_screendump_returns_404_when_no_install_is_running(tmp_path):
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get(f"/drive-admin/screendump?workspace={tmp_path}")
+        assert status == 404
+        assert "no active install" in json.loads(body)["error"]
+    finally:
+        case.close()
+
+
+def test_drive_admin_screendump_returns_a_real_png_when_an_install_is_running(tmp_path):
+    """Direct instruction, 2026-09-29: "keep things improving" - the
+    real fix for the manual `nc screendump ...\\nquit\\n` mistake that
+    killed a real in-progress install. Real Unix socket server stands
+    in for QEMU's own monitor, proving the full route only ever sends
+    the one real `screendump` command."""
+    import socket
+    import threading
+
+    monitor_socket = tmp_path / "monitor.sock"
+
+    def _serve():
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(str(monitor_socket))
+        srv.listen(1)
+        conn, _ = srv.accept()
+        conn.sendall(b"(qemu) ")
+        data = conn.recv(4096)
+        assert b"quit" not in data
+        # The real command is "screendump <path>\n" - write the fake
+        # PPM to whatever path the server actually requested, exactly
+        # as real QEMU would.
+        requested_path = data.decode().split(" ", 1)[1].strip()
+        Path(requested_path).write_bytes(b"P6\n1 1\n255\n" + bytes((1, 2, 3)))
+        conn.sendall(b"\r\n(qemu) ")
+        conn.close()
+        srv.close()
+
+    t = threading.Thread(target=_serve, daemon=True)
+    t.start()
+    import time as _time
+    _time.sleep(0.1)
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get(f"/drive-admin/screendump?workspace={tmp_path}")
+        assert status == 200
+        assert body.startswith(b"\x89PNG\r\n\x1a\n")
+    finally:
+        case.close()
+        t.join(timeout=2.0)
+
+
+def test_drive_admin_action_reaches_the_real_action_via_a_real_pkexec_runner():
+    """Proves the server actually constructs a real `PkexecRunner` and
+    dispatches to it - not any one action's specific business outcome.
+    `repair` is used since it genuinely calls `runner.run()` (via
+    `find_vg_for_device`'s real `pvs` call); `update_selected` is a
+    pure honest placeholder that never touches the runner at all, so
+    it can't prove this on its own."""
+    executor = FakeSudoExecutor(returncode=0, stdout="")
+    case = _RealServerCase(_base_deps(pkexec_executor=executor))
+    try:
+        status, body = case.post_json("/drive-admin/action",
+                                       {"action_id": "repair", "params": {"device_path": "/dev/sdz"}})
+        assert status == 200
+        job = _poll_job(case, body["job_id"])
+        assert job["done"] is True
+        assert executor.calls  # the real pkexec-wrapped call genuinely ran
+        assert executor.calls[0][0][0] == "pkexec"  # via pkexec, never a piped password
     finally:
         case.close()
 
@@ -526,3 +736,49 @@ def test_admin_settings_save_route_applies_a_real_value_once_elevated():
         assert settings_store.get_setting("startup", "auto_start_persona") == "admin"
     finally:
         case.close()
+
+
+# -- Hardware tab (direct instruction, 2026-09-29: health check moves out of ---
+# -- Drive Administration into its own tab that just shows current state) -----
+
+def test_real_hardware_state_returns_empty_shape_when_no_runner_is_configured():
+    state = bw.real_hardware_state(None)
+    assert state == {"dependency_results": [], "sensors": None, "nvme": None,
+                     "smart": None, "sysinfo": {}, "inventory": {}}
+
+
+def test_real_hardware_state_reports_real_dependency_results():
+    state = bw.real_hardware_state(FakeRunner())
+    assert isinstance(state["dependency_results"], list)
+    assert any(r["id"] == "system.sqlite3_importable" for r in state["dependency_results"])
+
+
+def test_render_hardware_page_shows_a_failing_dependency_as_a_danger_card():
+    body = bw.render_hardware_page(
+        dependency_results=[{"id": "self_installer.lvm_size_preset_valid", "ok": False, "detail": "bad value"}],
+        sensors=None, nvme=None, smart=None,
+    ).decode()
+    assert "self_installer.lvm_size_preset_valid" in body
+    assert "bad value" in body
+    assert "danger" in body
+
+
+def test_render_hardware_page_reports_an_unavailable_collector_honestly():
+    body = bw.render_hardware_page(dependency_results=[], sensors=None, nvme=None, smart=None).decode()
+    assert "Not available" in body
+
+
+def test_render_hardware_page_has_no_run_button_it_just_shows():
+    body = bw.render_hardware_page(dependency_results=[], sensors=None, nvme=None, smart=None).decode()
+    assert "Run&hellip;" not in body
+
+
+def test_render_drive_admin_page_css_actually_hides_a_hidden_action_card():
+    """Real bug found live: `.action-card { display: flex }` overrode
+    the native `[hidden]` attribute's default `display: none` (equal
+    CSS specificity, author style wins over the UA default regardless
+    of the attribute) - the update_selected card had `hidden=true` in
+    the DOM but was still visually showing. An explicit
+    `.action-card[hidden] { display: none; }` rule is required."""
+    body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[]).decode()
+    assert ".action-card[hidden]" in body
