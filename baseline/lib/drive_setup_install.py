@@ -54,6 +54,15 @@ class InstallRunner:
     def sleep(self, seconds: float) -> None:
         raise NotImplementedError
 
+    def kill_process_using_path(self, path: Path) -> bool:
+        """Real fix, decision record 113: a prior run's own QEMU
+        process, uniquely identified by this exact monitor-socket path
+        in its argv, may still be alive and holding the workspace (and
+        the real device) even though this new run just rebuilt fresh
+        ISOs/answer files - nothing ever killed it before. Returns
+        whether a live process was found and killed."""
+        raise NotImplementedError
+
 
 @dataclass
 class InstallProc:
@@ -110,6 +119,18 @@ class RealInstallRunner(InstallRunner):
     def sleep(self, seconds):
         time.sleep(seconds)
 
+    def kill_process_using_path(self, path):
+        found = subprocess.run(["pgrep", "-f", str(path)], capture_output=True, text=True)
+        pids = [int(p) for p in found.stdout.split() if p.strip()]
+        killed = False
+        for pid in pids:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                killed = True
+            except (ProcessLookupError, PermissionError):
+                pass
+        return killed
+
 
 class _RealInstallProcess(InstallProcess):
     def __init__(self, argv, cwd, monitor_socket: Path | None = None):
@@ -159,38 +180,149 @@ class QemuInvocation:
     device_inventory: dict = field(default_factory=dict)
 
 
+def _network_argv(*, mac: str, restrict_network: bool,
+                   guestfwd_host: str | None, guestfwd_port: int | None) -> list:
+    """Real bug found live, 2026-09-29 (a real regression from decision
+    record 03's own already-proven fix): `-nic user,restrict=on,mac=...`
+    alone blocks the guest from reaching *any* real host-bound TCP
+    service via SLIRP's `10.0.2.2` gateway - demonstrated directly, at
+    the time, with a real `io: Connection refused` on the installer's
+    own answer-file POST, and re-confirmed the same way here. DHCP/DNS/
+    router-advertisement traffic works because SLIRP implements those
+    protocols *internally*, not because anything is proxied to a real
+    host socket. `guestfwd=tcp:<host>:<port>-tcp:127.0.0.1:<port>`
+    punches one explicit, single-service exception through
+    `restrict=on` - stronger isolation than a blanket "block LAN/
+    internet only" approach, since it's "block everything, except this
+    one named service." `guestfwd` isn't expressible via the `-nic`
+    shorthand at all - it needs the long `-netdev` + `-device
+    virtio-net-pci` form."""
+    if guestfwd_host and guestfwd_port:
+        netdev = (f"user,id=net0,restrict={'on' if restrict_network else 'off'},"
+                  f"guestfwd=tcp:{guestfwd_host}:{guestfwd_port}-tcp:127.0.0.1:{guestfwd_port}")
+        return ["-netdev", netdev, "-device", f"virtio-net-pci,netdev=net0,mac={mac}"]
+    return ["-nic", f"user,restrict={'on' if restrict_network else 'off'},mac={mac}"]
+
+
 def build_sparse_install_invocation(
     *, target_image: Path, prepared_iso: Path, mac: str, smbios_product: str,
     serial_log: Path, memory_mb: int = 3072, smp: int = 2,
     restrict_network: bool = True, monitor_socket: Path | None = None,
+    guestfwd_host: str | None = None, guestfwd_port: int | None = None,
+    target_serial: str | None = None,
 ) -> QemuInvocation:
     """Sparse-file-only, guestfwd/restrict-isolated networking, no
     other drives, no host block-device paths - matching decision
-    record 03's accepted design exactly. `-boot order=d` (CD-ROM
-    first) is correct for the *install* run; a *post-install* boot
-    must instead use `order=c` (disk first) with the CD-ROM detached -
-    see decision record 04's fresh-OVMF finding that installer media
-    left first in boot order can silently re-enter itself against an
-    already-installed disk."""
-    argv = [
-        "qemu-system-x86_64",
-        "-enable-kvm", "-cpu", "host", "-m", str(memory_mb), "-smp", str(smp),
-        "-drive", f"file={target_image},format=raw,if=virtio,cache=none",
-        "-cdrom", str(prepared_iso),
-        "-boot", "order=d,once=d",
-        "-nic", f"user,restrict={'on' if restrict_network else 'off'},mac={mac}",
-        "-smbios", f"type=1,product={smbios_product}",
-        "-serial", f"file:{serial_log}",
-    ]
+    record 03's accepted design exactly (see `_network_argv`'s own
+    docstring for the real bug this restores the fix for).
+
+    `-boot order=c,once=d` (real bug found live, 2026-09-29, decision
+    record 116): `once=d` overrides the boot device for the VERY FIRST
+    boot of this QEMU process's life only - every *subsequent* boot
+    within the same still-running process (including the auto
+    installer's own guest-triggered `reboot` after a successful
+    install, confirmed live via a real screendump reading "INFO:
+    Rebooting system after successful installation") falls back to the
+    **base** `order=` value. The code previously used `order=d,once=d`
+    - `d` as *both* the override and the base - so every reboot,
+    forever, kept re-selecting the CD-ROM and silently re-entered the
+    installer environment from scratch against the now-already-
+    installed disk, exactly the failure this docstring already warned
+    about (see decision record 04) without the code ever actually
+    implementing the fix for it. Confirmed live: a real install that
+    reached 99% ("make system bootable") and genuinely rebooted was
+    then observed, via a real screendump, back at "Preparing installer
+    mount points..." - a full fresh boot of the installer ISO again,
+    not the newly-installed disk - which re-failed the answer-file
+    fetch (a fresh session token is generated per invocation, so a
+    second auto-install attempt within the same process can never
+    complete). `order=c` as the base value means any reboot after the
+    first uses the disk - now the just-installed, bootable Proxmox
+    system - instead of re-entering the CD-ROM's installer. This
+    matches decision record 04's own already-documented finding that
+    installer media left first in boot order can silently re-enter
+    itself against an already-installed disk - this fix is the first
+    time that finding was actually applied within this same,
+    self-rebooting QEMU session rather than assumed to only matter for
+    a hypothetical separate, later boot invocation.
+
+    `guestfwd_host`/`guestfwd_port` (real bug found live, 2026-09-29):
+    when given, punches the one real `guestfwd` exception through
+    `restrict=on` the answer-file fetch actually needs - omitted (the
+    default), this falls back to the plain `-nic` shorthand, which
+    real testing proved cannot reach any host service at all.
+
+    `target_serial` (real bug found live, 2026-09-29, decision record
+    114): the answer file's own `filter.ID_SERIAL_SHORT` asks
+    Proxmox's installer to target the disk by its real hardware
+    serial - but plain `-drive file=<real device>,if=virtio` never
+    exposes that serial to the guest at all. The guest's own udev sees
+    a blank/absent serial on the virtio-blk device regardless of what
+    the *host* device's real serial is, so the filter genuinely
+    matches nothing - confirmed live, "Installation failed: filter did
+    not match any device", well past decision record 112's own
+    variable-shadowing fix (which was real and necessary, but not
+    sufficient on its own).
+
+    `serial=` is a **device** property, not a block-format/backend
+    option - real, direct evidence: appending it onto the combined
+    `-drive if=virtio,...,serial=...` shorthand fails immediately with
+    a real QEMU error, `Block format 'raw' does not support the option
+    'serial'` (confirmed live against the actual installed QEMU
+    10.2.1). An interim fix moved `serial=` onto a separate `-device
+    virtio-blk-pci,drive=...,serial=...` instead - that launched, but
+    the real install still failed with the exact same filter error.
+    Live diagnosis on the guest's own already-booted, already-failed
+    shell (`udevadm info --query=property`, real HMP `sendkey`
+    keystrokes typed in and read back via screendump, never guessed)
+    proved why: `virtio-blk-pci` devices only ever populate udev's
+    `ID_SERIAL` property, never `ID_SERIAL_SHORT` - a second,
+    disposable hot-attached test disk (`virtio-scsi-pci` + `scsi-hd`,
+    never touching the real target) confirmed `ID_SERIAL_SHORT` *is*
+    populated correctly, but only for a SCSI-attached device. Proxmox's
+    own filter checks `ID_SERIAL_SHORT` specifically, which no
+    virtio-blk device can ever satisfy regardless of what `serial=`
+    value is set. When `target_serial` is given, the target disk is
+    therefore attached via `virtio-scsi-pci` + `scsi-hd` instead of
+    `virtio-blk-pci`."""
+    if target_serial:
+        argv = [
+            "qemu-system-x86_64",
+            "-enable-kvm", "-cpu", "host", "-m", str(memory_mb), "-smp", str(smp),
+            "-drive", f"file={target_image},format=raw,if=none,id=targetdisk,cache=none",
+            "-device", "virtio-scsi-pci,id=targetscsi",
+            "-device", f"scsi-hd,drive=targetdisk,bus=targetscsi.0,serial={target_serial}",
+            "-cdrom", str(prepared_iso),
+            "-boot", "order=c,once=d",
+            *_network_argv(mac=mac, restrict_network=restrict_network,
+                           guestfwd_host=guestfwd_host, guestfwd_port=guestfwd_port),
+            "-smbios", f"type=1,product={smbios_product}",
+            "-serial", f"file:{serial_log}",
+        ]
+    else:
+        argv = [
+            "qemu-system-x86_64",
+            "-enable-kvm", "-cpu", "host", "-m", str(memory_mb), "-smp", str(smp),
+            "-drive", f"file={target_image},format=raw,if=virtio,cache=none",
+            "-cdrom", str(prepared_iso),
+            "-boot", "order=c,once=d",
+            *_network_argv(mac=mac, restrict_network=restrict_network,
+                           guestfwd_host=guestfwd_host, guestfwd_port=guestfwd_port),
+            "-smbios", f"type=1,product={smbios_product}",
+            "-serial", f"file:{serial_log}",
+        ]
     if monitor_socket is not None:
         argv += ["-monitor", f"unix:{monitor_socket},server,nowait"]
 
     device_inventory = {
         "drives": [
-            f"file={target_image.name},format=raw,if=virtio (sparse target)",
+            f"file={target_image.name},format=raw,if={'none (virtio-scsi-pci/scsi-hd, serial set - ID_SERIAL_SHORT-visible)' if target_serial else 'virtio'} (sparse target)",
             f"cdrom={prepared_iso.name} (read-only installer ISO)",
         ],
-        "network": f"user (SLIRP), restrict={'on' if restrict_network else 'off'}, mac={mac} - no bridge/tap, no host device passthrough",
+        "network": (f"user (SLIRP), restrict={'on' if restrict_network else 'off'}, mac={mac}"
+                    + (f", guestfwd tcp:{guestfwd_host}:{guestfwd_port}->127.0.0.1:{guestfwd_port}"
+                       if guestfwd_host and guestfwd_port else "")
+                    + " - no bridge/tap, no host device passthrough"),
         "no_other_drives": True,
         "no_host_block_device_paths": True,
     }
@@ -320,3 +452,111 @@ def scan_for_forbidden_bytes(runner: InstallRunner, target_image: Path, forbidde
                     found[s] = True
             prev_tail = chunk[-overlap:] if overlap else b""
     return {s.decode(errors="replace"): v for s, v in found.items()}
+
+
+def send_monitor_command_via_socket(monitor_socket: Path, command: str, *, timeout: float = 5.0) -> str:
+    """The same real, safe HMP-over-unix-socket pattern
+    `_RealInstallProcess.send_monitor_command` already uses (connect,
+    drain the banner, send one command, read the reply, close) - as a
+    standalone function reachable with only the monitor socket's real
+    path on disk, not a live `InstallProcess` object. Needed because a
+    real, already-running install's own Python process handle does not
+    survive past the single web request that launched it - only the
+    socket file itself persists on disk for as long as QEMU is alive.
+
+    Real bug found live, 2026-09-29 (direct instruction: "keep things
+    improving"): a manual `nc`-piped `screendump ...\\nquit\\n` sent to
+    this same socket accidentally terminated a real, in-progress
+    install - `quit` is a genuine QEMU monitor command, not just a way
+    to close the shell pipe. This function's own contract is the fix:
+    it sends *exactly* the one real command asked for and nothing
+    else, ever - there is no code path here that can send `quit`."""
+    import socket
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(str(monitor_socket))
+        try:
+            s.recv(4096)  # banner
+        except socket.timeout:
+            pass
+        s.sendall((command + "\n").encode())
+        time.sleep(0.3)
+        try:
+            return s.recv(65536).decode("utf-8", errors="replace")
+        except socket.timeout:
+            return ""
+    finally:
+        s.close()
+
+
+def ppm_to_png(ppm_bytes: bytes) -> bytes:
+    """Minimal, stdlib-only P6 (binary) PPM -> PNG encoder - no new
+    system dependency (no ImageMagick/ffmpeg is provisioned anywhere
+    in this project) needed just to show a real QEMU screendump in a
+    browser. RGB, 8-bit, no interlace, no filtering beyond the
+    required per-scanline "None" filter byte - everything a raw QEMU
+    screendump actually needs, nothing more."""
+    import struct
+    import zlib
+
+    if not ppm_bytes.startswith(b"P6"):
+        raise ValueError("not a P6 (binary) PPM")
+
+    def _skip_ws_and_comments(data: bytes, pos: int) -> int:
+        while True:
+            while pos < len(data) and data[pos:pos + 1].isspace():
+                pos += 1
+            if pos < len(data) and data[pos:pos + 1] == b"#":
+                while pos < len(data) and data[pos:pos + 1] != b"\n":
+                    pos += 1
+            else:
+                return pos
+
+    def _read_int(data: bytes, pos: int) -> tuple[int, int]:
+        pos = _skip_ws_and_comments(data, pos)
+        start = pos
+        while pos < len(data) and not data[pos:pos + 1].isspace():
+            pos += 1
+        return int(data[start:pos]), pos
+
+    pos = 2
+    width, pos = _read_int(ppm_bytes, pos)
+    height, pos = _read_int(ppm_bytes, pos)
+    _maxval, pos = _read_int(ppm_bytes, pos)
+    pos += 1  # the single whitespace byte required right after maxval
+    pixel_data = ppm_bytes[pos:pos + width * height * 3]
+
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+
+    stride = width * 3
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # filter type "None"
+        raw.extend(pixel_data[y * stride:(y + 1) * stride])
+    compressed = zlib.compress(bytes(raw), 6)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", compressed) + _chunk(b"IEND", b""))
+
+
+def capture_live_screendump_png(monitor_socket: Path, *, tmp_path: Path | None = None,
+                                 timeout: float = 5.0) -> bytes:
+    """The real, safe, one-shot "what does the install screen look
+    like right now" capture - the actual feature this project needed
+    instead of a human (or an AI) hand-typing raw monitor commands
+    over `nc`. Never sends `quit`; genuinely fails (raises, never a
+    fake blank image) if no real install is running at this socket."""
+    import os
+    import tempfile
+    target = Path(tmp_path) if tmp_path else Path(tempfile.gettempdir()) / f"screendump-{os.getpid()}.ppm"
+    send_monitor_command_via_socket(monitor_socket, f"screendump {target}", timeout=timeout)
+    time.sleep(0.5)  # the monitor reply returns before the file is necessarily flushed to disk
+    ppm_bytes = target.read_bytes()
+    try:
+        target.unlink()
+    except OSError:
+        pass
+    return ppm_to_png(ppm_bytes)
