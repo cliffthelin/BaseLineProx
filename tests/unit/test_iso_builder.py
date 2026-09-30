@@ -17,6 +17,8 @@ class FakeIsoBuilderRunner(ib.IsoBuilderRunner):
         self.files = {}  # path -> size (int) - content itself is irrelevant to this module's own logic
         self.dirs = set()
         self.copied_trees = []  # (src, dst) pairs
+        self.removed_trees = []
+        self.removed_files = []
         self.command_responses = []
         self.calls = []
 
@@ -27,6 +29,10 @@ class FakeIsoBuilderRunner(ib.IsoBuilderRunner):
         self.calls.append(list(argv))
         for predicate, proc in self.command_responses:
             if predicate(argv):
+                if (proc.returncode == 0 and argv[:1] == ["xorriso"] and "-outdev" in argv
+                        and getattr(self, "_pending_output", None)):
+                    outdev, size = self._pending_output
+                    self.files[outdev] = size
                 return proc
         return ib.IsoBuilderProc(0, "", "")
 
@@ -43,6 +49,14 @@ class FakeIsoBuilderRunner(ib.IsoBuilderRunner):
         self.copied_trees.append((str(src), str(dst)))
         self.dirs.add(str(dst))
 
+    def remove_tree(self, path):
+        self.removed_trees.append(str(path))
+        self.dirs.discard(str(path))
+
+    def remove_file(self, path):
+        self.removed_files.append(str(path))
+        self.files.pop(str(path), None)
+
 
 def _base_runner(*, source_size=400_000, output_size=460_000):
     r = FakeIsoBuilderRunner()
@@ -51,9 +65,14 @@ def _base_runner(*, source_size=400_000, output_size=460_000):
               ib.IsoBuilderProc(0, "", ""))
     r.script(lambda a: "-find" in a,
               ib.IsoBuilderProc(0, "'/baseline-src/boot/provision.sh'\n", ""))
-    # remaster "creates" the output file as a side effect - simulate that
-    # by pre-registering it, since this fake has no real filesystem.
-    r.files["/out/current.iso"] = output_size
+    # remaster "creates" the output file as a real side effect of a
+    # successful xorriso call - simulated via run()'s own special-case
+    # (real bug found live, 2026-09-29: build_current_iso now removes
+    # any stale pre-existing output file *before* calling xorriso, so
+    # pre-registering the file here directly would just be immediately
+    # wiped by that real removal before the postcondition checks ever
+    # see it).
+    r._pending_output = ("/out/current.iso", output_size)
     return r
 
 
@@ -64,11 +83,36 @@ def test_stage_baseline_source_copies_boot_and_baseline_as_siblings():
     assert ("/repo/baseline", "/ws/staging/baseline") in r.copied_trees
 
 
+def test_stage_baseline_source_removes_a_stale_staging_dir_before_copying():
+    """Real bug found live, 2026-09-29: the workspace is a fixed,
+    reused path across real retries (by design - the cached assistant
+    binary under `workspace/acquire/` is meant to survive a retry) -
+    but a prior *failed* attempt's own `staging/boot` directory was
+    left behind too, and a bare `shutil.copytree` into an already-
+    existing destination raised a real `FileExistsError`. Every real
+    retry must start from a genuinely clean staging directory."""
+    r = FakeIsoBuilderRunner()
+    r.dirs.add("/ws/staging")
+    r.dirs.add("/ws/staging/boot")  # leftover from a prior failed attempt
+    ib.stage_baseline_source(r, repo_root=Path("/repo"), staging_dir=Path("/ws/staging"))
+    assert "/ws/staging" in r.removed_trees
+    assert ("/repo/boot", "/ws/staging/boot") in r.copied_trees
+
+
 def test_remaster_argv_shape():
+    """`patch`, not `replay` and not `keep` (real bug found live,
+    2026-09-29, corrected same-day): the real Proxmox source ISO's
+    quadruple-hybrid boot record (El Torito + MBR grub2-mbr + GPT +
+    APM) makes `replay` fail for real with `Overlapping MBR partition
+    entries requested`. `keep` completes cleanly but a real, isolated
+    QEMU boot test proved its actual output ISO never boots (hangs
+    forever at SeaBIOS's "Booting from DVD/CD..."). `patch` was then
+    boot-tested the same real way and genuinely works - boots all the
+    way into the real Proxmox installer environment."""
     argv = ib.remaster_argv(Path("/src/source.iso"), Path("/out/current.iso"), Path("/ws/staging"))
     assert argv == [
         "xorriso", "-indev", "/src/source.iso", "-outdev", "/out/current.iso",
-        "-boot_image", "any", "replay", "-map", "/ws/staging", "/baseline-src", "--",
+        "-boot_image", "any", "patch", "-map", "/ws/staging", "/baseline-src", "--",
     ]
 
 
@@ -88,6 +132,21 @@ def test_build_current_iso_success_all_postconditions_pass():
     assert all(c.ok for c in result.postconditions)
     assert ("/repo/boot", "/ws/staging/boot") in r.copied_trees
     assert ("/repo/baseline", "/ws/staging/baseline") in r.copied_trees
+
+
+def test_build_current_iso_removes_a_stale_output_file_before_remastering():
+    """Real bug found live, 2026-09-29: a prior real attempt's own
+    output ISO (~1.7GB, real non-zero ISO9660 session data) was still
+    sitting at this same fixed, reused workspace path - xorriso
+    refuses to write a fresh `-outdev` over one that already holds
+    real data: `FAILURE: -indev differs from -outdev and -outdev
+    media holds non-zero data`. Every real retry must remove it first."""
+    r = _base_runner()
+    ib.build_current_iso(
+        r, source_iso=Path("/src/source.iso"), repo_root=Path("/repo"),
+        output_iso=Path("/out/current.iso"), workspace=Path("/ws"),
+    )
+    assert "/out/current.iso" in r.removed_files
 
 
 def test_build_current_iso_fails_when_xorriso_remaster_exits_nonzero():

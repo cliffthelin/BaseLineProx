@@ -79,8 +79,6 @@ the full table):
 - Item 22: default/enforced persistence wiring for container volumes
   (nothing stops a container's data landing on the disposable
   substrate today).
-- v0.1's item 18, still genuinely never closed: run `homeassistant-lxc`
-  and `haos-vm` under real QEMU.
 - A real container has never actually been started with the new GPU
   device wiring (item 6 above) - the natural next real-world check
   whenever `nvidia-ctk` gets installed.
@@ -91,6 +89,296 @@ of how the above got built**, plus this project's own older history
 different physical machine, a Dell Latitude, was the subject of the
 oldest entries near the bottom). Read top-to-bottom for full detail;
 read only this summary if you just need to know where things stand.
+
+## 2026-09-29 continuation - real xorriso boot fix (keep→patch), safe screendump viewer, mount_volume action
+
+**Read decision records 105-109 first**, in order - they tell one
+continuous real story:
+
+- **105**: real `mount_volume`/`unmount_volume` Drive Administration
+  actions (direct instruction: "the application has to handle... not
+  manual scripts nobody will remember" - after a manual `vgchange`/
+  `mount` script was offered instead of a real app feature).
+- **106**: `build_self_installer`'s xorriso remaster failed for real
+  (`Overlapping MBR partition entries requested`) - fixed by switching
+  `replay` → `keep`. This fix was itself later found wrong (see 109).
+- **107**: a prior failed attempt's own leftover `iso-build/staging`
+  directory broke every subsequent retry (`FileExistsError`) - fixed
+  by removing it first, every time.
+- **108**: real, safe "Live install screen" viewer built into the app,
+  after I made a real mistake - a manual `nc`-piped `screendump
+  ...\nquit\n` accidentally sent `quit` to the QEMU monitor and killed
+  a real in-progress install. New `capture_live_screendump_png` (a
+  minimal stdlib-only PPM→PNG encoder, no new system dependency) +
+  `/drive-admin/screendump` route + a Refresh button on the page -
+  never sends anything but the one real `screendump` command.
+- **109**: **correction to 106** - a real, isolated QEMU boot test
+  (using 108's own safe mechanism) proved `keep`-mode ISOs never
+  actually boot (hang forever at "Booting from DVD/CD..."), while
+  `patch`-mode ISOs boot correctly all the way into the real Proxmox
+  installer environment. Neither xorriso's exit code nor its own
+  `-report_system_area` classification was sufficient proof either
+  time - only an actual isolated boot test settled it.
+
+Also established mid-session, worth remembering: once `PkexecRunner`
+(decision record 103) was in place, the operator confirmed I should
+trigger `build_self_installer` myself via a direct POST to
+`/drive-admin/action` - the real privilege-escalation dialog appears
+on the operator's own screen regardless of who sends the request, so
+this doesn't violate the "never handle real passwords" rule. I now do
+this directly rather than asking the operator to click through the
+browser each time.
+
+**Full suite: 1540/1540** at the end of this arc (was ~1514 going in).
+A real, self-triggered `build_self_installer` retry with the corrected
+`patch`-mode fix was in progress when this was written - **check its
+real outcome next** (`/drive-admin/job-log?job_id=...` for the text
+result, or the Live install screen viewer for a real screendump) before
+assuming anything about it succeeded or failed.
+
+## 2026-09-29 continuation - Drive Administration now authorizes actions via real pkexec/PolicyKit
+
+**Read decision record 103 first** (`docs/design/decision-records/103-pkexec-privilege-escalation.md`).
+
+Direct instruction: "Make the application ask for the sudo password
+through Ubuntu best practices... following documented methods and
+policies from the OS provider." Correctly refused a request to run a
+destructive action directly (never type/handle real passwords), then
+built the actual real fix: new `drive_admin.PkexecRunner` wraps every
+privileged call in `pkexec` instead of `sudo -S` piping a password
+through this app's own HTML form/HTTP request. Confirmed live on this
+real machine before building anything: `pkexec whoami` genuinely
+returned `root` after the operator authenticated through GNOME Shell's
+own built-in PolicyKit dialog - no custom `.policy` action file
+needed, the built-in default sufficed. `SudoRunner`/
+`verify_sudo_password` are untouched and still used by login
+(`SudoPasswordVerifier`, decision record 100) - a different real
+question ("does this session belong to someone who knows the
+password") than "authorize this one destructive action."
+
+The Drive Administration modal's password field is gone entirely -
+confirmed via live DOM inspection on the restarted server. Full suite:
+1522/1522 (was 1514).
+
+**Real disclosed side effect**: `build_self_installer`'s "reuse your
+submitted password as the new Proxmox root password" (same day's
+earlier work) needed `SudoRunner.password` to forward - `PkexecRunner`
+has no password at all by design, so that feature now falls back to
+generating and clearly surfacing a fresh one-time password again
+(still displays as clean text, still shown live).
+
+**Not yet verified**: a real, full Drive Administration action
+(`repair` or `build_self_installer`) actually triggering the native
+dialog and completing end-to-end through the running app - the
+`pkexec whoami` proof and the unit-test-level dispatch proof are both
+real, but a full real action hasn't been run through the live app yet
+on this new mechanism.
+
+## 2026-09-29 continuation - real crash fix: `_SudoPdsAdapter` missing 3 of 4 real methods
+
+**Read decision record 101 first** (`docs/design/decision-records/101-sudo-pds-adapter-missing-methods.md`).
+
+Real live bug report: "logged in fine but nothing happened when I
+authorized and ran." The real server log had the actual cause: an
+unhandled `AttributeError: '_SudoPdsAdapter' object has no attribute
+'realpath'` inside `physical_device_safety.validate_target_device`,
+raised mid-request during a real `build_self_installer` attempt.
+`BaseHTTPRequestHandler` doesn't send a clean response when a handler
+raises - the connection just broke, so the browser's fetch never got
+a parseable response and the page silently did nothing.
+
+Root cause: `_SudoPdsAdapter` (built earlier this session for
+`rebuild_persistence_lvm`'s own narrower need) only ever implemented
+`run()` - `build_self_installer` is a different, newer call path that
+needed the adapter's full interface (`lstat`/`realpath`/
+`read_size_file` too), and no test had ever constructed a real
+adapter and called anything but `run()` on it. Fixed by delegating the
+three missing (real, unprivileged) methods to a plain
+`physical_device_safety.Runner()` instance. 3 new tests close the
+exact coverage gap. Full suite: 1504/1504 (was 1501).
+
+**Not yet re-verified against a real `build_self_installer` run** -
+needs the user to retry with their own real password again now that
+the crash is fixed.
+
+## 2026-09-29 continuation - login now verifies via real sudo (real bug fix)
+
+**Read decision record 100 first** (`docs/design/decision-records/100-real-sudo-login-verifier.md`).
+
+Real live bug report: `✗ invalid password - action refused` when
+authorizing a Drive Administration action. Ruled out, in order: a
+stale server (only one, current process); a broken request pipeline
+(a direct `curl` POST with a known-wrong password reproduced the exact
+same message - plumbing is correct); a wrong-account mismatch (this
+machine really does have two real accounts, `cane` uid 1000 running
+the server and `Cliff` uid 1002 - flagged, then ruled out once the
+user confirmed both share the same real password); a PAM lockout (not
+configured on this system).
+
+The actual gap: login used a dev-seeded fake credential
+(`FileBackedPasswordVerifier`, root/baseline) while Drive
+Administration's own action password and the Admin-tab elevation gate
+both already checked something real. Fixed with a new
+`SudoPasswordVerifier` reusing Drive Administration's own real
+`sudo -S` preflight for login too - not `SystemPasswordVerifier`
+(reading `/etc/shadow` directly), since that needs the process to
+already run as root, exactly what decision record 84 moved this app
+away from. Full suite: 1501/1501 (was 1497).
+
+**Not yet verified live** - the user should retry logging in with the
+real (shared) system password once the server is restarted on this
+code.
+
+## 2026-09-29 continuation - Drive Administration overhaul (self-installer only, real per-drive Baseline detection/repair, Hardware its own tab)
+
+**Read decision record 99 first** (`docs/design/decision-records/99-drive-admin-model-overhaul.md`).
+
+Several direct corrections in one message, all addressed: `install`/
+`create_volumes_on_existing_vg` removed ("the only installer is a self
+installer"); `repair` rebuilt as a real, per-drive action (scans that
+drive's own VG for missing Baseline volumes, creates only what's
+missing); drive cards now show a real "Baseline drive" indicator,
+Baseline-installed drives group at the top under their own heading,
+missing volumes are listed on the card itself; `update_selected` only
+shows when a Baseline drive is selected, with a real per-volume select-
+all/individual mechanism - but the actual "check for a newer version"
+logic is an honest placeholder, since no real update source exists yet
+for any cached artifact (curated Helper-Scripts are deliberately
+manually-pinned, never auto-updated; the Proxmox ISO and any distro
+ISO have no version-tracking built); health-check moved out of Drive
+Administration entirely into a new `/hardware` tab that just shows
+real dependency-check results plus real sensor/NVMe/SMART facts, no
+button.
+
+Found and fixed a real CSS bug while verifying live: `.action-card`'s
+`display:flex` silently overrode the `[hidden]` attribute's own
+`display:none` default (equal specificity, author style beats the UA
+stylesheet) - the Update card had `hidden=true` in the DOM but was
+still visually showing. Confirmed via `getComputedStyle`/`offsetParent`
+before and after the fix.
+
+Full suite: 1497/1497 (was 1485). Import checker and persistence-typo
+guard both clean.
+
+**Still pending from the ask below**: `apply_volume_mode`/
+`switch_persona` (real, tested functions) have no web-UI entry point
+now that `update_selected` means something else - not rebuilt, flagged
+so it isn't mistaken for dead code later. The 7 distro ISOs still
+haven't been copied anywhere real - still pending the `/dev/sdd`
+wipe-and-rebuild.
+
+## 2026-09-29 continuation - SUBSTRATE_PERSISTENCE volume + real (min_gb, max_gb) sizing for every volume
+
+**Read decision record 98 first** (`docs/design/decision-records/98-substrate-persistence-and-real-sizing-defaults.md`).
+
+Continuing from the distro-ISO/INSTALLER_CACHE ask below: `/dev/sdb`
+was ruled out (repurposed, off-limits, direct instruction), leaving
+`/dev/sdd`'s existing `pve` VG as the only real candidate - adding new
+LVM logical volumes to it (never wiping/rebuilding it, never touching
+partitions). Along the way, direct instruction added a new required
+volume, `SUBSTRATE_PERSISTENCE` (recovery configuration + substrate/
+host-level configuration + the encrypted admin-provided passphrase -
+deliberately separate from `BASELINE`'s app/VM/LXC state and from any
+persona's own `USER_PERSISTENCE`), and replaced this project's old
+single-"desired size" model with a real per-volume (min_gb, max_gb)
+range for every shared and persona volume: `BASELINE` 5-50GB,
+`INSTALLER_CACHE` 50-200GB, `SESSION_TEMP` 5-50GB,
+`SUBSTRATE_PERSISTENCE` fixed 1GB, `USER_PERSISTENCE_<PERSONA>` (each)
+50-200GB, and Proxmox's own root sizing 5GB (new default "minimal"
+preset, expandable to 50GB later via a real `lvextend`).
+
+Real, honest finding while wiring this up: this session's own real
+machine's `pve` VG has only ~16GiB genuinely free - below the new
+combined minimum (161GB across the 4 shared volumes + 2 default
+personas). `compute_adaptive_plan` now correctly refuses every volume
+in that exact scenario rather than silently under-provisioning them -
+proven by two new tests using this machine's own real free-space
+figure. **The `create_volumes_on_existing_vg` web action set up
+earlier this session, pointed at `pve`, has not yet succeeded against
+real hardware and will currently refuse for exactly this reason** -
+either more real free space needs to exist in that VG, or a different
+target needs to be found, before this can be proven end-to-end.
+
+A new gap flagged but not yet closed: `registry.py`'s `GLOBAL` scope
+still writes to `/mnt/BASELINE/registry/foundation.db` - moving that
+onto the new `SUBSTRATE_PERSISTENCE` mountpoint (a more architecturally
+honest home, matching this volume's own stated purpose) was not done
+in this pass.
+
+Full suite: 1476/1476 (was 1471). Import checker and persistence-typo
+guard both clean.
+
+**Also correcting the record**: an earlier attempt this session to
+drive the Drive Administration web app's browser UI directly via JS
+(clicking through to actually submit the "install" action) was blocked
+by the auto-mode permission classifier before anything executed -
+nothing was ever run against `/dev/sdb`, which is good, since `/dev/sdb`
+was later confirmed off-limits anyway. The 7 downloaded distro ISOs/OVA
+(`~/.ubuntu26-usb/`) have not yet been copied anywhere real - that step
+is still pending the capacity question above.
+
+## 2026-09-29 continuation - homeassistant-lxc and haos-vm executed under real QEMU
+
+**Read decision record 97 first** (`docs/design/decision-records/97-homeassistant-haos-vm-qemu-execution.md`).
+
+Continued from a lean handoff packet (`~/Downloads/SESSION_HANDOFF.md`,
+now stale relative to this repo - see this file's own top summary for
+what's actually current). Took v0.2 queue item 16 - the first `[ ]`
+item with an empty "Blocked on" column - closing v0.1's own carried-
+forward item 18 at the same time: run the last 2 of 6 curated
+`SCRIPT_MANIFEST` Helper-Scripts (`homeassistant-lxc`, `haos-vm`) under
+real QEMU, reusing decision records 59/61's exact disposable-smoke-test
+pattern unchanged.
+
+First attempt on both VMs failed identically with a real, disclosed
+test-harness gap (not a product bug): the file list this kind of test
+embeds into the guest predates decision record 89's `registry.py` -
+`network.py` now imports it, so `import repair` itself failed with
+`ModuleNotFoundError: No module named 'registry'`. Confirmed directly
+via a passwordless-sudo (`/usr/bin/mount` is in this machine's sudoers
+NOPASSWD list) read-only loop mount of the powered-off guest's own
+`/var/log/baseline_driver.log`, since `libguestfs`/`virt-cat` couldn't
+build its supermin appliance in this sandboxed session (`/boot/vmlinuz-*`
+not readable by this user). Fixed by adding `registry.py` (stdlib-only)
+to the embedded list and re-running both VMs from clean overlays.
+
+Real results, second run: `homeassistant-lxc` → `outcome: applied`,
+exit 0, ~2s, stdout only `core/build.func`'s own header banner with no
+visible `apt` activity - a **third**, previously unobserved real
+outcome under the same condition that produced `debian-lxc`'s real
+mutation and `docker-lxc`'s real refusal; read honestly as "reported
+success without visible mutation," not "definitely did nothing."
+`haos-vm` → `outcome: refused`, exit 127, `pveversion: command not
+found`, <1s - confirms `debian-vm`'s VM-kind hard-fail pattern (record
+61) isn't specific to that one script.
+
+Only `vm_scripts.py`'s own module docstring changed (four real data
+points → six, `homeassistant-lxc`'s distinct outcome stated explicitly).
+Full suite: 1465/1465 (unchanged - no behavioral code touched).
+Disposable VMs/overlays/base image/seed ISOs deleted after verification
+per this project's established retention discipline.
+
+Closed: v0.1 item 18 (`[ ]`→`[x]`), v0.1 item 15 (`[~]`→`[x]`, all 6
+curated scripts now observed at least once), v0.2 item 16 (`[ ]`→`[x]`).
+`docs/changelog/proxmox/001.md` hit its ~400-line rotation threshold
+while writing this up - `002.md` opened, `INDEX.md`'s proxmox row now
+points there.
+
+**Separate, not-yet-started ask from the same conversation**: copy a
+set of downloaded distro ISOs/OVA (`~/.ubuntu26-usb/` - FydeOS, MX
+Linux, CachyOS, SystemRescue, NixOS, Omarchy, Ubuntu 26.04 desktop)
+into the real `INSTALLER_CACHE` shared volume so Proxmox can use them
+as install media, with each VM's resulting disk (the "overlay" of
+whatever the install writes) landing on the persistence-backed storage
+(the `baseline-persist` LVM-thin pool from Track A2/A4) rather than the
+disposable substrate - i.e. building out the "golden-image+clone+
+rollback workflow" that v0.2 item 15's own scoping pass already
+identified as the real missing piece, not a new storage primitive.
+Not scoped or built yet as of this entry - `INSTALLER_CACHE`'s real
+mountpoint on *this* machine (the ASUS desktop, not the `/dev/sdd`
+hardware) needs confirming first (only `/mnt/BASELINE` was found
+mounted when checked; `/mnt/INSTALLER_CACHE`/`/mnt/USER_PERSISTENCE`
+were not, as of this entry).
 
 ## 2026-09-28 continuation - GPU device wiring on quadlet.py's ContainerSpec
 

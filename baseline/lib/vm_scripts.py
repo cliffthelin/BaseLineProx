@@ -75,10 +75,10 @@ isn't solvable in the general case" honesty testpersistence-prd
 applies to itself (see its S:5's scoped claim) - don't claim more
 closure here than actually exists.
 
-**Real QEMU smoke tests (decision records 59 and 61) found `run_script()`
-does NOT fail uniformly on a non-Proxmox host - behavior genuinely
-varies by script and by kind, confirmed with four real data points, not
-one:**
+**Real QEMU smoke tests (decision records 59, 61, and 97) found
+`run_script()` does NOT fail uniformly on a non-Proxmox host - behavior
+genuinely varies by script and by kind, confirmed with six real data
+points now, covering every entry in `SCRIPT_MANIFEST`:**
 
 - `ct/debian.sh` (`debian-lxc`) - did **not** error out. It silently
   took its own "already-installed, update in place" branch (these
@@ -90,11 +90,24 @@ one:**
   one failed**: exit 113, "General error / Operation not permitted."
   Refused, not applied - a different real outcome than `debian-lxc`
   for the same general condition.
+- `ct/homeassistant.sh` (`homeassistant-lxc`) - a **third** distinct
+  outcome under the same general condition: printed `core/build.func`'s
+  header banner and exited 0 in ~2s with no further output - `outcome:
+  applied`, but with none of `debian-lxc`'s real `apt` activity visible
+  in stdout. Read as "reported success without visible mutation," not
+  as "did nothing" - `run_script()` only captures stdout on success,
+  and this project has not traced upstream's own internal branch to
+  confirm no side effect occurred. Don't assume this generalizes to
+  other LXC-kind scripts from `debian-lxc`/`docker-lxc` alone; this is
+  its own, separately observed data point.
 - `vm/debian-vm.sh` (`debian-vm`) - a genuinely different code path:
   failed immediately (under 1s) with `pveversion: command not found`,
   exit 127. VM-kind scripts checked so far do not have the LXC-kind
   update-in-place fallback at all - they hard-require `pveversion` and
   fail closed immediately without it.
+- `vm/haos-vm.sh` (`haos-vm`) - confirms the VM-kind pattern above is
+  not `debian-vm`-specific: same immediate `pveversion: command not
+  found`, exit 127, refused.
 - `run_script_and_adopt` against `pihole-lxc` - correctly refused
   before ever reaching `bash`, because `next_free_vmid`'s own
   `pvesh get /cluster/nextid` call fails cleanly (`pvesh` not found) -
@@ -102,11 +115,10 @@ one:**
 
 **The honest summary: don't assume either "always fails closed" or
 "always mutates the host" - it depends on the specific script, and
-this project has only directly observed 4 of the 6 curated entries
-(`homeassistant-lxc` and `haos-vm` are fetch+hash-verified but not yet
-executed under QEMU).** Never assume a missing Proxmox environment
-makes this module inert - `debian-lxc` alone is enough to prove it can
-mutate whatever real host it's run against. Treat `run_script()` as
+this project has now directly observed all 6 curated entries at least
+once each.** Never assume a missing Proxmox environment makes this
+module inert - `debian-lxc` alone is enough to prove it can mutate
+whatever real host it's run against. Treat `run_script()` as
 operator-supervised-only (never wired to any automatic/scheduled
 trigger, never invoked by the harness on its own initiative) until a
 fully vendored, network-isolated execution environment closes this

@@ -24,9 +24,9 @@ overwritten in place - it's a pointer, not a record.
 | [boot](boot/001.md) | boot/001.md | 7 | 2026-09-20 | Proxmox<->BaselineOS round trip (chvt-based, both directions) |
 | [hardware](hardware/001.md) | hardware/001.md | 7 | 2026-09-20 | Display fact added, then reverted (caused console garble) |
 | [network](network/001.md) | network/001.md | 6 | 2026-09-20 | ConnectionModal: bridged identity, alias, enable/disable, lifeline position |
-| [ui](ui/001.md) | ui/001.md | 11 | 2026-09-20 | Down arrow as sole navigation unreliable on bare console (Shift+Tab fallback) |
+| [ui](ui/002.md) | ui/002.md | 2 | 2026-09-29 | real, safe "live install screen" viewer |
 | [chat](chat/001.md) | chat/001.md | 11 | 2026-09-26 | OpenCode as the second HarnessAdapter, normalized through real ACP |
-| [proxmox](proxmox/001.md) | proxmox/001.md | 10 | 2026-09-27 | vm_scripts.py unified with pct_provision.py/vm_provision.py via a VMID-adoption bridge; three more Helper-Scripts run under real QEMU |
+| [proxmox](proxmox/003.md) | proxmox/003.md | 8 | 2026-09-29 | the install invocation's own base boot order never fell back to disk, so the auto-installer's own reboot re-entered itself |
 | [containers](containers/001.md) | containers/001.md | 3 | 2026-09-27 | quadlet.py rootless mode implemented for real; default corrected |
 
 Categories are named after the part of the system a change touches, not

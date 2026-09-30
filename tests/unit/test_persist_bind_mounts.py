@@ -104,7 +104,7 @@ def test_ensure_persistence_mounted_reports_a_real_failure_when_every_fallback_i
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER_PERSISTENCE" in a, FakeProc(1, "", "can't find LABEL=USER_PERSISTENCE")),
             (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),  # not found anywhere
-            (lambda a: a[:1] == ["vgs"], FakeProc(0, "0\n", "")),  # zero free space
+            (lambda a: "vgs" in a, FakeProc(0, "0\n", "")),  # zero free space
         ],
     )
     result = pbm.ensure_persistence_mounted(runner)
@@ -167,15 +167,35 @@ def test_ensure_persistence_mounted_self_installs_locally_when_nothing_found_any
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER_PERSISTENCE" in a, FakeProc(1, "", "not found")),
             (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
-            (lambda a: a[:1] == ["vgs"], FakeProc(0, "17179869184\n", "")),  # 16GiB free, matches the real dev machine
-            (lambda a: a[:1] == ["lvs"], FakeProc(0, "  pve   root  \n", "")),
+            (lambda a: "vgs" in a, FakeProc(0, "64424509440\n", "")),  # 60GiB free
+            (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n", "")),
         ],
     )
     result = pbm.ensure_persistence_mounted(runner)
     assert result.applied is True
     assert any(c[0] == "lvcreate" for c in runner.calls)
     lvcreate_call = next(c for c in runner.calls if c[0] == "lvcreate")
-    assert "300G" not in lvcreate_call  # adaptively sized down, not the full default
+    assert "200G" not in lvcreate_call  # adaptively sized down from the 200G max, not the full ceiling
+
+
+def test_ensure_persistence_mounted_refuses_when_local_free_space_is_below_the_new_50gb_minimum():
+    """Real, honest finding: this session's own real dev machine's `pve`
+    VG has only ~16GiB genuinely free - below USER_PERSISTENCE's own
+    real (min_gb=50, max_gb=200) range (2026-09-29 sizing defaults), so
+    the local self-install fallback now correctly refuses here instead
+    of creating an undersized volume."""
+    runner = FakeRunner(
+        files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
+        command_responses=[
+            (lambda a: a[:1] == ["mount"] and "LABEL=USER_PERSISTENCE" in a, FakeProc(1, "", "not found")),
+            (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
+            (lambda a: "vgs" in a, FakeProc(0, "17179869184\n", "")),  # 16GiB free, matches the real dev machine
+            (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n", "")),
+        ],
+    )
+    result = pbm.ensure_persistence_mounted(runner)
+    assert result.applied is False
+    assert not any(c[0] == "lvcreate" for c in runner.calls)
 
 
 def test_ensure_persistence_mounted_refuses_cleanly_when_local_fallback_has_no_real_space():
@@ -184,7 +204,7 @@ def test_ensure_persistence_mounted_refuses_cleanly_when_local_fallback_has_no_r
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER_PERSISTENCE" in a, FakeProc(1, "", "not found")),
             (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
-            (lambda a: a[:1] == ["vgs"], FakeProc(0, "0\n", "")),
+            (lambda a: "vgs" in a, FakeProc(0, "0\n", "")),
         ],
     )
     result = pbm.ensure_persistence_mounted(runner)
@@ -317,7 +337,7 @@ def test_main_records_a_real_recovery_mode_entry_when_the_cascade_fails():
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER_PERSISTENCE" in a, FakeProc(1, "", "no such partition")),
             (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
-            (lambda a: a[:1] == ["vgs"], FakeProc(0, "0\n", "")),
+            (lambda a: "vgs" in a, FakeProc(0, "0\n", "")),
         ],
     )
     pbm.main(runner=runner, print_fn=lambda *a: None, now=1700000000.0)

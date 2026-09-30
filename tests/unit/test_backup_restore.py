@@ -45,7 +45,7 @@ def test_create_backup_all_persistence_targets():
     result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=br.all_persistence_targets())
     assert result.ok is True
     assert set(runner.calls[0][3:]) == {"/mnt/BASELINE", "/mnt/USER_PERSISTENCE_ADMIN", "/mnt/USER_PERSISTENCE_PERSONAL",
-                                         "/mnt/INSTALLER_CACHE", "/mnt/SESSION_TEMP"}
+                                         "/mnt/INSTALLER_CACHE", "/mnt/SESSION_TEMP", "/mnt/SUBSTRATE_PERSISTENCE"}
 
 
 def test_create_backup_config_only_ignores_any_targets_passed():

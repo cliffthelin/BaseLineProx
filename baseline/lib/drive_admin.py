@@ -52,6 +52,17 @@ import persist_bind_mounts as pbm
 import physical_device_safety as pds
 import settings_store
 
+# Real bug found live, 2026-09-29: `build_self_installer` used to
+# default `repo_root` to a *hardcoded* `Path("/opt/baseline").parent`
+# (`/opt`) - wrong even on its own terms (iso_builder.build_current_iso
+# needs `repo_root / "boot"` and `repo_root / "baseline"` to exist
+# directly, not two levels up), and `/opt/baseline` doesn't exist at
+# all outside a real systemd-deployed install. Derived from this
+# file's own real, current location instead - correct by construction
+# whether this code is running from `/opt/baseline` in production or
+# a dev checkout at any other path, since it always finds itself.
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 try:
     from repair import Runner  # type: ignore
 except ImportError:  # pragma: no cover - direct-script execution fallback
@@ -175,13 +186,138 @@ class SudoRunner:
 class _SudoPdsAdapter:
     """Exposes `SudoRunner`'s real `sudo`-piping through
     `physical_device_safety.Runner`'s own interface (`run(argv) ->
-    str`, stdout only) - see `SudoRunner.as_pds_runner`."""
+    str`, stdout only) - see `SudoRunner.as_pds_runner`.
+
+    Real bug found live (first time `build_self_installer`'s real
+    `pds_runner` path was actually exercised against a real request,
+    not just `FakeRunner`): this adapter used to implement only `run`,
+    but `physical_device_safety.validate_target_device` also calls
+    `lstat`/`realpath`/`read_size_file` - crashed with `AttributeError`
+    mid-request, which the client sees as a silently broken connection
+    ("nothing happened" - no redirect, no banner, because the fetch
+    never got a real response to parse). None of those three need
+    real privilege (plain filesystem/sysfs reads, the same as
+    `physical_device_safety.Runner`'s own unprivileged implementations)
+    - delegated to a plain `pds.Runner()` instance rather than
+    reimplemented here a second time."""
 
     def __init__(self, sudo_runner: SudoRunner):
         self._sudo_runner = sudo_runner
+        self._plain = pds.Runner()
 
     def run(self, argv: list) -> str:
         return self._sudo_runner.run(argv, timeout=30).stdout
+
+    def lstat(self, path: str):
+        return self._plain.lstat(path)
+
+    def realpath(self, path: str) -> str:
+        return self._plain.realpath(path)
+
+    def read_size_file(self, dev_name: str) -> str:
+        return self._plain.read_size_file(dev_name)
+
+
+def pkexec_argv(argv: list) -> list:
+    """Direct instruction, 2026-09-29: "Make the application ask for
+    the sudo password through Ubuntu best practices... following
+    documented methods and policies from the OS provider" - `pkexec`
+    is exactly that (the same real mechanism GParted, GNOME Disks,
+    and the Software installer all use). Confirmed live on this
+    machine: GNOME Shell already runs its own built-in PolicyKit
+    authentication agent (no separate agent process, no custom
+    `.policy` action file needed - the built-in default
+    `org.freedesktop.policykit.exec` action already covers this),
+    and a real `pkexec whoami` test genuinely returned `root` after
+    the operator authenticated through GNOME's own native dialog.
+    Unlike `sudo -S`, no password is ever piped through this
+    process's own stdin, sent in any HTTP request, or seen by this
+    web app's own code at all - it goes straight to PolicyKit's
+    agent, entirely outside the browser."""
+    return ["pkexec", *argv]
+
+
+class PkexecRunner:
+    """A `repair.Runner`-compatible object that re-executes every real
+    privileged call through `pkexec` (see `pkexec_argv`) - the
+    Drive Administration action-authorization mechanism this project
+    actually uses now, replacing the HTML-form password field
+    `SudoRunner` needed. `SudoRunner`/`verify_sudo_password` remain in
+    this module unchanged - `settings_web.SudoPasswordVerifier` (login,
+    a different real question: "does this browser session belong to
+    someone who knows the password," not "authorize this one
+    destructive action") still uses them directly.
+
+    `timeout` defaults generously (300s) - unlike a piped `sudo -S`
+    call, this genuinely waits on a human looking at their screen and
+    typing into a real dialog, not a fixed subprocess round-trip."""
+
+    def __init__(self, *, executor=None, timeout: int = 300):
+        self._executor = executor or subprocess.run
+        self._default_timeout = timeout
+
+    def _pkexec(self, argv: list, *, extra_input: bytes = b"", timeout: int | None = None):
+        raw = self._executor(pkexec_argv(argv), input=extra_input,
+                              capture_output=True, timeout=timeout or self._default_timeout)
+        stdout = raw.stdout.decode(errors="replace") if isinstance(raw.stdout, bytes) else raw.stdout
+        stderr = raw.stderr.decode(errors="replace") if isinstance(raw.stderr, bytes) else raw.stderr
+        return subprocess.CompletedProcess(argv, raw.returncode, stdout, stderr)
+
+    def run(self, argv: list, timeout: int | None = None):
+        return self._pkexec(argv, timeout=timeout)
+
+    def makedirs(self, path: str) -> None:
+        self._pkexec(["mkdir", "-p", path])
+
+    def append_text(self, path: str, content: str) -> None:
+        self._pkexec(["tee", "-a", path], extra_input=content.encode())
+
+    def write_text_atomic(self, path: str, content: str) -> None:
+        tmp = f"{path}.tmp-pkexecrunner"
+        self._pkexec(["tee", tmp], extra_input=content.encode())
+        self._pkexec(["mv", tmp, path])
+
+    def remove(self, path: str) -> None:
+        self._pkexec(["rm", "-rf", path])
+
+    def read_text(self, path: str) -> str:
+        from pathlib import Path
+        return Path(path).read_text()
+
+    def path_exists(self, path: str) -> bool:
+        from pathlib import Path
+        return Path(path).exists()
+
+    def listdir(self, path: str) -> list:
+        from pathlib import Path
+        p = Path(path)
+        return sorted(p.iterdir()) if p.exists() else []
+
+    def as_pds_runner(self) -> "_PkexecPdsAdapter":
+        return _PkexecPdsAdapter(self)
+
+
+class _PkexecPdsAdapter:
+    """Mirrors `_SudoPdsAdapter` for `PkexecRunner` - see its own
+    docstring for why `lstat`/`realpath`/`read_size_file` delegate to
+    a plain, unprivileged `pds.Runner()` rather than going through
+    `pkexec` themselves (none of the three need real privilege)."""
+
+    def __init__(self, pkexec_runner: PkexecRunner):
+        self._pkexec_runner = pkexec_runner
+        self._plain = pds.Runner()
+
+    def run(self, argv: list) -> str:
+        return self._pkexec_runner.run(argv, timeout=self._pkexec_runner._default_timeout).stdout
+
+    def lstat(self, path: str):
+        return self._plain.lstat(path)
+
+    def realpath(self, path: str) -> str:
+        return self._plain.realpath(path)
+
+    def read_size_file(self, dev_name: str) -> str:
+        return self._plain.read_size_file(dev_name)
 
 
 MIN_TARGET_SIZE_BYTES = 50_000_000_000  # 50GB - excludes small USB sticks/SD cards by construction
@@ -353,6 +489,7 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
         # device, where this signal never applies anyway.
         usb_bridge_model = pds.get_usb_bridge_model(pds_runner, path) if tran == "usb" else None
         summary = _partition_summary_from_rows(tree_rows, name)
+        baseline_status = detect_baseline_drive(runner, path)
         drives.append({
             "path": path,
             "model": row.get("MODEL") or "Unknown model",
@@ -362,8 +499,38 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
             "is_default": serial in DEFAULT_TARGET_SERIALS,
             "partition_count": summary["partition_count"],
             "usage_text": summary["usage_text"],
+            **baseline_status,
         })
+    # Direct instruction, 2026-09-29: any real Baseline-installed drive
+    # goes to the top of the list, in its own "Baseline Installed"
+    # group - a stable sort so the real, already-established ordering
+    # among the rest (and among Baseline drives themselves) is
+    # preserved, not scrambled.
+    drives.sort(key=lambda d: 0 if d["is_baseline_drive"] else 1)
     return drives
+
+
+def detect_baseline_drive(runner: Runner, device_path: str) -> dict:
+    """Real, per-drive Baseline-install status (direct instruction,
+    2026-09-29): does this specific drive have its own real LVM volume
+    group, and if so, which of the real Baseline volumes actually
+    exist on it? `is_baseline_drive` is True the moment *any* real
+    Baseline volume is found there (a genuinely partial, in-progress
+    install is still "a Baseline drive," not nothing) - `missing_
+    baseline_volumes` lists the real, individually-checkable gaps
+    `repair_scan_and_fix` would close. A drive with no real volume
+    group at all (`find_vg_for_device` returns None) is honestly
+    reported as not a Baseline drive, with no missing-volumes list -
+    there's no VG yet to be missing anything *from*."""
+    vg_name = find_vg_for_device(runner, device_path)
+    if vg_name is None:
+        return {"is_baseline_drive": False, "vg_name": None, "missing_baseline_volumes": []}
+    detection = drive_installer.detect_existing_baseline_install(runner, vg_name=vg_name)
+    return {
+        "is_baseline_drive": bool(detection["found_volumes"]),
+        "vg_name": vg_name,
+        "missing_baseline_volumes": detection["missing_volumes"] if detection["found_volumes"] else [],
+    }
 
 
 @dataclass
@@ -489,7 +656,7 @@ def apply_volume_mode(runner: Runner, *, label: str) -> ActionResult:
     if label not in key_by_label:
         return ActionResult(False, f"{label!r} is not a shared volume with a configurable mode")
     mode = settings_store.get_setting("volumes", key_by_label[label])
-    mountpoint = next((mp for _, _, lbl, mp in drive_installer.SHARED_VOLUMES if lbl == label), None)
+    mountpoint = next((mp for _, _, _, lbl, mp in drive_installer.SHARED_VOLUMES if lbl == label), None)
     if mountpoint is None or not pbm.is_mounted(runner, mountpoint):
         return ActionResult(False, f"{label} is not currently mounted - nothing to remount")
     # "write-only" has no real Linux mount-option equivalent (per
@@ -522,55 +689,134 @@ def install_drive(runner, *, device_path, pds_runner=None, vg_name: str = PERSIS
     return ActionResult(True, f"{rebuild_result.detail}; {volumes_result.detail}")
 
 
-# The real, currently-updatable shared volumes - the only labels
-# `update_selected`'s "apply_volume_mode" update type can act on (must
-# match `apply_volume_mode`'s own accepted labels).
-UPDATABLE_VOLUME_LABELS = {"BASELINE", "INSTALLER_CACHE", "SESSION_TEMP"}
+def check_cache_updates(runner) -> list:
+    """Real per-volume "is a newer compatible version available"
+    check - direct instruction, 2026-09-29. Honestly empty right now:
+    no real update source is wired up for any cached artifact yet (the
+    curated Helper-Scripts in vm_scripts.SCRIPT_MANIFEST are
+    deliberately manually-pinned/reviewed, never auto-checked or
+    auto-updated by design; the cached Proxmox source ISO and any
+    distro ISO have no real version-tracking built yet). Returning a
+    real empty list here, not a fabricated "nothing available" per
+    item - there is a real difference between "checked, found
+    nothing" and "never checked," and this module does not blur it."""
+    return []
 
 
-def update_selected(runner, *, selected: list, update_types: list, to_persona: str | None = None) -> ActionResult:
-    """The real "Update" action - direct instruction: select
-    partitions/volumes from the drive tree, then select the types of
-    update to apply to the selection. Replaces what used to be two
-    separate top-level actions (switch_persona, apply_volume_mode)
-    with one real action driven by a selection plus a set of chosen
-    update types. `apply_volume_mode` runs once per selected item that
-    is actually a configurable shared volume; `switch_persona` is a
-    single global operation (there is only ever one active persona at
-    a time), so it runs once when requested regardless of how many
-    items are selected, not once per selected item."""
-    results = []
-    if "apply_volume_mode" in update_types:
-        targeted = [label for label in selected if label in UPDATABLE_VOLUME_LABELS]
-        if not targeted:
-            results.append(("apply_volume_mode",
-                             ActionResult(False, "no selected item supports a volume mode update")))
-        for label in targeted:
-            results.append((label, apply_volume_mode(runner, label=label)))
-    if "switch_persona" in update_types:
-        if to_persona:
-            results.append((f"persona:{to_persona}", switch_persona(runner, to_persona=to_persona)))
-        else:
-            results.append(("switch_persona",
-                             ActionResult(False, "switch_persona selected but no target persona was given")))
-    if not results:
-        return ActionResult(False, "no update types selected")
-    ok = all(r.ok for _, r in results)
-    detail = "; ".join(f"{name}: {r.detail}" for name, r in results)
-    return ActionResult(ok, detail)
+def update_selected(runner, *, selected: list, **params) -> ActionResult:
+    """The real "Update" action (direct instruction, 2026-09-29):
+    check each selected Baseline volume for a newer compatible version
+    of what it caches, and apply the ones chosen. Honest placeholder
+    for the actual apply step - `check_cache_updates` never returns
+    anything yet (see its own docstring for why), so there is nothing
+    real to apply. Refuses plainly rather than faking success."""
+    if not selected:
+        return ActionResult(False, "no volumes selected")
+    return ActionResult(
+        False, "update-checking is not implemented yet - no real 'newer version available' "
+               "source exists for any cached artifact in this build")
 
 
-def repair_scan_and_fix(runner, **params) -> ActionResult:
-    """Placeholder for the v0.2 Repair feature - direct instruction:
-    "a Repair button that tries to look for things not working and
-    then fix them - this is a v0.2 button." Deliberately does not
-    pretend to scan or fix anything yet: an honest "not implemented"
-    refusal, never a fake success, matches this project's own
-    no-fake-functionality discipline."""
-    return ActionResult(False, "Repair is planned for v0.2 and is not implemented in this build yet.")
+def find_vg_for_device(runner, device_path: str) -> str | None:
+    """Real PV -> VG lookup. `device_path` is usually the whole disk
+    (`/dev/sdd`), but `pvcreate` is commonly run against one of its
+    partitions (`/dev/sdd3`) - matched by prefix, not exact equality,
+    since that's the real relationship between a disk and its own PV.
+
+    `sudo -n` (real bug found live, 2026-09-29): called during plain
+    page rendering (an unprivileged runner - no destructive action, no
+    pkexec dialog involved) as well as during the real `repair`
+    action - a bare `pvs` fails with "Permission denied" for a plain
+    user on this real machine, which this function's own `returncode
+    != 0` check then silently reports as "no VG found," indistinguish-
+    able from a genuinely-empty result. This machine's own sudoers
+    file has `pvs` specifically passwordless (confirmed live via `sudo
+    -n -l`) - `-n` fails cleanly rather than hanging on any machine
+    where that isn't configured."""
+    proc = runner.run(["sudo", "-n", "pvs", "--noheadings", "-o", "pv_name,vg_name"], timeout=15)
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].startswith(device_path):
+            return parts[1]
+    return None
 
 
-def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> ActionResult:
+def repair_scan_and_fix(runner, *, device_path, **params) -> ActionResult:
+    """The real, per-drive Repair action (direct instruction,
+    2026-09-29): scans this drive's own real volume group for missing
+    Baseline volumes and creates only what's actually missing - reuses
+    `drive_installer.ensure_baseline_volumes`'s own idempotent
+    guarantee (never reformats or touches a volume that already
+    exists), rather than a bespoke "fix" path of its own. Each missing
+    volume this finds is the same real, individually-listable
+    validation failure the drive card itself shows."""
+    vg_name = find_vg_for_device(runner, device_path)
+    if vg_name is None:
+        return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to repair")
+    detection = drive_installer.detect_existing_baseline_install(runner, vg_name=vg_name)
+    if detection["has_existing_install"]:
+        return ActionResult(True, f"{vg_name}: every Baseline volume already present - nothing to repair")
+    plan = drive_installer.ensure_baseline_volumes(runner, vg_name=vg_name)
+    failed = [label for label, result in plan.items() if not result.ok]
+    fixed = [label for label, result in plan.items() if result.ok and result.created]
+    if failed:
+        return ActionResult(False, f"repair on {vg_name} still failing: {', '.join(failed)}")
+    return ActionResult(True, f"{vg_name} repaired - created {', '.join(fixed) if fixed else '(nothing needed creating)'}")
+
+
+def mount_logical_volume(runner, *, device_path, lv_name="root", mountpoint=None,
+                          on_progress=None, **params) -> ActionResult:
+    """Real, discoverable "mount an existing logical volume for
+    inspection" action (direct instruction, 2026-09-29: "The
+    application has to handle not manual scripts nobody will
+    remember"). Activates the selected drive's own real volume group,
+    then mounts the named logical volume read-write at a real,
+    predictable location under `/mnt` - the exact two real commands
+    (`vgchange -ay`, `mount`) that would otherwise have to be
+    remembered and re-typed by hand every single time. Read-write by
+    design (direct instruction) - genuinely mounts, not a dry run."""
+    progress = on_progress or (lambda line: None)
+    vg_name = find_vg_for_device(runner, device_path)
+    if vg_name is None:
+        return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to mount")
+    progress(f"Activating volume group {vg_name}...")
+    activate = runner.run(["vgchange", "-ay", vg_name])
+    if activate.returncode != 0:
+        return ActionResult(False, f"activating {vg_name} failed: {activate.stderr.strip()}")
+    lv_path = f"/dev/{vg_name}/{lv_name}"
+    if not runner.path_exists(lv_path):
+        return ActionResult(False, f"{lv_path} does not exist in {vg_name}")
+    target = mountpoint or f"/mnt/{vg_name}-{lv_name}-inspect"
+    progress(f"Creating mountpoint {target}...")
+    runner.makedirs(target)
+    progress(f"Mounting {lv_path} read-write at {target}...")
+    result = runner.run(["mount", "-o", "rw", lv_path, target])
+    if result.returncode != 0:
+        return ActionResult(False, f"mounting {lv_path} at {target} failed: {result.stderr.strip()}")
+    return ActionResult(True, f"{lv_path} mounted read-write at {target}")
+
+
+def unmount_logical_volume(runner, *, device_path, lv_name="root", mountpoint=None,
+                            on_progress=None, **params) -> ActionResult:
+    """The real counterpart to `mount_logical_volume` - a discoverable
+    button, not a one-off `umount` a human has to remember to run
+    later. Refuses cleanly (never a fake success) if the target isn't
+    actually mounted."""
+    progress = on_progress or (lambda line: None)
+    vg_name = find_vg_for_device(runner, device_path)
+    if vg_name is None:
+        return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to unmount")
+    target = mountpoint or f"/mnt/{vg_name}-{lv_name}-inspect"
+    progress(f"Unmounting {target}...")
+    result = runner.run(["umount", target])
+    if result.returncode != 0:
+        return ActionResult(False, f"unmounting {target} failed: {result.stderr.strip()}")
+    return ActionResult(True, f"{target} unmounted")
+
+
+def build_self_installer(runner, *, device_path, pds_runner=None, on_progress=None, **params) -> ActionResult:
     """The real "make this drive prove itself as a self installer"
     action (decision record 85) - direct instruction: do this through
     the web application, not a bare CLI invocation. Composes
@@ -585,11 +831,25 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     `lsblk` device queries are unprivileged reads, and the final QEMU
     step only needs `disk`-group-level read/write on the device node,
     a different privilege model than the LVM wipe/create calls
-    `rebuild_persistence_lvm` needs `SudoRunner` for. Plain, real,
-    unauthenticated runner instances are the correct choice here, not
-    an oversight - `pds_runner` still defaults to the same
-    `runner.as_pds_runner()` precedent when available, for consistency,
-    but a plain `pds.Runner()` is equally correct for this read-only use.
+    `rebuild_persistence_lvm` needs `SudoRunner` for.
+
+    Real bug found live, 2026-09-29: `pds_runner` used to default to
+    `runner.as_pds_runner()` "for consistency" whenever available -
+    correct for `SudoRunner` (whose own adapter already delegates
+    reads to a plain, unprivileged `pds.Runner()` internally), but
+    wrong for `PkexecRunner` (decision record 103), whose adapter
+    wraps *every* call, including plain reads, in a real `pkexec`
+    authentication prompt. Since this action's own validation reads
+    never needed privilege in the first place, every one of them -
+    `udevadm info` for the target, then `findmnt`/`lsblk`/`udevadm`
+    again for the boot-device self-check - each spawned its own
+    separate, genuinely blocking authentication dialog, one after
+    another, with nothing to tell the operator why device validation
+    of all things needed their password. `pds_runner` now always
+    defaults to a plain `pds.Runner()` directly - never derived from
+    `runner` at all - since this action never has a real reason to
+    authenticate its own reads, regardless of which kind of runner it
+    was given.
 
     **The only input this action actually needs is `device_path`**
     (decision record 86, direct instruction: "I will never fill in a
@@ -618,8 +878,6 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     import settings_store
     import dependencies as dep
 
-    if pds_runner is None and hasattr(runner, "as_pds_runner"):
-        pds_runner = runner.as_pds_runner()
     pds_runner = pds_runner or pds.Runner()
 
     # Decision record 88, direct instruction: dependencies "should be
@@ -627,6 +885,8 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
     # failure refuses here - a SILENT one (e.g. a stale fqdn preset) is
     # still recorded for dump_configuration_snapshot/troubleshooting,
     # but was never meant to block an install by itself.
+    progress = on_progress or (lambda line: None)
+    progress("Running pre-install dependency checks...")
     check_results = dep.run_checks(phase=dep.PRE_INSTALL)
     failed = dep.loud_failures(check_results)
     if failed:
@@ -657,7 +917,7 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
         iso_builder_runner=ib.RealIsoBuilderRunner(),
         install_runner=dsi.RealInstallRunner(),
         workspace=workspace,
-        repo_root=Path(params.get("repo_root", "/opt/baseline")).parent,
+        repo_root=Path(params["repo_root"]) if params.get("repo_root") else REPO_ROOT,
         proxmox_source_iso=Path(params["proxmox_source_iso"]) if params.get("proxmox_source_iso") else None,
         assistant_binary=Path(params.get("assistant_binary", str(workspace / "acquire/extracted/usr/bin/proxmox-auto-install-assistant"))),
         server_host=params.get("server_host") or si.DEFAULT_SERVER_HOST,
@@ -667,6 +927,15 @@ def build_self_installer(runner, *, device_path, pds_runner=None, **params) -> A
         memory_mb=memory_mb,
         target_mac=params.get("target_mac"),
         target_dmi_product=params.get("target_dmi_product"),
+        on_progress=on_progress,
+        # Direct instruction, 2026-09-29: "It has to accept my root
+        # password in Linux now" - `runner` here is the real
+        # `SudoRunner` built from whatever password the operator just
+        # submitted to authorize this very action; reusing it as the
+        # new Proxmox install's own root password means they log into
+        # the freshly-installed machine with the password they already
+        # know, not one they have to go find in a progress console.
+        admin_password=getattr(runner, "password", None),
         **lvm_sizes,
     )
     return ActionResult(result.outcome == "applied", result.detail)
@@ -714,38 +983,44 @@ ACTIONS = {
         lambda runner, device_path, **params: build_self_installer(runner, device_path=device_path, **params),
         requires_device=True,
     ),
-    # Human-override only (direct instruction) - builds bare
-    # persistence with no bootloader and no OS, for someone who
-    # explicitly wants that instead of a self-installed machine.
-    "install": ActionSpec(
-        "install",
-        "HUMAN OVERRIDE ONLY - not the normal path (use Build Self Installer instead). "
-        "PERMANENTLY ERASE the selected drive and install a fresh Baseline persistence "
-        "structure on it ONLY (LVM volume group plus BASELINE/INSTALLER_CACHE/SESSION_TEMP and "
-        "per-persona volumes) - no bootloader, no OS. This cannot be undone.",
-        lambda runner, device_path, **params: install_drive(runner, device_path=device_path),
-        requires_device=True,
-    ),
+    # Direct instruction, 2026-09-29: "The only installer is a self
+    # installer. There is not Create all the volumes button or
+    # action." - the old human-override "install" (bare persistence,
+    # no OS) and "create_volumes_on_existing_vg" actions are removed;
+    # `install_drive`/`create_baseline_volumes` remain as real internal
+    # functions (still used by `repair_scan_and_fix` below), just no
+    # longer exposed as their own top-level actions.
     "update_selected": ActionSpec(
         "update_selected",
-        "Apply the selected types of update (volume mount mode, active persona) to the "
-        "partitions and volumes selected from the drive tree.",
-        lambda runner, selected=(), update_types=(), to_persona=None, **params: update_selected(
-            runner, selected=list(selected), update_types=list(update_types), to_persona=to_persona),
+        "Check every volume on this Baseline drive for a newer compatible version of what it "
+        "caches, and apply the ones you select (or all of them). Only meaningful on a real "
+        "Baseline drive - shown only when one is selected.",
+        lambda runner, selected=(), **params: update_selected(runner, selected=list(selected)),
+        requires_device=True,
     ),
     "repair": ActionSpec(
         "repair",
-        "(v0.2) Scan the persistence setup for problems and fix what it finds. Not yet "
-        "implemented in this build.",
-        lambda runner, **params: repair_scan_and_fix(runner),
+        "Scan this drive's Baseline volumes for real problems (missing volumes on an "
+        "otherwise-real Baseline install) and create only what's actually missing - never "
+        "touches or reformats a volume that already exists. Shown per-drive; each failing check "
+        "is also listed individually on the drive itself.",
+        lambda runner, device_path, **params: repair_scan_and_fix(runner, device_path=device_path),
+        requires_device=True,
     ),
-    "run_health_check": ActionSpec(
-        "run_health_check",
-        "Run every registered dependency check right now (decision record 88's 'adhoc' phase) - "
-        "the same checks that gate before an install begins and run automatically at boot and on "
-        "an interval, just triggered on demand. A LOUD failure is reported as a failed action; a "
-        "silent one is still listed but does not fail this action by itself.",
-        lambda runner, **params: run_health_check(runner, **params),
+    "mount_volume": ActionSpec(
+        "mount_volume",
+        "Activate this drive's real volume group and mount one of its existing logical volumes "
+        "(default: root) read-write at a real, predictable location under /mnt - for direct "
+        "inspection or editing, not a one-off script you'd have to remember to re-run by hand.",
+        lambda runner, device_path, **params: mount_logical_volume(runner, device_path=device_path, **params),
+        requires_device=True,
+    ),
+    "unmount_volume": ActionSpec(
+        "unmount_volume",
+        "Unmount a logical volume this drive's mount_volume action mounted - the real "
+        "counterpart, not something you have to remember to type yourself.",
+        lambda runner, device_path, **params: unmount_logical_volume(runner, device_path=device_path, **params),
+        requires_device=True,
     ),
 }
 
@@ -755,8 +1030,18 @@ def describe_actions() -> list:
               "requires_device": spec.requires_device} for spec in ACTIONS.values()]
 
 
-def perform_action(runner: Runner, action_id: str, params: dict) -> ActionResult:
+def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None) -> ActionResult:
+    """`on_progress` (direct instruction, 2026-09-29 - "add a console
+    log of what is running and doing"): threaded through as a real
+    keyword argument, never required by any action's own signature -
+    only `build_self_installer` actually reports through it (the one
+    real, multi-minute action); every other action's own lambda simply
+    doesn't forward it, so it's silently unused there, never an
+    error."""
     spec = ACTIONS.get(action_id)
     if spec is None:
         return ActionResult(False, f"unknown action {action_id!r}")
-    return spec.run(runner, **params)
+    call_params = dict(params)
+    if on_progress is not None:
+        call_params["on_progress"] = on_progress
+    return spec.run(runner, **call_params)

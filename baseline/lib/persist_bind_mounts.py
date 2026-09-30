@@ -208,7 +208,11 @@ def _local_fallback_size_gb(runner: Runner, vg_name: str) -> int:
     free_bytes = di.parse_vg_free_bytes(free_proc.stdout)
     if free_bytes is None:
         return 0
-    return di.adaptive_single_size_gb(free_bytes, 300)
+    # Matches drive_installer.persona_volume's own real (min_gb, max_gb)
+    # range (50-200, 2026-09-29 sizing defaults) - this is the same
+    # USER_PERSISTENCE volume, just self-installed locally instead of
+    # on an external drive, so it gets the same real bounds.
+    return di.adaptive_single_size_gb(free_bytes, 200, min_gb=50)
 
 
 def ensure_persistence_mounted(runner: Runner, *, persona: str | None = None, vg_name: str = "pve") -> ApplyResult:

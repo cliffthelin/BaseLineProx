@@ -4,6 +4,7 @@ touched - FakeRunner/FakePdsRunner record every argv."""
 from fake_runner import FakeProc, FakeRunner
 
 import drive_admin as da
+import drive_installer as di
 import physical_device_safety as pds
 
 
@@ -137,6 +138,112 @@ def test_sudo_runner_never_calls_sudo_for_a_plain_read(tmp_path):
     assert runner.read_text(str(real_file)) == "hello"
     assert runner.path_exists(str(real_file)) is True
     assert executor.calls == []  # a read never touches sudo at all
+
+
+# -- PkexecRunner (direct instruction, 2026-09-29: real OS-documented privilege ---
+# escalation via PolicyKit, confirmed live on this machine - `pkexec whoami`
+# genuinely returned `root` after authenticating through GNOME Shell's own
+# built-in dialog, no password ever touching this process/app/HTTP request) ---
+
+def test_pkexec_argv_wraps_the_real_command_with_no_password_anywhere():
+    assert da.pkexec_argv(["true"]) == ["pkexec", "true"]
+
+
+def test_pkexec_runner_run_decodes_output_and_never_sends_a_password():
+    executor = FakeExecutor(returncode=0, stdout=b"real output\n", stderr=b"")
+    runner = da.PkexecRunner(executor=executor)
+    proc = runner.run(["pvcreate", "-ff", "-y", "/dev/sdb"])
+    assert proc.returncode == 0
+    assert proc.stdout == "real output\n"
+    assert isinstance(proc.stdout, str)
+    argv, input_bytes, _ = executor.calls[0]
+    assert argv == ["pkexec", "pvcreate", "-ff", "-y", "/dev/sdb"]
+    assert input_bytes == b""  # no password piped anywhere - pkexec's own agent collects it
+
+
+def test_pkexec_runner_makedirs_uses_real_mkdir_p():
+    executor = FakeExecutor()
+    da.PkexecRunner(executor=executor).makedirs("/mnt/BASELINE")
+    argv, _, _ = executor.calls[0]
+    assert argv == ["pkexec", "mkdir", "-p", "/mnt/BASELINE"]
+
+
+def test_pkexec_runner_append_text_sends_only_the_real_content_no_password_prefix():
+    executor = FakeExecutor()
+    da.PkexecRunner(executor=executor).append_text("/etc/fstab", "LABEL=X /mnt/X ext4 defaults 0 2\n")
+    argv, input_bytes, _ = executor.calls[0]
+    assert argv == ["pkexec", "tee", "-a", "/etc/fstab"]
+    assert input_bytes == b"LABEL=X /mnt/X ext4 defaults 0 2\n"
+
+
+def test_pkexec_runner_write_text_atomic_writes_a_temp_file_then_moves_it_into_place():
+    executor = FakeExecutor()
+    da.PkexecRunner(executor=executor).write_text_atomic("/mnt/BASELINE/state/x.json", '{"a": 1}')
+    tee_argv, tee_input, _ = executor.calls[0]
+    mv_argv, _, _ = executor.calls[1]
+    assert tee_argv == ["pkexec", "tee", "/mnt/BASELINE/state/x.json.tmp-pkexecrunner"]
+    assert tee_input == b'{"a": 1}'
+    assert mv_argv == ["pkexec", "mv",
+                        "/mnt/BASELINE/state/x.json.tmp-pkexecrunner", "/mnt/BASELINE/state/x.json"]
+
+
+def test_pkexec_runner_remove_uses_real_rm_rf():
+    executor = FakeExecutor()
+    da.PkexecRunner(executor=executor).remove("/mnt/SESSION_TEMP/recovery_mode")
+    argv, _, _ = executor.calls[0]
+    assert argv == ["pkexec", "rm", "-rf", "/mnt/SESSION_TEMP/recovery_mode"]
+
+
+def test_pkexec_runner_never_calls_pkexec_for_a_plain_read(tmp_path):
+    real_file = tmp_path / "readable.txt"
+    real_file.write_text("hello")
+    executor = FakeExecutor()
+    runner = da.PkexecRunner(executor=executor)
+    assert runner.read_text(str(real_file)) == "hello"
+    assert runner.path_exists(str(real_file)) is True
+    assert executor.calls == []  # a read never touches pkexec at all
+
+
+def test_pkexec_runner_as_pds_runner_implements_the_full_interface(tmp_path):
+    adapter = da.PkexecRunner(executor=FakeExecutor()).as_pds_runner()
+    real_file = tmp_path / "somefile"
+    real_file.write_text("x")
+    assert adapter.realpath(str(real_file)) == str(real_file.resolve())
+    assert adapter.lstat(str(real_file)).st_size == 1
+    assert isinstance(adapter._plain, pds.Runner)
+
+
+# -- _SudoPdsAdapter (real bug found live) --------------------------------------
+
+def test_sudo_pds_adapter_implements_lstat_and_realpath_for_real(tmp_path):
+    """Real bug found live: this adapter used to implement only
+    `run()`, crashing `physical_device_safety.validate_target_device`
+    (which also calls `lstat`/`realpath`/`read_size_file`) the first
+    time `build_self_installer`'s real `pds_runner` path was actually
+    exercised against a real request - the client saw a silently
+    broken connection ("nothing happened")."""
+    adapter = da._SudoPdsAdapter(da.SudoRunner("unused", executor=FakeExecutor()))
+    real_file = tmp_path / "somefile"
+    real_file.write_text("x")
+    assert adapter.realpath(str(real_file)) == str(real_file.resolve())
+    st = adapter.lstat(str(real_file))
+    assert st.st_size == 1
+
+
+def test_sudo_pds_adapter_read_size_file_delegates_to_a_plain_unprivileged_runner():
+    """None of lstat/realpath/read_size_file need real privilege -
+    delegated to a plain physical_device_safety.Runner rather than
+    reimplemented (and potentially re-broken) a second time here."""
+    adapter = da._SudoPdsAdapter(da.SudoRunner("unused", executor=FakeExecutor()))
+    assert isinstance(adapter._plain, pds.Runner)
+    assert hasattr(adapter, "read_size_file")
+
+
+def test_sudo_pds_adapter_run_still_goes_through_real_sudo():
+    executor = FakeExecutor(stdout=b"real output\n")
+    adapter = da._SudoPdsAdapter(da.SudoRunner("hunter2", executor=executor))
+    assert adapter.run(["udevadm", "info"]) == "real output\n"
+    assert executor.calls  # the real sudo path genuinely ran
 
 
 # -- classify_drive_type - real per-drive data from this project's own -----
@@ -424,8 +531,8 @@ def test_rebuild_persistence_lvm_reports_a_real_vgcreate_failure():
 
 def test_create_baseline_volumes_succeeds_with_real_free_space():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["vgs"], FakeProc(0, "1099511627776\n", "")),  # 1TiB free
-        (lambda a: a[:1] == ["lvs"], FakeProc(0, "", "")),
+        (lambda a: "vgs" in a, FakeProc(0, "1099511627776\n", "")),  # 1TiB free
+        (lambda a: "lvs" in a, FakeProc(0, "", "")),
     ])
     result = da.create_baseline_volumes(runner, vg_name="baseline_persist")
     assert result.ok is True
@@ -434,7 +541,7 @@ def test_create_baseline_volumes_succeeds_with_real_free_space():
 
 def test_create_baseline_volumes_reports_failure_when_vg_has_no_free_space():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["vgs"], FakeProc(1, "", "no such VG")),
+        (lambda a: "vgs" in a, FakeProc(1, "", "no such VG")),
     ])
     result = da.create_baseline_volumes(runner, vg_name="baseline_persist")
     assert result.ok is False
@@ -486,8 +593,8 @@ def test_apply_volume_mode_refuses_a_non_shared_label():
 
 def test_install_drive_runs_rebuild_then_creates_volumes_on_success():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["vgs"], FakeProc(0, "1099511627776\n", "")),  # 1TiB free
-        (lambda a: a[:1] == ["lvs"], FakeProc(0, "", "")),
+        (lambda a: "vgs" in a, FakeProc(0, "1099511627776\n", "")),  # 1TiB free
+        (lambda a: "lvs" in a, FakeProc(0, "", "")),
     ])
     result = da.install_drive(runner, device_path="/dev/sdb", pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
     assert result.ok is True
@@ -505,52 +612,220 @@ def test_install_drive_stops_before_creating_volumes_when_rebuild_fails():
     assert not any(c[0] in ("vgcreate", "lvcreate") for c in runner.calls)
 
 
-# -- update_selected --------------------------------------------------------------
+# -- check_cache_updates / update_selected --------------------------------------
+# Direct instruction, 2026-09-29: "Update selected" now means checking
+# each selected Baseline volume for a newer compatible version of what
+# it caches (not the old mount-mode/persona-switch behavior, which has
+# no web-UI entry point anymore - see drive_admin.py's own comment on
+# the removed "install"/"create_volumes_on_existing_vg" actions).
 
-def test_update_selected_applies_volume_mode_to_each_selected_shared_volume():
-    mounts = ("/dev/sdd2 /mnt/BASELINE ext4 rw,relatime 0 0\n"
-              "/dev/sdd3 /mnt/INSTALLER_CACHE ext4 rw,relatime 0 0\n")
-    runner = FakeRunner(files={"/proc/self/mounts": mounts})
-    result = da.update_selected(runner, selected=["BASELINE", "INSTALLER_CACHE"],
-                                 update_types=["apply_volume_mode"])
+def test_check_cache_updates_returns_a_real_empty_list_not_a_fabricated_one():
+    """No real "is a newer version available" source is wired up for
+    any cached artifact yet - a real empty list, not a per-item
+    "checked, nothing found" that was never actually checked."""
+    assert da.check_cache_updates(FakeRunner()) == []
+
+
+def test_update_selected_refuses_with_nothing_selected():
+    result = da.update_selected(FakeRunner(), selected=[])
+    assert result.ok is False
+    assert "no volumes selected" in result.detail
+
+
+def test_update_selected_is_an_honest_not_implemented_placeholder():
+    result = da.update_selected(FakeRunner(), selected=["INSTALLER_CACHE"])
+    assert result.ok is False
+    assert "not implemented" in result.detail
+
+
+# -- find_vg_for_device / detect_baseline_drive ---------------------------------
+
+def test_find_vg_for_device_matches_by_prefix_since_a_pv_is_usually_a_partition():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+    ])
+    assert da.find_vg_for_device(runner, "/dev/sdd") == "pve"
+
+
+def test_find_vg_for_device_returns_none_when_the_drive_has_no_real_pv():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdb   baseline_persist\n", "")),
+    ])
+    assert da.find_vg_for_device(runner, "/dev/sdz") is None
+
+
+def test_detect_baseline_drive_false_when_no_volume_group_exists():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "", "")),
+    ])
+    result = da.detect_baseline_drive(runner, "/dev/sdz")
+    assert result["is_baseline_drive"] is False
+    assert result["vg_name"] is None
+    assert result["missing_baseline_volumes"] == []
+
+
+def test_detect_baseline_drive_true_and_lists_missing_volumes_for_a_partial_install():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: "lvs" in a, FakeProc(0, "  pve  root\n  pve  baseline_app_state\n", "")),
+    ])
+    result = da.detect_baseline_drive(runner, "/dev/sdd")
+    assert result["is_baseline_drive"] is True
+    assert result["vg_name"] == "pve"
+    assert "baseline_installer_cache" in result["missing_baseline_volumes"]
+    assert "baseline_app_state" not in result["missing_baseline_volumes"]
+
+
+def test_detect_baseline_drive_false_when_volume_group_exists_but_has_no_baseline_volumes():
+    """A real Proxmox host with no Baseline install on it yet - has a
+    VG, but none of the real Baseline volumes."""
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: "lvs" in a, FakeProc(0, "  pve  root\n", "")),
+    ])
+    result = da.detect_baseline_drive(runner, "/dev/sdd")
+    assert result["is_baseline_drive"] is False
+    assert result["missing_baseline_volumes"] == []
+
+
+# -- repair_scan_and_fix (real, per-drive) --------------------------------------
+
+def test_repair_scan_and_fix_refuses_when_the_drive_has_no_real_volume_group():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "", "")),
+    ])
+    result = da.repair_scan_and_fix(runner, device_path="/dev/sdz")
+    assert result.ok is False
+    assert "no real LVM volume group" in result.detail
+
+
+def test_repair_scan_and_fix_reports_nothing_to_repair_when_already_complete():
+    all_lvs = "\n".join(f"  pve  {lv}" for lv, *_ in di.BASELINE_VOLUMES)
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: "lvs" in a, FakeProc(0, all_lvs + "\n", "")),
+    ])
+    result = da.repair_scan_and_fix(runner, device_path="/dev/sdd")
     assert result.ok is True
-    assert ["mount", "-o", "remount,rw", "/mnt/BASELINE"] in runner.calls
-    assert ["mount", "-o", "remount,rw", "/mnt/INSTALLER_CACHE"] in runner.calls
+    assert "nothing to repair" in result.detail
 
 
-def test_update_selected_ignores_a_selected_item_that_has_no_configurable_mode():
-    result = da.update_selected(FakeRunner(), selected=["USER_PERSISTENCE_ADMIN"],
-                                 update_types=["apply_volume_mode"])
-    assert result.ok is False
-    assert "no selected item supports a volume mode update" in result.detail
-
-
-def test_update_selected_switches_persona_once_regardless_of_selection_size():
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
-    runner = FakeRunner(files={"/proc/self/mounts": mounts})
-    result = da.update_selected(runner, selected=["BASELINE", "INSTALLER_CACHE"],
-                                 update_types=["switch_persona"], to_persona="admin")
+def test_repair_scan_and_fix_creates_only_what_is_actually_missing():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: "lvs" in a, FakeProc(0, "  pve  root\n", "")),
+        (lambda a: "vgs" in a, FakeProc(0, "600000000000\n", "")),  # 600GB free
+    ])
+    result = da.repair_scan_and_fix(runner, device_path="/dev/sdd")
     assert result.ok is True
+    assert any(c[0] == "lvcreate" for c in runner.calls)
+    assert not any(c[0] in ("pvcreate", "vgcreate", "wipefs") for c in runner.calls)
 
 
-def test_update_selected_refuses_switch_persona_without_a_target():
-    result = da.update_selected(FakeRunner(), selected=[], update_types=["switch_persona"])
+# -- mount_logical_volume / unmount_logical_volume (direct instruction, 2026- ---
+# 09-29: "The application has to handle not manual scripts nobody will
+# remember" - a real, discoverable, repeatable feature instead) --------------
+
+def test_mount_logical_volume_activates_the_vg_and_mounts_read_write():
+    runner = FakeRunner(
+        files={"/dev/pve/root": "x"},
+        command_responses=[
+            (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+            (lambda a: a[:1] == ["vgchange"], FakeProc(0, "  7 logical volume(s) active\n", "")),
+            (lambda a: a[:1] == ["mount"], FakeProc(0, "", "")),
+        ],
+    )
+    result = da.mount_logical_volume(runner, device_path="/dev/sdd")
+    assert result.ok is True
+    assert "/dev/pve/root mounted read-write at /mnt/pve-root-inspect" in result.detail
+    assert ["vgchange", "-ay", "pve"] in runner.calls
+    assert ["mount", "-o", "rw", "/dev/pve/root", "/mnt/pve-root-inspect"] in runner.calls
+    assert "/mnt/pve-root-inspect" in runner.dirs
+
+
+def test_mount_logical_volume_refuses_when_the_drive_has_no_real_vg():
+    runner = FakeRunner(command_responses=[(lambda a: "pvs" in a, FakeProc(0, "", ""))])
+    result = da.mount_logical_volume(runner, device_path="/dev/sdz")
     assert result.ok is False
-    assert "no target persona" in result.detail
+    assert "no real LVM volume group" in result.detail
 
 
-def test_update_selected_refuses_when_no_update_types_are_chosen():
-    result = da.update_selected(FakeRunner(), selected=["BASELINE"], update_types=[])
+def test_mount_logical_volume_refuses_cleanly_when_activation_fails():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: a[:1] == ["vgchange"], FakeProc(5, "", "Volume group \"pve\" not found")),
+    ])
+    result = da.mount_logical_volume(runner, device_path="/dev/sdd")
     assert result.ok is False
-    assert "no update types selected" in result.detail
+    assert "activating pve failed" in result.detail
+    assert not any(c[0] == "mount" for c in runner.calls)  # never attempted after activation fails
 
 
-# -- repair_scan_and_fix (v0.2 placeholder) -------------------------------------
-
-def test_repair_scan_and_fix_is_an_honest_not_implemented_placeholder():
-    result = da.repair_scan_and_fix(FakeRunner())
+def test_mount_logical_volume_refuses_when_the_named_lv_does_not_exist():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: a[:1] == ["vgchange"], FakeProc(0, "", "")),
+    ])
+    result = da.mount_logical_volume(runner, device_path="/dev/sdd", lv_name="nonexistent")
     assert result.ok is False
-    assert "v0.2" in result.detail
+    assert "/dev/pve/nonexistent does not exist" in result.detail
+
+
+def test_mount_logical_volume_accepts_a_custom_lv_name_and_mountpoint():
+    runner = FakeRunner(
+        files={"/dev/pve/data": "x"},
+        command_responses=[
+            (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+            (lambda a: a[:1] == ["vgchange"], FakeProc(0, "", "")),
+            (lambda a: a[:1] == ["mount"], FakeProc(0, "", "")),
+        ],
+    )
+    result = da.mount_logical_volume(runner, device_path="/dev/sdd", lv_name="data", mountpoint="/mnt/custom")
+    assert result.ok is True
+    assert ["mount", "-o", "rw", "/dev/pve/data", "/mnt/custom"] in runner.calls
+
+
+def test_mount_logical_volume_reports_real_progress():
+    runner = FakeRunner(
+        files={"/dev/pve/root": "x"},
+        command_responses=[
+            (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+            (lambda a: a[:1] == ["vgchange"], FakeProc(0, "", "")),
+            (lambda a: a[:1] == ["mount"], FakeProc(0, "", "")),
+        ],
+    )
+    lines = []
+    da.mount_logical_volume(runner, device_path="/dev/sdd", on_progress=lines.append)
+    assert any("Activating volume group pve" in line for line in lines)
+    assert any("Mounting /dev/pve/root" in line for line in lines)
+
+
+def test_unmount_logical_volume_unmounts_the_real_target():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: a[:1] == ["umount"], FakeProc(0, "", "")),
+    ])
+    result = da.unmount_logical_volume(runner, device_path="/dev/sdd")
+    assert result.ok is True
+    assert ["umount", "/mnt/pve-root-inspect"] in runner.calls
+
+
+def test_unmount_logical_volume_refuses_cleanly_when_not_actually_mounted():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: a[:1] == ["umount"], FakeProc(32, "", "not mounted")),
+    ])
+    result = da.unmount_logical_volume(runner, device_path="/dev/sdd")
+    assert result.ok is False
+    assert "unmounting" in result.detail
+
+
+def test_mount_and_unmount_volume_are_registered_real_actions():
+    assert "mount_volume" in da.ACTIONS
+    assert "unmount_volume" in da.ACTIONS
+    described = {d["action_id"]: d for d in da.describe_actions()}
+    assert described["mount_volume"]["requires_device"] is True
+    assert described["unmount_volume"]["requires_device"] is True
 
 
 # -- ACTIONS registry / describe_actions / perform_action ----------------------
@@ -564,13 +839,81 @@ def test_describe_actions_lists_every_registered_action_with_its_real_descriptio
 
 
 def test_describe_actions_lists_every_real_action():
-    """Direct instruction: don't cap a count of things pre-v1 - this
-    project's own action list has already outgrown an exact-set
-    assertion twice (decision records 85 and 88 each had to widen a
-    prior "exactly N actions" test just to add one more real,
-    separately-tested action). Asserts presence, not exclusivity - a
-    future action being added is expected, not a regression to catch."""
-    assert {"install", "update_selected", "repair", "build_self_installer", "run_health_check"} <= set(da.ACTIONS)
+    """Direct instruction, 2026-09-29: "The only installer is a self
+    installer" - "install" and "create_volumes_on_existing_vg" are
+    gone; "run_health_check" moved to its own Hardware tab, no longer
+    a Drive Administration action. Asserts presence, not exclusivity -
+    a future action being added is expected, not a regression to
+    catch."""
+    assert {"update_selected", "repair", "build_self_installer"} <= set(da.ACTIONS)
+    assert "install" not in da.ACTIONS
+    assert "create_volumes_on_existing_vg" not in da.ACTIONS
+    assert "run_health_check" not in da.ACTIONS
+
+
+def test_build_self_installer_forwards_the_submitted_password_as_the_new_root_password(monkeypatch):
+    """Direct instruction, 2026-09-29: "It has to accept my root
+    password in Linux now" - the exact password the operator submitted
+    to authorize this run must reach self_installer.py as the new
+    Proxmox install's own root password, not a randomly generated one
+    they'd have to go find."""
+    import self_installer as si
+    captured = {}
+
+    def fake_build(**kwargs):
+        captured.update(kwargs)
+        return si.SelfInstallerResult("applied", "fake ok")
+
+    monkeypatch.setattr(si, "build_and_write_self_installer", fake_build)
+    runner = da.SudoRunner("the-real-shared-password", executor=FakeExecutor())
+    result = da.build_self_installer(runner, device_path="/dev/sdd", pds_runner=FakePdsRunner())
+    assert result.ok is True
+    assert captured["admin_password"] == "the-real-shared-password"
+
+
+def test_build_self_installer_never_wraps_its_own_device_validation_in_pkexec(monkeypatch):
+    """Real bug found live, 2026-09-29: `pds_runner` used to default to
+    `runner.as_pds_runner()` whenever available - correct for
+    `SudoRunner` (its adapter already delegates reads to a plain
+    runner internally) but wrong for `PkexecRunner`, whose adapter
+    wraps *every* call, including plain unprivileged reads, in a real
+    `pkexec` authentication dialog. Confirmed live: `udevadm info` for
+    the target, then `findmnt`/`lsblk`/`udevadm` again for the
+    boot-device self-check, each spawned its own separate, genuinely
+    blocking dialog. This action's own validation never needed
+    privilege at all - `pds_runner` must default to a plain
+    `pds.Runner()`, never derived from a `PkexecRunner`."""
+    import self_installer as si
+    import physical_device_safety as pds
+
+    captured = {}
+
+    def fake_build(**kwargs):
+        captured.update(kwargs)
+        return si.SelfInstallerResult("applied", "fake ok")
+
+    monkeypatch.setattr(si, "build_and_write_self_installer", fake_build)
+    executor = FakeExecutor()
+    runner = da.PkexecRunner(executor=executor)
+    result = da.build_self_installer(runner, device_path="/dev/sdd")
+    assert result.ok is True
+    # The real point: a plain, unprivileged Runner - not the PkexecRunner's
+    # own adapter - so validation never spawns a real pkexec dialog.
+    assert isinstance(captured["pds_runner"], pds.Runner)
+    assert executor.calls == []  # no pkexec call was ever made for this action's own setup
+
+
+def test_repo_root_default_finds_this_files_own_real_repo_checkout():
+    """Real bug found live, 2026-09-29: the old default was a
+    hardcoded `Path("/opt/baseline").parent` (`/opt`) - wrong even on
+    its own terms, and `/opt/baseline` doesn't exist outside a real
+    systemd-deployed install, crashing `build_self_installer` with
+    `FileNotFoundError: [Errno 2] No such file or directory:
+    '/opt/boot'` the moment it reached the real ISO-build stage.
+    `REPO_ROOT` must instead resolve to wherever this actual file
+    lives, which always has real `boot/` and `baseline/` children."""
+    assert (da.REPO_ROOT / "boot").exists()
+    assert (da.REPO_ROOT / "baseline").exists()
 
 
 def test_build_self_installer_needs_nothing_but_device_path(tmp_path):
@@ -642,9 +985,9 @@ def test_describe_actions_exposes_requires_device_for_the_web_pages_device_picke
     the ActionSpec itself was correctly flagged - found by driving the
     actual running page, not by code inspection alone."""
     described = {d["action_id"]: d for d in da.describe_actions()}
-    assert described["install"]["requires_device"] is True
-    assert described["update_selected"]["requires_device"] is False
-    assert described["repair"]["requires_device"] is False
+    assert described["update_selected"]["requires_device"] is True
+    assert described["repair"]["requires_device"] is True
+    assert described["build_self_installer"]["requires_device"] is True
 
 
 def test_perform_action_refuses_an_unknown_action_id():
@@ -653,9 +996,15 @@ def test_perform_action_refuses_an_unknown_action_id():
     assert result.ok is False
 
 
+def test_perform_action_does_not_choke_on_on_progress_for_an_action_that_ignores_it():
+    """`update_selected`'s own lambda doesn't forward on_progress -
+    passing one anyway must never raise."""
+    result = da.perform_action(FakeRunner(), "update_selected", {"selected": []}, on_progress=lambda line: None)
+    assert result.ok is False  # "no volumes selected" - the real point is that it didn't crash
+
+
 def test_perform_action_dispatches_update_selected_with_its_params():
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
-    runner = FakeRunner(files={"/proc/self/mounts": mounts})
-    result = da.perform_action(runner, "update_selected",
-                                {"selected": [], "update_types": ["switch_persona"], "to_persona": "admin"})
-    assert result.ok is True
+    runner = FakeRunner()
+    result = da.perform_action(runner, "update_selected", {"selected": ["INSTALLER_CACHE"], "device_path": "/dev/sdd"})
+    assert result.ok is False  # honest placeholder - see test_update_selected_is_an_honest_not_implemented_placeholder
+    assert "not implemented" in result.detail

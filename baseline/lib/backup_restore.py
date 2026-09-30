@@ -79,7 +79,7 @@ def backup_required(install_detection: dict) -> bool:
 
 def all_persistence_targets() -> list:
     import drive_installer
-    return [mountpoint for _, _, _, mountpoint in drive_installer.BASELINE_VOLUMES]
+    return [mountpoint for _, _, _, _, mountpoint in drive_installer.BASELINE_VOLUMES]
 
 
 def create_backup_argv(dest_path: str, targets: list) -> list:

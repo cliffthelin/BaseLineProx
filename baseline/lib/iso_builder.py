@@ -6,13 +6,16 @@ baseline/ tree at /baseline-src, so a fresh install needs no separate
 git-clone/copy step afterward - the installer already carries the
 exact code that was live in this repo the moment the ISO was built.
 
-`-boot_image any replay` is the real reason this is safe: it copies
-the source ISO's own, already-working El Torito boot record onto the
-new ISO unchanged rather than rebuilding one from scratch, so remaster
-can never turn a bootable input ISO into an unbootable output one
-(verified directly against a real synthetic bootable ISO with real
-xorriso before writing this module - `boot.catalog` and the boot file
-came through unchanged in that run).
+`-boot_image any patch` (changed from `replay`, then from a same-day
+`keep` that was itself wrong - see `remaster_argv`'s own docstring for
+the full real story, including the actual isolated QEMU boot test
+that proved `keep` never boots and `patch` does) is the real reason
+this is safe: it adjusts the source ISO's own, already-working boot
+records in place to account for the newly added content, rather than
+either fully rebuilding them (`replay`, which failed with `Overlapping
+MBR partition entries requested`) or leaving them completely untouched
+(`keep`, which produced an ISO that hangs forever at SeaBIOS's own
+"Booting from DVD/CD..." line and never actually boots).
 
 Never trusts a single signal for success - matches
 drive_setup_answer.prepare_iso_defensively's own standing discipline
@@ -47,6 +50,12 @@ class IsoBuilderRunner:
     def copytree(self, src: Path, dst: Path) -> None:
         raise NotImplementedError
 
+    def remove_tree(self, path: Path) -> None:
+        raise NotImplementedError
+
+    def remove_file(self, path: Path) -> None:
+        raise NotImplementedError
+
 
 @dataclass
 class IsoBuilderProc:
@@ -75,6 +84,12 @@ class RealIsoBuilderRunner(IsoBuilderRunner):
     def copytree(self, src, dst):
         shutil.copytree(str(src), str(dst))
 
+    def remove_tree(self, path):
+        shutil.rmtree(str(path), ignore_errors=True)
+
+    def remove_file(self, path):
+        Path(path).unlink(missing_ok=True)
+
 
 @dataclass
 class PostconditionResult:
@@ -97,8 +112,34 @@ ISO_TARGET_DIR = "/baseline-src"
 
 def remaster_argv(source_iso: Path, output_iso: Path, staging_dir: Path,
                    iso_target_dir: str = ISO_TARGET_DIR) -> list:
+    """`-boot_image any patch` (real bug found live, 2026-09-29 -
+    correcting this same day's own earlier `keep` choice, which was
+    wrong). The real Proxmox source ISO's own boot record is a
+    quadruple hybrid (El Torito + MBR grub2-mbr + GPT + APM) -
+    `replay` mode, which tries to fully recompute every partition
+    table to match the resized image, failed for real against it:
+    `xorriso: FAILURE: Overlapping MBR partition entries requested`.
+
+    `keep` (preserve the boot image byte-for-byte, no recomputation)
+    was tried next and *did* complete cleanly - but a real, isolated
+    QEMU boot test of its actual output ISO proved it genuinely does
+    not boot: hangs forever at SeaBIOS's own "Booting from DVD/CD..."
+    line, confirmed reproducible in complete isolation, with no real
+    hardware involved. `patch` (adjust the existing boot records in
+    place) was then boot-tested the same real way and genuinely works:
+    the resulting ISO boots all the way through kernel load, driver
+    init, and into the real Proxmox installer environment, which
+    correctly attempts (and, in an isolated no-network test, correctly
+    fails) to fetch its answer file - exactly the real installer's own
+    expected behavior, not a remaster defect.
+
+    The real lesson: xorriso's own exit code and `-report_system_area`
+    classification are not sufficient proof of bootability for this
+    ISO's actual boot complexity - only a real, isolated QEMU boot
+    test settles it. That's the standing verification this function's
+    own choice depends on, not assumed from either signal alone."""
     return ["xorriso", "-indev", str(source_iso), "-outdev", str(output_iso),
-            "-boot_image", "any", "replay", "-map", str(staging_dir), iso_target_dir, "--"]
+            "-boot_image", "any", "patch", "-map", str(staging_dir), iso_target_dir, "--"]
 
 
 def find_in_iso_argv(iso_path: Path, iso_target_path: str) -> list:
@@ -110,7 +151,21 @@ def stage_baseline_source(runner: IsoBuilderRunner, *, repo_root: Path, staging_
     itself at <SRC>/boot/provision.sh and reads $SRC/baseline/... via
     SRC="$(dirname "$0")/.." - so the staged tree keeps boot/ and
     baseline/ as siblings, never flattened, so provision.sh runs
-    unmodified once copied off the ISO onto the real target."""
+    unmodified once copied off the ISO onto the real target.
+
+    Removes any pre-existing `staging_dir` first (real bug found live,
+    2026-09-29): the workspace this lives under is a fixed, reused
+    path across real attempts (by design - `workspace/acquire/`'s own
+    cached assistant binary is meant to survive a retry, avoiding a
+    real network re-fetch) - but a prior *failed* attempt's own
+    `staging/boot`/`staging/baseline` directories were left behind
+    too, and Python's `shutil.copytree` refuses to write into an
+    already-existing destination: `FileExistsError: [Errno 17] File
+    exists: '.../iso-build/staging/boot'`. A clean removal first makes
+    every real retry copy this repo's current, real content fresh -
+    never stale leftovers from whatever the repo looked like during an
+    earlier, failed attempt."""
+    runner.remove_tree(staging_dir)
     runner.makedirs(staging_dir)
     runner.copytree(repo_root / "boot", staging_dir / "boot")
     runner.copytree(repo_root / "baseline", staging_dir / "baseline")
@@ -124,6 +179,16 @@ def build_current_iso(runner: IsoBuilderRunner, *, source_iso: Path, repo_root: 
     staging_dir = workspace / "staging"
     stage_baseline_source(runner, repo_root=repo_root, staging_dir=staging_dir)
 
+    # Real bug found live, 2026-09-29: the same class of stale-
+    # leftover-from-a-prior-attempt bug decision record 107 already
+    # fixed for the staging directory, this time hitting `output_iso`
+    # itself. A prior real attempt's own `baseline-self-installer.iso`
+    # (real, ~1.7GB, non-zero ISO9660 session data) was still sitting
+    # at this same fixed, reused workspace path - xorriso refuses to
+    # write a fresh `-outdev` over one that already holds real data:
+    # `FAILURE: -indev differs from -outdev and -outdev media holds
+    # non-zero data`. Removed first so every real retry starts clean.
+    runner.remove_file(output_iso)
     proc = runner.run(remaster_argv(source_iso, output_iso, staging_dir, iso_target_dir), timeout=600)
     checks.append(PostconditionResult("xorriso_remaster_exit_zero", proc.returncode == 0, proc.stderr.strip()[-500:]))
     if proc.returncode != 0:

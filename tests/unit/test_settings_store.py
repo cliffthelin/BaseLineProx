@@ -163,7 +163,7 @@ def test_set_setting_rejects_a_value_outside_the_defined_options():
         assert False, "should have raised"
     except ValueError:
         pass
-    assert ss.get_setting("self_installer", "lvm_size_preset") == "medium"
+    assert ss.get_setting("self_installer", "lvm_size_preset") == "minimal"
 
 
 def test_set_setting_accepts_a_value_inside_the_defined_options():
@@ -241,5 +241,5 @@ def test_export_bootstrap_snapshot_returns_a_flat_plain_dict():
     ])
     assert snapshot == {
         "self_installer.fqdn": "baseline.home.arpa",
-        "self_installer.lvm_size_preset": "medium",
+        "self_installer.lvm_size_preset": "minimal",
     }

@@ -58,7 +58,7 @@ def test_check_python_module_importable_fails_for_a_fake_module():
 def test_check_setting_configured_passes_for_a_valid_default():
     ok, detail = dep._check_setting_configured({"group": "self_installer", "key": "lvm_size_preset"})
     assert ok is True
-    assert "medium" in detail
+    assert "minimal" in detail
 
 
 def test_check_setting_configured_fails_for_an_unknown_setting():
@@ -141,7 +141,7 @@ def test_dump_configuration_snapshot_calls_out_a_currently_failing_silent_depend
 def test_dump_configuration_snapshot_includes_effective_settings():
     dep.run_checks(phase=dep.ADHOC)
     snapshot = dep.dump_configuration_snapshot()
-    assert snapshot["settings"]["self_installer"]["lvm_size_preset"] == "medium"
+    assert snapshot["settings"]["self_installer"]["lvm_size_preset"] == "minimal"
 
 
 def test_run_checks_for_global_dependencies_never_requires_protected_to_be_reachable(monkeypatch):
