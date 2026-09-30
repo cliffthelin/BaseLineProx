@@ -235,6 +235,13 @@ def upsert_entry(type_id: str, entry_id: str, *, attributes: dict, scope: str, v
         conn.commit()
 
 
+def delete_entry(type_id: str, entry_id: str, *, scope: str) -> None:
+    """Removes one entry at `scope`; a no-op if it does not exist."""
+    with closing(_connect(_path_for_scope(scope))) as conn:
+        conn.execute("DELETE FROM registry_entries WHERE type_id = ? AND entry_id = ?", (type_id, entry_id))
+        conn.commit()
+
+
 def set_value(type_id: str, entry_id: str, value, *, scope: str) -> None:
     """Updates only an entry's stored value - the real "set_setting"-
     shaped operation. Refuses if the entry's definition doesn't exist
