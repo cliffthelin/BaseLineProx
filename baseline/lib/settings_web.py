@@ -545,7 +545,9 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "applied":
-                deps["store"].save_pending_account(body["username"], deps["hasher"](body["password"]))
+                hashed = deps["hasher"](body["password"])
+                deps["store"].add_user(body["username"], hashed)
+                deps["store"].save_pending_account(body["username"], hashed)
                 return self._html_response(200, render_setup_page("rebuild",
                     f"Account {body['username']!r} created. Now build the rebuild target."))
             return self._html_response(result.status, render_setup_page("account", "Username and password are both required."))
