@@ -532,6 +532,49 @@ def test_system_password_verifier_refuses_a_non_sha512_hash_scheme():
     assert verifier.verify("root", "anything") is False
 
 
+class _FakeSudoExecutor:
+    """Matches subprocess.run's real call shape - never invokes real
+    sudo or needs a real password."""
+    def __init__(self, *, returncode=0):
+        self.returncode = returncode
+        self.calls = []
+
+    def __call__(self, argv, *, input=b"", capture_output=True, timeout=10):
+        self.calls.append((list(argv), input))
+        import subprocess
+        return subprocess.CompletedProcess(argv, self.returncode, b"", b"")
+
+
+def test_sudo_password_verifier_accepts_when_the_real_sudo_preflight_succeeds():
+    executor = _FakeSudoExecutor(returncode=0)
+    verifier = sw.SudoPasswordVerifier(executor=executor)
+    assert verifier.verify("cane", "whatever-the-real-password-is") is True
+    assert executor.calls  # the real preflight genuinely ran
+
+
+def test_sudo_password_verifier_refuses_when_the_real_sudo_preflight_fails():
+    executor = _FakeSudoExecutor(returncode=1)
+    verifier = sw.SudoPasswordVerifier(executor=executor)
+    assert verifier.verify("cane", "wrong") is False
+
+
+def test_sudo_password_verifier_ignores_username_and_checks_the_process_owner_only():
+    """Real, stated behavior: `sudo -S` always authenticates whoever
+    the process itself runs as, never the typed username - correct for
+    this project's real multi-account-shares-one-password setup, not
+    a per-username check this class pretends to do."""
+    executor = _FakeSudoExecutor(returncode=0)
+    verifier = sw.SudoPasswordVerifier(executor=executor)
+    assert verifier.verify("Cliff", "the-shared-password") is True
+    assert verifier.verify("cane", "the-shared-password") is True
+
+
+def test_build_real_server_uses_the_real_sudo_password_verifier_for_login(tmp_path):
+    server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json")
+    assert isinstance(server.deps["verifier"], sw.SudoPasswordVerifier)
+    server.httpd.server_close()
+
+
 def test_system_elevation_verifier_is_callable_with_just_a_password():
     entry_hash = sw._sha512crypt("correct horse", sw._new_salt())
     shadow_text = f"cane:{entry_hash}:19000:0:99999:7:::\n"
@@ -806,3 +849,73 @@ def test_render_recovery_page_hides_the_exit_button_when_recovery_mode_is_not_ac
 def test_render_recovery_page_handles_the_handed_off_case_without_crashing():
     body = sw.render_recovery_page({}, "no Runner configured").decode()
     assert "not available" in body
+
+
+# ---------------------------------------------------------------------------
+# export_install_config round-trip tests
+# ---------------------------------------------------------------------------
+
+def test_export_install_config_maps_all_settings_sections():
+    store_settings = dict(sw._DEFAULT_SETTINGS_SECTIONS)
+    store_settings["proxmox"] = sw._DEFAULT_SETTINGS_SECTIONS["proxmox"]
+    store_settings["drivers"] = sw._DEFAULT_SETTINGS_SECTIONS["drivers"]
+    config = sw.export_install_config(store_settings)
+    assert "network" in config
+    assert "firewall" in config
+    assert "ssh" in config
+    assert "tether" in config
+    assert "handoff" in config
+    assert "proxmox" in config
+    assert "drivers" in config
+
+
+def test_export_install_config_preserves_network_values():
+    settings = {"network": {"hostname": "testhost", "dhcp": False}}
+    config = sw.export_install_config(settings)
+    assert config["network"]["hostname"] == "testhost"
+    assert config["network"]["dhcp"] is False
+
+
+def test_export_install_config_extracts_iperf3_values_from_diagnostics():
+    settings = {
+        "diagnostics": {
+            "iperf3": {"role": "server", "peer_address": "10.0.0.5", "port": 9999},
+        }
+    }
+    config = sw.export_install_config(settings)
+    assert config["diagnostics"]["iperf3"]["role"] == "server"
+    assert config["diagnostics"]["iperf3"]["peer_address"] == "10.0.0.5"
+    assert config["diagnostics"]["iperf3"]["port"] == 9999
+
+
+def test_export_install_config_skips_empty_sections():
+    config = sw.export_install_config({})
+    assert config == {}
+
+
+def test_export_install_config_round_trips_through_config_pipeline():
+    """The real integration test: Configurator defaults → export →
+    config_pipeline can process them without errors."""
+    import json
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "baseline", "lib"))
+    import config_pipeline as cp
+    from fake_runner import FakeRunner
+
+    store_settings = dict(sw._DEFAULT_SETTINGS_SECTIONS)
+    store_settings["proxmox"] = sw._DEFAULT_SETTINGS_SECTIONS["proxmox"]
+    store_settings["drivers"] = sw._DEFAULT_SETTINGS_SECTIONS["drivers"]
+    exported = sw.export_install_config(store_settings)
+
+    runner = FakeRunner(files={
+        "/etc/baseline/install-config.json": json.dumps(exported),
+        "/etc/ssh/sshd_config": "# default config\n",
+    })
+    config = cp.load_config(runner)
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+
+    all_named = set(summary["applied"] + summary["skipped"] + summary["failed"])
+    expected = {"network", "firewall", "ssh", "tether", "handoff",
+                "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
+    assert expected == all_named
+    assert summary["failed"] == []

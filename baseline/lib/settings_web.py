@@ -133,6 +133,7 @@ class RebuildTrigger:
 
 KNOWN_SECTIONS = frozenset({
     "network", "firewall", "tether", "ssh", "handoff", "diagnostics",
+    "proxmox", "drivers",
 })
 
 
@@ -609,6 +610,14 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/setup":
             return self._html_response(200, render_setup_page("account"))
 
+        if self.path == "/api/export-config":
+            result = handle_settings_view(deps["sessions"], deps["source"], self._token(), now,
+                                           persona_provider=deps.get("persona_provider"))
+            if result.outcome != "applied":
+                return self._json(401, {"outcome": "refused", "error": "not authenticated"})
+            config = export_install_config(result.body["settings"])
+            return self._json(200, config)
+
         if self.path == "/settings":
             result = handle_settings_view(deps["sessions"], deps["source"], self._token(), now,
                                            persona_provider=deps.get("persona_provider"))
@@ -701,7 +710,63 @@ _DEFAULT_SETTINGS_SECTIONS = {
         },
         "tools_installed": [],
     },
+    "proxmox": {
+        "smartd_health_check": True,
+        "smartd_monitor_all": True,
+        "smartd_auto_offline": "on",
+        "smartd_attribute_autosave": "on",
+        "smartd_selftest_schedule": "",
+        "smartd_email": "",
+        "smartd_email_frequency": "",
+        "ethtool_interface": "",
+        "ethtool_autoneg": "on",
+        "ethtool_speed": "",
+        "ethtool_duplex": "full",
+        "ethtool_wol": "",
+        "ethtool_rx_checksum": True,
+        "ethtool_tx_checksum": True,
+        "ethtool_tso": True,
+        "ethtool_gro": True,
+        "ethtool_pause_autoneg": True,
+    },
+    "drivers": {
+        "cpu_microcode": False,
+        "cpu_microcode_package": "amd64-microcode",
+        "nic_wifi_firmware": False,
+        "wifi_firmware_package": "firmware-mediatek",
+    },
 }
+
+
+def export_install_config(store_settings: dict) -> dict:
+    """Map the Configurator's stored settings into the install-config.json
+    format that config_pipeline.py's apply_stored_config() expects.
+
+    This is the bridge between the two: the Configurator stores flat
+    section dicts in SQLite, config_pipeline reads a single JSON file
+    with those same section names as top-level keys. The mapping is
+    nearly 1:1 for network/firewall/ssh/tether/handoff/proxmox/drivers.
+    The diagnostics section needs its iperf3 values extracted into the
+    nested structure config_pipeline expects."""
+    config = {}
+    for key in ("network", "firewall", "ssh", "tether", "handoff",
+                "proxmox", "drivers"):
+        section = store_settings.get(key)
+        if section and isinstance(section, dict):
+            config[key] = dict(section)
+
+    diag = store_settings.get("diagnostics")
+    if diag and isinstance(diag, dict):
+        iperf3_raw = diag.get("iperf3") or {}
+        if isinstance(iperf3_raw, dict) and any(
+            k in iperf3_raw for k in ("role", "peer_address", "port")
+        ):
+            config.setdefault("diagnostics", {})["iperf3"] = {
+                "role": iperf3_raw.get("role", "client"),
+                "peer_address": iperf3_raw.get("peer_address", ""),
+                "port": iperf3_raw.get("port", 5201),
+            }
+    return config
 
 
 class LocalAppStore:
@@ -869,6 +934,35 @@ class SystemPasswordVerifier(PasswordVerifier):
             return False
         salt = parts[2]
         return _sha512crypt(password, salt) == stored_hash
+
+
+class SudoPasswordVerifier(PasswordVerifier):
+    """The real login verifier this unprivileged-by-design process
+    actually needs (direct instruction, 2026-09-29: login and Drive
+    Administration's own action password "likely should both be real
+    now"). `SystemPasswordVerifier` reads `/etc/shadow` directly, which
+    needs the *calling process* to already be running as root -
+    exactly the pre-elevated model decision record 84 deliberately
+    moved away from (this app runs unprivileged and self-elevates per
+    real action via the operator's own submitted password). Reusing
+    that same real `sudo -S` mechanism here instead - never a second,
+    inconsistent way to check "does this person really know the real
+    password" - means login needs no root either.
+
+    `username` is accepted (the `PasswordVerifier` interface takes
+    one) but not actually used to select *which* account's password to
+    check: `sudo -S` always authenticates whoever this process itself
+    is running as, regardless of what was typed into the login form's
+    username field. Real and correct for this machine's actual setup
+    (multiple real accounts sharing one password) - not a per-typed-
+    username check, and this class does not pretend otherwise."""
+
+    def __init__(self, *, executor=None):
+        self._executor = executor
+
+    def verify(self, username: str, password: str) -> bool:
+        import drive_admin
+        return drive_admin.verify_sudo_password(password, executor=self._executor)
 
 
 class SystemElevationVerifier:
@@ -1313,21 +1407,23 @@ class SettingsWebServer:
 def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
                        data_path: Path | None = None, runner=None) -> SettingsWebServer:
     """A genuinely working, standalone deployment - one small SQLite
-    database, no root, no real Proxmox install required. Default login
-    is root/baseline (see `LocalAppStore`'s seed) until PasswordVerifier
-    is wired to the real system account.
+    database, no real Proxmox install required. Login now verifies via
+    the machine's own real `sudo` (`SudoPasswordVerifier`, decision
+    record 2026-09-29 - "login... should [be] real now"), matching
+    Drive Administration's own self-elevation model - no root needed
+    by this process itself, and no separate fake/dev credential path.
 
     `runner` (optional, real-deployment only) wires a real
     `RunnerBackedActivePersonaProvider` so a session becomes stale if
     the active persona switches underneath it (decision record 78) -
     omitted (the default) keeps this fully usable standalone with no
     Runner/persistence layer available at all, matching this
-    function's own "no root, no real hardware required" design."""
+    function's own "no real hardware required" design."""
     store = LocalAppStore(data_path or Path("/tmp/baseline-settings-web/store.db"))
     persona_provider = RunnerBackedActivePersonaProvider(runner) if runner is not None else None
     return SettingsWebServer(
         bind_host, bind_port,
-        verifier=FileBackedPasswordVerifier(store),
+        verifier=SudoPasswordVerifier(),
         source=FileBackedSettingsSource(store),
         applier=FileBackedSectionApplier(store),
         eligibility=PathPrefixRebuildEligibility(),

@@ -15,7 +15,12 @@ from fake_runner import FakeRunner
 
 import config_pipeline as cp
 
-CONFIG_JSON = json.dumps({
+FULL_CONFIG = {
+    "network": {"hostname": "myhost", "dhcp": True},
+    "firewall": {"allow_lan_only": True},
+    "ssh": {"password_auth": False},
+    "tether": {"enabled": False},
+    "handoff": {"restored_categories": ["network", "ssh"]},
     "proxmox": {
         "smartd_health_check": True,
         "smartd_monitor_all": True,
@@ -34,11 +39,15 @@ CONFIG_JSON = json.dumps({
         "ethtool_gro": True,
         "ethtool_pause_autoneg": True,
     },
+    "diagnostics": {
+        "iperf3": {"role": "server", "peer_address": "192.168.1.10", "port": 5201},
+    },
     "drivers": {
         "cpu_microcode": True,
         "nic_wifi_firmware": True,
     },
-})
+}
+CONFIG_JSON = json.dumps(FULL_CONFIG)
 
 
 def test_load_config_returns_none_when_no_file_exists():
@@ -150,3 +159,72 @@ def test_apply_stored_config_never_touches_anything_iso_shaped():
     iso_shaped = lambda p: p.lower().endswith(".iso") or "/iso/" in p.lower()
     assert not any(iso_shaped(p) for p in runner.writes)
     assert not any(iso_shaped(a) for call in runner.calls for a in call if isinstance(a, str))
+
+
+def test_apply_stored_config_applies_network_hostname():
+    runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "network" in summary["applied"]
+    assert any(c == ["hostnamectl", "set-hostname", "myhost"] for c in runner.calls)
+
+
+def test_apply_stored_config_applies_firewall():
+    runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "firewall" in summary["applied"]
+
+
+def test_apply_stored_config_applies_ssh():
+    runner = FakeRunner(files={
+        "/etc/baseline/install-config.json": CONFIG_JSON,
+        "/etc/ssh/sshd_config": "# default\nPasswordAuthentication yes\n",
+    })
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "ssh" in summary["applied"]
+    assert "/etc/ssh/sshd_config" in runner.writes
+
+
+def test_apply_stored_config_applies_tether():
+    runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "tether" in summary["applied"]
+
+
+def test_apply_stored_config_applies_handoff():
+    runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "handoff" in summary["applied"]
+
+
+def test_apply_stored_config_applies_iperf3():
+    runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "iperf3" in summary["applied"]
+
+
+def test_apply_stored_config_all_sections_accounted_for():
+    """Every subsystem the pipeline knows about must appear in exactly
+    one of applied/skipped/failed - nothing silently dropped."""
+    runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    all_named = set(summary["applied"] + summary["skipped"] + summary["failed"])
+    expected = {"network", "firewall", "ssh", "tether", "handoff",
+                "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
+    assert expected == all_named
+
+
+def test_no_config_skips_all_subsystems():
+    runner = FakeRunner()
+    summary = cp.apply_stored_config(runner, None, network_interface="eno1")
+    assert summary["applied"] == []
+    assert summary["failed"] == []
+    expected = {"network", "firewall", "ssh", "tether", "handoff",
+                "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
+    assert expected == set(summary["skipped"])

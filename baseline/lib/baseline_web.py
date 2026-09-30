@@ -809,6 +809,14 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         if path == "/setup":
             return self._html_response(200, _with_nav(sw.render_setup_page("account"), path))
 
+        if path == "/api/export-config":
+            result = sw.handle_settings_view(deps["sessions"], deps["source"], self._cookie_token(), now,
+                                              persona_provider=deps.get("persona_provider"))
+            if result.outcome != "applied":
+                return self._json(401, {"outcome": "refused", "error": "not authenticated"})
+            config = sw.export_install_config(result.body["settings"])
+            return self._json(200, config)
+
         if path.startswith("/admin"):
             result = sw.handle_admin_view(deps["sessions"], self._cookie_token(), now)
             if result.outcome == "refused" and result.status == 401:
