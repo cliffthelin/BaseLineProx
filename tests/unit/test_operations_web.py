@@ -187,3 +187,71 @@ def test_the_operator_role_comes_from_the_configured_machine_accounts(tmp_path):
         assert deps["sessions"].sessions[token].ttl_s == 1800.0
     finally:
         case.close()
+
+
+# -- adding operators in the application ------------------------------------------
+
+SECRET = "root-secret"
+OPPW = "a long operator password"
+
+
+def _acct_case(tmp_path, role="admin", audit=None):
+    import operator_accounts as oa
+    accounts = oa.OperatorAccounts(tmp_path / "ops.json", is_system_user=lambda n: n == "cane")
+    case = _case(tmp_path, role=role, operator_accounts=accounts, recovery_verify_fn=lambda s: s == SECRET,
+                 audit=audit or (lambda r: None))
+    return case, accounts
+
+
+def test_an_admin_adds_an_operator_with_the_root_password_and_the_operator_can_log_in(tmp_path):
+    import http.client
+    log = []
+    case, accounts = _acct_case(tmp_path, audit=log.append)
+    try:
+        status, body = _req(case, "POST", "/operators/add", {"username": "claude", "password": OPPW, "secret": SECRET})
+        assert status == 200 and accounts.names() == ["claude"]
+        assert log == [{"event": "operator_added", "username": "claude"}] and OPPW not in str(log)
+        assert b"claude" in case.get("/operators")[1]
+        conn = http.client.HTTPConnection("127.0.0.1", case.port, timeout=5)
+        conn.request("POST", "/login", body=json.dumps({"username": "claude", "password": OPPW}).encode(),
+                     headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{case.port}"})
+        resp = conn.getresponse()
+        resp.read()
+        assert resp.getheader("Location") == "/operations"
+        token = resp.getheader("Set-Cookie").split("session=")[1].split(";")[0]
+        assert case.server.deps["sessions"].sessions[token].role == "operator"
+    finally:
+        case.close()
+
+
+@pytest.mark.parametrize("secret", ["", "wrong", None])
+def test_adding_an_operator_needs_the_right_root_credential(tmp_path, secret):
+    case, accounts = _acct_case(tmp_path)
+    try:
+        status, _ = _req(case, "POST", "/operators/add", {"username": "claude", "password": OPPW, "secret": secret})
+        assert status == 403 and accounts.names() == []
+    finally:
+        case.close()
+
+
+def test_an_operator_cannot_add_or_remove_operators_or_see_the_page(tmp_path):
+    case, accounts = _acct_case(tmp_path, role="operator")
+    try:
+        assert case.get("/operators")[0] == 403
+        assert _req(case, "POST", "/operators/add", {"username": "x" * 5, "password": OPPW, "secret": SECRET})[0] == 403
+        assert accounts.names() == []
+    finally:
+        case.close()
+
+
+def test_bad_names_and_machine_accounts_are_refused_and_remove_works(tmp_path):
+    case, accounts = _acct_case(tmp_path)
+    try:
+        for name in ("cane", "root", "x"):
+            assert _req(case, "POST", "/operators/add", {"username": name, "password": OPPW, "secret": SECRET})[0] == 400
+        _req(case, "POST", "/operators/add", {"username": "claude", "password": OPPW, "secret": SECRET})
+        assert _req(case, "POST", "/operators/remove", {"username": "claude", "secret": SECRET})[0] == 200
+        assert accounts.names() == []
+        assert _req(case, "POST", "/operators/remove", {"username": "claude", "secret": SECRET})[0] == 404
+    finally:
+        case.close()

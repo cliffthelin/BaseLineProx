@@ -70,3 +70,43 @@ document.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => 
 }});
 </script></body></html>"""
     return body.encode()
+
+
+def render_operators_page(names: list) -> bytes:
+    rows = "".join(
+        f'<li>{html.escape(n)} <button type="button" data-remove="{html.escape(n)}">Remove</button></li>' for n in names
+    ) or "<li>No operator accounts yet.</li>"
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Operator accounts</title>
+<style>body{{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:44rem;padding:1rem}}
+label{{display:block;margin:.6rem 0}} input{{padding:.4rem;width:100%;box-sizing:border-box}} button{{padding:.4rem .8rem}}
+#msg{{margin-top:1rem}}</style></head><body><h1>Operator accounts</h1>
+<p>An operator can run, schedule and watch backups on the Operations page and nothing else: no settings, no recovery,
+no drive actions, and never a confirmation. Adding or removing one needs this machine's root password or passphrase.
+Passwords are stored only as salted one-way hashes.</p>
+<ul>{rows}</ul>
+<h2>Add an operator</h2>
+<form id="add" autocomplete="off">
+<label>Name <input name="username" required pattern="[a-z][a-z0-9_-]{{2,31}}"></label>
+<label>Password for this operator (12+ characters) <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+<label>Your root password or passphrase <input name="secret" type="password" required autocomplete="off"></label>
+<button type="submit">Add operator</button></form><div id="msg"></div>
+<script>
+const msg = document.getElementById('msg');
+async function post(path, body) {{
+  const r = await fetch(path, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body)}});
+  return [r.status, await r.json()];
+}}
+document.getElementById('add').onsubmit = async (e) => {{
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const [s, j] = await post('/operators/add', Object.fromEntries(f));
+  if (j.outcome === 'applied') location.reload(); else msg.textContent = j.detail || 'Refused';
+}};
+document.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => {{
+  const secret = prompt('Your root password or passphrase, to remove ' + b.dataset.remove);
+  if (!secret) return;
+  const [s, j] = await post('/operators/remove', {{username: b.dataset.remove, secret}});
+  if (j.outcome === 'applied') location.reload(); else msg.textContent = j.detail || 'Refused';
+}});
+</script></body></html>"""
+    return page.encode()

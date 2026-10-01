@@ -47,6 +47,7 @@ import settings_web as sw
 import hitl
 import operations as ops
 import operations_page
+import operator_accounts
 import web_gate as wg
 import web_security as ws
 
@@ -64,6 +65,7 @@ NAV_TABS = (
     ("/recovery", "Recovery"),
     ("/drive-admin", "Drive Administration"),
     ("/operations", "Operations"),
+    ("/operators", "Operators"),
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -1375,6 +1377,32 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                                                        authorization, store, origin), daemon=True).start()
         return self._json(200, {"outcome": "started", "job_id": job_id})
 
+    def _post_operators(self, deps: dict, path: str, body: dict, now: float) -> None:
+        """Add or remove an operator account. Needs an admin session AND this machine's root password or passphrase."""
+        accounts, verify = deps.get("operator_accounts"), deps.get("recovery_verify_fn")
+        if accounts is None or verify is None:
+            return self._json(503, {"outcome": "refused", "detail": "refused: operator accounts are not available on this server"})
+        if self._throttled("confirm", now):
+            return
+        secret = body.get("secret", "")
+        if not isinstance(secret, str) or not secret or not verify(secret):
+            self._record_attempt("confirm", now, ok=False)
+            return self._json(403, {"outcome": "refused", "detail": "refused: the credential was not accepted"})
+        self._record_attempt("confirm", now, ok=True)
+        audit = deps.get("audit") or (lambda record: None)
+        username = body.get("username", "")
+        try:
+            if path == "/operators/add":
+                accounts.add(username, body.get("password"))
+                audit({"event": "operator_added", "username": username})
+            else:
+                if not accounts.remove(username):
+                    return self._json(404, {"outcome": "refused", "detail": "refused: no such operator"})
+                audit({"event": "operator_removed", "username": username})
+        except ValueError as exc:
+            return self._json(400, {"outcome": "refused", "detail": f"refused: {exc}"})
+        return self._json(200, {"outcome": "applied"})
+
     def _post_operations(self, deps: dict, path: str, body: dict, now: float) -> None:
         gate, scheduler, session = deps.get("web_gate"), deps.get("scheduler"), self._cookie_token()
         if gate is None or scheduler is None:
@@ -1523,6 +1551,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(
                 render_installer_cache_page(report, elevated=elevated), path))
 
+        if path == "/operators":
+            accounts = deps.get("operator_accounts")
+            return self._html_response(200, _with_nav(
+                operations_page.render_operators_page(accounts.names() if accounts else []), path))
+
         if path == "/operations":
             scheduler = deps.get("scheduler")
             return self._html_response(200, _with_nav(
@@ -1610,6 +1643,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/login":
             if self._throttled("login", now):
                 return
+            accounts = deps.get("operator_accounts")
+            if accounts is not None and accounts.verify(body.get("username", ""), body.get("password", "")):
+                session = deps["sessions"].create(body["username"], now, role="operator")
+                session.ttl_s = _operator_session_seconds(deps)
+                self._record_attempt("login", now, ok=True)
+                return self._redirect("/operations", set_cookie=ws.session_cookie(session.token))
             result = sw.handle_login(deps["verifier"], deps["sessions"],
                                       body.get("username", ""), body.get("password", ""), now,
                                       persona_provider=deps.get("persona_provider"))
@@ -1747,6 +1786,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path.startswith("/operations/"):
             return self._post_operations(deps, path, body, now)
 
+        if path in ("/operators/add", "/operators/remove"):
+            return self._post_operators(deps, path, body, now)
+
         if path == "/api/backup":
             gate = deps.get("web_gate")
             if gate is None:
@@ -1805,6 +1847,8 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     gate = wg.WebGate(wg.load_or_create_key(state / "web-signing.key"), audit=audit)
     wg.configure(gate)
     deps["web_gate"] = gate
+    deps["audit"] = audit
+    deps["operator_accounts"] = operator_accounts.OperatorAccounts(state / "operators.json")
     deps["scheduler"] = ops.Scheduler(
         gate, ops.ScheduleStore(state / "schedules.json"),
         lambda op, params, origin: _start_operation_job(deps, op, params, origin))
