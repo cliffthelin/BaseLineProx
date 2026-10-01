@@ -59,8 +59,8 @@ the ext4 label is only a hint (stated in `baseline_drive_layout.py`'s own docstr
 | `agentIndex.md` written into each partition | MVP completed | unit tests | `baseline_drive_layout.agent_index` - AppData `KeyError` fixed `e629011` |
 | AppData partitions 7-8 on the real Baseline drive | On roadmap | none | not created yet |
 | ext4 label truncation and the persona label collision | MVP completed | real hardware | Relabeled 2026-09-30 (evening): GPT names and ext4 labels read back from the drive as `SUBSTRATE`, `USER_ADMIN`, `USER_PERSONAL`, none mounted. Applied by the operator, not by this session's code. v0.2 row 38 |
-| Docs re-keyed from kernel letters to serials | On roadmap | - | v0.2 rows 27-29 |
-| Record of the 2026-09-30 repartition (an Omarchy ISO on that drive was erased) | On roadmap | - | v0.2 rows 28, 41. Whether it was authorized is unconfirmed |
+| Docs re-keyed from kernel letters to serials | MVP completed | real hardware | `INSTALL.md` re-keyed; dated serial notes atop `SESSION_HANDOFF.md`, DR46, DR48 (v0.2 rows 27-29, mapping read by serial on 2026-09-30) |
+| Record of the 2026-09-30 repartition (an Omarchy ISO on that drive was erased) | MVP completed | none | Recorded in `docs/INSTALL.md` (v0.2 row 28). Whether it was authorized is unconfirmed |
 
 ## Deeper reading
 

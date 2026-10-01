@@ -1,5 +1,12 @@
 # Decision record: `/dev/sdb` physically repartitioned into USER_PERSISTENCE / INSTALLER_CACHE / SESSION_TEMP
 
+> **Drive letters in this record are as of when it was written and are not stable.**
+> Identify drives by serial, never by `/dev/sdX`. As of 2026-09-30:
+> serial `FD01N6557110C271B` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
+> `MD89N41071210AP4E` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
+> `ls -l /dev/disk/by-id/ | grep -E 'FD01N6557110C271B|MD89N41071210AP4E'` (v0.2 rows 27-29).
+
+
 Status: **done, for real, on real hardware.** This is the first
 action in this session that modified a real physical drive directly.
 

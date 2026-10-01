@@ -28,10 +28,16 @@ newer scattered narrative.**
 
 ## The two known real drives (Track A)
 
-| Path (at last check - re-verify, don't assume) | Model | Serial | Role |
+**2026-09-30 event:** the Baseline drive (serial `MD89N41071210AP4E`) was repartitioned at the operator's instruction with `boot/prepare_scratch_drive.sh --apply`. It then held an `iso9660` image labelled `OMARCHY_202609` and no LVM or recognizable persistence layout; that was erased and replaced by a 200G/100G/176.9G GPT (`proxmox-rehearsal`, `luks-scratch`, `scratch-data`), which was in turn re-laid out the same day into Baseline's own volumes (`baseline_drive_layout.py`: BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE, USER_ADMIN, USER_PERSONAL). The Proxmox drive (`FD01N6557110C271B`) was not touched.
+
+| Serial (the identity) | Model | Kernel path on 2026-09-30 (re-verify, don't assume) | Role |
 |---|---|---|---|
-| `/dev/sdd` | PC601 NVMe SK hynix 512GB | `FD01N6557110C271B` | Proxmox substrate (steps 1-6) |
-| `/dev/sdb` | PC401 NVMe SK hynix 512GB | `MD89N41071210AP4E` | Persistence backend (steps 7-9) |
+| `FD01N6557110C271B` | PC601 NVMe SK hynix 512GB | `/dev/sdc` (was `/dev/sdd` earlier the same month) | Proxmox substrate (steps 1-6); holds the `pve` volume group |
+| `MD89N41071210AP4E` | PC401 NVMe SK hynix 512GB | `/dev/sdd` (was `/dev/sdb`) | The Baseline drive: plain GPT volumes laid out by `baseline_drive_layout.py` (see `docs/layers/00-baseline-drive.md`). Steps 7-9's LVM-thin pool design is superseded for it (decision records 46-47) |
+
+Resolve a serial to its current device with
+`readlink -f /dev/disk/by-id/ata-PC601_NVMe_SK_hynix_512GB_FD01N6557110C271B` (substrate) and
+`readlink -f /dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E` (Baseline drive).
 
 `/dev/sdX` letters are **not** identity - re-resolve by serial every time (Step 3), never assume the same letter next boot.
 
@@ -111,14 +117,19 @@ session is consumed or its TTL expires (default 30 min) - start it,
 ## Step 3 - Validate the target drives
 
 ```python
+import os
+
 import physical_device_safety as pds
 
-sdd = pds.validate_target_device(
-    "/dev/sdd", expected_serial="FD01N6557110C271B",
+# `validate_target_device` refuses symlinks, so resolve the by-id link first; the serial check is the guard.
+substrate_path = os.path.realpath("/dev/disk/by-id/ata-PC601_NVMe_SK_hynix_512GB_FD01N6557110C271B")
+baseline_path = os.path.realpath("/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E")
+substrate = pds.validate_target_device(
+    substrate_path, expected_serial="FD01N6557110C271B",
     min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000,
 )
-sdb = pds.validate_target_device(
-    "/dev/sdb", expected_serial="MD89N41071210AP4E",
+baseline_drive = pds.validate_target_device(
+    baseline_path, expected_serial="MD89N41071210AP4E",
     min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000,
 )
 ```
@@ -143,7 +154,8 @@ never cache or assume a prior result still holds.
    code** (this repo's `physical_device_safety.py` validates a device
    *before* Baseline touches it for persistence/provisioning purposes;
    it does not run during Proxmox's own installer). Confirm the answer
-   file specifies the exact serial `FD01N6557110C271B` (`/dev/sdd`)
+   file specifies the exact serial `FD01N6557110C271B` (`/dev/sdc` on
+   2026-09-30, but re-check by serial)
    before writing the USB stick, not just its expected disk letter.
 4. Reboot into the freshly-installed Proxmox host.
 
@@ -194,13 +206,16 @@ reboot goes straight to that console, no re-prompt.
 ## Step 7 - Build the persistence pool on the second drive (new, unverified)
 
 ```python
+import os
+
 import persistence_pool as pp
 import physical_device_safety as pds
 from repair import RealRunner
 
 runner = RealRunner()
 validated = pds.validate_target_device(
-    "/dev/sdb", expected_serial="MD89N41071210AP4E",
+    os.path.realpath("/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E"),
+    expected_serial="MD89N41071210AP4E",
     min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000,
 )
 

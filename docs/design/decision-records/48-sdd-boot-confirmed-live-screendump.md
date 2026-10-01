@@ -1,5 +1,12 @@
 # Decision record: `/dev/sdd`'s real Proxmox install confirmed live, via a real screendump
 
+> **Drive letters in this record are as of when it was written and are not stable.**
+> Identify drives by serial, never by `/dev/sdX`. As of 2026-09-30:
+> serial `FD01N6557110C271B` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
+> `MD89N41071210AP4E` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
+> `ls -l /dev/disk/by-id/ | grep -E 'FD01N6557110C271B|MD89N41071210AP4E'` (v0.2 rows 27-29).
+
+
 Status: **confirmed, for real, with direct visual evidence** - the
 first actual positive evidence this session has for any of Track A's
 "verified on real hardware" claims, closing part of the gap decision
