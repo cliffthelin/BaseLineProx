@@ -49,6 +49,7 @@ import operations as ops
 import audit_view
 import operations_page
 import operator_accounts
+import remote_access
 import web_gate as wg
 import web_security as ws
 
@@ -69,6 +70,7 @@ NAV_TABS = (
     ("/operators", "Operators"),
     ("/approvals", "Approvals"),
     ("/audit", "Audit"),
+    ("/remote-access", "Remote access"),
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -1568,6 +1570,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(
                 operations_page.render_audit_page(audit_view.read_tail(deps["audit_log_path"], 200) if deps.get("audit_log_path") else []),
                 path))
+
+        if path == "/remote-access":
+            status = deps["remote_status"]() if deps.get("remote_status") else remote_access.collect(deps["runner"])
+            return self._html_response(200, _with_nav(operations_page.render_remote_access_page(status), path))
 
         if path == "/approvals":
             return self._html_response(200, _with_nav(

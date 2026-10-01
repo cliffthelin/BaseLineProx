@@ -162,3 +162,20 @@ document.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => 
 }});
 </script></body></html>"""
     return page.encode()
+
+
+def render_remote_access_page(status: dict) -> bytes:
+    def yn(v):
+        return "unknown" if v is None else ("on" if v else "off")
+    ports = "".join(f"<li>{html.escape(p['address'])}</li>" for p in status.get("listening", [])) or "<li>none found</li>"
+    warns = "".join(f'<p role="alert" class="ra-warn">{html.escape(w)}</p>' for w in status.get("warnings", []))
+    ts = status.get("tailscale", {})
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Remote access</title>
+<style>body{{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:44rem;padding:1rem}}
+.ra-warn{{border:2px solid #c80;padding:.6rem;border-radius:6px}}</style></head><body><h1>Remote access</h1>
+<p>Read-only: this page changes nothing.</p>{warns}
+<ul><li>SSH: <strong>{yn(status.get("ssh", {}).get("active"))}</strong></li>
+<li>Tailscale address: <strong>{html.escape(str(ts.get("ip") or "none"))}</strong>,
+other devices on the tailnet: <strong>{html.escape(str(ts.get("peers") if ts.get("peers") is not None else "unknown"))}</strong></li></ul>
+<h2>Listening on</h2><ul>{ports}</ul></body></html>"""
+    return page.encode()
