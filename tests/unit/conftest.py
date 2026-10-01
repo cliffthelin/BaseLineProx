@@ -95,3 +95,104 @@ def _isolated_settings_store(tmp_path, monkeypatch):
     import registry
     monkeypatch.setattr(settings_store, "DEFAULT_DB_PATH", str(tmp_path / "master_config.db"))
     monkeypatch.setattr(registry, "GLOBAL_DB_PATH", str(tmp_path / "foundation.db"))
+
+
+# ---------------------------------------------------------------------------
+# Hardware safety guard (autouse, every test). See test_hardware_safety_guard.py for why it exists:
+# a test must be INCAPABLE of touching real hardware whatever the code under test does. It refuses, at
+# the lowest level, to launch QEMU, run disk / partition / mount / privilege / service-control commands,
+# or open a device node under /dev.
+# ---------------------------------------------------------------------------
+
+import builtins
+import os
+import re
+import subprocess
+
+_FORBIDDEN_PROGRAMS = re.compile(
+    r"^(qemu(-system-.+|-img|-io|-nbd)?|kvm|wipefs|mkfs(\..+)?|mke2fs|mkswap|sgdisk|gdisk|sfdisk|fdisk|cfdisk|parted|partprobe|"
+    r"partx|dd|shred|blkdiscard|pvcreate|pvremove|pvresize|pvmove|vgcreate|vgremove|vgextend|vgreduce|vgchange|lvcreate|"
+    r"lvremove|lvchange|lvresize|lvextend|lvreduce|mount|umount|losetup|tune2fs|e2label|resize2fs|e2fsck|fsck(\..+)?|"
+    r"cryptsetup|nvme|efibootmgr|grub-install|update-grub|reboot|poweroff|shutdown|halt|sudo|pkexec|su|systemctl|"
+    r"virsh|multipass|docker|podman)$"
+)
+_SAFE_DEVICES = {"/dev/null", "/dev/zero", "/dev/urandom", "/dev/random", "/dev/stdin", "/dev/stdout", "/dev/stderr",
+                 "/dev/tty", "/dev/fd"}
+
+
+class HardwareSafetyViolation(AssertionError):
+    """A test tried to touch real hardware. An AssertionError so no code under test can swallow it as an ordinary
+    failure by catching a narrower exception type."""
+
+
+def _program_names_in_shell_string(command: str) -> list:
+    return re.findall(r"[A-Za-z0-9_./-]+", command)
+
+
+def _check_argv(args, shell=False) -> None:
+    if isinstance(args, (str, bytes, os.PathLike)):
+        words = _program_names_in_shell_string(os.fsdecode(args))
+        candidates = words if shell or " " in os.fsdecode(args) else words[:1]
+    else:
+        argv = [os.fsdecode(a) for a in args]
+        candidates = argv[:1]
+        if argv and os.path.basename(argv[0]) in ("sh", "bash", "dash", "zsh", "env", "nohup", "setsid", "timeout", "nice", "ionice", "xargs"):
+            for a in argv[1:]:
+                candidates += _program_names_in_shell_string(a)
+    for word in candidates:
+        if _FORBIDDEN_PROGRAMS.match(os.path.basename(word)):
+            raise HardwareSafetyViolation(
+                f"a test tried to run {os.path.basename(word)!r} for real. Tests must use FakeRunner / injected "
+                f"runners; they may never launch QEMU or run disk, mount, privilege or service commands.")
+
+
+def _check_device_path(path) -> None:
+    try:
+        p = os.fsdecode(path)
+    except TypeError:
+        return
+    if p.startswith("/dev/") and p not in _SAFE_DEVICES and not p.startswith("/dev/fd/"):
+        raise HardwareSafetyViolation(f"a test tried to open the device node {p!r}; tests may never touch real devices")
+
+
+@pytest.fixture(autouse=True)
+def _hardware_safety_guard(monkeypatch):
+    real_popen = subprocess.Popen
+
+    class GuardedPopen(real_popen):
+        _hardware_safety_guard = True
+
+        def __init__(self, args, *a, **kw):
+            _check_argv(args, shell=bool(kw.get("shell")))
+            super().__init__(args, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+
+    def _blocked_os(name):
+        real = getattr(os, name)
+
+        def wrapper(cmd, *a, **kw):
+            _check_argv(cmd if isinstance(cmd, (str, bytes)) else cmd, shell=True)
+            return real(cmd, *a, **kw)
+        return wrapper
+
+    for name in ("system", "popen"):
+        monkeypatch.setattr(os, name, _blocked_os(name))
+
+    for name in ("execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp", "execlpe", "spawnv", "spawnvp"):
+        if hasattr(os, name):
+            real = getattr(os, name)
+            monkeypatch.setattr(os, name, (lambda real: lambda path, *a, **k: (_check_argv([path]), real(path, *a, **k))[1])(real))
+
+    real_open, real_os_open = builtins.open, os.open
+
+    def guarded_open(file, *a, **kw):
+        _check_device_path(file)
+        return real_open(file, *a, **kw)
+
+    def guarded_os_open(path, *a, **kw):
+        _check_device_path(path)
+        return real_os_open(path, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", guarded_open)
+    monkeypatch.setattr(os, "open", guarded_os_open)
