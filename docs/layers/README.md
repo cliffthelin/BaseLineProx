@@ -57,7 +57,7 @@ still only proven in a test harness:
 
 ## Pages
 
-> Only 00 is written. Pages 01-08 are listed so the structure is fixed, but are **not written yet** (paused 2026-09-30 while naming settled). Their statuses below are the author's reading of the code, not yet checked page by page.
+> All nine pages are written. Pages 01-08 were drafted 2026-09-30 from a read of the relevant modules; claims marked *unit tests* are not proven on hardware, and no page has been checked against a running system.
 
 | # | Layer | Status | One line |
 |---|---|---|---|
