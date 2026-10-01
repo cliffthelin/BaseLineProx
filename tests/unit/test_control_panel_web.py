@@ -20,12 +20,12 @@ import control_panel_web as cpw
 
 def test_handle_detect_calls_the_real_backend_and_returns_its_result():
     runner = FakeRunner(command_responses=[
-        (lambda a: "lvs" in a, FakeProc(0, "  pve  baseline_user_persistence_admin\n", "")),
+        (lambda a: "lvs" in a, FakeProc(0, "  pve  baseline_user_admin\n", "")),
     ])
     result = cpw.handle_detect(runner, vg_name="pve")
     assert result.outcome == "applied"
     assert result.status == 200
-    assert result.body["found_volumes"] == ["baseline_user_persistence_admin"]
+    assert result.body["found_volumes"] == ["baseline_user_admin"]
 
 
 # -- active persona (work-queue item 25, decision record 78) --------------
@@ -35,7 +35,7 @@ def test_handle_active_persona_defaults_when_no_marker_exists():
     result = cpw.handle_active_persona(runner)
     assert result.outcome == "applied"
     assert result.body["persona"] == "admin"
-    assert result.body["mountpoint"] == "/mnt/USER_PERSISTENCE_ADMIN"
+    assert result.body["mountpoint"] == "/mnt/USER_ADMIN"
 
 
 def test_handle_active_persona_reflects_a_real_marker():
@@ -43,7 +43,7 @@ def test_handle_active_persona_reflects_a_real_marker():
     runner = FakeRunner(files={pbm.ACTIVE_PERSONA_MARKER_PATH: "personal"})
     result = cpw.handle_active_persona(runner)
     assert result.body["persona"] == "personal"
-    assert result.body["mountpoint"] == "/mnt/USER_PERSISTENCE_PERSONAL"
+    assert result.body["mountpoint"] == "/mnt/USER_PERSONAL"
 
 
 # -- differences ----------------------------------------------------------
@@ -72,7 +72,7 @@ def test_handle_differences_computes_the_real_diff_when_config_exists():
 def test_handle_backup_runs_the_real_tar_backup():
     runner = FakeRunner()
     result = cpw.handle_backup(runner, dest="/mnt/INSTALLER_CACHE/backups/x.tar.gz",
-                                targets=["/mnt/USER_PERSISTENCE"], config_only=False)
+                                targets=["/mnt/USER"], config_only=False)
     assert result.outcome == "applied"
     assert runner.calls[0][:2] == ["tar", "-czf"]
 
@@ -86,21 +86,21 @@ def test_handle_backup_refused_with_no_targets():
 
 def test_handle_backup_list_returns_the_real_tar_contents():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(0, "USER_PERSISTENCE/\nUSER_PERSISTENCE/doc.txt\n", "")),
+        (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(0, "USER/\nUSER/doc.txt\n", "")),
     ])
     result = cpw.handle_backup_list(runner, archive="/tmp/x.tar.gz")
     assert result.outcome == "applied"
-    assert result.body["contents"] == ["USER_PERSISTENCE/", "USER_PERSISTENCE/doc.txt"]
+    assert result.body["contents"] == ["USER/", "USER/doc.txt"]
 
 
 def test_handle_restore_runs_the_real_tar_extract():
     """An unconstrained restore (empty members) conservatively counts
-    as touching USER_PERSISTENCE (decision record 74) - needs a fresh
+    as touching USER (decision record 74) - needs a fresh
     backup manifest to pass the hard gate, same as backup_restore's
     own tests."""
     import backup_restore
     runner = FakeRunner()
-    backup_restore.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    backup_restore.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     result = cpw.handle_restore(runner, archive="/tmp/x.tar.gz", dest_root="/mnt", members=[],
                                  now=1700000000.0 + 60)
     assert result.outcome == "applied"

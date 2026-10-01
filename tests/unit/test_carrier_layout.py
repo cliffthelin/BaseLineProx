@@ -110,7 +110,7 @@ def test_agent_index_names_the_real_volume_and_its_baseline_rules():
 
 def test_adding_appdata_does_not_renumber_existing_partitions():
     """Real hazard: interleaving AppData per persona moved
-    USER_PERSISTENCE_PERSONAL from partition 6 to 7. The real carrier
+    USER_PERSONAL from partition 6 to 7. The real carrier
     already has partitions 1-6 laid out, so re-applying a renumbered plan
     would treat the personal persona's partition as AppData. New volumes
     append; existing numbers never move."""
@@ -118,9 +118,9 @@ def test_adding_appdata_does_not_renumber_existing_partitions():
     assert by_label["BASELINE"] == 1
     assert by_label["INSTALLER_CACHE"] == 2
     assert by_label["SESSION_TEMP"] == 3
-    assert by_label["SUBSTRATE_PERSISTENCE"] == 4
-    assert by_label["USER_PERSISTENCE_ADMIN"] == 5
-    assert by_label["USER_PERSISTENCE_PERSONAL"] == 6
+    assert by_label["SUBSTRATE"] == 4
+    assert by_label["USER_ADMIN"] == 5
+    assert by_label["USER_PERSONAL"] == 6
     assert by_label["APPDATA_ADMIN"] == 7
     assert by_label["APPDATA_PERSONAL"] == 8
 
@@ -136,3 +136,31 @@ def test_appdata_labels_fit_ext4_for_the_default_personas():
     for p in cl.plan_partitions(476 * 1024**3):
         if p["label"].startswith("APPDATA_"):
             assert p["fs_label"] == p["label"], f"{p['label']} truncates"
+
+
+def test_legacy_relabel_plan_renames_old_partitions_in_place():
+    current = [(1, "BASELINE"), (2, "INSTALLER_CACHE"), (3, "SESSION_TEMP"),
+               (4, "SUBSTRATE_PERSISTENCE"), (5, "USER_PERSISTENCE_ADMIN"),
+               (6, "USER_PERSISTENCE_PERSONAL")]
+    plan = cl.legacy_relabel_plan("/dev/sdd", current)
+    assert ["sgdisk", "-c", "4:SUBSTRATE", "/dev/sdd"] in plan
+    assert ["e2label", "/dev/sdd5", "USER_ADMIN"] in plan
+    assert ["e2label", "/dev/sdd6", "USER_PERSONAL"] in plan
+    assert len(plan) == 6                      # 3 partitions x (GPT name + ext4 label)
+
+
+def test_legacy_relabel_plan_is_metadata_only():
+    """No step may reformat, repartition or move data."""
+    current = [(5, "USER_PERSISTENCE_ADMIN")]
+    for argv in cl.legacy_relabel_plan("/dev/sdd", current):
+        assert argv[0] in ("sgdisk", "e2label")
+        assert "-n" not in argv and "-d" not in argv and "-o" not in argv and "-Z" not in argv
+
+
+def test_legacy_relabel_plan_is_empty_for_a_current_drive():
+    assert cl.legacy_relabel_plan("/dev/sdd", [(5, "USER_ADMIN"), (1, "BASELINE")]) == []
+
+
+def test_relabel_uses_the_nvme_partition_naming():
+    plan = cl.legacy_relabel_plan("/dev/nvme0n1", [(5, "USER_PERSISTENCE_ADMIN")])
+    assert ["e2label", "/dev/nvme0n1p5", "USER_ADMIN"] in plan

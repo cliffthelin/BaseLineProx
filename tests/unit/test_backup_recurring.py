@@ -30,28 +30,28 @@ def test_is_due_true_when_no_manifest_exists_yet():
 def test_is_due_false_within_the_configured_interval():
     import backup_restore
     runner = FakeRunner()
-    backup_restore.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE_ADMIN", ts=1700000000.0)
+    backup_restore.record_backup_manifest(runner, target="/mnt/USER_ADMIN", ts=1700000000.0)
     assert br.is_due(runner, persona="admin", now=1700000000.0 + 3600, interval_hours=12) is False
 
 
 def test_is_due_true_once_the_configured_interval_has_elapsed():
     import backup_restore
     runner = FakeRunner()
-    backup_restore.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE_ADMIN", ts=1700000000.0)
+    backup_restore.record_backup_manifest(runner, target="/mnt/USER_ADMIN", ts=1700000000.0)
     assert br.is_due(runner, persona="admin", now=1700000000.0 + 12 * 3600 + 1, interval_hours=12) is True
 
 
 def test_is_due_checks_the_legacy_singular_target_when_persona_is_none():
     import backup_restore
     runner = FakeRunner()
-    backup_restore.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    backup_restore.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     assert br.is_due(runner, persona=None, now=1700000000.0 + 60, interval_hours=12) is False
 
 
 def test_is_due_for_one_persona_is_unaffected_by_another_personas_manifest():
     import backup_restore
     runner = FakeRunner()
-    backup_restore.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE_ADMIN", ts=1700000000.0)
+    backup_restore.record_backup_manifest(runner, target="/mnt/USER_ADMIN", ts=1700000000.0)
     assert br.is_due(runner, persona="personal", now=1700000000.0 + 60, interval_hours=12) is True
 
 
@@ -66,7 +66,7 @@ def test_run_encrypted_backup_creates_backs_up_encrypts_and_deletes_the_plaintex
     tar_calls = [c for c in runner.calls if c[0] == "tar"]
     encrypt_calls = [c for c in runner.calls if c[:2] == ["openssl", "enc"] and "-d" not in c]
     assert len(tar_calls) == 1
-    assert "/mnt/USER_PERSISTENCE_ADMIN" in tar_calls[0]
+    assert "/mnt/USER_ADMIN" in tar_calls[0]
     assert len(encrypt_calls) == 1
     plaintext_path = tar_calls[0][2]
     assert encrypt_calls[0][encrypt_calls[0].index("-in") + 1] == plaintext_path
@@ -78,7 +78,7 @@ def test_run_encrypted_backup_records_a_real_manifest_on_success():
     runner = FakeRunner()
     br.run_encrypted_backup(runner, password_file="/tmp/.pw", now=1700000000.0, persona="admin")
     assert backup_restore.has_recent_successful_backup(
-        runner, target="/mnt/USER_PERSISTENCE_ADMIN", now=1700000000.0 + 60) is True
+        runner, target="/mnt/USER_ADMIN", now=1700000000.0 + 60) is True
 
 
 def test_run_encrypted_backup_reports_a_real_tar_failure_and_never_encrypts():
@@ -105,7 +105,7 @@ def test_run_encrypted_backup_reports_a_real_encryption_failure_and_keeps_no_sta
 def test_run_if_due_skips_real_work_when_not_due():
     import backup_restore
     runner = FakeRunner()
-    backup_restore.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE_ADMIN", ts=1700000000.0)
+    backup_restore.record_backup_manifest(runner, target="/mnt/USER_ADMIN", ts=1700000000.0)
     result = br.run_if_due(runner, password_file="/tmp/.pw", now=1700000000.0 + 60,
                             persona="admin", interval_hours=12)
     assert result.applied is True

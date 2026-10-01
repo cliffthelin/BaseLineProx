@@ -20,7 +20,7 @@ from repair import RealRunner  # noqa: E402
 
 
 def _create(args):
-    targets = backup_restore.all_persistence_targets() if args.all else (args.target or [])
+    targets = backup_restore.all_volume_targets() if args.all else (args.target or [])
     result = backup_restore.create_backup(
         RealRunner(), dest_path=args.dest, targets=targets, config_only=args.config_only)
     print(result.detail)

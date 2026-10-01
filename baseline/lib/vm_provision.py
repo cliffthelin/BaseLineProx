@@ -40,7 +40,7 @@ DEFAULT_BRIDGE = "vmbr0"
 DEFAULT_VM_STORAGE = "local-lvm"
 # SUPERSEDED as of decision record 46/47 (2026-09-26): named a Proxmox
 # storage backend ("baseline-persist") that assumed an LVM-thin pool
-# on /dev/sdb - that drive is now plain ext4 (USER_PERSISTENCE/
+# on /dev/sdb - that drive is now plain ext4 (USER/
 # INSTALLER_CACHE/SESSION_TEMP), and no such Proxmox storage backend
 # exists on it. attach_persistence_disk()'s own qm-set mechanism is
 # unaffected and still correct for whatever Proxmox storage backend

@@ -100,7 +100,7 @@ cp "$SRC/baseline/lib/config_pipeline.py" /opt/baseline/lib/config_pipeline.py
 cp "$SRC/baseline/lib/firstboot_statemachine.py" /opt/baseline/lib/firstboot_statemachine.py
 cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
 # Redirects Baseline's own control-plane paths (/etc/baseline,
-# /var/lib/baseline, /var/log/baseline) onto the USER_PERSISTENCE
+# /var/lib/baseline, /var/log/baseline) onto the USER
 # partition via bind mounts, per direct instruction ("All user data
 # including credentials and config and logs should go to the User
 # Persistence partition") - decision record 62. Must run, and succeed,
@@ -204,7 +204,7 @@ cp "$SRC/baseline/bin/baseline-recovery-mode" /opt/baseline/bin/baseline-recover
 # pushed from any client lands in a real folder an operator later runs
 # by hand from a terminal. Never executes anything itself. Reuses
 # settings_web.py's own auth machinery directly rather than
-# duplicating it. Gated on USER_PERSISTENCE actually being mounted
+# duplicating it. Gated on USER actually being mounted
 # (scripts_inbox_gate.py, reusing persist_bind_mounts.is_mounted
 # unchanged) so a script pushed too early can't silently land on the
 # disposable substrate instead.

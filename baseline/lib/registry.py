@@ -35,11 +35,11 @@ while the rest are protected with the user persistence"):
 - `GLOBAL` entries live in a database on the shared, non-persona
   `/mnt/BASELINE` volume (`drive_installer.SHARED_VOLUMES` - a real,
   separate LVM volume from any one persona's own
-  `USER_PERSISTENCE_<PERSONA>` volume, present regardless of which
+  `USER_<PERSONA>` volume, present regardless of which
   persona is active or whether a persona's own volume is broken).
   Reachable during recovery precisely because it does not depend on
   the thing recovery mode exists to work around.
-- `PROTECTED` entries live in the existing USER_PERSISTENCE-redirected
+- `PROTECTED` entries live in the existing USER-redirected
   database (`settings_store.DEFAULT_DB_PATH`, decision record 87) -
   gone or inaccessible exactly when that persona's persistence is
   broken, which is correct for anything that should NOT be trusted or
@@ -71,10 +71,10 @@ PROTECTED = "protected"
 SCOPES = (GLOBAL, PROTECTED)
 
 # The shared, non-persona volume - not gated on any one persona's own
-# USER_PERSISTENCE_<PERSONA> being mounted or healthy.
+# USER_<PERSONA> being mounted or healthy.
 GLOBAL_DB_PATH = "/mnt/BASELINE/registry/foundation.db"
 
-# The USER_PERSISTENCE-redirected database settings_store.py already
+# The USER-redirected database settings_store.py already
 # established (decision record 87). Imported lazily inside functions,
 # not at module level, to avoid a real import cycle - settings_store.py
 # itself is built on this module.
@@ -190,10 +190,10 @@ def register_type(type_id: str, description: str, *, default_scope: str = PROTEC
     (not a fake): `dependencies.py` registers its type as GLOBAL-only,
     but this function used to write into the PROTECTED database too
     "for discoverability" - meaning a purely GLOBAL type could never
-    even be registered on a machine where PROTECTED (the USER_PERSISTENCE-
+    even be registered on a machine where PROTECTED (the USER-
     redirected path) doesn't exist or isn't writable, which defeats the
     entire point of GLOBAL entries being usable independent of
-    USER_PERSISTENCE - precisely the scenario recovery mode exists
+    USER - precisely the scenario recovery mode exists
     for. A caller that later stores entries of this type under the
     *other* scope as well just won't have this type's description
     pre-registered there - entries work regardless, since nothing

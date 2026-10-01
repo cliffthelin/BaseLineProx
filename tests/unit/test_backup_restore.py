@@ -15,7 +15,7 @@ import backup_restore as br
 
 
 def test_backup_required_true_when_any_volume_found():
-    assert br.backup_required({"found_volumes": ["baseline_user_persistence"], "missing_volumes": []}) is True
+    assert br.backup_required({"found_volumes": ["baseline_user"], "missing_volumes": []}) is True
 
 
 def test_backup_required_false_when_nothing_found():
@@ -25,33 +25,33 @@ def test_backup_required_false_when_nothing_found():
 def test_backup_required_true_even_for_a_partial_existing_install():
     """A partial existing install still has real data worth
     protecting, not just a fully-provisioned one."""
-    assert br.backup_required({"found_volumes": ["baseline_user_persistence"], "missing_volumes": ["x"]}) is True
+    assert br.backup_required({"found_volumes": ["baseline_user"], "missing_volumes": ["x"]}) is True
 
 
 def test_create_backup_argv_is_real_tar():
-    argv = br.create_backup_argv("/mnt/INSTALLER_CACHE/backups/x.tar.gz", ["/mnt/USER_PERSISTENCE"])
-    assert argv == ["tar", "-czf", "/mnt/INSTALLER_CACHE/backups/x.tar.gz", "/mnt/USER_PERSISTENCE"]
+    argv = br.create_backup_argv("/mnt/INSTALLER_CACHE/backups/x.tar.gz", ["/mnt/USER"])
+    assert argv == ["tar", "-czf", "/mnt/INSTALLER_CACHE/backups/x.tar.gz", "/mnt/USER"]
 
 
 def test_create_backup_selected_targets_only():
     runner = FakeRunner()
-    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER_PERSISTENCE"])
+    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER"])
     assert result.ok is True
-    assert runner.calls[0] == ["tar", "-czf", "/tmp/x.tar.gz", "/mnt/USER_PERSISTENCE"]
+    assert runner.calls[0] == ["tar", "-czf", "/tmp/x.tar.gz", "/mnt/USER"]
 
 
-def test_create_backup_all_persistence_targets():
+def test_create_backup_all_volume_targets():
     runner = FakeRunner()
-    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=br.all_persistence_targets())
+    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=br.all_volume_targets())
     assert result.ok is True
-    assert set(runner.calls[0][3:]) == {"/mnt/BASELINE", "/mnt/USER_PERSISTENCE_ADMIN", "/mnt/USER_PERSISTENCE_PERSONAL",
+    assert set(runner.calls[0][3:]) == {"/mnt/BASELINE", "/mnt/USER_ADMIN", "/mnt/USER_PERSONAL",
                                          "/mnt/APPDATA_ADMIN", "/mnt/APPDATA_PERSONAL",
-                                         "/mnt/INSTALLER_CACHE", "/mnt/SESSION_TEMP", "/mnt/SUBSTRATE_PERSISTENCE"}
+                                         "/mnt/INSTALLER_CACHE", "/mnt/SESSION_TEMP", "/mnt/SUBSTRATE"}
 
 
 def test_create_backup_config_only_ignores_any_targets_passed():
     runner = FakeRunner()
-    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER_PERSISTENCE"], config_only=True)
+    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER"], config_only=True)
     assert result.ok is True
     assert runner.calls[0] == ["tar", "-czf", "/tmp/x.tar.gz"] + list(br.DEFAULT_CONFIG_PATHS)
 
@@ -67,17 +67,17 @@ def test_create_backup_reports_a_real_tar_failure():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["tar"] and a[1] == "-czf", FakeProc(1, "", "tar: disk full")),
     ])
-    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER_PERSISTENCE"])
+    result = br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER"])
     assert result.ok is False
     assert "disk full" in result.detail
 
 
 def test_list_backup_contents_parses_real_tar_listing():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(0, "USER_PERSISTENCE/\nUSER_PERSISTENCE/docs/\n", "")),
+        (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(0, "USER/\nUSER/docs/\n", "")),
     ])
     contents = br.list_backup_contents(runner, "/tmp/x.tar.gz")
-    assert contents == ["USER_PERSISTENCE/", "USER_PERSISTENCE/docs/"]
+    assert contents == ["USER/", "USER/docs/"]
 
 
 def test_list_backup_contents_empty_on_a_real_failure():
@@ -92,7 +92,7 @@ def test_restore_backup_creates_the_destination_root_first():
     requires dest to already exist - it will not create it, and fails
     outright if it doesn't."""
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt/newdir", now=1700000000.0 + 60)
     assert runner.calls[0] == ["mkdir", "-p", "/mnt/newdir"]
     assert runner.calls[1] == ["tar", "-xzf", "/tmp/x.tar.gz", "-C", "/mnt/newdir"]
@@ -100,7 +100,7 @@ def test_restore_backup_creates_the_destination_root_first():
 
 def test_restore_backup_extracts_everything_by_default():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60)
     assert result.ok is True
     assert runner.calls[-1] == ["tar", "-xzf", "/tmp/x.tar.gz", "-C", "/mnt"]
@@ -108,17 +108,17 @@ def test_restore_backup_extracts_everything_by_default():
 
 def test_restore_backup_supports_selective_members():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt",
-                       members=["USER_PERSISTENCE/docs/"], now=1700000000.0 + 60)
-    assert runner.calls[-1] == ["tar", "-xzf", "/tmp/x.tar.gz", "-C", "/mnt", "USER_PERSISTENCE/docs/"]
+                       members=["USER/docs/"], now=1700000000.0 + 60)
+    assert runner.calls[-1] == ["tar", "-xzf", "/tmp/x.tar.gz", "-C", "/mnt", "USER/docs/"]
 
 
 def test_restore_backup_reports_a_real_failure():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:2] == ["tar", "-xzf"], FakeProc(1, "", "unexpected end of file")),
     ])
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60)
     assert result.ok is False
     assert "unexpected end of file" in result.detail
@@ -150,70 +150,70 @@ def test_restore_never_invokes_any_decryption_mechanism():
 # "never overwriting the user persistence unless there is valid proof
 # of it being backed up successfully within 24 hours." Unconditional,
 # not a caller-opt-in flag: any restore that would touch
-# USER_PERSISTENCE (named in members, or an unconstrained restore-
+# USER (named in members, or an unconstrained restore-
 # everything) refuses outright without a fresh manifest.
 # --------------------------------------------------------------------------
 
 def test_record_backup_manifest_then_read_returns_it():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
-    manifest = br.read_backup_manifest(runner, target="/mnt/USER_PERSISTENCE")
-    assert manifest == {"target": "/mnt/USER_PERSISTENCE", "ts": 1700000000.0}
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
+    manifest = br.read_backup_manifest(runner, target="/mnt/USER")
+    assert manifest == {"target": "/mnt/USER", "ts": 1700000000.0}
 
 
 def test_read_backup_manifest_returns_none_when_never_recorded():
     runner = FakeRunner()
-    assert br.read_backup_manifest(runner, target="/mnt/USER_PERSISTENCE") is None
+    assert br.read_backup_manifest(runner, target="/mnt/USER") is None
 
 
 def test_has_recent_successful_backup_true_within_window():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
-    assert br.has_recent_successful_backup(runner, target="/mnt/USER_PERSISTENCE", now=1700000000.0 + 3600) is True
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
+    assert br.has_recent_successful_backup(runner, target="/mnt/USER", now=1700000000.0 + 3600) is True
 
 
 def test_has_recent_successful_backup_false_once_older_than_24h():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     now = 1700000000.0 + 86400 + 1
-    assert br.has_recent_successful_backup(runner, target="/mnt/USER_PERSISTENCE", now=now) is False
+    assert br.has_recent_successful_backup(runner, target="/mnt/USER", now=now) is False
 
 
 def test_has_recent_successful_backup_false_when_never_recorded():
     runner = FakeRunner()
-    assert br.has_recent_successful_backup(runner, target="/mnt/USER_PERSISTENCE", now=1700000000.0) is False
+    assert br.has_recent_successful_backup(runner, target="/mnt/USER", now=1700000000.0) is False
 
 
 def test_has_recent_successful_backup_false_for_a_different_targets_manifest():
     runner = FakeRunner()
     br.record_backup_manifest(runner, target="/mnt/BASELINE", ts=1700000000.0)
-    assert br.has_recent_successful_backup(runner, target="/mnt/USER_PERSISTENCE", now=1700000000.0 + 60) is False
+    assert br.has_recent_successful_backup(runner, target="/mnt/USER", now=1700000000.0 + 60) is False
 
 
 def test_create_backup_records_a_manifest_per_target_when_now_is_given():
     runner = FakeRunner()
-    br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER_PERSISTENCE", "/mnt/BASELINE"], now=1700000000.0)
-    assert br.has_recent_successful_backup(runner, target="/mnt/USER_PERSISTENCE", now=1700000000.0) is True
+    br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER", "/mnt/BASELINE"], now=1700000000.0)
+    assert br.has_recent_successful_backup(runner, target="/mnt/USER", now=1700000000.0) is True
     assert br.has_recent_successful_backup(runner, target="/mnt/BASELINE", now=1700000000.0) is True
 
 
 def test_create_backup_records_no_manifest_when_now_is_omitted():
     runner = FakeRunner()
-    br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER_PERSISTENCE"])
-    assert br.read_backup_manifest(runner, target="/mnt/USER_PERSISTENCE") is None
+    br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER"])
+    assert br.read_backup_manifest(runner, target="/mnt/USER") is None
 
 
 def test_create_backup_records_no_manifest_when_tar_itself_fails():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["tar"], FakeProc(1, "", "disk full")),
     ])
-    br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER_PERSISTENCE"], now=1700000000.0)
-    assert br.read_backup_manifest(runner, target="/mnt/USER_PERSISTENCE") is None
+    br.create_backup(runner, dest_path="/tmp/x.tar.gz", targets=["/mnt/USER"], now=1700000000.0)
+    assert br.read_backup_manifest(runner, target="/mnt/USER") is None
 
 
 def test_restore_refuses_unconstrained_restore_without_a_fresh_manifest():
     """Unconstrained restore (members=None) conservatively counts as
-    touching USER_PERSISTENCE - fails safe, not open by default."""
+    touching USER - fails safe, not open by default."""
     runner = FakeRunner()
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0)
     assert result.ok is False
@@ -221,10 +221,10 @@ def test_restore_refuses_unconstrained_restore_without_a_fresh_manifest():
     assert not any(c[0] == "tar" and c[1] == "-xzf" for c in runner.calls)
 
 
-def test_restore_refuses_selective_user_persistence_members_without_a_fresh_manifest():
+def test_restore_refuses_selective_user_volume_members_without_a_fresh_manifest():
     runner = FakeRunner()
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt",
-                                members=["USER_PERSISTENCE/docs/"], now=1700000000.0)
+                                members=["USER/docs/"], now=1700000000.0)
     assert result.ok is False
     assert not any(c[0] == "tar" and c[1] == "-xzf" for c in runner.calls)
 
@@ -240,59 +240,59 @@ def test_restore_refuses_when_now_is_not_given_at_all():
 
 def test_restore_allows_unconstrained_restore_with_a_fresh_manifest():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60)
     assert result.ok is True
     assert runner.calls[-1] == ["tar", "-xzf", "/tmp/x.tar.gz", "-C", "/mnt"]
 
 
-def test_restore_allows_selective_user_persistence_members_with_a_fresh_manifest():
+def test_restore_allows_selective_user_volume_members_with_a_fresh_manifest():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt",
-                                members=["USER_PERSISTENCE/docs/"], now=1700000000.0 + 60)
+                                members=["USER/docs/"], now=1700000000.0 + 60)
     assert result.ok is True
 
 
 def test_restore_refuses_with_a_stale_manifest_older_than_24h():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     stale_now = 1700000000.0 + 86400 + 1
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=stale_now)
     assert result.ok is False
 
 
-def test_restore_with_explicit_persistence_targets_checks_that_targets_manifest_instead():
+def test_restore_with_explicit_volume_targets_checks_that_targets_manifest_instead():
     """decision record 79: a persona-scoped backup's manifest is never
-    recorded under the legacy singular USER_PERSISTENCE path - a
+    recorded under the legacy singular USER path - a
     caller restoring a real persona's archive must be able to point
     the freshness check at that persona's own mountpoint."""
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE_PERSONAL", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER_PERSONAL", ts=1700000000.0)
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60,
-                                persistence_targets=["/mnt/USER_PERSISTENCE_PERSONAL"])
+                                volume_targets=["/mnt/USER_PERSONAL"])
     assert result.ok is True
 
 
-def test_restore_with_explicit_persistence_targets_still_refuses_without_a_fresh_one():
+def test_restore_with_explicit_volume_targets_still_refuses_without_a_fresh_one():
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)  # a different target's manifest
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)  # a different target's manifest
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60,
-                                persistence_targets=["/mnt/USER_PERSISTENCE_PERSONAL"])
+                                volume_targets=["/mnt/USER_PERSONAL"])
     assert result.ok is False
 
 
-def test_restore_omitting_persistence_targets_still_checks_the_legacy_singular_target():
-    """Backward compatibility: persistence_targets=None (the default)
+def test_restore_omitting_volume_targets_still_checks_the_legacy_singular_target():
+    """Backward compatibility: volume_targets=None (the default)
     reproduces the pre-existing behavior byte-for-byte."""
     runner = FakeRunner()
-    br.record_backup_manifest(runner, target="/mnt/USER_PERSISTENCE", ts=1700000000.0)
+    br.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt", now=1700000000.0 + 60)
     assert result.ok is True
 
 
-def test_restore_of_non_user_persistence_members_does_not_require_a_manifest():
-    """The hard gate is scoped to USER_PERSISTENCE specifically - a
+def test_restore_of_non_user_volume_members_does_not_require_a_manifest():
+    """The hard gate is scoped to USER specifically - a
     restore that only touches, say, BASELINE members is unaffected."""
     runner = FakeRunner()
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt",

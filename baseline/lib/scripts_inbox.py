@@ -11,7 +11,7 @@ human decision for anything consequential" principle (PRD SS2/SS6,
 the same standard settings_web.py already holds itself to for its own
 one destructive trigger).
 
-Lives on USER_PERSISTENCE (drive_installer.py's own BASELINE_VOLUMES
+Lives on USER (drive_installer.py's own BASELINE_VOLUMES
 mountpoint) so the inbox survives a reinstall, unlike the disposable
 substrate.
 
@@ -51,17 +51,17 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
             raise NotImplementedError
 
 
-DEFAULT_INBOX_DIR = "/mnt/USER_PERSISTENCE/scripts_inbox"
+DEFAULT_INBOX_DIR = "/mnt/USER/scripts_inbox"
 MAX_SCRIPT_BYTES = 1_000_000  # generous for a hand-written or phone-dictated script; refuses anything absurd
 
 
 def inbox_dir_for(persona: str | None = None) -> str:
     """Persona-aware wiring (work-queue item 25, decision record 78).
     `persona=None` (default) reproduces DEFAULT_INBOX_DIR unchanged -
-    matches the real, already-deployed plain USER_PERSISTENCE
+    matches the real, already-deployed plain USER
     partition (decision record 46), so no existing caller is affected.
     A real persona name gives that persona's own scripts_inbox
-    subdirectory under drive_installer's USER_PERSISTENCE_<PERSONA>
+    subdirectory under drive_installer's USER_<PERSONA>
     mountpoint, so each persona's pushed scripts stay separate -
     matching "the data in each is not at risk for the other"
     (decision record 76)."""

@@ -140,8 +140,8 @@ def test_get_setting_for_a_global_setting_never_requires_protected_to_be_reachab
     assert ss.get_setting("startup", "auto_start_persona") == "personal"
 
 
-def test_store_lives_under_the_user_persistence_redirect_by_default():
-    # /etc/baseline is bind-redirected onto USER_PERSISTENCE (persist_bind_mounts.py)
+def test_store_lives_under_the_user_volume_redirect_by_default():
+    # /etc/baseline is bind-redirected onto USER (persist_bind_mounts.py)
     # - direct instruction: all config must survive a disposable-stage rebuild.
     # Checks the module's own source for the real shipped default, since the
     # autouse fixture in conftest.py deliberately overrides the live

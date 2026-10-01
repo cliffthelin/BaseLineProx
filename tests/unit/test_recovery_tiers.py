@@ -29,10 +29,10 @@ def test_guest_alone_never_allows_added_tools():
     assert "use_added_tools" not in actions
 
 
-def test_guest_alone_never_allows_user_persistence_access():
+def test_guest_alone_never_allows_user_volume_access():
     actions = rt.allowed_actions()
-    assert "read_user_persistence" not in actions
-    assert "write_user_persistence" not in actions
+    assert "read_user_volume" not in actions
+    assert "write_user_volume" not in actions
 
 
 def test_proxmox_credential_unlocks_proxmox_changes_logs_and_tools():
@@ -42,34 +42,34 @@ def test_proxmox_credential_unlocks_proxmox_changes_logs_and_tools():
     assert "use_added_tools" in actions
 
 
-def test_proxmox_credential_alone_does_not_unlock_user_persistence():
+def test_proxmox_credential_alone_does_not_unlock_user_volume():
     actions = rt.allowed_actions(proxmox_authenticated=True)
-    assert "read_user_persistence" not in actions
-    assert "write_user_persistence" not in actions
+    assert "read_user_volume" not in actions
+    assert "write_user_volume" not in actions
 
 
-def test_persistence_credential_unlocks_user_persistence_access():
-    actions = rt.allowed_actions(persistence_authenticated=True)
-    assert "read_user_persistence" in actions
-    assert "write_user_persistence" in actions
+def test_persistence_credential_unlocks_user_volume_access():
+    actions = rt.allowed_actions(user_volume_authenticated=True)
+    assert "read_user_volume" in actions
+    assert "write_user_volume" in actions
 
 
 def test_persistence_credential_alone_does_not_unlock_proxmox_changes():
-    actions = rt.allowed_actions(persistence_authenticated=True)
+    actions = rt.allowed_actions(user_volume_authenticated=True)
     assert "proxmox_changes" not in actions
     assert "view_logs" not in actions
     assert "use_added_tools" not in actions
 
 
 def test_both_credentials_together_unlock_everything():
-    actions = rt.allowed_actions(proxmox_authenticated=True, persistence_authenticated=True)
-    assert actions == (rt.GUEST_ACTIONS | rt.PROXMOX_ACTIONS | rt.PERSISTENCE_ACTIONS)
+    actions = rt.allowed_actions(proxmox_authenticated=True, user_volume_authenticated=True)
+    assert actions == (rt.GUEST_ACTIONS | rt.PROXMOX_ACTIONS | rt.USER_VOLUME_ACTIONS)
 
 
 def test_guest_floor_is_always_present_regardless_of_credentials():
     for proxmox in (True, False):
         for persistence in (True, False):
-            actions = rt.allowed_actions(proxmox_authenticated=proxmox, persistence_authenticated=persistence)
+            actions = rt.allowed_actions(proxmox_authenticated=proxmox, user_volume_authenticated=persistence)
             assert rt.GUEST_ACTIONS <= actions
 
 

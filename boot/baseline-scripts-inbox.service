@@ -10,8 +10,8 @@ ExecStartPre=/opt/baseline/bin/baseline-scripts-inbox-gate
 ExecStart=/opt/baseline/bin/baseline-scripts-inbox 8200
 Restart=on-failure
 RestartSec=5
-Environment=BASELINE_SCRIPTS_INBOX_DATA=/mnt/USER_PERSISTENCE/scripts-inbox-auth/store.json
-Environment=BASELINE_SCRIPTS_INBOX_DIR=/mnt/USER_PERSISTENCE/scripts_inbox
+Environment=BASELINE_SCRIPTS_INBOX_DATA=/mnt/USER/scripts-inbox-auth/store.json
+Environment=BASELINE_SCRIPTS_INBOX_DIR=/mnt/USER/scripts_inbox
 StandardOutput=journal
 StandardError=journal
 

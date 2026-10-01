@@ -1,5 +1,5 @@
 """Redirects Baseline's own control-plane paths - credentials, state,
-logs - onto the persistent USER_PERSISTENCE partition instead of the
+logs - onto the persistent USER partition instead of the
 disposable substrate, per direct instruction ("All user data including
 credentials and config and logs should go to the User Persistence
 partition"). Every existing Baseline module keeps using the same
@@ -24,20 +24,20 @@ Not yet run against real hardware - see decision record 62.
 **Persona-aware wiring (work-queue item 25, decision record 78).**
 Every function above accepts an optional `persona` keyword now:
 `persona=None` (the default everywhere) reproduces the exact prior
-behavior byte-for-byte - the legacy singular `USER_PERSISTENCE` label
-at `/mnt/USER_PERSISTENCE`, matching the real, already-deployed plain
+behavior byte-for-byte - the legacy singular `USER` label
+at `/mnt/USER`, matching the real, already-deployed plain
 partition layout on the actual `/dev/sdb` (decision record 46) - so no
 existing caller or real deployment is affected. Passing a real
 `persona` string (`"admin"`, `"personal"`, ...) switches to
 `drive_installer.py`'s multi-persona label scheme
-(`USER_PERSISTENCE_<PERSONA>`), reusing its own naming functions
+(`USER_<PERSONA>`), reusing its own naming functions
 directly rather than re-deriving them here. Reconciling *which* scheme
 the real `/dev/sdb` should actually use long-term is a separate,
 still-open architecture item (flagged directly to the user, not part
 of this change) - this module simply supports both without forcing a
 premature choice between them.
 
-New in this pass: `unmount_persistence`/`unmount_redirect`/
+New in this pass: `unmount_user_volume`/`unmount_redirect`/
 `unmount_all_redirects` (the reverse of the `ensure_*` half - redirects
 first, since they're bind-sourced from inside the persistence mount,
 then the persistence volume itself), `get_active_persona`/
@@ -83,14 +83,14 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
     RealRunner = Runner
 
 
-PERSISTENCE_LABEL = "USER_PERSISTENCE"
+USER_LABEL = "USER"
 # Must match drive_installer.BASELINE_VOLUMES' own real mountpoint for
 # this label exactly - a real, previously-undetected mismatch (this
 # was "/mnt/user-persistence", lowercase) meant the same ext4-labeled
 # filesystem could end up mounted read-write at two different paths by
 # two different modules, a real corruption/lost-write risk, not a
 # cosmetic one (decision record 69).
-MOUNT_POINT = "/mnt/USER_PERSISTENCE"
+MOUNT_POINT = "/mnt/USER"
 FSTAB_PATH = "/etc/fstab"
 
 # Default persona for the switch mechanism only (get_active_persona's
@@ -101,14 +101,14 @@ DEFAULT_PERSONA = "admin"
 ACTIVE_PERSONA_MARKER_PATH = "/mnt/BASELINE/state/active_persona"
 
 
-def persistence_label_for(persona: str | None = None) -> str:
+def user_label_for(persona: str | None = None) -> str:
     if persona is None:
-        return PERSISTENCE_LABEL
+        return USER_LABEL
     import drive_installer as di
     return di.persona_label(persona)
 
 
-def persistence_mountpoint_for(persona: str | None = None) -> str:
+def user_mountpoint_for(persona: str | None = None) -> str:
     if persona is None:
         return MOUNT_POINT
     import drive_installer as di
@@ -128,14 +128,14 @@ class ApplyResult:
     detail: str
 
 
-def persistence_mount_fstab_line(persona: str | None = None) -> str:
-    label = persistence_label_for(persona)
-    mountpoint = persistence_mountpoint_for(persona)
+def user_mount_fstab_line(persona: str | None = None) -> str:
+    label = user_label_for(persona)
+    mountpoint = user_mountpoint_for(persona)
     return f"LABEL={label} {mountpoint} ext4 defaults 0 2\n"
 
 
 def bind_fstab_line(target_path: str, subdir: str, persona: str | None = None) -> str:
-    mountpoint = persistence_mountpoint_for(persona)
+    mountpoint = user_mountpoint_for(persona)
     return f"{mountpoint}/{subdir} {target_path} none bind 0 0\n"
 
 
@@ -184,7 +184,7 @@ def _fstab_has_line(runner: Runner, line: str) -> bool:
 
 
 def discover_persistence_device(runner: Runner, persona: str | None = None) -> str | None:
-    """Real discovery via blkid - does a USER_PERSISTENCE-labeled
+    """Real discovery via blkid - does a USER-labeled
     device exist anywhere among currently attached block devices,
     even if mount-by-label just failed (e.g. not yet settled, or a
     stale mount elsewhere)? Returns the real device path, or None if
@@ -192,7 +192,7 @@ def discover_persistence_device(runner: Runner, persona: str | None = None) -> s
     creation, so a real existing volume is never duplicated - the
     exact "same label, two different real volumes" risk decision
     record 69 already found once."""
-    label = persistence_label_for(persona)
+    label = user_label_for(persona)
     proc = runner.run(["blkid", "-L", label], timeout=10)
     if proc.returncode != 0:
         return None
@@ -210,17 +210,17 @@ def _local_fallback_size_gb(runner: Runner, vg_name: str) -> int:
         return 0
     # Matches drive_installer.persona_volume's own real (min_gb, max_gb)
     # range (50-200, 2026-09-29 sizing defaults) - this is the same
-    # USER_PERSISTENCE volume, just self-installed locally instead of
+    # USER volume, just self-installed locally instead of
     # on an external drive, so it gets the same real bounds.
     return di.adaptive_single_size_gb(free_bytes, 200, min_gb=50)
 
 
-def ensure_persistence_mounted(runner: Runner, *, persona: str | None = None, vg_name: str = "pve") -> ApplyResult:
-    """Mounts USER_PERSISTENCE at MOUNT_POINT if not already active,
+def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg_name: str = "pve") -> ApplyResult:
+    """Mounts USER at MOUNT_POINT if not already active,
     and ensures a durable fstab entry exists so this survives reboot
     without depending on this function running again.
 
-    A missing external USER_PERSISTENCE is "the most important aspect
+    A missing external USER is "the most important aspect
     to resolve" (direct instruction) - it is never simply refused.
     Real discovery first (blkid, not just one mount-by-label attempt):
     if a labeled device exists anywhere, mount it directly rather than
@@ -232,9 +232,9 @@ def ensure_persistence_mounted(runner: Runner, *, persona: str | None = None, vg
 
     `persona=None` (default) uses the legacy singular label/mountpoint
     unchanged; a real persona name switches to the
-    `USER_PERSISTENCE_<PERSONA>` scheme (decision record 78)."""
-    label = persistence_label_for(persona)
-    mountpoint = persistence_mountpoint_for(persona)
+    `USER_<PERSONA>` scheme (decision record 78)."""
+    label = user_label_for(persona)
+    mountpoint = user_mountpoint_for(persona)
     if not is_mounted(runner, mountpoint):
         runner.makedirs(mountpoint)
         proc = runner.run(["mount", f"LABEL={label}", mountpoint], timeout=30)
@@ -254,7 +254,7 @@ def ensure_persistence_mounted(runner: Runner, *, persona: str | None = None, vg
                     return ApplyResult(
                         False, f"no {label} device found anywhere (label mount: "
                                f"{label_mount_error}) and no real local free space to self-install one")
-                lv_name = di.persona_lv_name(persona) if persona is not None else "baseline_user_persistence_local"
+                lv_name = di.persona_lv_name(persona) if persona is not None else "baseline_user_local"
                 local_result = di.ensure_volume(
                     runner, vg_name=vg_name, lv_name=lv_name,
                     size=f"{local_size_gb}G", label=label, mountpoint=mountpoint,
@@ -264,18 +264,18 @@ def ensure_persistence_mounted(runner: Runner, *, persona: str | None = None, vg
                         False, f"no {label} device found anywhere and local self-install "
                                f"failed: {local_result.detail}")
 
-    line = persistence_mount_fstab_line(persona)
+    line = user_mount_fstab_line(persona)
     if not _fstab_has_line(runner, line):
         runner.append_text(FSTAB_PATH, line)
 
     return ApplyResult(True, f"{label} mounted at {mountpoint}")
 
 
-def unmount_persistence(runner: Runner, *, persona: str | None = None) -> ApplyResult:
-    """The reverse of `ensure_persistence_mounted` - real `umount`,
+def unmount_user_volume(runner: Runner, *, persona: str | None = None) -> ApplyResult:
+    """The reverse of `ensure_user_volume_mounted` - real `umount`,
     never assumed to succeed. A no-op success if already unmounted, so
     callers (e.g. `switch_active_persona`) can call it unconditionally."""
-    mountpoint = persistence_mountpoint_for(persona)
+    mountpoint = user_mountpoint_for(persona)
     if not is_mounted(runner, mountpoint):
         return ApplyResult(True, f"{mountpoint} already not mounted")
     proc = runner.run(["umount", mountpoint], timeout=30)
@@ -305,7 +305,7 @@ def ensure_redirect(runner: Runner, target_path: str, subdir: str, *, persona: s
     nothing is really mounted at MOUNT_POINT) and bind onto that -
     exactly the write-through-to-the-substrate bug this module exists
     to prevent."""
-    mountpoint = persistence_mountpoint_for(persona)
+    mountpoint = user_mountpoint_for(persona)
     if not is_mounted(runner, mountpoint):
         return ApplyResult(False, f"{mountpoint} is not mounted - refusing to touch {target_path}")
 
@@ -346,10 +346,10 @@ def unmount_redirect(runner: Runner, target_path: str) -> ApplyResult:
 
 
 def ensure_all_redirects(runner: Runner, *, persona: str | None = None) -> list[ApplyResult]:
-    """Runs `ensure_persistence_mounted` first - everything else
+    """Runs `ensure_user_volume_mounted` first - everything else
     depends on it - then `ensure_redirect` for each of REDIRECT_PATHS.
     Stops and returns early if the persistence mount itself fails."""
-    results = [ensure_persistence_mounted(runner, persona=persona)]
+    results = [ensure_user_volume_mounted(runner, persona=persona)]
     if not results[0].applied:
         return results
     for target_path, subdir in REDIRECT_PATHS.items():
@@ -364,7 +364,7 @@ def unmount_all_redirects(runner: Runner, *, persona: str | None = None) -> list
     first would leave them dangling, bound to nothing real), then the
     persistence volume itself."""
     results = [unmount_redirect(runner, target_path) for target_path in REDIRECT_PATHS]
-    results.append(unmount_persistence(runner, persona=persona))
+    results.append(unmount_user_volume(runner, persona=persona))
     return results
 
 

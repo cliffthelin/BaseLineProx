@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Thin installed entry point redirecting Baseline's own control-plane
 paths (/etc/baseline, /var/lib/baseline, /var/log/baseline) onto the
-USER_PERSISTENCE partition via bind mounts, per direct instruction
+USER partition via bind mounts, per direct instruction
 ("All user data including credentials and config and logs should go
 to the User Persistence partition") - decision record 62.
 

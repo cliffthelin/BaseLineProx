@@ -1,5 +1,5 @@
 [Unit]
-Description=Baseline persistence redirects (credentials/state/logs onto USER_PERSISTENCE)
+Description=Baseline persistence redirects (credentials/state/logs onto USER)
 After=local-fs.target
 Before=baseline-firstboot.service baseline.service
 Requires=local-fs.target

@@ -14,7 +14,7 @@ docstring for the real xorriso mechanics and why this is safe.
 Defaults the output path onto the real INSTALLER_CACHE partition
 (drive_installer.py's own BASELINE_VOLUMES mountpoint) - the installer
 media itself belongs there, alongside cached driver packages, not on
-USER_PERSISTENCE (credentials/config/logs) or the disposable substrate.
+USER (credentials/config/logs) or the disposable substrate.
 """
 import argparse
 import json

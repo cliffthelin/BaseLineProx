@@ -45,7 +45,7 @@ import registry
 # and logs should go to the User Persistence partition" / "[USER
 # PERSISTENCE] is the first and primary thing user persistence data
 # does. It stores all configuration for the Machine." `/etc/baseline`
-# is already bind-redirected onto USER_PERSISTENCE for every active
+# is already bind-redirected onto USER for every active
 # persona (persist_bind_mounts.py's own REDIRECTS table) - this reuses
 # that existing redirect rather than adding a new bind target, so
 # every PROTECTED-scope setting in this store survives a disposable-
@@ -82,7 +82,7 @@ class SettingDef:
     # decision record 89, direct instruction: "Some may be allowed as a
     # global foundation for recovery while the rest are protected with
     # the user persistence." Most settings default to PROTECTED
-    # (USER_PERSISTENCE-backed, per decision record 87's own direct
+    # (USER-backed, per decision record 87's own direct
     # instruction that config belongs there) - a setting only needs
     # GLOBAL when recovery genuinely depends on reading it independent
     # of any one persona's own persistence (see
@@ -113,9 +113,9 @@ SCHEMA = (
                "How long admin's cross-persona passphrase stays cached before it must be "
                "re-entered - sudo-like, deliberately much shorter than the base session."),
     SettingDef("startup", "auto_start_persona", "personal",
-               "Which persona's USER_PERSISTENCE volume mounts automatically on boot. GLOBAL "
+               "Which persona's USER volume mounts automatically on boot. GLOBAL "
                "scope (decision record 89) - recovery must be able to read this even when a "
-               "persona's own USER_PERSISTENCE volume is exactly the thing that's broken.",
+               "persona's own USER volume is exactly the thing that's broken.",
                scope=registry.GLOBAL),
     # Per-volume mode for the three shared volumes (never persona-scoped
     # - matches drive_installer.SHARED_VOLUMES exactly). Real, storable,
@@ -205,7 +205,7 @@ def _sync_definition(d: SettingDef) -> None:
     scope, not a hardcoded default - found as a real bug once already
     (decision record 90): hardcoding PROTECTED here meant reading a
     GLOBAL setting would still try to reach the PROTECTED
-    (USER_PERSISTENCE-redirected) database just to register the type's
+    (USER-redirected) database just to register the type's
     description, and fail if that volume is unavailable - exactly the
     scenario a GLOBAL setting exists to survive."""
     registry.register_type(d.group, f"Settings group {d.group!r} (settings_store.py)", default_scope=d.scope)

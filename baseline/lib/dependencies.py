@@ -34,7 +34,7 @@ add its own level (e.g. "persona", "app") without editing this file.
 **Scope**: dependency definitions and their results default to GLOBAL
 (decision record 89) - deliberately, unlike settings_store.py's
 PROTECTED default. A dependency's whole purpose is diagnosing the
-health of the machine, including USER_PERSISTENCE itself - definitions
+health of the machine, including USER itself - definitions
 and results that only existed *inside* the volume being diagnosed
 would be unreachable exactly when they're needed most (during
 recovery, or troubleshooting a broken persona). A future dependency
@@ -215,7 +215,7 @@ def _sync_definition(d: Dependency) -> None:
     health check for real): every seed dependency here is GLOBAL, but
     hardcoding that as this call's target would have broken a future
     PROTECTED-scope dependency's sync whenever PROTECTED (the
-    USER_PERSISTENCE-redirected database) is unavailable, even though
+    USER-redirected database) is unavailable, even though
     that entry's own definition/value write is unaffected."""
     registry.register_type(TYPE_ID, "Predefined system/install/(future) dependency checks (dependencies.py)",
                             default_scope=d.scope)

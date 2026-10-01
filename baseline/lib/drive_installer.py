@@ -10,7 +10,7 @@ tested against fakes first, exactly like every other provisioning
 module in this codebase.
 
 **Single-drive design, corrected from this session's own earlier
-mistake**: `BASELINE`/`USER_PERSISTENCE`/`INSTALLER_CACHE`/
+mistake**: `BASELINE`/`USER`/`INSTALLER_CACHE`/
 `SESSION_TEMP` all live on the *same* physical drive, as additional
 LVM logical volumes inside Proxmox's own existing volume group (`pve`
 by default) - never a second drive, never a new partition table.
@@ -49,7 +49,7 @@ DEFAULT_VG_NAME = "pve"
 # name, min_gb, max_gb, GPT/ext4 label, mountpoint - the shared
 # volumes present on every install (decision records 46-49, 68, and
 # the 2026-09-29 sizing-defaults instruction): BASELINE (application/
-# VM/LXC state), INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE_PERSISTENCE.
+# VM/LXC state), INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE.
 # Never persona-scoped - there is exactly one of each per install.
 #
 # Sizing model, replacing the old single "desired size" per volume
@@ -72,10 +72,10 @@ SHARED_VOLUMES = (
     # *state*, not this kind of small, security-relevant config data).
     # Fixed 1GB, no growth ceiling above that - this volume's whole
     # point is to stay small, non-persona, and always-present.
-    ("baseline_substrate_persistence", 1, 1, "SUBSTRATE_PERSISTENCE", "/mnt/SUBSTRATE_PERSISTENCE"),
+    ("baseline_substrate", 1, 1, "SUBSTRATE", "/mnt/SUBSTRATE"),
 )
 
-# Multiple, isolated USER_PERSISTENCE volumes - "like a different
+# Multiple, isolated USER volumes - "like a different
 # Proxmox account," per direct instruction - not one shared volume.
 # The default creator becomes "admin" (root-like, not the daily
 # driver, has cross-persona access gated behind its own additional
@@ -87,11 +87,11 @@ DEFAULT_PERSONAS = ("admin", "personal")
 
 
 def persona_label(persona: str) -> str:
-    return f"USER_PERSISTENCE_{persona.upper()}"
+    return f"USER_{persona.upper()}"
 
 
 def persona_lv_name(persona: str) -> str:
-    return f"baseline_user_persistence_{persona.lower()}"
+    return f"baseline_user_{persona.lower()}"
 
 
 def persona_mountpoint(persona: str) -> str:
@@ -105,7 +105,7 @@ def persona_volume(persona: str, *, min_gb: int = 50, max_gb: int = 200) -> tupl
 # Per-persona AppData (direct instruction, 2026-09-30): "Application
 # data is personal owned application data and does not go anywhere
 # other than an AppData persistence volume or container." It is a
-# separate volume from USER_PERSISTENCE on purpose - USER_PERSISTENCE
+# separate volume from USER on purpose - USER
 # holds the person's own settings/state, AppData holds the writable
 # upper layer of every installed application's overlay (appdata.py).
 # Per-persona rather than shared, following the phone-OS model: app
@@ -126,8 +126,8 @@ def appdata_volume(persona: str, *, min_gb: int = 20, max_gb: int = 200) -> tupl
     return (appdata_lv_name(persona), min_gb, max_gb, appdata_label(persona), appdata_mountpoint(persona))
 
 
-def is_persistence_label(label: str) -> bool:
-    return label.startswith("USER_PERSISTENCE_") or label == "USER_PERSISTENCE"
+def is_user_label(label: str) -> bool:
+    return label.startswith("USER_") or label == "USER"
 
 
 def is_appdata_label(label: str) -> bool:
@@ -136,7 +136,7 @@ def is_appdata_label(label: str) -> bool:
 
 def baseline_volumes_for(personas: tuple = DEFAULT_PERSONAS) -> tuple:
     """The real, complete volume set for a given persona set: the
-    shared volumes plus, per persona, one USER_PERSISTENCE_<PERSONA>
+    shared volumes plus, per persona, one USER_<PERSONA>
     and one APPDATA_<PERSONA>. `personas=()` gives just the shared
     volumes - useful for provisioning the substrate before any persona
     is created.
@@ -144,7 +144,7 @@ def baseline_volumes_for(personas: tuple = DEFAULT_PERSONAS) -> tuple:
     Order is part of the on-disk contract: carrier_layout numbers GPT
     partitions in this order. AppData is therefore appended AFTER every
     pre-existing volume rather than interleaved per persona - an
-    interleaved order moved USER_PERSISTENCE_PERSONAL from partition 6 to
+    interleaved order moved USER_PERSONAL from partition 6 to
     7, so re-applying the plan to an already laid-out carrier would have
     treated the personal persona's partition as AppData."""
     return (SHARED_VOLUMES
@@ -162,7 +162,7 @@ BASELINE_VOLUMES = baseline_volumes_for()
 # SESSION_TEMP (pure ephemeral session data - never anything meant to
 # run) and INSTALLER_CACHE (holds ISOs/driver packages, consumed by
 # name via dpkg/mount/xorriso, never executed directly). Not on
-# USER_PERSISTENCE - it holds the scripts inbox, and an operator may
+# USER - it holds the scripts inbox, and an operator may
 # reasonably chmod +x and run a pushed script directly from there. Not
 # on BASELINE - app/VM/LXC state may legitimately need to execute
 # things it stores.
@@ -172,17 +172,17 @@ MOUNT_OPTIONS = {
     "SESSION_TEMP": "defaults,nosuid,nodev,noexec",
     # Config/recovery data only, never anything meant to run - same
     # noexec discipline as INSTALLER_CACHE/SESSION_TEMP.
-    "SUBSTRATE_PERSISTENCE": "defaults,nosuid,nodev,noexec",
+    "SUBSTRATE": "defaults,nosuid,nodev,noexec",
 }
-_PERSISTENCE_MOUNT_OPTIONS = "defaults,nosuid,nodev"
+_USER_MOUNT_OPTIONS = "defaults,nosuid,nodev"
 
 
 def mount_options_for(label: str) -> str:
-    """Every USER_PERSISTENCE_<PERSONA> label (any persona) gets the
-    same policy as the old singular USER_PERSISTENCE did - matched by
+    """Every USER_<PERSONA> label (any persona) gets the
+    same policy as the old singular USER did - matched by
     prefix, not by an ever-growing dict of every persona name."""
-    if is_persistence_label(label):
-        return _PERSISTENCE_MOUNT_OPTIONS
+    if is_user_label(label):
+        return _USER_MOUNT_OPTIONS
     # AppData holds every application's writable layer, so it gets at
     # least the persona policy. Without this branch APPDATA_* fell
     # through to bare "defaults" - setuid binaries and device nodes
@@ -190,7 +190,7 @@ def mount_options_for(label: str) -> str:
     # podman's own image layers live in an AppData upper layer and must
     # execute; whether a narrower policy is possible is an open question.
     if is_appdata_label(label):
-        return _PERSISTENCE_MOUNT_OPTIONS
+        return _USER_MOUNT_OPTIONS
     return MOUNT_OPTIONS.get(label, "defaults")
 
 
@@ -310,6 +310,50 @@ def ensure_mounted_with_options(runner: Runner, lv_path: str, mountpoint: str, o
 # Runner-executed operations
 # ---------------------------------------------------------------------------
 
+# Names used before 2026-09-30, when "persistence" was dropped from every
+# volume name (direct instruction). Volumes already provisioned or laid
+# out under these names still exist on real disks - the carrier with serial
+# MD89N41071210AP4E carries them as GPT partition names - so they must be
+# recognised, never silently treated as absent.
+_LEGACY_LABEL_PREFIX = "USER_PERSISTENCE_"
+_LEGACY_LV_PREFIX = "baseline_user_persistence_"
+_LEGACY_EXACT = {
+    "SUBSTRATE_PERSISTENCE": "SUBSTRATE",
+    "USER_PERSISTENCE": "USER",
+    "baseline_substrate_persistence": "baseline_substrate",
+    "baseline_user_persistence": "baseline_user",
+}
+
+
+def canonical_name(name: str) -> str:
+    """The current name for a label or LV name, old or new. Unrecognised
+    names are returned unchanged."""
+    if name in _LEGACY_EXACT:
+        return _LEGACY_EXACT[name]
+    if name.startswith(_LEGACY_LABEL_PREFIX):
+        return "USER_" + name[len(_LEGACY_LABEL_PREFIX):]
+    if name.startswith(_LEGACY_LV_PREFIX):
+        return "baseline_user_" + name[len(_LEGACY_LV_PREFIX):]
+    return name
+
+
+def legacy_name(name: str) -> str | None:
+    """The pre-2026-09-30 name for a current label or LV name, if it had
+    a different one."""
+    for old, new in _LEGACY_EXACT.items():
+        if new == name:
+            return old
+    if name.startswith("USER_") and name != "USER":
+        return _LEGACY_LABEL_PREFIX + name[len("USER_"):]
+    if name.startswith("baseline_user_"):
+        return _LEGACY_LV_PREFIX + name[len("baseline_user_"):]
+    return None
+
+
+def is_legacy_name(name: str) -> bool:
+    return canonical_name(name) != name
+
+
 def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
                    label: str, mountpoint: str) -> CommandResult:
     """Idempotent: creates+formats+mounts `lv_name` only if it doesn't
@@ -332,6 +376,16 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
         ensure_fstab_entry(runner, lv_path, mountpoint, options)
         return CommandResult(True, f"{lv_name} already existed on {vg_name} - not reformatted", created=False)
 
+    # The volume may exist under its pre-rename name. Creating the new
+    # name beside it would give the person a second, empty volume and
+    # split their data across two - so refuse, and leave the rename to an
+    # explicit, operator-authorised step.
+    old = legacy_name(lv_name)
+    if old and lv_exists(groups, vg_name=vg_name, lv_name=old):
+        return CommandResult(False, f"{old} exists on {vg_name}: this is {lv_name} under its "
+                                    f"pre-rename name. Not creating a second volume - rename "
+                                    f"it (lvrename + e2label) to adopt it.", created=False)
+
     create_proc = runner.run(create_logical_volume_argv(vg_name, lv_name, size), timeout=30)
     if create_proc.returncode != 0:
         return CommandResult(False, f"lvcreate failed: {create_proc.stderr.strip()}")
@@ -353,7 +407,7 @@ def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_V
                                       personas: tuple = DEFAULT_PERSONAS) -> dict:
     """Real auto-detection: does `vg_name` already have every volume
     for `personas` provisioned (the three shared volumes plus one
-    USER_PERSISTENCE_<PERSONA> per persona)? Reuses the exact same
+    USER_<PERSONA> per persona)? Reuses the exact same
     `lvs` parsing ensure_volume() already uses, rather than a second
     detection mechanism that could drift out of sync with it. "Existing
     install" means ALL are present; a target with none or only some is
@@ -370,8 +424,13 @@ def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_V
     groups = parse_logical_volumes(proc.stdout)
     found = [lv_name for lv_name, _, _, _, _ in volumes
              if lv_exists(groups, vg_name=vg_name, lv_name=lv_name)]
-    missing = [lv_name for lv_name, _, _, _, _ in volumes if lv_name not in found]
-    return {"has_existing_install": len(missing) == 0, "found_volumes": found, "missing_volumes": missing}
+    # Present only under the pre-rename name: neither missing nor current.
+    legacy = {lv_name: legacy_name(lv_name) for lv_name, _, _, _, _ in volumes
+              if lv_name not in found and legacy_name(lv_name)
+              and lv_exists(groups, vg_name=vg_name, lv_name=legacy_name(lv_name))}
+    missing = [lv_name for lv_name, _, _, _, _ in volumes if lv_name not in found and lv_name not in legacy]
+    return {"has_existing_install": not missing and not legacy, "found_volumes": found,
+            "missing_volumes": missing, "legacy_named_volumes": legacy}
 
 
 DEFAULT_SAFETY_MARGIN_BYTES = 1 * (1024 ** 3)  # never claim the last GiB of free space
@@ -436,7 +495,7 @@ def compute_adaptive_plan(free_bytes: int, volumes=BASELINE_VOLUMES, *,
 def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                              personas: tuple = DEFAULT_PERSONAS) -> dict:
     """The top-level, idempotent entry point: ensures the three shared
-    volumes plus one USER_PERSISTENCE_<PERSONA> volume per `personas`
+    volumes plus one USER_<PERSONA> volume per `personas`
     all exist on `vg_name`, sizing them adaptively to whatever real
     free space actually exists (decision record 73) rather than
     refusing outright when the fixed defaults don't fit. Additional
@@ -585,7 +644,7 @@ def collect_volume_details(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
 
 def collect_volume_usage(runner: Runner, *, personas: tuple = DEFAULT_PERSONAS) -> list:
     """Real per-volume usage for every shared volume plus one
-    USER_PERSISTENCE_<PERSONA> per `personas`, for whichever
+    USER_<PERSONA> per `personas`, for whichever
     mountpoints are actually mounted right now - never assumes
     ensure_baseline_volumes() has run; a volume that isn't mounted
     (df fails) is skipped, not an error, matching diagnostics.py's own

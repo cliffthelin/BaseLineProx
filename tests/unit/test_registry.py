@@ -25,9 +25,9 @@ def test_register_type_writes_only_to_its_own_scopes_database(monkeypatch):
     real: register_type used to write into BOTH physical databases
     unconditionally "for discoverability" - meaning even a purely
     GLOBAL type (dependencies.py) could never be registered on a
-    machine where PROTECTED (USER_PERSISTENCE) isn't reachable, which
+    machine where PROTECTED (USER) isn't reachable, which
     defeats the entire point of GLOBAL existing independent of
-    USER_PERSISTENCE. Proves the fix: registering a GLOBAL type must
+    USER. Proves the fix: registering a GLOBAL type must
     never even attempt to touch the PROTECTED database."""
     monkeypatch.setattr(reg, "_protected_db_path", lambda: "/nonexistent/definitely/not/writable/x.db")
     reg.register_type("global_only_type", "x", default_scope=reg.GLOBAL)  # must not raise

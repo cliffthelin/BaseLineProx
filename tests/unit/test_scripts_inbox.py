@@ -72,8 +72,8 @@ def test_is_safe_name_refuses_an_absurdly_long_name():
 
 def test_list_scripts_creates_inbox_dir_and_returns_empty_when_none_exist():
     r = FakeInboxRunner()
-    assert si.list_scripts(r, inbox_dir="/mnt/USER_PERSISTENCE/scripts_inbox") == []
-    assert "/mnt/USER_PERSISTENCE/scripts_inbox" in r.dirs
+    assert si.list_scripts(r, inbox_dir="/mnt/USER/scripts_inbox") == []
+    assert "/mnt/USER/scripts_inbox" in r.dirs
 
 
 def test_list_scripts_returns_sorted_names():
@@ -173,8 +173,8 @@ def test_inbox_dir_for_defaults_to_the_legacy_singular_inbox_dir():
 
 
 def test_inbox_dir_for_a_real_persona_uses_its_own_mountpoint():
-    assert si.inbox_dir_for("admin") == "/mnt/USER_PERSISTENCE_ADMIN/scripts_inbox"
-    assert si.inbox_dir_for("personal") == "/mnt/USER_PERSISTENCE_PERSONAL/scripts_inbox"
+    assert si.inbox_dir_for("admin") == "/mnt/USER_ADMIN/scripts_inbox"
+    assert si.inbox_dir_for("personal") == "/mnt/USER_PERSONAL/scripts_inbox"
 
 
 def test_inbox_dir_for_different_personas_never_collide():

@@ -1,5 +1,5 @@
 """The real cross-persona "sudo" gate for the admin persona (decision
-record 76). Admin has open access to every persona's USER_PERSISTENCE,
+record 76). Admin has open access to every persona's USER,
 but only after a SEPARATE, additional passphrase - not the same
 secret as admin's own base login - per direct instruction: "Admin has
 open access to each and an additional passphrase. This is to add an

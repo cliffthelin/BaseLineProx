@@ -3,7 +3,7 @@ entry point (corrects a real process failure this session: ad hoc
 destructive commands were run directly against real hardware instead
 of building this first - see decision record 49).
 
-Single-drive design: BASELINE/USER_PERSISTENCE/INSTALLER_CACHE/
+Single-drive design: BASELINE/USER/INSTALLER_CACHE/
 SESSION_TEMP all live on the same physical drive, as additional LVM
 logical volumes inside Proxmox's own existing volume group - never a
 second drive, never a new partition, and the boot/EFI partitions and
@@ -20,6 +20,8 @@ gap, not a hypothetical one.
 No real lvm/mount is ever invoked - the FakeRunner records every argv
 and returns scripted results."""
 from fake_runner import FakeProc, FakeRunner
+
+import pytest
 
 import drive_installer as di
 
@@ -40,8 +42,8 @@ def test_vg_free_bytes_argv():
 
 
 def test_create_logical_volume_argv():
-    argv = di.create_logical_volume_argv("pve", "baseline_user_persistence", "300G")
-    assert argv == ["lvcreate", "-n", "baseline_user_persistence", "-L", "300G", "pve"]
+    argv = di.create_logical_volume_argv("pve", "baseline_user", "300G")
+    assert argv == ["lvcreate", "-n", "baseline_user", "-L", "300G", "pve"]
 
 
 def test_format_and_label_argv_never_used_on_an_existing_volume_by_this_function_alone():
@@ -49,26 +51,26 @@ def test_format_and_label_argv_never_used_on_an_existing_volume_by_this_function
     # are responsible for only calling this on a volume this module
     # just created, never an existing one. See test_ensure_volume_*
     # below for the actual safety guarantee.
-    assert di.format_and_label_argv("/dev/pve/baseline_user_persistence", "USER_PERSISTENCE") == [
-        "mkfs.ext4", "-F", "-L", "USER_PERSISTENCE", "/dev/pve/baseline_user_persistence",
+    assert di.format_and_label_argv("/dev/pve/baseline_user", "USER") == [
+        "mkfs.ext4", "-F", "-L", "USER", "/dev/pve/baseline_user",
     ]
 
 
 def test_mount_argv():
-    assert di.mount_argv("/dev/pve/baseline_user_persistence", "/mnt/USER_PERSISTENCE") == [
-        "mount", "/dev/pve/baseline_user_persistence", "/mnt/USER_PERSISTENCE",
+    assert di.mount_argv("/dev/pve/baseline_user", "/mnt/USER") == [
+        "mount", "/dev/pve/baseline_user", "/mnt/USER",
     ]
 
 
 def test_makedirs_argv():
-    assert di.makedirs_argv("/mnt/USER_PERSISTENCE") == ["mkdir", "-p", "/mnt/USER_PERSISTENCE"]
+    assert di.makedirs_argv("/mnt/USER") == ["mkdir", "-p", "/mnt/USER"]
 
 
 # -- parsing -------------------------------------------------------------
 
 def test_parse_logical_volumes():
-    text = "  pve   root  \n  pve   data  \n  pve   baseline_user_persistence  \n"
-    assert di.parse_logical_volumes(text) == [("pve", "root"), ("pve", "data"), ("pve", "baseline_user_persistence")]
+    text = "  pve   root  \n  pve   data  \n  pve   baseline_user  \n"
+    assert di.parse_logical_volumes(text) == [("pve", "root"), ("pve", "data"), ("pve", "baseline_user")]
 
 
 def test_parse_logical_volumes_empty():
@@ -76,13 +78,13 @@ def test_parse_logical_volumes_empty():
 
 
 def test_lv_exists_true():
-    groups = [("pve", "root"), ("pve", "baseline_user_persistence")]
-    assert di.lv_exists(groups, vg_name="pve", lv_name="baseline_user_persistence") is True
+    groups = [("pve", "root"), ("pve", "baseline_user")]
+    assert di.lv_exists(groups, vg_name="pve", lv_name="baseline_user") is True
 
 
 def test_lv_exists_false():
     groups = [("pve", "root"), ("pve", "data")]
-    assert di.lv_exists(groups, vg_name="pve", lv_name="baseline_user_persistence") is False
+    assert di.lv_exists(groups, vg_name="pve", lv_name="baseline_user") is False
 
 
 def test_parse_vg_free_bytes():
@@ -95,22 +97,22 @@ def test_parse_vg_free_bytes_malformed_returns_none():
 
 # -- ensure_volume(): the core idempotent, never-reformat-existing operation --
 
-# -- SUBSTRATE_PERSISTENCE (2026-09-29 sizing-defaults instruction) --------
+# -- SUBSTRATE (2026-09-29 sizing-defaults instruction) --------
 
-def test_substrate_persistence_is_one_of_the_shared_volumes_fixed_at_1gb():
+def test_substrate_is_one_of_the_shared_volumes_fixed_at_1gb():
     """Recovery configuration + substrate (host/Proxmox-level, not
     persona) configuration, including the encrypted admin-provided
     installer/recovery passphrase - direct instruction. Deliberately
     tiny and fixed (min_gb == max_gb == 1), never asked to grow."""
-    entry = next(v for v in di.SHARED_VOLUMES if v[3] == "SUBSTRATE_PERSISTENCE")
+    entry = next(v for v in di.SHARED_VOLUMES if v[3] == "SUBSTRATE")
     _lv_name, min_gb, max_gb, label, mountpoint = entry
     assert min_gb == 1
     assert max_gb == 1
-    assert mountpoint == "/mnt/SUBSTRATE_PERSISTENCE"
+    assert mountpoint == "/mnt/SUBSTRATE"
 
 
-def test_substrate_persistence_mount_options_are_noexec_like_installer_cache():
-    assert di.mount_options_for("SUBSTRATE_PERSISTENCE") == "defaults,nosuid,nodev,noexec"
+def test_substrate_mount_options_are_noexec_like_installer_cache():
+    assert di.mount_options_for("SUBSTRATE") == "defaults,nosuid,nodev,noexec"
 
 
 def test_baseline_and_session_temp_now_have_a_5gb_to_50gb_range():
@@ -136,8 +138,8 @@ def test_ensure_volume_creates_format_and_mounts_when_missing():
     runner = FakeRunner(command_responses=[
         (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n  pve   data  \n", "")),
     ])
-    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user_persistence",
-                               size="300G", label="USER_PERSISTENCE", mountpoint="/mnt/USER_PERSISTENCE")
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user",
+                               size="300G", label="USER", mountpoint="/mnt/USER")
     assert result.ok is True
     assert result.created is True
     kinds = [c[0] for c in runner.calls]
@@ -146,10 +148,10 @@ def test_ensure_volume_creates_format_and_mounts_when_missing():
 
 def test_ensure_volume_never_reformats_an_already_existing_volume():
     runner = FakeRunner(command_responses=[
-        (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n  pve   baseline_user_persistence  \n", "")),
+        (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n  pve   baseline_user  \n", "")),
     ])
-    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user_persistence",
-                               size="300G", label="USER_PERSISTENCE", mountpoint="/mnt/USER_PERSISTENCE")
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user",
+                               size="300G", label="USER", mountpoint="/mnt/USER")
     assert result.ok is True
     assert result.created is False
     kinds = [c[0] for c in runner.calls]
@@ -166,8 +168,8 @@ def test_ensure_volume_reports_the_real_lvcreate_failure_and_never_formats():
         (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n", "")),
         (lambda a: a[:1] == ["lvcreate"], FakeProc(5, "", "Insufficient free extents")),
     ])
-    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user_persistence",
-                               size="300G", label="USER_PERSISTENCE", mountpoint="/mnt/USER_PERSISTENCE")
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user",
+                               size="300G", label="USER", mountpoint="/mnt/USER")
     assert result.ok is False
     assert "Insufficient free extents" in result.detail
     kinds = [c[0] for c in runner.calls]
@@ -189,17 +191,17 @@ def test_ensure_baseline_volumes_checks_free_space_before_creating_anything():
 
 
 def test_ensure_baseline_volumes_creates_all_six_when_space_allows():
-    """Admin + personal, per direct instruction - two USER_PERSISTENCE
+    """Admin + personal, per direct instruction - two USER
     volumes by default, not one (decision record 76). Six volumes
-    total since SUBSTRATE_PERSISTENCE was added (2026-09-29)."""
+    total since SUBSTRATE was added (2026-09-29)."""
     runner = FakeRunner(command_responses=[
         (lambda a: "vgs" in a, FakeProc(0, "600000000000\n", "")),  # 600GB free - plenty for every max
         (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n", "")),
     ])
     results = di.ensure_baseline_volumes(runner, vg_name="pve")
-    assert set(results) == {"BASELINE", "USER_PERSISTENCE_ADMIN", "USER_PERSISTENCE_PERSONAL",
+    assert set(results) == {"BASELINE", "USER_ADMIN", "USER_PERSONAL",
                              "APPDATA_ADMIN", "APPDATA_PERSONAL",
-                             "INSTALLER_CACHE", "SESSION_TEMP", "SUBSTRATE_PERSISTENCE"}
+                             "INSTALLER_CACHE", "SESSION_TEMP", "SUBSTRATE"}
     assert all(r.ok for r in results.values())
 
 
@@ -227,11 +229,11 @@ def test_detect_existing_baseline_install_true_when_all_volumes_present():
             0,
             "  pve  root\n"
             "  pve  baseline_app_state\n"
-            "  pve  baseline_user_persistence_admin\n"
-            "  pve  baseline_user_persistence_personal\n"
+            "  pve  baseline_user_admin\n"
+            "  pve  baseline_user_personal\n"
             "  pve  baseline_installer_cache\n"
             "  pve  baseline_session_temp\n"
-            "  pve  baseline_substrate_persistence\n"
+            "  pve  baseline_substrate\n"
             "  pve  baseline_appdata_admin\n"
             "  pve  baseline_appdata_personal\n",
             "")),
@@ -239,9 +241,9 @@ def test_detect_existing_baseline_install_true_when_all_volumes_present():
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is True
     assert set(result["found_volumes"]) == {
-        "baseline_app_state", "baseline_user_persistence_admin", "baseline_user_persistence_personal",
+        "baseline_app_state", "baseline_user_admin", "baseline_user_personal",
         "baseline_appdata_admin", "baseline_appdata_personal",
-        "baseline_installer_cache", "baseline_session_temp", "baseline_substrate_persistence"}
+        "baseline_installer_cache", "baseline_session_temp", "baseline_substrate"}
     assert result["missing_volumes"] == []
 
 
@@ -253,9 +255,9 @@ def test_detect_existing_baseline_install_false_when_none_present():
     assert result["has_existing_install"] is False
     assert result["found_volumes"] == []
     assert set(result["missing_volumes"]) == {
-        "baseline_app_state", "baseline_user_persistence_admin", "baseline_user_persistence_personal",
+        "baseline_app_state", "baseline_user_admin", "baseline_user_personal",
         "baseline_appdata_admin", "baseline_appdata_personal",
-        "baseline_installer_cache", "baseline_session_temp", "baseline_substrate_persistence"}
+        "baseline_installer_cache", "baseline_session_temp", "baseline_substrate"}
 
 
 def test_detect_existing_baseline_install_false_when_only_some_present():
@@ -263,14 +265,14 @@ def test_detect_existing_baseline_install_false_when_only_some_present():
     "existing" or blocked - ensure_baseline_volumes() already creates
     whatever's missing regardless."""
     runner = FakeRunner(command_responses=[
-        (lambda a: "lvs" in a, FakeProc(0, "  pve  root\n  pve  baseline_user_persistence_admin\n", "")),
+        (lambda a: "lvs" in a, FakeProc(0, "  pve  root\n  pve  baseline_user_admin\n", "")),
     ])
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is False
-    assert result["found_volumes"] == ["baseline_user_persistence_admin"]
+    assert result["found_volumes"] == ["baseline_user_admin"]
     assert set(result["missing_volumes"]) == {
         "baseline_app_state", "baseline_installer_cache", "baseline_session_temp",
-        "baseline_user_persistence_personal", "baseline_substrate_persistence",
+        "baseline_user_personal", "baseline_substrate",
         "baseline_appdata_admin", "baseline_appdata_personal"}
 
 
@@ -294,11 +296,11 @@ def test_mount_options_restricts_session_temp_and_installer_cache_to_noexec():
     assert "noexec" in di.MOUNT_OPTIONS["INSTALLER_CACHE"]
 
 
-def test_mount_options_never_restricts_user_persistence_or_baseline_to_noexec():
-    # USER_PERSISTENCE_<PERSONA> holds the scripts inbox - an operator
+def test_mount_options_never_restricts_user_volume_or_baseline_to_noexec():
+    # USER_<PERSONA> holds the scripts inbox - an operator
     # may reasonably chmod +x and run a script directly from there.
-    assert "noexec" not in di.mount_options_for("USER_PERSISTENCE_ADMIN")
-    assert "noexec" not in di.mount_options_for("USER_PERSISTENCE_PERSONAL")
+    assert "noexec" not in di.mount_options_for("USER_ADMIN")
+    assert "noexec" not in di.mount_options_for("USER_PERSONAL")
     assert "noexec" not in di.MOUNT_OPTIONS["BASELINE"]
 
 
@@ -413,21 +415,21 @@ def test_compute_adaptive_plan_uses_every_volumes_own_max_when_space_comfortably
     # 50+200+50+1+200+200+200+200 = 1101G
     free_bytes = 1200 * (1024 ** 3)
     plan = di.compute_adaptive_plan(free_bytes)
-    assert plan == {"BASELINE": 50, "USER_PERSISTENCE_ADMIN": 200, "USER_PERSISTENCE_PERSONAL": 200,
+    assert plan == {"BASELINE": 50, "USER_ADMIN": 200, "USER_PERSONAL": 200,
                      "APPDATA_ADMIN": 200, "APPDATA_PERSONAL": 200,
-                     "INSTALLER_CACHE": 200, "SESSION_TEMP": 50, "SUBSTRATE_PERSISTENCE": 1}
+                     "INSTALLER_CACHE": 200, "SESSION_TEMP": 50, "SUBSTRATE": 1}
 
 
 def test_compute_adaptive_plan_gives_every_volume_at_least_its_own_minimum_when_space_is_between_min_and_max():
     # total min across all 8 volumes (AppData adds 20+20): 5+50+5+1+50+50+20+20 = 201G
     free_bytes = 400 * (1024 ** 3)
     plan = di.compute_adaptive_plan(free_bytes)
-    mins = {"BASELINE": 5, "USER_PERSISTENCE_ADMIN": 50, "USER_PERSISTENCE_PERSONAL": 50,
+    mins = {"BASELINE": 5, "USER_ADMIN": 50, "USER_PERSONAL": 50,
             "APPDATA_ADMIN": 20, "APPDATA_PERSONAL": 20,
-            "INSTALLER_CACHE": 50, "SESSION_TEMP": 5, "SUBSTRATE_PERSISTENCE": 1}
-    maxs = {"BASELINE": 50, "USER_PERSISTENCE_ADMIN": 200, "USER_PERSISTENCE_PERSONAL": 200,
+            "INSTALLER_CACHE": 50, "SESSION_TEMP": 5, "SUBSTRATE": 1}
+    maxs = {"BASELINE": 50, "USER_ADMIN": 200, "USER_PERSONAL": 200,
             "APPDATA_ADMIN": 200, "APPDATA_PERSONAL": 200,
-            "INSTALLER_CACHE": 200, "SESSION_TEMP": 50, "SUBSTRATE_PERSISTENCE": 1}
+            "INSTALLER_CACHE": 200, "SESSION_TEMP": 50, "SUBSTRATE": 1}
     for label, size_gb in plan.items():
         assert mins[label] <= size_gb <= maxs[label]
     assert sum(plan.values()) <= 400
@@ -543,3 +545,63 @@ def test_no_baseline_volume_mounts_with_bare_defaults():
         opts = di.mount_options_for(label)
         assert "nosuid" in opts, f"{label} mounts without nosuid"
         assert "nodev" in opts, f"{label} mounts without nodev"
+
+
+# -- "persistence" dropped from volume names (2026-09-30) --------------
+
+def test_no_current_volume_name_contains_persistence():
+    for lv, _min, _max, label, mountpoint in di.BASELINE_VOLUMES:
+        for name in (lv, label, mountpoint):
+            assert "persist" not in name.lower(), name
+
+
+def test_every_volume_label_now_fits_ext4_and_none_collide():
+    """The old persona labels both truncated to USER_PERSISTENCE, so a
+    LABEL= mount could pick either person's volume."""
+    labels = [label for _lv, _min, _max, label, _mnt in di.BASELINE_VOLUMES]
+    assert all(len(label) <= 16 for label in labels)
+    assert len({label[:16] for label in labels}) == len(labels)
+
+
+@pytest.mark.parametrize("old,new", [
+    ("USER_PERSISTENCE_ADMIN", "USER_ADMIN"),
+    ("USER_PERSISTENCE_PERSONAL", "USER_PERSONAL"),
+    ("SUBSTRATE_PERSISTENCE", "SUBSTRATE"),
+    ("baseline_user_persistence_admin", "baseline_user_admin"),
+    ("baseline_substrate_persistence", "baseline_substrate"),
+])
+def test_old_names_map_to_current_names(old, new):
+    assert di.canonical_name(old) == new
+    assert di.legacy_name(new) == old
+    assert di.is_legacy_name(old) and not di.is_legacy_name(new)
+
+
+def test_current_names_are_left_unchanged():
+    for name in ("BASELINE", "INSTALLER_CACHE", "APPDATA_ADMIN", "baseline_app_state"):
+        assert di.canonical_name(name) == name
+
+
+def test_detection_reports_an_old_named_volume_as_legacy_not_missing():
+    """The existing carrier carries the old names; calling those volumes
+    missing would invite creating replacements next to them."""
+    lvs = "".join(f"  pve  {lv}\n" for lv, *_ in di.BASELINE_VOLUMES
+                  if lv != "baseline_user_admin")
+    lvs += "  pve  baseline_user_persistence_admin\n"
+    runner = FakeRunner(command_responses=[(lambda a: "lvs" in a, FakeProc(0, lvs, ""))])
+    result = di.detect_existing_baseline_install(runner, vg_name="pve")
+    assert "baseline_user_admin" not in result["missing_volumes"]
+    assert result["legacy_named_volumes"] == {"baseline_user_admin": "baseline_user_persistence_admin"}
+    assert result["has_existing_install"] is False
+
+
+def test_ensure_volume_refuses_to_create_a_duplicate_beside_an_old_named_one():
+    """Creating baseline_user_admin next to baseline_user_persistence_admin
+    would give the person a second, empty volume and split their data."""
+    runner = FakeRunner(command_responses=[
+        (lambda a: "lvs" in a, FakeProc(0, "  pve  baseline_user_persistence_admin\n", "")),
+    ])
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user_admin", size="50G",
+                              label="USER_ADMIN", mountpoint="/mnt/USER_ADMIN")
+    assert result.ok is False
+    assert "pre-rename" in result.detail
+    assert not any(c[0] == "lvcreate" for c in runner.calls)

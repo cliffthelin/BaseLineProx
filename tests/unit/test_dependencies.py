@@ -153,7 +153,7 @@ def test_run_checks_for_global_dependencies_never_requires_protected_to_be_reach
     each entry's own scope instead, matching settings_store.py's
     identical fix. This proves system-level (GLOBAL) checks - the ones
     a boot-time or recovery health check most needs - keep working
-    even when PROTECTED (USER_PERSISTENCE) is completely unreachable."""
+    even when PROTECTED (USER) is completely unreachable."""
     import settings_store
     monkeypatch.setattr(settings_store, "DEFAULT_DB_PATH", "/nonexistent/definitely/not/writable/x.db")
     results = dep.run_checks(phase=dep.BOOT)  # only system.* deps run at BOOT, both GLOBAL

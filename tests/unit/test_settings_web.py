@@ -392,7 +392,7 @@ def test_recovery_view_needs_no_session_at_all():
 def test_recovery_view_reports_real_discovery_and_active_state():
     from fake_runner import FakeRunner
     import recovery_mode
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     recovery_mode.record_entry(runner, now=1000.0, reason="cascade_failed")
     result = sw.handle_recovery_view(runner, personas=("admin", "personal"))
@@ -413,7 +413,7 @@ def test_recovery_exit_refuses_without_a_real_read_write_persona():
 
 def test_recovery_exit_succeeds_once_a_persona_is_confirmed_read_write():
     from fake_runner import FakeRunner
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     result = sw.handle_recovery_exit(runner, personas=("admin",), now=1000.0)
     assert result.outcome == "applied"

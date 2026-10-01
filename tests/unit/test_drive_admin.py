@@ -550,7 +550,7 @@ def test_create_baseline_volumes_reports_failure_when_vg_has_no_free_space():
 # -- switch_persona -------------------------------------------------------------
 
 def test_switch_persona_reuses_persist_bind_mounts_directly():
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     result = da.switch_persona(runner, to_persona="admin")
     assert result.ok is True
@@ -585,7 +585,7 @@ def test_apply_volume_mode_remounts_read_only_when_configured():
 
 def test_apply_volume_mode_refuses_a_non_shared_label():
     runner = FakeRunner()
-    result = da.apply_volume_mode(runner, label="USER_PERSISTENCE_ADMIN")
+    result = da.apply_volume_mode(runner, label="USER_ADMIN")
     assert result.ok is False
 
 

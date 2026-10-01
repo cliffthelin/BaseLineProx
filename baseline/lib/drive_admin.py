@@ -622,7 +622,7 @@ def create_baseline_volumes(runner: Runner, *, vg_name: str = PERSISTENCE_VG_NAM
     """Reuses `drive_installer.ensure_baseline_volumes` directly - the
     real, already-tested orchestration (adaptive sizing, per-volume
     mount options, fstab entries) for creating BASELINE/INSTALLER_CACHE
-    /SESSION_TEMP plus one USER_PERSISTENCE_<PERSONA> volume per
+    /SESSION_TEMP plus one USER_<PERSONA> volume per
     persona. Not reimplemented here."""
     plan = drive_installer.ensure_baseline_volumes(runner, vg_name=vg_name, personas=personas)
     failed = [name for name, result in plan.items() if not result.ok]

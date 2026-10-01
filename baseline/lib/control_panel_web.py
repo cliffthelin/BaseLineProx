@@ -88,14 +88,14 @@ def handle_detect(runner: Runner, *, vg_name: str = drive_installer.DEFAULT_VG_N
 def handle_active_persona(runner: Runner) -> RouteResult:
     """Persona-aware wiring (work-queue item 25, decision record 78):
     the Backup card's own target path used to hardcode the legacy
-    singular `/mnt/USER_PERSISTENCE` mountpoint regardless of which
+    singular `/mnt/USER` mountpoint regardless of which
     persona is actually active - reuses `persist_bind_mounts.py`'s own
     active-persona marker directly rather than re-deriving it here, so
     a caller (the page's own JS) can default the field correctly
     instead of pointing at a mountpoint that may not even be mounted."""
     import persist_bind_mounts as pbm
     persona = pbm.get_active_persona(runner)
-    mountpoint = pbm.persistence_mountpoint_for(persona)
+    mountpoint = pbm.user_mountpoint_for(persona)
     return RouteResult("applied", 200, {"persona": persona, "mountpoint": mountpoint})
 
 
@@ -115,7 +115,7 @@ def handle_backup(runner: Runner, *, dest: str, targets: list, config_only: bool
     """`now` (real wall-clock time from the caller) records a fresh
     backup-success manifest per target on success - the durable proof
     `handle_restore`'s own hard gate checks before allowing any
-    restore to touch USER_PERSISTENCE (decision record 74)."""
+    restore to touch USER (decision record 74)."""
     result = backup_restore.create_backup(runner, dest_path=dest, targets=targets,
                                            config_only=config_only, now=now)
     if not result.ok:
@@ -132,7 +132,7 @@ def handle_restore(runner: Runner, *, archive: str, dest_root: str, members: lis
                     now: float = None) -> RouteResult:
     """`now` (real wall-clock time from the caller) is required to
     pass backup_restore.restore_backup's own hard gate: any restore
-    touching USER_PERSISTENCE refuses outright without a fresh backup
+    touching USER refuses outright without a fresh backup
     manifest (decision record 74) - omitting `now` refuses too,
     matching that module's own fail-closed design."""
     result = backup_restore.restore_backup(runner, archive_path=archive, dest_root=dest_root,

@@ -1,5 +1,5 @@
 [Unit]
-Description=Check hourly whether a recurring encrypted USER_PERSISTENCE backup is due (work-queue item 27)
+Description=Check hourly whether a recurring encrypted USER backup is due (work-queue item 27)
 
 [Timer]
 OnBootSec=5m

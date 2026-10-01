@@ -530,7 +530,7 @@ def real_drive_state(runner, *, pds_runner=None) -> list:
 def real_volume_state(runner) -> list:
     """Every planned volume (direct feedback: the old version only
     ever showed whatever happened to already be mounted, silently
-    hiding INSTALLER_CACHE/SESSION_TEMP/SUBSTRATE_PERSISTENCE/persona
+    hiding INSTALLER_CACHE/SESSION_TEMP/SUBSTRATE/persona
     volumes that simply hadn't been created yet - "makes no sense").
     Includes each volume's real LVM identity (name, real allocated
     size) alongside its live usage when mounted."""

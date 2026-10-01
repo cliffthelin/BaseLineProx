@@ -7,7 +7,7 @@ exactly per the direct instruction that closed that question ("We
 decided not to do the usb recovery option").
 
 **Real entry**: `should_enter` is the pure predicate - true either when
-the discovery+repair cascade (`persist_bind_mounts.ensure_persistence_mounted`'s
+the discovery+repair cascade (`persist_bind_mounts.ensure_user_volume_mounted`'s
 own already-real fallback chain) has genuinely exhausted itself, or on
 a deliberate operator request ("on-demand"). `persist_bind_mounts.main`
 calls `record_entry` directly when its own cascade fails, so entering
@@ -93,7 +93,7 @@ def discover(runner: Runner, *, personas: tuple) -> DiscoveryReport:
     found = []
     missing = []
     for persona in personas:
-        mountpoint = pbm.persistence_mountpoint_for(persona)
+        mountpoint = pbm.user_mountpoint_for(persona)
         if pbm.is_mounted(runner, mountpoint):
             found.append(persona)
         else:
@@ -110,7 +110,7 @@ def can_exit(runner: Runner, *, personas: tuple) -> tuple[bool, str]:
     read-only, which must NOT count as satisfying this condition."""
     import persist_bind_mounts as pbm
     for persona in personas:
-        mountpoint = pbm.persistence_mountpoint_for(persona)
+        mountpoint = pbm.user_mountpoint_for(persona)
         if pbm.is_mounted_read_write(runner, mountpoint):
             return True, f"persona {persona!r} confirmed read-write at {mountpoint}"
     return False, "no persona volume is confirmed read-write yet - cannot leave recovery mode"

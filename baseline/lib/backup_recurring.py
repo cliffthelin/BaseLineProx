@@ -7,9 +7,9 @@ script + systemd timer, never a hand-run step as the only path).
 **Real, honest gap this only partially closes.** Item 27 asked for a
 "separate device target." No third physical device exists in this dev
 session - only `/dev/sdd` (Proxmox/BASELINE) and `/dev/sdb`
-(USER_PERSISTENCE/INSTALLER_CACHE/SESSION_TEMP) are real and attached
+(USER/INSTALLER_CACHE/SESSION_TEMP) are real and attached
 (decision record 46). Backing up onto INSTALLER_CACHE (this module's
-real default target) is NOT physically separate from USER_PERSISTENCE
+real default target) is NOT physically separate from USER
 - both currently live on the same drive - so this does not yet satisfy
 "separate device" in the strong sense item 27 meant. The target
 directory is a real, live `settings_store` value
@@ -81,7 +81,7 @@ def is_due(runner: Runner, *, persona: str | None, now: float,
     succeed," shared with `restore_backup`'s own gate."""
     import backup_restore
     import persist_bind_mounts as pbm
-    target = pbm.persistence_mountpoint_for(persona)
+    target = pbm.user_mountpoint_for(persona)
     kwargs = {"manifests_dir": manifests_dir} if manifests_dir is not None else {}
     return not backup_restore.has_recent_successful_backup(
         runner, target=target, now=now, max_age_s=interval_hours * 3600, **kwargs)
@@ -91,7 +91,7 @@ def run_encrypted_backup(runner: Runner, *, password_file: str, now: float,
                           persona: str | None = None,
                           target_dir: str = DEFAULT_TARGET_DIR) -> ApplyResult:
     """Backs up `persona`'s (or the legacy singular, if None) real
-    USER_PERSISTENCE mountpoint, encrypts the archive, and deletes the
+    USER mountpoint, encrypts the archive, and deletes the
     plaintext copy - never left behind, matching this project's
     established password/secret-handling discipline (`control_panel_web
     .handle_backup_encrypt`'s own docstring)."""
@@ -99,7 +99,7 @@ def run_encrypted_backup(runner: Runner, *, password_file: str, now: float,
     import config_crypto
     import persist_bind_mounts as pbm
 
-    mountpoint = pbm.persistence_mountpoint_for(persona)
+    mountpoint = pbm.user_mountpoint_for(persona)
     runner.makedirs(target_dir)
     filename = backup_filename(persona, now)
     plaintext_path = f"{target_dir}/.{filename}.tmp"

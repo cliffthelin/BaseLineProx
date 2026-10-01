@@ -18,7 +18,7 @@ points at a device:
 Why each rule exists:
 
 - **Fixed length.** ext4 labels are 16 characters and every old name that
-  ran past that truncated, so USER_PERSISTENCE_ADMIN and _PERSONAL both
+  ran past that truncated: USER_PERSISTENCE_ADMIN and _PERSONAL both
   became USER_PERSISTENCE. Nine characters never truncates, for any
   persona name, forever.
 - **`_` as both separators.** `_` passes through systemd unit-name

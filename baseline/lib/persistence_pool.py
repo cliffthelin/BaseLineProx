@@ -1,7 +1,7 @@
 """Real-hardware LVM-thin persistence pool setup.
 
 **SUPERSEDED as of decision record 46/47 (2026-09-26) - the real
-`/dev/sdb` was repartitioned to plain ext4 (`USER_PERSISTENCE`/
+`/dev/sdb` was repartitioned to plain ext4 (`USER`/
 `INSTALLER_CACHE`/`SESSION_TEMP`), not an LVM-thin pool. This module's
 design no longer matches the physical disk's current state.** Kept
 because its Runner-injected argv-building logic and its 16 unit tests

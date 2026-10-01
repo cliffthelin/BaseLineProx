@@ -8,9 +8,13 @@ Every destructive step is gated by `physical_device_safety.validate_target_devic
 (decision record 49) and goes through an injected runner, so the tests never
 touch a device.
 
-ext4 labels are at most 16 characters and three Baseline labels are longer
-(USER_PERSISTENCE_ADMIN / _PERSONAL would both truncate to USER_PERSISTENCE), so
-the full GPT partition name is the identity and the ext4 label is a truncation.
+ext4 labels are at most 16 characters. Before 2026-09-30 three labels were
+longer (USER_PERSISTENCE_ADMIN and USER_PERSISTENCE_PERSONAL both truncated to
+USER_PERSISTENCE, and SUBSTRATE_PERSISTENCE to SUBSTRATE_PERSIS); dropping
+"persistence" from the names brought every label within 16. The full GPT
+partition name is still the identity and the ext4 label a copy of it: a
+longer persona name would truncate again, and `plan_partitions` records the
+truncated form in `fs_label` rather than silently assuming it fits.
 """
 from __future__ import annotations
 
@@ -32,7 +36,7 @@ _ROLES = {
     "BASELINE": "Application, VM and LXC state for this Baseline install.",
     "INSTALLER_CACHE": "ISOs, driver packages and backups (ISO at isos/proxmox-ve-source.iso, backups/, encrypted_backups/, backup_manifests/). Consumed by name, never executed.",
     "SESSION_TEMP": "Ephemeral session data and quarantine for anything not yet triaged. Never anything meant to run.",
-    "SUBSTRATE_PERSISTENCE": "Small, security-relevant recovery and substrate configuration, including the encrypted admin installer/recovery passphrase. Fixed 1 GB.",
+    "SUBSTRATE": "Small, security-relevant recovery and substrate configuration, including the encrypted admin installer/recovery passphrase. Fixed 1 GB.",
 }
 
 
@@ -41,8 +45,8 @@ class LayoutError(RuntimeError):
 
 
 def _role(label: str) -> str:
-    if di.is_persistence_label(label):
-        persona = label.removeprefix("USER_PERSISTENCE_").lower()
+    if di.is_user_label(label):
+        persona = label.removeprefix("USER_").lower()
         return f"Isolated persistence for the '{persona}' persona (scripts inbox lives here; it may hold executables)."
     if di.is_appdata_label(label):
         persona = label.removeprefix("APPDATA_").lower()
@@ -83,6 +87,32 @@ def mkfs_argv(device: str, p: dict) -> list[str]:
     because the kernel re-reading the new table (partprobe) is what needs it."""
     return ["mkfs.ext4", "-F", "-q", "-L", p["fs_label"],
             "-E", f"offset={p['start_sector'] * _SECTOR}", device, f"{p['size_gb'] * 1024 * 1024}k"]
+
+
+def _partition_path(device: str, number: int) -> str:
+    """/dev/sdd + 4 -> /dev/sdd4; /dev/nvme0n1 + 4 -> /dev/nvme0n1p4."""
+    return f"{device}p{number}" if device[-1:].isdigit() else f"{device}{number}"
+
+
+def legacy_relabel_plan(device: str, partitions: list) -> list[list[str]]:
+    """Commands that rename pre-2026-09-30 partitions to their current
+    names in place: the GPT partition name and the ext4 label. Metadata
+    only - no data is moved or reformatted.
+
+    `partitions` is the drive's real current table as (number, partname)
+    pairs, read from the drive, never assumed from a plan.
+
+    Planning only, like everything else that touches the carrier: this
+    returns argv lists and runs nothing. Applying it still has to go
+    through validate_target_device and an explicit operator decision."""
+    plan = []
+    for number, partname in partitions:
+        new = di.canonical_name(partname)
+        if new == partname:
+            continue
+        plan.append(["sgdisk", "-c", f"{number}:{new}", device])
+        plan.append(["e2label", _partition_path(device, number), new[:_EXT4_LABEL_MAX]])
+    return plan
 
 
 def apply(cmd, path: str, *, validate=validate_target_device, expected_serial=None,

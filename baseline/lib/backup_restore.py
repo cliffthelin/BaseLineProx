@@ -16,7 +16,7 @@ real data worth protecting, not just a fully-provisioned one.
 Selective by design, matching "Backup can be selected to backup only
 selected partition / containers or all and can be selected to only
 back config": `targets` names exactly which real mountpoints (or
-container paths) to include - `all_persistence_targets()` is the "all"
+container paths) to include - `all_volume_targets()` is the "all"
 convenience, a caller-built subset is the "only selected" case, and
 `config_only=True` switches to backing up only the real config file(s)
 this project writes, ignoring any `targets` passed alongside it.
@@ -64,7 +64,7 @@ DEFAULT_CONFIG_PATHS = ("/etc/baseline/install-config.json", "/etc/smartd.conf")
 # project's own persistence philosophy (decision record 68).
 DEFAULT_MANIFESTS_DIR = "/mnt/INSTALLER_CACHE/backup_manifests"
 DEFAULT_MAX_BACKUP_AGE_S = 24 * 60 * 60
-USER_PERSISTENCE_TARGET = "/mnt/USER_PERSISTENCE"
+USER_TARGET = "/mnt/USER"
 
 
 @dataclass
@@ -77,7 +77,7 @@ def backup_required(install_detection: dict) -> bool:
     return bool(install_detection.get("found_volumes"))
 
 
-def all_persistence_targets() -> list:
+def all_volume_targets() -> list:
     import drive_installer
     return [mountpoint for _, _, _, _, mountpoint in drive_installer.BASELINE_VOLUMES]
 
@@ -169,19 +169,19 @@ def restore_backup_argv(archive_path: str, dest_root: str, *, members: list = No
     return argv
 
 
-def _restore_touches_user_persistence(members: list = None) -> bool:
+def _restore_touches_user_volume(members: list = None) -> bool:
     """`None` (restore everything in the archive) conservatively
-    counts as touching USER_PERSISTENCE too - fails safe, not open by
+    counts as touching USER too - fails safe, not open by
     default."""
     if members is None:
         return True
-    return any(m.startswith("USER_PERSISTENCE") for m in members)
+    return any(m.startswith("USER") for m in members)
 
 
 def restore_backup(runner: Runner, *, archive_path: str, dest_root: str = "/", members: list = None,
                     now: float = None, max_age_s: float = DEFAULT_MAX_BACKUP_AGE_S,
                     manifests_dir: str = DEFAULT_MANIFESTS_DIR,
-                    persistence_targets: list = None) -> CommandResult:
+                    volume_targets: list = None) -> CommandResult:
     """Extracts exactly what's asked for, verbatim - `members` (from
     list_backup_contents()) restores only those entries, matching
     create_backup()'s own selective shape; omitted, everything in the
@@ -192,33 +192,33 @@ def restore_backup(runner: Runner, *, archive_path: str, dest_root: str = "/", m
     Hard gate, not a caller-opt-in flag, per direct instruction:
     "never overwriting the user persistence unless there is valid
     proof of it being backed up successfully within 24 hours." Any
-    restore that would touch USER_PERSISTENCE (named in `members`, or
+    restore that would touch USER (named in `members`, or
     an unconstrained restore-everything) refuses outright - tar is
     never even invoked - unless a real, recorded manifest proves a
-    successful backup of USER_PERSISTENCE within `max_age_s`. Omitting
+    successful backup of USER within `max_age_s`. Omitting
     `now` also refuses, rather than silently skipping the check
     because a caller forgot a parameter.
 
-    `persistence_targets` (decision record 79): which manifest
+    `volume_targets` (decision record 79): which manifest
     target(s) count as proof, checked as "any one is fresh enough."
-    Defaults to `[USER_PERSISTENCE_TARGET]` - the legacy singular
+    Defaults to `[USER_TARGET]` - the legacy singular
     target, byte-identical to this function's pre-existing behavior -
     so every existing caller is unaffected. A caller restoring a real
     persona's own archive passes that persona's own mountpoint(s)
-    instead (e.g. via `persist_bind_mounts.persistence_mountpoint_for`),
+    instead (e.g. via `persist_bind_mounts.user_mountpoint_for`),
     since a persona-scoped backup's manifest is never recorded under
     the legacy singular path."""
-    if _restore_touches_user_persistence(members):
+    if _restore_touches_user_volume(members):
         if now is None:
             return CommandResult(
-                False, "refusing to restore into/over USER_PERSISTENCE: `now` was not given, "
+                False, "refusing to restore into/over USER: `now` was not given, "
                        "so backup freshness cannot be verified")
-        targets_to_check = persistence_targets or [USER_PERSISTENCE_TARGET]
+        targets_to_check = volume_targets or [USER_TARGET]
         if not any(has_recent_successful_backup(runner, target=t, now=now,
                                                  max_age_s=max_age_s, manifests_dir=manifests_dir)
                    for t in targets_to_check):
             return CommandResult(
-                False, f"refusing to restore into/over USER_PERSISTENCE: no proof of a successful "
+                False, f"refusing to restore into/over USER: no proof of a successful "
                        f"backup of {targets_to_check} within {max_age_s:g}s - back it up first")
 
     runner.run(["mkdir", "-p", dest_root], timeout=10)

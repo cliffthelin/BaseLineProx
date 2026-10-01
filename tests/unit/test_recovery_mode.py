@@ -21,7 +21,7 @@ def test_should_enter_false_when_cascade_succeeded():
 # -- discover (guest-tier, no credential needed) -----------------------------
 
 def test_discover_reports_a_found_persona():
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     report = rm.discover(runner, personas=("admin", "personal"))
     assert report.personas_found == ["admin"]
@@ -30,7 +30,7 @@ def test_discover_reports_a_found_persona():
 
 def test_discover_reports_the_active_persona_when_something_is_found():
     import persist_bind_mounts as pbm
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
     report = rm.discover(runner, personas=("admin",))
     assert report.active_persona == "admin"
@@ -47,7 +47,7 @@ def test_discover_active_persona_is_none_when_nothing_is_found():
 # -- can_exit: the hard exit condition ---------------------------------------
 
 def test_can_exit_true_when_a_persona_is_confirmed_read_write():
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     ok, reason = rm.can_exit(runner, personas=("admin", "personal"))
     assert ok is True
@@ -55,7 +55,7 @@ def test_can_exit_true_when_a_persona_is_confirmed_read_write():
 
 
 def test_can_exit_false_when_the_only_mounted_persona_is_read_only():
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 ro,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 ro,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     ok, reason = rm.can_exit(runner, personas=("admin",))
     assert ok is False
@@ -108,7 +108,7 @@ def test_attempt_exit_refuses_and_never_clears_active_without_a_real_rw_persona(
 
 
 def test_attempt_exit_succeeds_and_clears_active_once_a_persona_is_read_write():
-    mounts = "/dev/sdb2 /mnt/USER_PERSISTENCE_ADMIN ext4 rw,relatime 0 0\n"
+    mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
     runner = FakeRunner(files={"/proc/self/mounts": mounts})
     rm.record_entry(runner, now=1700000000.0, reason="cascade_failed")
     result = rm.attempt_exit(runner, personas=("admin",), now=1700000060.0)

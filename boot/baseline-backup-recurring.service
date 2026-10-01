@@ -1,5 +1,5 @@
 [Unit]
-Description=Baseline recurring encrypted USER_PERSISTENCE backup (work-queue item 27)
+Description=Baseline recurring encrypted USER backup (work-queue item 27)
 Requires=baseline-persist-bind-mounts.service
 After=baseline-persist-bind-mounts.service
 

@@ -1,5 +1,5 @@
 """ExecStartPre gate for baseline-scripts-inbox.service - refuses to
-start the scripts inbox CRUD server until USER_PERSISTENCE is actually
+start the scripts inbox CRUD server until USER is actually
 mounted, so a script pushed before that lands on the real persistent
 volume rather than silently writing through to the disposable
 substrate. Reuses persist_bind_mounts.is_mounted unchanged, the exact
