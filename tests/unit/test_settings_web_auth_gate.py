@@ -92,6 +92,9 @@ class _FakeStore:
     def set_machine_passphrase_hash(self, hash_):
         self.passphrase_set = True
 
+    def set_elevation_hash(self, hash_):
+        self.elevation_set = True
+
 
 def _with_store(server, has_data):
     server.deps["store"] = _FakeStore(has_data)
@@ -102,14 +105,14 @@ def _with_store(server, has_data):
 def test_new_account_is_created_on_a_machine_with_no_user_data(server):
     store = _with_store(server, has_data=False)
     status, _, _ = _request(server, "POST", "/setup/new-account",
-                            body=b"username=first&password=pw&passphrase=blue+heron")
-    assert status == 200 and store.added == ["first"] and store.passphrase_set
+                            body=b"username=first&password=pw&passphrase=blue+heron&elevation_passphrase=key")
+    assert status == 200 and store.added == ["first"] and store.passphrase_set and store.elevation_set
 
 
 def test_new_account_is_refused_once_any_user_data_exists(server):
     store = _with_store(server, has_data=True)
     status, location, _ = _request(server, "POST", "/setup/new-account",
-                                   body=b"username=second&password=pw&passphrase=x")
+                                   body=b"username=second&password=pw&passphrase=x&elevation_passphrase=y")
     assert status in (303, 401, 403) and store.added == []
 
 

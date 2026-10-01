@@ -994,38 +994,51 @@ def test_a_verifier_that_raises_never_counts_as_a_match():
 
 def test_first_account_sets_the_login_and_the_machine_passphrase(tmp_path):
     store = sw.LocalAppStore(tmp_path / "s.db")
-    result = sw.create_first_account(store, "alice", "pw-one", "blue heron 42")
+    result = sw.create_first_account(store, "alice", "pw-one", "blue heron 42", "admin key 7")
     assert result.outcome == "applied"
     assert sw.FileBackedPasswordVerifier(store).verify("alice", "pw-one") is True
     assert sw.MachinePassphraseVerifier(store)("blue heron 42") is True
+    assert sw.FileBackedElevationVerifier(store)("admin key 7") is True
     assert store.has_user_data() is True
 
 
-@pytest.mark.parametrize("username,password,passphrase", [("", "p", "x"), ("a", "", "x"), ("a", "p", "")])
-def test_first_account_needs_a_username_a_password_and_a_passphrase(tmp_path, username, password, passphrase):
+def test_the_elevation_passphrase_is_separate_from_the_login_and_machine_passphrase(tmp_path):
     store = sw.LocalAppStore(tmp_path / "s.db")
-    result = sw.create_first_account(store, username, password, passphrase)
+    sw.create_first_account(store, "alice", "pw-one", "blue heron 42", "admin key 7")
+    elevate = sw.FileBackedElevationVerifier(store)
+    assert elevate("pw-one") is False and elevate("blue heron 42") is False
+    assert sw.MachinePassphraseVerifier(store)("admin key 7") is False
+    assert sw.FileBackedPasswordVerifier(store).verify("alice", "admin key 7") is False
+    assert b"admin key" not in (tmp_path / "s.db").read_bytes()
+
+
+@pytest.mark.parametrize("username,password,passphrase,elevation",
+                         [("", "p", "x", "e"), ("a", "", "x", "e"), ("a", "p", "", "e"), ("a", "p", "x", "")])
+def test_first_account_needs_all_four_values(tmp_path, username, password, passphrase, elevation):
+    store = sw.LocalAppStore(tmp_path / "s.db")
+    result = sw.create_first_account(store, username, password, passphrase, elevation)
     assert result.outcome == "refused" and result.status == 400
     assert store.has_user_data() is False
 
 
 def test_first_account_is_refused_once_user_data_exists(tmp_path):
     store = sw.LocalAppStore(tmp_path / "s.db")
-    assert sw.create_first_account(store, "alice", "p1", "x1").outcome == "applied"
-    again = sw.create_first_account(store, "mallory", "p2", "x2")
+    assert sw.create_first_account(store, "alice", "p1", "x1", "e1").outcome == "applied"
+    again = sw.create_first_account(store, "mallory", "p2", "x2", "e2")
     assert again.outcome == "refused" and again.status == 403
     assert store.get_user_hash("mallory") is None
     assert sw.MachinePassphraseVerifier(store)("x2") is False
 
 
-def test_the_setup_form_asks_for_the_passphrase():
-    assert b'name="passphrase"' in sw.render_setup_page("account")
+def test_the_setup_form_asks_for_both_passphrases():
+    page = sw.render_setup_page("account")
+    assert b'name="passphrase"' in page and b'name="elevation_passphrase"' in page
 
 
 def test_build_real_server_recovery_accepts_the_machine_passphrase(tmp_path):
     server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json")
     try:
-        sw.create_first_account(server.deps["store"], "alice", "pw-one", "blue heron 42")
+        sw.create_first_account(server.deps["store"], "alice", "pw-one", "blue heron 42", "admin key 7")
         verify = server.deps["recovery_verify_fn"]
         assert verify("blue heron 42") is True
         assert verify("blue heron 41") is False

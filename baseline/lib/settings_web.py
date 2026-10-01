@@ -588,12 +588,13 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
                 result = RouteResult("refused", 403, {"error": "no store configured"})
             else:
                 result = create_first_account(store, body.get("username", ""), body.get("password", ""),
-                                               body.get("passphrase", ""), hasher=deps.get("hasher"))
+                                               body.get("passphrase", ""), body.get("elevation_passphrase", ""),
+                                               hasher=deps.get("hasher"))
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "applied":
                 return self._html_response(200, render_setup_page("rebuild",
-                    f"Account {body['username']!r} created and the machine passphrase set. Now build the rebuild target."))
+                    f"Account {body['username']!r} created and both passphrases set. Now build the rebuild target."))
             return self._html_response(result.status, render_setup_page("account", result.body.get("error", "")))
 
         if self.path == "/setup/rebuild":
@@ -915,6 +916,9 @@ class LocalAppStore:
     def set_machine_passphrase_hash(self, password_hash: str) -> None:
         self._put("auth", "machine_passphrase_hash", password_hash)
 
+    def set_elevation_hash(self, password_hash: str) -> None:
+        self._put("auth", "elevation_password_hash", password_hash)
+
     def settings(self) -> dict:
         return self._namespace("settings")
 
@@ -1069,19 +1073,23 @@ class AnyCredentialVerifier:
         return False
 
 
-def create_first_account(store, username: str, password: str, passphrase: str, *, hasher=None) -> RouteResult:
-    """First-run setup: the first account and the machine passphrase, both
-    stored only as salted one-way hashes. Available only while the store has
+def create_first_account(store, username: str, password: str, passphrase: str, elevation_passphrase: str,
+                         *, hasher=None) -> RouteResult:
+    """First-run setup: the first account, the machine passphrase (recovery)
+    and the admin elevation passphrase, each a different secret and each
+    stored only as a salted one-way hash. Available only while the store has
     no user data at all."""
     if store.has_user_data():
         return RouteResult("refused", 403, {"error": "an account already exists on this machine"})
-    if not username or not password or not passphrase:
-        return RouteResult("refused", 400, {"error": "username, password and passphrase are all required"})
+    if not (username and password and passphrase and elevation_passphrase):
+        return RouteResult("refused", 400, {"error": "username, password, machine passphrase and admin "
+                                                      "elevation passphrase are all required"})
     hash_password = hasher or (lambda pw: _sha512crypt(pw, _new_salt()))
     hashed = hash_password(password)
     store.add_user(username, hashed)
     store.save_pending_account(username, hashed)
     store.set_machine_passphrase_hash(_sha512crypt(passphrase, _new_salt()))
+    store.set_elevation_hash(_sha512crypt(elevation_passphrase, _new_salt()))
     return RouteResult("applied", 200, {"account": username})
 
 
@@ -1513,7 +1521,8 @@ def render_setup_page(step: str = "account", notice: str = "") -> bytes:
 <form method="post" action="/setup/new-account">
   <label>New username <input name="username"></label>
   <label>New password <input name="password" type="password"></label>
-  <label>Machine passphrase <input name="passphrase" type="password" autocomplete="off"></label>
+  <label>Machine passphrase (recovery) <input name="passphrase" type="password" autocomplete="off"></label>
+  <label>Admin elevation passphrase <input name="elevation_passphrase" type="password" autocomplete="off"></label>
   <button type="submit">Create account</button>
 </form>
 <p class="hint">Building a fresh configuration under a new account never
