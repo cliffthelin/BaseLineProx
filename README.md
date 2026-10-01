@@ -21,7 +21,7 @@ operator's data.
 - **Recovery mode** needs a login and then this machine's root password (or its machine passphrase).
 - **A new account** can be created only while the machine has no user data. There are no seeded or default credentials.
 - **Passwords and passphrases are stored only as salted one-way hashes**: a candidate can be checked for a match, nothing stored can be decrypted.
-- Drives are identified by **serial number, never by `/dev/sdX`**, and every destructive step goes through `physical_device_safety.validate_target_device`.
+- Drives are identified by **serial number, never by `/dev/sdX`**, and every destructive step goes through `physical_device_safety.validate_target_device` (block device, minimum size, never the boot drive). Restricting targets to specific serials is opt-in and not enforced today (v0.2 row 55).
 
 ## Salvage boundary
 

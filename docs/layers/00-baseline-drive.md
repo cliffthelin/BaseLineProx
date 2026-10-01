@@ -26,8 +26,13 @@ said, so a rule written as "never touch `sdb`" now points at an unrelated
 Every destructive step goes through
 [`physical_device_safety.validate_target_device`](../../baseline/lib/physical_device_safety.py)
 ([decision record 49](../design/decision-records/49-single-drive-installer-not-ad-hoc-commands.md)):
-exact-serial allowlist, size range, refuses the running boot drive, refuses
-anything not a block device. No destructive helper accepts a bare path.
+the path is not a symlink, it is a real block device, it meets the minimum size, and it is
+not the running boot drive. **Restricting to specific serials is opt-in** (`expected_serial`),
+not enforced. Drive Administration lists *every* non-boot disk of 50 GB or more as a candidate
+(`drive_admin.list_candidate_drives`), and the two Baseline serials are only pre-selected as a
+suggestion. So the media and NVMe drives on this machine are selectable targets. What stands
+between a selection and a write is the login, an explicit pick in the action modal, and a
+PolicyKit authentication on each privileged call (v0.2 row 55).
 
 ## The Baseline drive, on disk vs. planned
 
@@ -53,7 +58,7 @@ the ext4 label is only a hint (stated in `baseline_drive_layout.py`'s own docstr
 
 | Item | Status | Verified | Evidence |
 |---|---|---|---|
-| Serial-allowlist safety gate | MVP completed | unit tests | `physical_device_safety.py`, DR 49 |
+| Target validation gate (block device, minimum size, not the boot drive; serial restriction is opt-in) | MVP completed | unit tests | `physical_device_safety.py`, DR 49 |
 | Baseline drive laid out as partitions 1-6 | MVP completed | real hardware | `baseline_drive_layout.py`, v0.2 row 37 - kernel table re-read and mounting still need root |
 | Partition numbering stable when volumes are added | MVP completed | unit tests | `test_adding_appdata_does_not_renumber_existing_partitions` - fixed after an interleaved order moved #6 → #7 |
 | `agentIndex.md` written into each partition | MVP completed | unit tests | `baseline_drive_layout.agent_index` - AppData `KeyError` fixed `e629011` |
