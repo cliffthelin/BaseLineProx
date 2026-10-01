@@ -77,9 +77,12 @@ There is no guest user. Nothing is reachable beyond the login screen without a
 credential, and recovery mode needs a validated login like everything else.
 No setting and no admin can change that; the only way past is the credential or
 the passphrase. This is enforced deny-by-default in `baseline_web.py` and
-`settings_web.py` (v0.2 row 43). Two items remain open: the `/setup` first-run
-routes on the standalone server (row 44) and the older "guest tier" wording in
-`recovery_tiers.py` (row 45).
+`settings_web.py` (v0.2 row 43). Recovery mode needs this machine's root password (or
+its passphrase) on top of a login (row 45), and a new account can only be
+created while there is no user data (row 44). Passwords and passphrases are
+stored only as one-way hashes, never encrypted. Open: the seeded dev credentials
+default login and elevation passphrase in `LocalAppStore` (row 46) and the
+machine-passphrase hash (row 47).
 
 ## Cross-cutting findings from writing these pages
 
@@ -97,7 +100,7 @@ was invisible until something looked at the whole layout at once:
 | Web UI served hardware serials, Drive Administration, recovery and the installer/app pages to anyone, and accepted state-changing POSTs without a session | fixed 2026-09-30, v0.2 row 43 | [01](01-substrate.md) |
 | ext4 16-char labels: `SUBSTRATE` and the persona volumes truncated or collided on the real drive | fixed, relabeled 2026-09-30 | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |
 | `/mnt/INSTALLER_CACHE` is a plain directory on the root filesystem, not the volume | **open** | [04](04-installer-cache.md) |
-| SUBSTRATE is described as holding the encrypted admin passphrase; no code writes it | **open** | [03](03-substrate-persistence.md) |
+| SUBSTRATE should hold only a one-way hash of the machine passphrase (v0.2 row 47); no code writes it | **open** | [03](03-substrate-persistence.md) |
 
 ## Deeper reading
 

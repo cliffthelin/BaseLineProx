@@ -919,3 +919,27 @@ def test_export_install_config_round_trips_through_config_pipeline():
                 "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
     assert expected == all_named
     assert summary["failed"] == []
+
+
+# --- stored secrets: verifiable as a match, never recoverable -------------
+
+def test_hashes_match_only_on_equal_hashes():
+    assert sw._hashes_match("$6$salt$abc", "$6$salt$abc") is True
+    assert sw._hashes_match("$6$salt$abc", "$6$salt$abd") is False
+    assert sw._hashes_match("", "$6$salt$abc") is False
+
+
+def test_hash_comparison_is_constant_time():
+    import inspect
+    src = inspect.getsource(sw._hashes_match)
+    assert "compare_digest" in src
+
+
+def test_a_stored_secret_hash_does_not_contain_the_secret_and_cannot_be_reversed_by_the_verifier(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "s.db")
+    store.add_user("alice", sw._sha512crypt("correct horse", "abcdefgh"))
+    stored = store.get_user_hash("alice")
+    assert "correct horse" not in stored and stored.startswith("$6$abcdefgh$")
+    verifier = sw.FileBackedPasswordVerifier(store)
+    assert verifier.verify("alice", "correct horse") is True
+    assert verifier.verify("alice", "wrong") is False

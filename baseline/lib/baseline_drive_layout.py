@@ -36,7 +36,7 @@ _ROLES = {
     "BASELINE": "Application, VM and LXC state for this Baseline install.",
     "INSTALLER_CACHE": "ISOs, driver packages and backups (ISO at isos/proxmox-ve-source.iso, backups/, encrypted_backups/, backup_manifests/). Consumed by name, never executed.",
     "SESSION_TEMP": "Ephemeral session data and quarantine for anything not yet triaged. Never anything meant to run.",
-    "SUBSTRATE": "Small, security-relevant recovery and substrate configuration, including the encrypted admin installer/recovery passphrase. Fixed 1 GB.",
+    "SUBSTRATE": "Small, security-relevant recovery and substrate configuration, including the one-way hash of the admin installer/recovery passphrase (verifiable, never decryptable). Fixed 1 GB.",
 }
 
 

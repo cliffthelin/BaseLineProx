@@ -66,7 +66,7 @@ SHARED_VOLUMES = (
     ("baseline_installer_cache", 50, 200, "INSTALLER_CACHE", "/mnt/INSTALLER_CACHE"),
     ("baseline_session_temp", 5, 50, "SESSION_TEMP", "/mnt/SESSION_TEMP"),
     # Recovery configuration + substrate (host/Proxmox-level, not
-    # persona) configuration, including the encrypted admin-provided
+    # persona) configuration, including the one-way-hashed admin-provided
     # installer/recovery passphrase - direct instruction, 2026-09-29:
     # deliberately separate from BASELINE (which holds real app/VM/LXC
     # *state*, not this kind of small, security-relevant config data).

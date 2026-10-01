@@ -101,7 +101,7 @@ def test_parse_vg_free_bytes_malformed_returns_none():
 
 def test_substrate_is_one_of_the_shared_volumes_fixed_at_1gb():
     """Recovery configuration + substrate (host/Proxmox-level, not
-    persona) configuration, including the encrypted admin-provided
+    persona) configuration, including the one-way-hashed admin-provided
     installer/recovery passphrase - direct instruction. Deliberately
     tiny and fixed (min_gb == max_gb == 1), never asked to grow."""
     entry = next(v for v in di.SHARED_VOLUMES if v[3] == "SUBSTRATE")

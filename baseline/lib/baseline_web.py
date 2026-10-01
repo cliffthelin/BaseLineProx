@@ -1309,6 +1309,8 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 dependency_results=result.body.get("dependency_results")), path))
 
         if path.startswith("/recovery"):
+            if not sw.recovery_unlocked(deps, now):
+                return self._html_response(401, _with_nav(sw.render_recovery_locked_page(), path))
             result = sw.handle_recovery_view(deps.get("runner"), personas=deps.get("personas", ()))
             if result.outcome != "applied":
                 return self._html_response(result.status, _with_nav(sw.render_recovery_page({}, result.body.get("reason", "")), path))
@@ -1457,7 +1459,14 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
             return self._redirect(f"/admin?notice={notice}")
 
+        if path == "/recovery/unlock":
+            result = sw.handle_admin_elevate(deps["recovery_store"], deps.get("recovery_verify_fn"),
+                                              deps["sessions"], self._cookie_token(), body.get("passphrase", ""), now)
+            return self._redirect("/recovery")
+
         if path == "/recovery/exit":
+            if not sw.recovery_unlocked(deps, now):
+                return self._redirect("/recovery")
             result = sw.handle_recovery_exit(deps.get("runner"), personas=deps.get("personas", ()), now=now)
             notice = result.body.get("detail") or result.body.get("reason", "")
             return self._redirect(f"/recovery?notice={notice}")
@@ -1532,6 +1541,12 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     deps["network_interface"] = "eno1"
     deps["pds_runner"] = pds.Runner()
     deps["elevation_verify_fn"] = sw.SystemElevationVerifier(elevation_username)
+    # Recovery mode: this machine's root password (or its passphrase), checked
+    # against the system's own one-way hash. Its own ticket store; Admin
+    # elevation never opens recovery.
+    import admin_elevation
+    deps["recovery_store"] = admin_elevation.ElevationStore()
+    deps["recovery_verify_fn"] = sw.SystemElevationVerifier("root")
     settings_server.httpd.server_close()
     return make_server(deps=deps, host=host, port=port)
 

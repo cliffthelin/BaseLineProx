@@ -8,10 +8,16 @@ other."""
 import recovery_tiers as rt
 
 
-def test_guest_actions_available_with_no_credentials_at_all():
-    actions = rt.allowed_actions()
-    assert "view_login_screen" in actions
-    assert "view_recovery_screen" in actions
+def test_with_no_credential_only_the_login_screen_is_available():
+    """No guest user exists: nothing beyond the login screen without a credential."""
+    assert rt.allowed_actions() == frozenset({"view_login_screen"})
+    assert rt.GUEST_ACTIONS == frozenset({"view_login_screen"})
+
+
+def test_the_recovery_screen_needs_the_root_password_or_machine_passphrase():
+    assert "view_recovery_screen" not in rt.allowed_actions()
+    assert "view_recovery_screen" not in rt.allowed_actions(proxmox_authenticated=True)
+    assert "view_recovery_screen" in rt.allowed_actions(recovery_authenticated=True)
 
 
 def test_guest_alone_never_allows_proxmox_changes():
@@ -64,9 +70,10 @@ def test_persistence_credential_alone_does_not_unlock_proxmox_changes():
 def test_both_credentials_together_unlock_everything():
     actions = rt.allowed_actions(proxmox_authenticated=True, user_volume_authenticated=True)
     assert actions == (rt.GUEST_ACTIONS | rt.PROXMOX_ACTIONS | rt.USER_VOLUME_ACTIONS)
+    assert "view_recovery_screen" not in actions   # recovery is its own credential
 
 
-def test_guest_floor_is_always_present_regardless_of_credentials():
+def test_the_login_screen_is_always_present_regardless_of_credentials():
     for proxmox in (True, False):
         for persistence in (True, False):
             actions = rt.allowed_actions(proxmox_authenticated=proxmox, user_volume_authenticated=persistence)

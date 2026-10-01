@@ -77,7 +77,7 @@ def test_a_valid_session_reaches_the_pages():
     session = sessions.create("root", now=1700000000.0)
     c = _RealServerCase(_base_deps(sessions=sessions))
     try:
-        for path in ("/hardware", "/installer-cache", "/app-isolation", "/recovery"):
+        for path in ("/hardware", "/installer-cache", "/app-isolation"):
             status, _, _ = _request(c.port, "GET", path, cookie=session.token)
             assert status == 200, path
     finally:
@@ -91,5 +91,84 @@ def test_an_expired_session_is_refused():
     try:
         status, location, _ = _request(c.port, "GET", "/hardware", cookie=session.token)
         assert status == 303 and location.endswith("/login")
+    finally:
+        c.close()
+
+
+# --- recovery needs the root password or machine passphrase ---------------
+
+def _recovery_case(verify=lambda pw: pw == "right"):
+    import admin_elevation
+    sessions = sw.SessionStore()
+    token = sessions.create("root", now=1700000000.0).token
+    runner = FakeRunner()
+    c = _RealServerCase(_base_deps(sessions=sessions, runner=runner,
+                                   recovery_store=admin_elevation.ElevationStore(),
+                                   recovery_verify_fn=verify))
+    c.cookie, c.runner = token, runner
+    return c
+
+
+def test_recovery_with_only_a_login_shows_no_machine_state():
+    c = _recovery_case()
+    try:
+        status, _, body = _request(c.port, "GET", "/recovery", cookie=c.cookie)
+        assert b"currently-mounted" not in body and b"Personas" not in body
+        assert b"password" in body.lower()
+        assert c.runner.calls == []
+    finally:
+        c.close()
+
+
+def test_recovery_exit_is_refused_without_the_recovery_credential():
+    c = _recovery_case()
+    try:
+        status, location, _ = _request(c.port, "POST", "/recovery/exit", cookie=c.cookie)
+        assert status in (303, 401, 403)
+        assert c.runner.calls == []
+    finally:
+        c.close()
+
+
+def test_a_wrong_recovery_credential_does_not_unlock():
+    c = _recovery_case()
+    try:
+        _request(c.port, "POST", "/recovery/unlock", cookie=c.cookie, body=b"passphrase=wrong")
+        _, _, body = _request(c.port, "GET", "/recovery", cookie=c.cookie)
+        assert b"Personas" not in body
+    finally:
+        c.close()
+
+
+def test_the_right_recovery_credential_unlocks_recovery():
+    c = _recovery_case()
+    try:
+        _request(c.port, "POST", "/recovery/unlock", cookie=c.cookie, body=b"passphrase=right")
+        status, _, body = _request(c.port, "GET", "/recovery", cookie=c.cookie)
+        assert status == 200 and b"Personas" in body
+    finally:
+        c.close()
+
+
+def test_unlocking_recovery_needs_a_login_first():
+    c = _recovery_case(verify=lambda pw: True)
+    try:
+        status, _, _ = _request(c.port, "POST", "/recovery/unlock", body=b"passphrase=right")
+        assert status in (303, 401)
+        assert c.server.deps["recovery_store"].tickets == {}
+    finally:
+        c.close()
+
+
+def test_the_elevation_store_does_not_open_recovery():
+    """Admin elevation has its own (seeded-dev) passphrase; it must not unlock recovery."""
+    import admin_elevation
+    c = _recovery_case()
+    try:
+        elevation = admin_elevation.ElevationStore()
+        elevation.grant(1700000000.0)
+        c.server.deps["elevation_store"] = elevation
+        _, _, body = _request(c.port, "GET", "/recovery", cookie=c.cookie)
+        assert b"Personas" not in body
     finally:
         c.close()

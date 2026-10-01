@@ -432,6 +432,7 @@ def _base_deps(**overrides):
         "persona_provider": None, "runner": FakeRunner(), "elevation_store": None,
         "elevation_verify_fn": None, "personas": ("admin", "personal"),
         "pds_runner": FakePdsRunner(), "vg_name": "pve", "pkexec_executor": None,
+        "recovery_store": None, "recovery_verify_fn": None,
     }
     deps.update(overrides)
     return deps

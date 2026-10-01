@@ -43,6 +43,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
+def _hashes_match(computed: str, stored: str) -> bool:
+    """Constant-time comparison of two password hashes. Passwords and
+    passphrases are only ever stored as salted one-way hashes: a candidate
+    can be checked for a match, but nothing stored can be decrypted back to
+    the secret (direct instruction, 2026-09-30)."""
+    import hmac
+    return bool(computed) and bool(stored) and hmac.compare_digest(computed.encode(), stored.encode())
+
+
 def _sha512crypt(password: str, salt: str) -> str:
     """SHA-512-crypt via `openssl passwd -6` - the stdlib `crypt`
     module was removed in Python 3.13, and this project already has a
@@ -369,12 +378,11 @@ def handle_admin_edit(sessions: SessionStore, runner, elevation_store, token: st
 
 
 # ---------------------------------------------------------------------------
-# Recovery mode's userless discovery view (work-queue item 26, decision
-# record 81). Deliberately no `sessions`/`token` parameter anywhere in
-# this section - guest-tier by construction, matching
-# `recovery_tiers.GUEST_ACTIONS`' `view_recovery_screen` being always
-# present, never conditionally withheld. `runner=None` hands off rather
-# than crashing, same convention as the Admin tab above.
+# Recovery mode's discovery view (work-queue item 26, decision record 81).
+# `handle_recovery_view` itself takes no session, but the HTTP layer only
+# calls it after a login AND `recovery_unlocked` - this machine's root
+# password or passphrase (direct instruction, 2026-09-30). `runner=None`
+# hands off rather than crashing, same convention as the Admin tab above.
 # ---------------------------------------------------------------------------
 
 def handle_recovery_view(runner, *, personas: tuple) -> RouteResult:
@@ -404,10 +412,16 @@ def handle_recovery_exit(runner, *, personas: tuple, now: float) -> RouteResult:
     return RouteResult("applied", 200, {"detail": result.detail})
 
 
-def handle_new_account(hasher, username: str, password: str) -> RouteResult:
+def handle_new_account(hasher, username: str, password: str, *, store=None) -> RouteResult:
     """`hasher` is a callable(password: str) -> str, reusing
     drive_setup_answer.hash_password_sha512crypt-shaped injection
-    rather than hardcoding a hashing scheme here."""
+    rather than hardcoding a hashing scheme here.
+
+    A new account is available only while there is no user data and no
+    users yet (direct instruction, 2026-09-30). Pass the `store` to enforce
+    that; with `store=None` the caller has already decided."""
+    if store is not None and store.has_user_data():
+        return RouteResult("refused", 403, {"error": "an account already exists on this machine"})
     if not username or not password:
         return RouteResult("refused", 400, {"error": "username and password required"})
     account = PendingRebuildAccount(username=username, password_hash=hasher(password))
@@ -440,10 +454,11 @@ def handle_rebuild(eligibility: RebuildEligibility, trigger: RebuildTrigger,
 # functions above so it's testable without opening a real socket.
 # ---------------------------------------------------------------------------
 
-# Reachable without a session. The login routes, plus the first-run /setup
-# routes, which stay open only until the operator decides whether a fresh
-# install may create its first account unauthenticated.
-_UNGATED_PATHS = frozenset({"/", "/login", "/logout", "/setup", "/setup/new-account", "/setup/rebuild"})
+# Reachable without a session: the login routes. The first-run /setup routes
+# are open too, but only while the store holds no user data at all (a new
+# account is available only on a machine with no users yet).
+_UNGATED_PATHS = frozenset({"/", "/login", "/logout"})
+_FIRST_RUN_PATHS = frozenset({"/setup", "/setup/new-account", "/setup/rebuild"})
 
 
 class SettingsHandler(http.server.BaseHTTPRequestHandler):
@@ -520,6 +535,9 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in _UNGATED_PATHS or deps["sessions"].get(self._token(), now) is not None:
             return False
+        store = deps.get("store")
+        if path in _FIRST_RUN_PATHS and store is not None and not store.has_user_data():
+            return False
         if json_mode or path.startswith("/api/"):
             self._json(401, {"outcome": "refused", "error": "not authenticated"})
         else:
@@ -565,7 +583,8 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(result.status, render_settings_page(settings, notice))
 
         if self.path == "/setup/new-account":
-            result = handle_new_account(deps["hasher"], body.get("username", ""), body.get("password", ""))
+            result = handle_new_account(deps["hasher"], body.get("username", ""), body.get("password", ""),
+                                         store=deps.get("store"))
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "applied":
@@ -584,7 +603,18 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             notice = result.body.get("detail") or result.body.get("reason", "")
             return self._html_response(result.status, render_setup_page("rebuild", notice))
 
+        if self.path == "/recovery/unlock":
+            result = handle_admin_elevate(deps["recovery_store"], deps.get("recovery_verify_fn"),
+                                           deps["sessions"], self._token(), body.get("passphrase", ""), now)
+            if json_mode:
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            return self._redirect("/recovery")
+
         if self.path == "/recovery/exit":
+            if not recovery_unlocked(deps, now):
+                if json_mode:
+                    return self._json(401, {"outcome": "refused", "error": "recovery credential required"})
+                return self._redirect("/recovery")
             result = handle_recovery_exit(deps.get("runner"), personas=deps.get("personas", ()), now=now)
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
@@ -656,6 +686,10 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, render_settings_page(result.body["settings"]))
 
         if self.path.startswith("/recovery"):
+            if not recovery_unlocked(deps, now):
+                if json_mode:
+                    return self._json(401, {"outcome": "refused", "error": "recovery credential required"})
+                return self._html_response(401, render_recovery_locked_page())
             result = handle_recovery_view(deps.get("runner"), personas=deps.get("personas", ()))
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
@@ -874,6 +908,13 @@ class LocalAppStore:
     def add_user(self, username: str, password_hash: str) -> None:
         self._put("users", username, password_hash)
 
+    def has_user_data(self) -> bool:
+        """Any user, or any account waiting on a rebuild. First-run account
+        creation is available only while this is False. NOTE: a brand-new
+        store seeds a DEV-ONLY `root` user (see `__init__`), so on a
+        freshly created store file this is already True."""
+        return bool(self._namespace("users") or self._namespace("pending_accounts"))
+
     def settings(self) -> dict:
         return self._namespace("settings")
 
@@ -913,7 +954,7 @@ class FileBackedPasswordVerifier(PasswordVerifier):
         if len(parts) < 4:
             return False
         salt = parts[2]
-        return _sha512crypt(password, salt) == stored_hash
+        return _hashes_match(_sha512crypt(password, salt), stored_hash)
 
 
 class SystemPasswordVerifier(PasswordVerifier):
@@ -961,7 +1002,7 @@ class SystemPasswordVerifier(PasswordVerifier):
         if len(parts) < 4 or parts[1] != "6":
             return False
         salt = parts[2]
-        return _sha512crypt(password, salt) == stored_hash
+        return _hashes_match(_sha512crypt(password, salt), stored_hash)
 
 
 class SudoPasswordVerifier(PasswordVerifier):
@@ -1030,7 +1071,7 @@ class FileBackedElevationVerifier:
         if len(parts) < 4:
             return False
         salt = parts[2]
-        return _sha512crypt(passphrase, salt) == stored_hash
+        return _hashes_match(_sha512crypt(passphrase, salt), stored_hash)
 
 
 class RunnerBackedActivePersonaProvider(ActivePersonaProvider):
@@ -1289,10 +1330,34 @@ only that section is re-applied, nothing else is touched.</p>
 """)
 
 
+def recovery_unlocked(deps: dict, now: float) -> bool:
+    """Recovery mode needs the root password of this machine (or its
+    passphrase), on top of a login (direct instruction, 2026-09-30). True
+    only inside a live ticket from `recovery_verify_fn`. This is its own
+    ticket store, separate from Admin elevation, whose seeded dev passphrase
+    must never open recovery."""
+    store = deps.get("recovery_store")
+    return store is not None and store.is_elevated(deps.get("runner"), now)
+
+
+def render_recovery_locked_page(notice: str = "") -> bytes:
+    """Shown instead of any machine state until the recovery credential is
+    entered. Reveals nothing about personas or volumes."""
+    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    return _html("Recovery", f"""
+{notice_html}
+<p>Recovery mode needs this machine's root password or its recovery passphrase.</p>
+<form method="post" action="/recovery/unlock">
+  <label>Root password or passphrase <input type="password" name="passphrase" autocomplete="off"></label>
+  <button type="submit">Unlock recovery</button>
+</form>
+""")
+
+
 def render_recovery_page(discovery: dict, notice: str = "") -> bytes:
-    """The userless discovery view (work-queue item 26) - no login
-    form anywhere on this page, matching guest-tier access being
-    always present. `discovery` is `handle_recovery_view`'s own body
+    """The recovery discovery view (work-queue item 26), shown only once
+    recovery is unlocked (`recovery_unlocked`); until then
+    `render_recovery_locked_page` is served instead. `discovery` is `handle_recovery_view`'s own body
     dict; an empty dict (the hand-off case) renders a plain notice."""
     notice_html = f'<p class="notice">{notice}</p>' if notice else ""
     if not discovery:
@@ -1430,7 +1495,8 @@ class SettingsWebServer:
                  eligibility: RebuildEligibility, trigger: RebuildTrigger,
                  hasher, store=None, clock=time.time,
                  persona_provider: ActivePersonaProvider | None = None,
-                 runner=None, elevation_verify_fn=None, personas: tuple | None = None):
+                 runner=None, elevation_verify_fn=None, recovery_verify_fn=None,
+                 personas: tuple | None = None):
         import admin_elevation
         if personas is None:
             import drive_installer
@@ -1442,6 +1508,10 @@ class SettingsWebServer:
             "persona_provider": persona_provider,
             "runner": runner, "elevation_store": admin_elevation.ElevationStore(),
             "elevation_verify_fn": elevation_verify_fn, "personas": personas,
+            # Recovery mode's own credential check and ticket store - never
+            # `elevation_verify_fn`, whose store seeds a known dev passphrase.
+            "recovery_store": admin_elevation.ElevationStore(),
+            "recovery_verify_fn": recovery_verify_fn,
         }
         self.httpd = http.server.HTTPServer((bind_host, bind_port), SettingsHandler)
         self.httpd.deps = self.deps  # type: ignore[attr-defined]
@@ -1482,6 +1552,7 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
         persona_provider=persona_provider,
         runner=runner,
         elevation_verify_fn=FileBackedElevationVerifier(store),
+        recovery_verify_fn=SystemElevationVerifier("root"),
     )
 
 

@@ -15,11 +15,11 @@ recovery mode is a real, durable fact the moment the condition that
 requires it actually happens - not something a separate poller has to
 notice later.
 
-**Userless discovery**: `discover` needs no credential at all - it
-only reports real, already-public mount state (which personas have a
-volume actually present, which is currently active), matching
-`recovery_tiers.GUEST_ACTIONS`' `view_recovery_screen` being always
-present, never conditionally withheld.
+**Discovery**: `discover` reads only real mount state (which personas have
+a volume actually present, which is currently active) and needs no
+credential *of its own*. The web layer will not call it until the caller
+has logged in and then proven this machine's root password or passphrase
+(`recovery_tiers.RECOVERY_ACTIONS`); there is no guest access to it.
 
 **Hard exit condition**: `can_exit`/`attempt_exit` refuse to consider
 the machine able to leave recovery mode until at least one real
@@ -85,7 +85,7 @@ def should_enter(cascade_applied: bool) -> bool:
 
 
 def discover(runner: Runner, *, personas: tuple) -> DiscoveryReport:
-    """Guest-tier - no credential of any kind needed. Reports which
+    """Reports which
     personas have a real, currently-mounted persistence volume and
     which don't, plus whichever persona is currently marked active
     (may be None if nothing is mounted at all)."""
