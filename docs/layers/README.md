@@ -67,7 +67,7 @@ still only proven in a test harness:
 | 03 | [SUBSTRATE](03-substrate-persistence.md) | In progress | Volume exists and mounts; nothing writes to it yet |
 | 04 | [INSTALLER_CACHE](04-installer-cache.md) | In progress | Catalog and tab built; on this machine it is not mounted and 25 of 26 artifacts are missing |
 | 05 | [SESSION_TEMP](05-session-temp.md) | MVP completed | Ephemeral state and recovery-mode working state |
-| 06 | [USER_PERSISTENCE](06-user-persistence.md) | MVP completed | Per-persona settings/state via bind redirects; label collision open |
+| 06 | [USER_PERSISTENCE](06-user-persistence.md) | MVP completed | Per-persona settings/state via bind redirects |
 | 07 | [APPDATA](07-appdata.md) | In progress | Per-persona app data volume; planned and in the layout, not yet on any disk |
 | 08 | [Application isolation](08-application-isolation.md) | In progress | Overlays, formats, containers, the Caddy gateway |
 
@@ -84,7 +84,7 @@ was invisible until something looked at the whole layout at once:
 | `baseline_drive_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-baseline-drive.md) |
 | Rootless Quadlet units targeted `multi-user.target`, so they never started at boot | fixed, `4012834` | [08](08-application-isolation.md) |
 | Four LXC guests overlaid one path, silently sharing data | fixed, `5a11c35` | [08](08-application-isolation.md) |
-| ext4 16-char labels: `SUBSTRATE` truncates too, not only the persona volumes | **open** | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |
+| ext4 16-char labels: `SUBSTRATE` and the persona volumes truncated or collided on the real drive | fixed, relabeled 2026-09-30 | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |
 | `/mnt/INSTALLER_CACHE` is a plain directory on the root filesystem, not the volume | **open** | [04](04-installer-cache.md) |
 | SUBSTRATE is described as holding the encrypted admin passphrase; no code writes it | **open** | [03](03-substrate-persistence.md) |
 

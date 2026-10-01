@@ -40,13 +40,13 @@ laid out, and the drive is effectively full (471 of 476.9 GB allocated).
 | 1 | BASELINE | 31 G | yes | fits |
 | 2 | INSTALLER_CACHE | 136 G | yes | fits |
 | 3 | SESSION_TEMP | 31 G | yes | fits |
-| 4 | SUBSTRATE | 1 G | yes | **truncates** to `SUBSTRATE_PERSIS` |
-| 5 | USER_ADMIN | 136 G | yes | **truncates** to `USER_PERSISTENCE` |
-| 6 | USER_PERSONAL | 136 G | yes | **truncates** to `USER_PERSISTENCE` - same as #5 |
+| 4 | SUBSTRATE | 1 G | yes | fits (relabeled) |
+| 5 | USER_ADMIN | 136 G | yes | fits (relabeled) |
+| 6 | USER_PERSONAL | 136 G | yes | fits (relabeled) |
 | 7 | APPDATA_ADMIN | - | yes | fits |
 | 8 | APPDATA_PERSONAL | - | yes | fits, exactly 16 |
 
-Because ext4 labels truncate, the **GPT partition name is the identity** and
+The old names ran past ext4's 16-character label limit and collided. Both layers now carry the short names, but the **GPT partition name remains the identity** and
 the ext4 label is only a hint (stated in `baseline_drive_layout.py`'s own docstring).
 
 ## Status
@@ -58,7 +58,7 @@ the ext4 label is only a hint (stated in `baseline_drive_layout.py`'s own docstr
 | Partition numbering stable when volumes are added | MVP completed | unit tests | `test_adding_appdata_does_not_renumber_existing_partitions` - fixed after an interleaved order moved #6 → #7 |
 | `agentIndex.md` written into each partition | MVP completed | unit tests | `baseline_drive_layout.agent_index` - AppData `KeyError` fixed `e629011` |
 | AppData partitions 7-8 on the real Baseline drive | On roadmap | none | needs ~40 GB minimum; the drive has no free space. Needs re-layout or a different Baseline drive - an operator decision |
-| ext4 label truncation and the persona label collision | On roadmap | - | Fix is `baseline_drive_layout.legacy_relabel_plan`: 6 metadata-only commands on partitions 4-6, no root needed (the operator is in the `disk` group and the devices are `root:disk` 0660). PARTLY APPLIED, found 2026-09-30 22:32: the three `sgdisk -c` GPT renames are already on the drive (partition nodes re-created 22:18:28); the three `e2label` changes are not, so ext4 labels still read `SUBSTRATE_PERSIS` / `USER_PERSISTENCE` x2. Who ran it is unconfirmed. v0.2 row 38. Candidate identities: GPT partname, LV name, filesystem UUID |
+| ext4 label truncation and the persona label collision | MVP completed | real hardware | Relabeled 2026-09-30 (evening): GPT names and ext4 labels read back from the drive as `SUBSTRATE`, `USER_ADMIN`, `USER_PERSONAL`, none mounted. Applied by the operator, not by this session's code. v0.2 row 38 |
 | Docs re-keyed from kernel letters to serials | On roadmap | - | v0.2 rows 27-29 |
 | Record of the 2026-09-30 repartition (an Omarchy ISO on that drive was erased) | On roadmap | - | v0.2 rows 28, 41. Whether it was authorized is unconfirmed |
 

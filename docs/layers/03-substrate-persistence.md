@@ -14,7 +14,7 @@ renamed from `SUBSTRATE_PERSISTENCE`; the old name is still recognised.
 
 | Finding | Status |
 |---|---|
-| ext4 labels are 16 characters. `SUBSTRATE_PERSISTENCE` truncated to `SUBSTRATE_PERSIS`. The new name `SUBSTRATE` fits, but the real Baseline drive partition still carries the old name | open, needs the metadata-only relabel (`baseline_drive_layout.legacy_relabel_plan`) |
+| ext4 label truncation (`SUBSTRATE_PERSIS`) | fixed on the real drive 2026-09-30, read back as `SUBSTRATE` |
 | `baseline_drive_layout.py` describes this volume as holding the encrypted admin installer/recovery passphrase. No code writes it | open |
 
 ## Status

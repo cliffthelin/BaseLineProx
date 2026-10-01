@@ -27,5 +27,5 @@ is entered.
 |---|---|---|---|
 | Per-persona volumes and bind redirects | MVP completed | unit tests | `persist_bind_mounts.py`; says itself not yet run on real hardware (DR 62) |
 | Persona switch | MVP completed | unit tests | `switch_active_persona` |
-| Label collision on the real Baseline drive | open | real hardware | partitions 5 and 6 both truncate to `USER_PERSISTENCE`; fix is the relabel plan, not applied |
+| Label collision on the real Baseline drive | fixed | real hardware | partitions 5 and 6 now read back `USER_ADMIN` / `USER_PERSONAL` in both GPT name and ext4 label |
 | Cross-persona access gated by a second passphrase | On roadmap | none | DR 76 describes it; not checked here |
