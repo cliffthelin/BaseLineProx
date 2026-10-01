@@ -1,4 +1,4 @@
-"""Lay Baseline's own defined volumes onto a plain-GPT carrier drive.
+"""Lay Baseline's own defined volumes onto a plain-GPT Baseline drive.
 
 The volume set, sizing and mount options all come from `drive_installer`
 (SHARED_VOLUMES, persona volumes, compute_adaptive_plan, MOUNT_OPTIONS); this
@@ -102,7 +102,7 @@ def legacy_relabel_plan(device: str, partitions: list) -> list[list[str]]:
     `partitions` is the drive's real current table as (number, partname)
     pairs, read from the drive, never assumed from a plan.
 
-    Planning only, like everything else that touches the carrier: this
+    Planning only, like everything else that touches the Baseline drive: this
     returns argv lists and runs nothing. Applying it still has to go
     through validate_target_device and an explicit operator decision."""
     plan = []
@@ -138,13 +138,13 @@ Read this first. It tells an AI agent or operator what this Baseline volume is a
 - **Role:** {_role(p['label'])}
 - **Mountpoint:** `{p['mountpoint']}` with options `{p['options']}`{' (nothing on this volume is ever executed directly)' if noexec else ''}.
 - **Drive:** serial `{serial}`. Find it by `/dev/disk/by-id`, never by kernel letter (letters shift between boots).
-- **Defined in:** `baseline/lib/drive_installer.py` (volume set, sizing, mount options) and laid out by `baseline/lib/carrier_layout.py`.
+- **Defined in:** `baseline/lib/drive_installer.py` (volume set, sizing, mount options) and laid out by `baseline/lib/baseline_drive_layout.py`.
 
 ## Rules for agents
 
 1. Verify the drive serial before any write; stop if it does not match.
 2. Never touch another drive. Identify this volume by partition name `{p['partname']}`, not by the ext4 label (labels are truncated to 16 characters).
-3. Changes to the volume layout go through `drive_installer` / `carrier_layout` with tests first (decision record 49), never ad hoc commands.
+3. Changes to the volume layout go through `drive_installer` / `baseline_drive_layout` with tests first (decision record 49), never ad hoc commands.
 """
 
 

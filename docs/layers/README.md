@@ -81,7 +81,7 @@ was invisible until something looked at the whole layout at once:
 |---|---|---|
 | AppData mounted with bare `defaults` (no `nosuid,nodev`) | fixed, `86f86fc` | [07](07-appdata.md) |
 | AppData interleaved per persona, renumbering existing Baseline drive partitions (`USER_PERSONAL` 6 → 7) | fixed, `e629011` | [00](00-baseline-drive.md) |
-| `carrier_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-baseline-drive.md) |
+| `baseline_drive_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-baseline-drive.md) |
 | Rootless Quadlet units targeted `multi-user.target`, so they never started at boot | fixed, `4012834` | [08](08-application-isolation.md) |
 | Four LXC guests overlaid one path, silently sharing data | fixed, `5a11c35` | [08](08-application-isolation.md) |
 | ext4 16-char labels: `SUBSTRATE` truncates too, not only the persona volumes | **open** | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |

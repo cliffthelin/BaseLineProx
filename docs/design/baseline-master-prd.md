@@ -39,7 +39,7 @@ Volumes on one drive, defined in `baseline/lib/drive_installer.py` (the single s
 
 Sizing: `compute_adaptive_plan` (min first, cap at max, real space wins between). For a 512 GB drive: 31 / 136 / 31 / 1 / 136 / 136 GB.
 
-Two physical forms exist and both must stay supported: **LVM logical volumes inside Proxmox's `pve` VG** on the install drive (`drive_installer`), and **plain GPT partitions named for the volume** on a carrier drive (record 46, `carrier_layout.py`, 2026-09-30). Identity on a carrier is the GPT partition name; ext4 labels are truncated to 16 characters and collide for the two persona volumes (known defect, §10).
+Two physical forms exist and both must stay supported: **LVM logical volumes inside Proxmox's `pve` VG** on the install drive (`drive_installer`), and **plain GPT partitions named for the volume** on a carrier drive (record 46, `baseline_drive_layout.py`, 2026-09-30). Identity on a carrier is the GPT partition name; ext4 labels are truncated to 16 characters and collide for the two persona volumes (known defect, §10).
 
 ## 4. Capability inventory (what already exists)
 
@@ -61,7 +61,7 @@ Status wording follows each record. "Unit" = tested against fakes; "QEMU" = run 
 | Drive admin | Self-installer-only model, per-drive Baseline detection/repair, hardware tab | `drive_admin`, `hardware`; 83, 99 | Unit + live browser (99); "update selected" logic is a placeholder |
 | Harness | Read-only harness, chat tab (warm session, streaming), ACP adapters, write-scope grant, status bar | `harness*`, `acp_*`, `providers`; 31-44 | Unit; real Claude subscription in V0.1 |
 | Workloads | VM/LXC/Docker provisioning, pinned community scripts, Podman Quadlet, GPU admin + device wiring, HA/HAOS under QEMU | `vm_provision`, `vm_scripts`, `quadlet`, `gpu_admin`; 34-36, 57-59, 61, 66, 94, 96, 97 | Unit + QEMU; not real hardware |
-| Hardened appliance (new) | layer digests + PCR extend; Caddyfile renderer; registry-backed routes; host readiness report; carrier layout | `measured_boot`, `gateway_config`, `gateway_routes`, `host_readiness`, `carrier_layout` | Unit only; `host_readiness` and `carrier_layout` were also run on the dev machine 2026-09-30 |
+| Hardened appliance (new) | layer digests + PCR extend; Caddyfile renderer; registry-backed routes; host readiness report; carrier layout | `measured_boot`, `gateway_config`, `gateway_routes`, `host_readiness`, `baseline_drive_layout` | Unit only; `host_readiness` and `baseline_drive_layout` were also run on the dev machine 2026-09-30 |
 
 ## 5. New and folded-in requirements
 
@@ -71,7 +71,7 @@ A drive must be able to produce a working, correctly-laid-out drive on another d
 
 - N1.1 **Recipe** = a canonical manifest of everything needed to rebuild the drive's *structure and software*: the volume set and sizes (from `drive_installer`), mount options, the pinned source artifacts (Proxmox ISO and assistant, each by URL + sha256), the repo commit and file manifest that get baked into the ISO, the selected `settings_store` presets, and the list of registry entries of GLOBAL scope that define the layout (e.g. gateway routes).
 - N1.2 **Recipe digest.** The recipe is exported as canonical JSON and hashed with `measured_boot.layer_digest("recipe", ...)`. Two drives built from the same recipe carry the same digest; any change is visible. The digest, not the bytes, is the equality test.
-- N1.3 **Replication pipeline** reuses the existing stages in order: `physical_device_safety.validate_target_device` -> `drive_setup_acquire` -> `drive_setup_answer` (HTTP answer, one-time credential) -> `iso_builder` -> `drive_setup_install` -> `carrier_layout` / `drive_installer.ensure_baseline_volumes`. The pipeline gains one new first step: load and verify the recipe, refuse on digest mismatch.
+- N1.3 **Replication pipeline** reuses the existing stages in order: `physical_device_safety.validate_target_device` -> `drive_setup_acquire` -> `drive_setup_answer` (HTTP answer, one-time credential) -> `iso_builder` -> `drive_setup_install` -> `baseline_drive_layout` / `drive_installer.ensure_baseline_volumes`. The pipeline gains one new first step: load and verify the recipe, refuse on digest mismatch.
 - N1.4 **Never copied**: drive/partition identity (new serial and GPT GUIDs), credentials (fresh one-time values), persona data, backups, the encrypted admin passphrase, TPM-sealed keys. These are recreated or re-enrolled on the new drive.
 - N1.5 **Replica proof** = recipe digest recomputed from the new drive's own registries equals the source digest, plus `host_readiness`-style checks pass. Not a byte comparison.
 - N1.6 The recipe lives on `SUBSTRATE_PERSISTENCE` (config/recovery data, small, noexec) with a read-only copy embedded in the self-installer ISO, so a drive that has lost everything else can still be rebuilt (matches the "substrate may lose everything" requirement, testpersistence §9a). See Q1.
@@ -81,7 +81,7 @@ A drive must be able to produce a working, correctly-laid-out drive on another d
 Problem recorded in AGENTS.md and repeated on 2026-09-30: sessions lose established facts and act on a partial picture (this session wiped a drive with an invented layout before reading `drive_installer.py`, DR49 or AGENTS.md).
 
 - N2.1 **Charter**: one short document (this PRD's §1-§3, kept under one screen) that every volume's `agentIndex.md` points to, and that is embedded in the self-installer ISO and in the repo. It states purpose, principles, the volume table and the required-reading list.
-- N2.2 **`agentIndex.md` per volume**, generated from `drive_installer`'s definitions, never hand-written (generator: `carrier_layout.agent_index`, written 2026-09-30 for all six carrier volumes). It names the volume's role, mount options, the drive serial, and the rules. Regenerated whenever the layout changes; a test fails if the index disagrees with `drive_installer`.
+- N2.2 **`agentIndex.md` per volume**, generated from `drive_installer`'s definitions, never hand-written (generator: `baseline_drive_layout.agent_index`, written 2026-09-30 for all six carrier volumes). It names the volume's role, mount options, the drive serial, and the rules. Regenerated whenever the layout changes; a test fails if the index disagrees with `drive_installer`.
 - N2.3 **Workplace** = the place the recipe, charter and source live together and an agent is directed to first. Proposed: the repo checkout as source of truth; `BASELINE:/hardened-appliance/` style copies are backups, not the workplace. Decision needed (Q2): whether the workplace is (a) the repo on the dev machine, (b) a git worktree carried on a volume, or (c) a dedicated volume.
 - N2.4 **Required-reading gate.** `physical_device_safety.validate_target_device` is already the choke point for destructive work. Add a check that refuses unless the caller passes a charter digest matching the repo's current charter file, so acting without loading the charter fails in code, not by convention. (Proposal; Q3.)
 - N2.5 **Docs-vs-code guard.** A unit test implementing the 2026-09-30 audit's mechanical scan (referenced files and `module.symbol` names must exist; every `lib` module must be mentioned in a doc), run in the normal suite, so drift fails CI instead of accumulating. Findings already filed as queue rows 27-36.
@@ -102,7 +102,7 @@ Components: Proxmox host on a dedicated NVMe with iGPU-only display and a Chromi
                      |
    validate_target_device -> acquire -> answer(HTTP, one-time cred) -> iso_builder -> install
                      |                                                       |
-         carrier_layout / drive_installer  ---------------------------> volumes (§3), agentIndex per volume
+         baseline_drive_layout / drive_installer  ---------------------------> volumes (§3), agentIndex per volume
                      |
    registries (GLOBAL on SUBSTRATE_PERSISTENCE/BASELINE, PROTECTED on USER_PERSISTENCE)
         settings | dependencies | gateway_route | gpu modes | ...

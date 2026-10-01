@@ -141,11 +141,11 @@ def baseline_volumes_for(personas: tuple = DEFAULT_PERSONAS) -> tuple:
     volumes - useful for provisioning the substrate before any persona
     is created.
 
-    Order is part of the on-disk contract: carrier_layout numbers GPT
+    Order is part of the on-disk contract: baseline_drive_layout numbers GPT
     partitions in this order. AppData is therefore appended AFTER every
     pre-existing volume rather than interleaved per persona - an
     interleaved order moved USER_PERSONAL from partition 6 to
-    7, so re-applying the plan to an already laid-out carrier would have
+    7, so re-applying the plan to an already laid-out Baseline drive would have
     treated the personal persona's partition as AppData."""
     return (SHARED_VOLUMES
             + tuple(persona_volume(p) for p in personas)
@@ -312,7 +312,7 @@ def ensure_mounted_with_options(runner: Runner, lv_path: str, mountpoint: str, o
 
 # Names used before 2026-09-30, when "persistence" was dropped from every
 # volume name (direct instruction). Volumes already provisioned or laid
-# out under these names still exist on real disks - the carrier with serial
+# out under these names still exist on real disks - the Baseline drive with serial
 # MD89N41071210AP4E carries them as GPT partition names - so they must be
 # recognised, never silently treated as absent.
 _LEGACY_LABEL_PREFIX = "USER_PERSISTENCE_"

@@ -8,7 +8,7 @@ are two realizations of the same volume set, and both derive from one source,
 
 - **LVM inside the Proxmox `pve` volume group** - `drive_installer.ensure_baseline_volumes`
   creates one logical volume per Baseline volume next to Proxmox's own.
-- **Plain GPT on a separate drive** - [`carrier_layout.py`](../../baseline/lib/carrier_layout.py)
+- **Plain GPT on a separate drive** - [`baseline_drive_layout.py`](../../baseline/lib/baseline_drive_layout.py)
   lays each volume out as a GPT partition named for it, ext4 inside, no LVM,
   no root ([decision record 46](../design/decision-records/46-sdb-partitioned-user-persistence-installer-cache-session-temp.md) style).
 
@@ -47,24 +47,24 @@ laid out, and the drive is effectively full (471 of 476.9 GB allocated).
 | 8 | APPDATA_PERSONAL | - | yes | fits, exactly 16 |
 
 Because ext4 labels truncate, the **GPT partition name is the identity** and
-the ext4 label is only a hint (stated in `carrier_layout.py`'s own docstring).
+the ext4 label is only a hint (stated in `baseline_drive_layout.py`'s own docstring).
 
 ## Status
 
 | Item | Status | Verified | Evidence |
 |---|---|---|---|
 | Serial-allowlist safety gate | MVP completed | unit tests | `physical_device_safety.py`, DR 49 |
-| Baseline drive laid out as partitions 1-6 | MVP completed | real hardware | `carrier_layout.py`, v0.2 row 37 - kernel table re-read and mounting still need root |
+| Baseline drive laid out as partitions 1-6 | MVP completed | real hardware | `baseline_drive_layout.py`, v0.2 row 37 - kernel table re-read and mounting still need root |
 | Partition numbering stable when volumes are added | MVP completed | unit tests | `test_adding_appdata_does_not_renumber_existing_partitions` - fixed after an interleaved order moved #6 → #7 |
-| `agentIndex.md` written into each partition | MVP completed | unit tests | `carrier_layout.agent_index` - AppData `KeyError` fixed `e629011` |
+| `agentIndex.md` written into each partition | MVP completed | unit tests | `baseline_drive_layout.agent_index` - AppData `KeyError` fixed `e629011` |
 | AppData partitions 7-8 on the real Baseline drive | On roadmap | none | needs ~40 GB minimum; the drive has no free space. Needs re-layout or a different Baseline drive - an operator decision |
-| ext4 label truncation and the persona label collision | On roadmap | - | Fix is `carrier_layout.legacy_relabel_plan`: 6 metadata-only commands on partitions 4-6, no root needed (the operator is in the `disk` group and the devices are `root:disk` 0660). Not applied. v0.2 row 38. Candidate identities: GPT partname, LV name, filesystem UUID |
+| ext4 label truncation and the persona label collision | On roadmap | - | Fix is `baseline_drive_layout.legacy_relabel_plan`: 6 metadata-only commands on partitions 4-6, no root needed (the operator is in the `disk` group and the devices are `root:disk` 0660). Not applied. v0.2 row 38. Candidate identities: GPT partname, LV name, filesystem UUID |
 | Docs re-keyed from kernel letters to serials | On roadmap | - | v0.2 rows 27-29 |
 | Record of the 2026-09-30 repartition (an Omarchy ISO on that drive was erased) | On roadmap | - | v0.2 rows 28, 41. Whether it was authorized is unconfirmed |
 
 ## Deeper reading
 
-- [`carrier_layout.py`](../../baseline/lib/carrier_layout.py) · [`drive_installer.py`](../../baseline/lib/drive_installer.py) · [`physical_device_safety.py`](../../baseline/lib/physical_device_safety.py)
+- [`baseline_drive_layout.py`](../../baseline/lib/baseline_drive_layout.py) · [`drive_installer.py`](../../baseline/lib/drive_installer.py) · [`physical_device_safety.py`](../../baseline/lib/physical_device_safety.py)
 - [DR 46](../design/decision-records/46-sdb-partitioned-user-persistence-installer-cache-session-temp.md) - the first real partitioning
 - [DR 73](../design/decision-records/73-adaptive-volume-sizing.md) - adaptive sizing within each volume's min/max
 - [DR 98](../design/decision-records/98-substrate-persistence-and-real-sizing-defaults.md) - the sizing defaults

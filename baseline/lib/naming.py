@@ -30,7 +30,7 @@ Why each rule exists:
   mapping is one-to-one, so two identifiers can never share a uid.
 - **Allocated once, never reused.** A number computed from the current
   set would renumber everything after a removal - the same hazard that
-  moved a persona's partition from 6 to 7 on the real carrier. Every
+  moved a persona's partition from 6 to 7 on the real Baseline drive. Every
   allocation is recorded in the registry and only ever *retired*, so the
   stored set is a permanent high-water mark.
 - **Aliases are never a mount path.** Mounts, overlays, binds and owner

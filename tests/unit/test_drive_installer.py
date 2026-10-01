@@ -582,7 +582,7 @@ def test_current_names_are_left_unchanged():
 
 
 def test_detection_reports_an_old_named_volume_as_legacy_not_missing():
-    """The existing carrier carries the old names; calling those volumes
+    """The existing Baseline drive carries the old names; calling those volumes
     missing would invite creating replacements next to them."""
     lvs = "".join(f"  pve  {lv}\n" for lv, *_ in di.BASELINE_VOLUMES
                   if lv != "baseline_user_admin")

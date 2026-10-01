@@ -15,19 +15,17 @@ app, VM and LXC state may need to run things stored here.
 
 ## Decision (2026-09-30)
 
-Baseline supports app, VM and LXC state. Where the guests themselves live:
-VMs and LXCs are kept on [INSTALLER_CACHE](04-installer-cache.md), and Proxmox
-does not care where they are as long as it can reach them. So BASELINE holds
-Baseline's own install-wide state about apps and guests (registry, markers),
-not the guest disks.
+Baseline supports app, VM and LXC state. VM and LXC *installers* (images and
+scripts) are kept on [INSTALLER_CACHE](04-installer-cache.md). Running guests
+are not put on that volume, and Proxmox does not care where a guest is as long
+as it can reach it. BASELINE holds Baseline's own install-wide state about apps
+and guests (registry, markers).
 
 **Not yet reconciled in code.** `appdata.py` plans VM and LXC guest data as
 overlays at Proxmox's own paths (`/var/lib/vz/images/<guest>`,
-`/var/lib/vz/private/<guest>`) with the upper layer on per-persona AppData.
-That matches neither statement above. It is planning only and nothing is
-applied. Open question: are guest *disks* on INSTALLER_CACHE (which is mounted
-`noexec` and sized 50-200 GB) at runtime, or only the images they are built
-from?
+`/var/lib/vz/private/<guest>`), with the writable layer on per-persona AppData.
+It is planning only and nothing is applied. Whether that placement is what is
+wanted for running guests is still open.
 
 ## Known defect
 

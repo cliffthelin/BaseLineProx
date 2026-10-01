@@ -1,10 +1,10 @@
-"""Tests for carrier_layout.py: lay Baseline's defined volumes
-(drive_installer.SHARED_VOLUMES + persona volumes) onto a plain-GPT carrier
+"""Tests for baseline_drive_layout.py: lay Baseline's defined volumes
+(drive_installer.SHARED_VOLUMES + persona volumes) onto a plain-GPT Baseline drive
 drive, the way decision record 46 did, with no LVM and no root. Pure: commands
 go through an injected runner and validation through an injected validator."""
 import pytest
 
-import carrier_layout as cl
+import baseline_drive_layout as cl
 import drive_installer as di
 
 SIZE = 512_110_190_592
