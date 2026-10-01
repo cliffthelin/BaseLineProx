@@ -1,5 +1,5 @@
 """Recovery mode itself (work-queue item 26, decision record 81) -
-real entry, a userless discovery view, and the hard exit condition.
+real entry, a discovery view (behind a login and the recovery credential), and the hard exit condition.
 Explicitly NOT blocked on the withdrawn USB challenge-response
 mechanism (decision record 77): every credential tier this module
 touches comes from `recovery_tiers.py`/`admin_elevation.py` alone,

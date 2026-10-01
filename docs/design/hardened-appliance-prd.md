@@ -1,5 +1,7 @@
 # PRD: Hardened workstation appliance - dual-GPU host, Caddy gateway, measured boot
 
+> **Record status (v0.2 row 35, 2026-09-30):** this PRD is the decision record for the hardened-appliance work (v0.2 rows 23-26: gateway, measured boot, host readiness, dual GPU). No separate numbered decision records exist for it; its decisions and open questions (§3, §12) are recorded here, and the operator's answers to them are not yet in.
+
 Status: draft. Design plus a first pure-code slice (§13). Nothing in §13's first slice touches a real drive or the real TPM. Drive steps are in §11 and §15.
 Source: an architecture blueprint pasted by the operator on 2026-09-30 (written by another AI assistant, not by this project). It is treated as *requirements input*, reconciled against the code that actually exists (§3), not copied as truth.
 Depends on: `registry.py`, `settings_store.py`, `gpu_admin.py`, `quadlet.py`, `dependencies.py`, `testpersistence-prd.md` (identity/ledger integrity).
