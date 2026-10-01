@@ -114,3 +114,102 @@ def test_a_bot_backup_writes_only_to_the_ram_drive(ram, tmp_path):
         assert ram.backups == ["set-1"] and (ram.root / "set-1").exists() and ram.intact()
     finally:
         case.close()
+
+
+# -- the root password once a day per target ---------------------------------------------
+
+def _ask_repair(case, device="/dev/sdb"):
+    return _req(case, "POST", "/drive-admin/action", {"action_id": "repair", "params": {"device_path": device}})
+
+
+def _confirm_daily(case, chal, daily=True):
+    return _req(case, "POST", "/drive-admin/confirm",
+                {"challenge_id": chal["id"], "typed": chal["phrase"], "secret": SECRET, "daily": daily})
+
+
+def test_a_bot_needs_the_root_password_once_a_day_per_drive(ram, tmp_path):
+    case = bot_case("bot:repair", tmp_path)
+    try:
+        _, body = _ask_repair(case)
+        assert body["outcome"] == "confirmation_required"
+        _, started = _confirm_daily(case, body["challenge"])
+        assert _poll_job(case, started["job_id"])["outcome"] == "applied"
+        # Same drive, same day: no challenge, it runs (even from a brand new login of the same account).
+        for _ in range(3):
+            status, again = _ask_repair(case)
+            assert status == 200 and again["outcome"] == "started", again
+            assert _poll_job(case, again["job_id"])["outcome"] == "applied"
+        assert len([c for c in ram.calls if c[0] == "repair"]) == 4
+    finally:
+        case.close()
+
+
+def test_without_ticking_the_daily_box_every_run_still_needs_the_password(ram, tmp_path):
+    case = bot_case("bot:repair", tmp_path)
+    try:
+        _, body = _ask_repair(case)
+        _, started = _confirm_daily(case, body["challenge"], daily=False)
+        _poll_job(case, started["job_id"])
+        assert _ask_repair(case)[1]["outcome"] == "confirmation_required"
+    finally:
+        case.close()
+
+
+def test_a_new_day_needs_a_new_authorization(ram, tmp_path):
+    case = bot_case("bot:repair", tmp_path)
+    try:
+        _, body = _ask_repair(case)
+        _, started = _confirm_daily(case, body["challenge"])
+        _poll_job(case, started["job_id"])
+        assert _ask_repair(case)[1]["outcome"] == "started"
+        clock = case.server.deps["clock"]
+        clock.t += 26 * 3600
+        case.server.deps["sessions"].sessions[case.token].created = clock.t      # the login itself is still live
+        assert _ask_repair(case)[1]["outcome"] == "confirmation_required"
+    finally:
+        case.close()
+
+
+def test_a_new_target_needs_a_new_authorization(ram, tmp_path):
+    case = bot_case("bot:repair", tmp_path)
+    try:
+        _, body = _ask_repair(case)
+        _, started = _confirm_daily(case, body["challenge"])
+        _poll_job(case, started["job_id"])
+        # A different serial would be a different target; the allowlist only admits the SK hynix drives, so prove the
+        # scoping at the store: the authorization is bound to this exact serial.
+        store = case.server.deps["hitl"]
+        assert store.authorization_from_daily("bot", "repair", {}, "ANOTHERTARGET") is None
+        assert store.authorization_from_daily("bot", "repair", {}, "MD89N41071210AP4E") is not None
+    finally:
+        case.close()
+
+
+def test_the_daily_box_is_refused_for_non_bot_logins_and_never_applies_to_the_install(ram, tmp_path):
+    admin = bot_case("admin", tmp_path)
+    try:
+        _, body = _ask_repair(admin)
+        status, out = _confirm_daily(admin, body["challenge"])
+        assert status == 403 and "job_id" not in out and ram.calls == []
+    finally:
+        admin.close()
+    bot = bot_case("bot:build_self_installer", tmp_path)
+    try:
+        _, body = _req(bot, "POST", "/drive-admin/action", {"action_id": "build_self_installer", "params": PARAMS})
+        status, out = _confirm_daily(bot, body["challenge"])
+        assert status == 403 and out["reason"] == "never_granted" and ram.installs == 0
+        assert _req(bot, "POST", "/drive-admin/action",
+                    {"action_id": "build_self_installer", "params": PARAMS})[1]["outcome"] == "confirmation_required"
+    finally:
+        bot.close()
+
+
+def test_the_daily_authorization_is_not_shared_with_another_bot_account(ram, tmp_path):
+    case = bot_case("bot:repair", tmp_path)
+    try:
+        _, body = _ask_repair(case)
+        _confirm_daily(case, body["challenge"])
+        store = case.server.deps["hitl"]
+        assert store.authorization_from_daily("some-other-bot", "repair", {}, "MD89N41071210AP4E") is None
+    finally:
+        case.close()

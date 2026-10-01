@@ -13,6 +13,10 @@ Every drive action needs a person to confirm THAT exact request, each time, and 
 - The one exception is a STANDING APPROVAL a person grants: scoped to one action and one drive, limited in time
   and number of uses, tied to the session, revocable, and gated by the same password and a typed sentence. The
   install action can never be pre-approved: installing over a drive is confirmed every time.
+- A BOT account (role `bot:<action>`) is confirmed with the root password once per day per target: confirming
+  with "authorize for today" lets that account run that one action on that one drive until the local day ends;
+  a different drive, a different action or the next day needs a new confirmation. Bound to the account (not one
+  login), in memory only, revocable, and never available for the install action.
 - Every step is written to an append-only audit log; the secret never is.
 
 This module holds state in memory only: after a restart there are no pending challenges and no approvals.
@@ -48,6 +52,11 @@ CONFIRMED_ACTIONS = frozenset(VERBS)
 NEVER_PRE_APPROVED = frozenset({"build_self_installer"})
 
 _SECRET = secrets.token_bytes(32)
+
+
+def day_key(now: float) -> str:
+    """The local calendar day. A daily authorization ends when this changes."""
+    return time.strftime("%Y-%m-%d", time.localtime(now))
 
 
 class ConfirmationError(Exception):
@@ -138,6 +147,7 @@ class ConfirmationStore:
         self._pending: dict = {}
         self._grants: dict = {}
         self._live: dict = {}            # nonce -> authorization not yet used
+        self._daily: dict = {}           # id -> {account, action, serial, day}: a bot's authorization for today
         self._lock = threading.Lock()
 
     # -- challenges ----------------------------------------------------------
@@ -148,6 +158,9 @@ class ConfirmationStore:
             del self._grants[gid]
         for nonce in [n for n, a in self._live.items() if a._expires <= now]:
             del self._live[nonce]
+        today = day_key(now)
+        for did in [d for d, r in self._daily.items() if r["day"] != today]:
+            del self._daily[did]
 
     def challenge(self, session_id: str, action_id: str, params: dict, serial: str, summary: str) -> dict:
         if action_id not in CONFIRMED_ACTIONS:
@@ -182,13 +195,17 @@ class ConfirmationStore:
         self._audit({"event": "confirm_failed", "id": cid, "reason": why, "who": _who(session_id)})
         raise ConfirmationError(message, why)
 
-    def confirm(self, session_id: str, challenge_id: str, typed, secret) -> Authorization:
+    def confirm(self, session_id: str, challenge_id: str, typed, secret, *, daily_for: str | None = None) -> Authorization:
+        """`daily_for`: the bot account to also authorize for the rest of today on this drive (see the module doc)."""
         with self._lock:
             now = self.clock()
             self._prune(now)
             record = self._pending.get(challenge_id)
             if record is None:
                 self._refuse(session_id, challenge_id, "unknown", "that confirmation is unknown, expired or already used")
+            if daily_for and record["action"] in NEVER_PRE_APPROVED:
+                self._refuse(session_id, challenge_id, "never_granted",
+                             f"{record['action']} is confirmed by a person every time and can never be authorized for the day")
             if not hmac.compare_digest(str(record["session"]), str(session_id)):
                 self._refuse(session_id, challenge_id, "session", "that confirmation belongs to a different session")
             if now - record["created"] < self.min_wait_s:
@@ -205,6 +222,12 @@ class ConfirmationStore:
                     del self._pending[challenge_id]
                 self._refuse(session_id, challenge_id, "credential", "the credential was not accepted")
             del self._pending[challenge_id]
+            if daily_for:
+                did = secrets.token_urlsafe(12)
+                self._daily[did] = {"account": daily_for, "action": record["action"], "serial": record["serial"],
+                                    "day": day_key(now)}
+                self._audit({"event": "daily_authorized", "id": did, "action": record["action"],
+                             "serial": record["serial"], "account": daily_for, "day": day_key(now)})
             auth = self._mint(record["digest"], "confirmation", now + AUTHORIZATION_USE_WINDOW_S)
             self._audit({"event": "confirmed", "id": challenge_id, "action": record["action"],
                          "serial": record["serial"], "who": _who(session_id)})
@@ -267,6 +290,33 @@ class ConfirmationStore:
                                  "uses_left": g["uses_left"], "who": _who(session_id)})
                     return auth
             return None
+
+    def authorization_from_daily(self, account: str, action_id: str, params: dict, serial: str):
+        """An authorization for this request if `account` was authorized for this action on this drive today."""
+        with self._lock:
+            now = self.clock()
+            self._prune(now)
+            for did, d in self._daily.items():
+                if (d["action"] == action_id and d["serial"] == serial and d["day"] == day_key(now)
+                        and hmac.compare_digest(d["account"], str(account))):
+                    auth = self._mint(request_digest(action_id, params, serial), "daily", now + AUTHORIZATION_USE_WINDOW_S)
+                    self._audit({"event": "daily_used", "id": did, "action": action_id, "serial": serial,
+                                 "account": account})
+                    return auth
+            return None
+
+    def list_daily(self, account: str) -> list:
+        with self._lock:
+            self._prune(self.clock())
+            return [{"id": did, "action": d["action"], "serial": d["serial"], "day": d["day"]}
+                    for did, d in self._daily.items() if hmac.compare_digest(d["account"], str(account))]
+
+    def revoke_daily(self, daily_id: str) -> bool:
+        with self._lock:
+            existed = self._daily.pop(daily_id, None) is not None
+            if existed:
+                self._audit({"event": "daily_revoked", "id": daily_id})
+            return existed
 
     def revoke(self, grant_id: str) -> bool:
         with self._lock:

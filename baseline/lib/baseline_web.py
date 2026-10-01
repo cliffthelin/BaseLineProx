@@ -172,7 +172,8 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 
 
 def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notice: str = "",
-                             notice_ok: bool | None = None, acted_on_path: str | None = None) -> bytes:
+                             notice_ok: bool | None = None, acted_on_path: str | None = None,
+                             daily_ok: bool = False) -> bytes:
     """`notice_ok`: `True` (real success), `False` (real refusal/
     failure), or `None` (no action just ran - e.g. a plain page load).
     A prior version rendered every notice with the same quiet blue
@@ -479,6 +480,7 @@ async function pollJobLog(jobId, consoleEl) {{
 
 // A drive action never runs on request: a person must confirm that exact request, each time, by typing the
 // phrase shown and entering this machine's root password or passphrase. Everything is added with textContent.
+const DAILY_OK = {"true" if daily_ok else "false"};
 function askForConfirmation(challenge) {{
   return new Promise((resolve) => {{
     const modal = document.getElementById("driveAdminModal");
@@ -516,7 +518,8 @@ function askForConfirmation(challenge) {{
       ok.disabled = true;
       const res = await fetch("/drive-admin/confirm", {{
         method: "POST", headers: {{"Content-Type": "application/json"}},
-        body: JSON.stringify({{challenge_id: challenge.id, typed: typed.value, secret: secret.value}}),
+        body: JSON.stringify({{challenge_id: challenge.id, typed: typed.value, secret: secret.value,
+          daily: DAILY_OK && daily.checked}}),
       }});
       const body = await res.json();
       secret.value = "";
@@ -528,7 +531,13 @@ function askForConfirmation(challenge) {{
       box.remove();
       resolve({{detail: "Cancelled: nothing was run."}});
     }});
-    box.append(summary, lead, typed, secret, msg, ok, cancel);
+    const daily = document.createElement("input");
+    daily.type = "checkbox";
+    daily.id = "hitlDaily";
+    const dailyLabel = document.createElement("label");
+    dailyLabel.append(daily, " Also authorize this action on this drive for the rest of today");
+    dailyLabel.hidden = !DAILY_OK;
+    box.append(summary, lead, typed, secret, dailyLabel, msg, ok, cancel);
     (modal.querySelector(".modal-body") || modal).appendChild(box);
   }});
 }}
@@ -1606,7 +1615,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             acted_on_path = qs.get("device", [None])[0]  # which drive card an action just targeted, if any
             return self._html_response(200, _with_nav(
                 render_drive_admin_page(drives=drives, volumes=volumes, actions=da.describe_actions(),
-                                         notice=notice, notice_ok=notice_ok, acted_on_path=acted_on_path), path))
+                                         notice=notice, notice_ok=notice_ok, acted_on_path=acted_on_path,
+                                         daily_ok=deps["sessions"].get(self._cookie_token(), now).role.startswith(wg.BOT_PREFIX)),
+                path))
 
         if path.startswith("/hardware"):
             runner = deps.get("runner")
@@ -1736,6 +1747,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(400, {"outcome": "refused", "detail": str(exc)})
             store, session = _hitl_store(deps), self._cookie_token()
             authorization = store.authorization_from_grant(session, action_id, prepared["params"], prepared["serial"])
+            if authorization is None:
+                me = deps["sessions"].get(session, now)
+                if me is not None and me.role.startswith(wg.BOT_PREFIX):
+                    authorization = store.authorization_from_daily(me.username, action_id, prepared["params"], prepared["serial"])
             if authorization is not None:
                 return self._start_drive_job(deps, action_id, prepared["params"], authorization, store)
             try:
@@ -1752,8 +1767,15 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             request = store.pending_request(challenge_id) if isinstance(challenge_id, str) else None
             if request is None:
                 return self._json(404, {"outcome": "refused", "detail": "that confirmation is unknown, expired or already used"})
+            daily_for = None
+            if body.get("daily") is True:
+                me = deps["sessions"].get(session, now)
+                if me is None or not me.role.startswith(wg.BOT_PREFIX):
+                    return self._json(403, {"outcome": "refused", "detail": "refused: authorizing for the day is for bot accounts"})
+                daily_for = me.username
             try:
-                authorization = store.confirm(session, challenge_id, body.get("typed", ""), body.get("secret", ""))
+                authorization = store.confirm(session, challenge_id, body.get("typed", ""), body.get("secret", ""),
+                                              daily_for=daily_for)
             except hitl.ConfirmationError as exc:
                 if exc.reason in ("phrase", "credential"):
                     self._record_attempt("confirm", now, ok=False)

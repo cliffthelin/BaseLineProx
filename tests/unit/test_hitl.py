@@ -299,3 +299,61 @@ def test_require_refuses_an_authorization_used_for_a_different_request_and_it_st
     with pytest.raises(hitl.ConfirmationRequired):
         hitl.require(auth, action, params, serial)
     assert hitl.require(auth, "repair", PARAMS, SERIAL) is None            # a wrong attempt does not burn it
+
+
+# --- a bot's once-a-day authorization (per target, per day) --------------------------
+
+def _daily_confirm(store, clock, action="repair", serial=SERIAL, secret=SECRET, account="botrepair"):
+    chal = store.challenge("sess-A", action, PARAMS, serial, "summary")
+    clock.advance(5)
+    return chal, (lambda: store.confirm("sess-A", chal["id"], chal["phrase"], secret, daily_for=account))
+
+
+def test_a_daily_confirmation_lets_the_same_account_repeat_that_action_on_that_drive_without_the_password(store, clock):
+    _, confirm = _daily_confirm(store, clock)
+    confirm()
+    for params in (PARAMS, {**PARAMS, "x": 1}):
+        auth = store.authorization_from_daily("botrepair", "repair", params, SERIAL)
+        assert auth is not None
+        hitl.require(auth, "repair", params, SERIAL, store=store)
+
+
+def test_a_new_drive_a_new_action_or_a_different_account_needs_a_new_confirmation(store, clock):
+    _, confirm = _daily_confirm(store, clock)
+    confirm()
+    assert store.authorization_from_daily("botrepair", "repair", PARAMS, "OTHERSERIAL123") is None
+    assert store.authorization_from_daily("botrepair", "mount_volume", PARAMS, SERIAL) is None
+    assert store.authorization_from_daily("botother", "repair", PARAMS, SERIAL) is None
+
+
+def test_the_next_day_needs_a_new_confirmation(store, clock):
+    _, confirm = _daily_confirm(store, clock)
+    confirm()
+    assert store.authorization_from_daily("botrepair", "repair", PARAMS, SERIAL) is not None
+    clock.advance(26 * 3600)
+    assert store.authorization_from_daily("botrepair", "repair", PARAMS, SERIAL) is None
+
+
+def test_a_wrong_password_grants_nothing_daily(store, clock):
+    _, confirm = _daily_confirm(store, clock, secret="guess")
+    with pytest.raises(hitl.ConfirmationError):
+        confirm()
+    assert store.authorization_from_daily("botrepair", "repair", PARAMS, SERIAL) is None
+
+
+def test_the_install_action_can_never_be_authorized_for_the_day_and_the_challenge_survives(store, clock):
+    chal, confirm = _daily_confirm(store, clock, action="build_self_installer", account="botinstall")
+    with pytest.raises(hitl.ConfirmationError) as exc:
+        confirm()
+    assert exc.value.reason == "never_granted"
+    assert store.authorization_from_daily("botinstall", "build_self_installer", PARAMS, SERIAL) is None
+    assert store.confirm("sess-A", chal["id"], chal["phrase"], SECRET) is not None       # a normal one-off still works
+
+
+def test_a_daily_authorization_can_be_revoked_and_listed(store, clock):
+    _, confirm = _daily_confirm(store, clock)
+    confirm()
+    (entry,) = store.list_daily("botrepair")
+    assert store.list_daily("botother") == []
+    assert store.revoke_daily(entry["id"]) is True
+    assert store.authorization_from_daily("botrepair", "repair", PARAMS, SERIAL) is None
