@@ -116,6 +116,12 @@ def handle_backup(runner: Runner, *, dest: str, targets: list, config_only: bool
     backup-success manifest per target on success - the durable proof
     `handle_restore`'s own hard gate checks before allowing any
     restore to touch USER (decision record 74)."""
+    try:
+        dest = backup_restore.check_new_backup_file(runner, dest, suffix=".tar.gz")
+        if not config_only:
+            targets = backup_restore.check_backup_sources(targets)
+    except ValueError as exc:
+        return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
     result = backup_restore.create_backup(runner, dest_path=dest, targets=targets,
                                            config_only=config_only, now=now)
     if not result.ok:
@@ -124,6 +130,10 @@ def handle_backup(runner: Runner, *, dest: str, targets: list, config_only: bool
 
 
 def handle_backup_list(runner: Runner, *, archive: str) -> RouteResult:
+    try:
+        archive = backup_restore.check_existing_backup_file(runner, archive)
+    except ValueError as exc:
+        return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
     contents = backup_restore.list_backup_contents(runner, archive)
     return RouteResult("applied", 200, {"contents": contents})
 
@@ -135,6 +145,12 @@ def handle_restore(runner: Runner, *, archive: str, dest_root: str, members: lis
     touching USER refuses outright without a fresh backup
     manifest (decision record 74) - omitting `now` refuses too,
     matching that module's own fail-closed design."""
+    try:
+        archive = backup_restore.check_existing_backup_file(runner, archive)
+        dest_root = backup_restore.check_restore_root(dest_root)
+        members = backup_restore.check_restore_members(members)
+    except ValueError as exc:
+        return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
     result = backup_restore.restore_backup(runner, archive_path=archive, dest_root=dest_root,
                                             members=members or None, now=now)
     if not result.ok:
@@ -169,6 +185,11 @@ def handle_backup_encrypt(runner: Runner, *, in_path: str, out_path: str, passwo
     an ephemeral 0600 temp file that is removed immediately after -
     the same discipline this project's key-handling code already
     established (baseline-drive-inventory's own docstring)."""
+    try:
+        in_path = backup_restore.check_existing_backup_file(runner, in_path, what="in_path")
+        out_path = backup_restore.check_new_backup_file(runner, out_path, suffix=".gpg", what="out_path")
+    except ValueError as exc:
+        return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
     fd, pw_path = tempfile.mkstemp(prefix=".baseline-cpw-")
     try:
         os.chmod(pw_path, 0o600)
@@ -186,6 +207,11 @@ def handle_backup_encrypt(runner: Runner, *, in_path: str, out_path: str, passwo
 
 
 def handle_backup_decrypt(runner: Runner, *, in_path: str, out_path: str, password: str) -> RouteResult:
+    try:
+        in_path = backup_restore.check_existing_backup_file(runner, in_path, what="in_path")
+        out_path = backup_restore.check_new_backup_file(runner, out_path, suffix=".tar.gz", what="out_path")
+    except ValueError as exc:
+        return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
     fd, pw_path = tempfile.mkstemp(prefix=".baseline-cpw-")
     try:
         os.chmod(pw_path, 0o600)
@@ -422,12 +448,13 @@ async function runUpdate(){
 
 
 def main() -> int:
-    from repair import RealRunner
-    runner = RealRunner()
-    server = make_server(runner=runner, pds_runner=pds.Runner())
-    print(f"Baseline Control Panel listening on http://{server.server_address[0]}:{server.server_address[1]}/")
-    server.serve_forever()
-    return 0
+    """The standalone control panel has NO login: anyone who can reach its port could run backups and restores
+    as root. Its routes are served by the merged, login-gated app (baseline-web), so this entry point no longer
+    starts a server."""
+    import sys
+    print("The standalone control panel server has no login and is retired. Use baseline-web, which serves the "
+          "same pages behind the login.", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

@@ -1052,6 +1052,7 @@ def test_the_action_receives_the_validated_path_not_the_raw_string():
     spec = da.ActionSpec("probe", "probe", lambda runner, device_path, **p: seen.setdefault("p", device_path) or da.ActionResult(True, "ok"),
                          requires_device=True)
     da.ACTIONS["probe"] = spec
+    da.ACTION_PARAMS["probe"] = frozenset({"device_path"})
     try:
         class Resolving(FakePdsRunner):
             def realpath(self, path):
@@ -1062,6 +1063,7 @@ def test_the_action_receives_the_validated_path_not_the_raw_string():
         assert seen["p"] == "/dev/sdb"
     finally:
         del da.ACTIONS["probe"]
+        del da.ACTION_PARAMS["probe"]
 
 
 def test_a_device_action_with_no_device_path_is_refused():
@@ -1074,3 +1076,108 @@ def test_a_device_action_with_no_device_path_is_refused():
 def test_actions_that_need_no_device_are_unaffected():
     result = da.perform_action(FakeRunner(), "update_selected", {"selected": []}, pds_runner=FakePdsRunner())
     assert result.ok is not None
+
+
+# -- request parameters are an allowlist, and each one is validated -------------
+# The page posts {action_id, params}; params used to be splatted straight into privileged functions. A volume
+# name like "../../sda1" built /dev/<vg>/../../sda1 and so reached a drive outside the allowlist.
+
+ALLOWED_DEV = {"device_path": "/dev/sdb"}
+
+
+def _runner_with_a_volume_group():
+    """A drive that really has a volume group and volumes, so any unsafe value would reach vgchange/mount/umount
+    unless it is refused first."""
+    return FakeRunner(command_responses=[(lambda a: a[:3] == ["sudo", "-n", "pvs"], FakeProc(0, "  /dev/sdb3 pve\n", ""))],
+                      files={"/dev/pve/root": "", "/dev/pve/data-vol": "", "/dev/pve/x": ""})
+
+
+def _act(action_id, **params):
+    runner = _runner_with_a_volume_group()
+    result = da.perform_action(runner, action_id, {**ALLOWED_DEV, **params},
+                               pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
+    return result, runner
+
+
+@pytest.mark.parametrize("action_id,extra", [
+    ("repair", {"lv_name": "root"}), ("repair", {"anything": "x"}), ("mount_volume", {"selected": ["A"]}),
+    ("unmount_volume", {"expected_serial": "MD89N41071210AP4E"}), ("build_self_installer", {"lv_name": "root"}),
+    ("build_self_installer", {"pds_runner": "x"}), ("build_self_installer", {"on_progress": "x"}),
+])
+def test_unknown_parameters_are_refused_and_nothing_runs(action_id, extra):
+    result, runner = _act(action_id, **extra)
+    assert result.ok is False and "parameter" in result.detail.lower()
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("bad", ["../../sda1", "../sda1", "a/b", "root --force", "-x", "", "r" * 65, "ro\not", "$(id)", "a;b"])
+@pytest.mark.parametrize("action_id", ["mount_volume", "unmount_volume"])
+def test_a_volume_name_that_could_leave_the_volume_group_is_refused(action_id, bad):
+    result, runner = _act(action_id, lv_name=bad)
+    assert result.ok is False
+    assert not any(c[:1] in (["mount"], ["umount"], ["vgchange"]) for c in runner.calls)
+
+
+@pytest.mark.parametrize("bad", ["/", "/etc", "/mnt", "/mnt/", "/mnt/../etc", "mnt/x", "/mnt/a b", "/mnt/a/../../etc",
+                                 "/mnt/BASELINE", "/mnt/USER_ADMIN", "/mnt/x\nmore", "/mnt/a/b/c/d/e", "/home/x", "/mnt/-x"])
+@pytest.mark.parametrize("action_id", ["mount_volume", "unmount_volume"])
+def test_a_mountpoint_outside_a_safe_place_under_mnt_is_refused(action_id, bad):
+    result, runner = _act(action_id, mountpoint=bad)
+    assert result.ok is False
+    assert not any(c[:1] in (["mount"], ["umount"], ["vgchange"]) for c in runner.calls)
+
+
+def test_a_valid_volume_name_and_mountpoint_still_work():
+    runner = FakeRunner(command_responses=[(lambda a: a[:3] == ["sudo", "-n", "pvs"], FakeProc(0, "  /dev/sdb3 pve\n", ""))],
+                        files={"/dev/pve/data-vol": ""})
+    result = da.perform_action(runner, "mount_volume",
+                               {"device_path": "/dev/sdb", "lv_name": "data-vol", "mountpoint": "/mnt/pve-inspect"},
+                               pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
+    assert result.ok is True and any(c[0] == "mount" for c in runner.calls)
+
+
+def test_the_sink_functions_check_their_own_inputs_too():
+    runner = FakeRunner(command_responses=[(lambda a: a[:3] == ["sudo", "-n", "pvs"], FakeProc(0, "  /dev/sdd3 pve\n", ""))],
+                        files={"/dev/pve/root": ""})
+    assert da.mount_logical_volume(runner, device_path="/dev/sdd", lv_name="../../sda1").ok is False
+    assert da.mount_logical_volume(runner, device_path="/dev/sdd", mountpoint="/etc").ok is False
+    assert da.unmount_logical_volume(runner, device_path="/dev/sdd", lv_name="../x").ok is False
+    assert not any(c[:1] in (["mount"], ["umount"], ["vgchange"]) for c in runner.calls)
+
+
+@pytest.mark.parametrize("params", [
+    {"expected_serial": "SomeOtherDrive-1"},                 # a drive outside the allowlist
+    {"proxmox_source_iso": "/etc/shadow"}, {"proxmox_source_iso": "relative.iso"}, {"cert_path": "/mnt/INSTALLER_CACHE/../../etc/passwd"},
+    {"key_path": "/root/.ssh/id_rsa"}, {"server_host": "evil host; rm -rf /"}, {"server_host": "a\nb"},
+    {"target_mac": "not-a-mac"}, {"target_dmi_product": 'x"; evil'}, {"target_dmi_product": "a" * 100},
+])
+def test_installer_overrides_are_validated_before_anything_runs(params):
+    result, runner = _act("build_self_installer", **params)
+    assert result.ok is False and runner.calls == []
+
+
+def test_valid_installer_overrides_are_accepted_by_the_validator():
+    ok = {"expected_serial": "MD89N41071210AP4E", "proxmox_source_iso": "/mnt/INSTALLER_CACHE/isos/proxmox.iso",
+          "server_host": "10.0.2.2", "cert_path": "/etc/baseline/cert.pem", "key_path": "/var/lib/baseline/key.pem",
+          "target_mac": "aa:bb:cc:dd:ee:ff", "target_dmi_product": "ASUS ROG STRIX B650E-F"}
+    assert da.validate_action_params("build_self_installer", {"device_path": "/dev/sdb", **ok}) == {"device_path": "/dev/sdb", **ok}
+
+
+def test_update_selected_only_takes_a_list_of_volume_labels():
+    assert da.validate_action_params("update_selected", {"selected": ["INSTALLER_CACHE", "USER_ADMIN"]})
+    for bad in ({"selected": "INSTALLER_CACHE"}, {"selected": ["../x"]}, {"selected": [1]}, {"selected": ["A"] * 50}):
+        with pytest.raises(ValueError):
+            da.validate_action_params("update_selected", bad)
+
+
+def test_an_unsafe_value_would_have_reached_mount_if_it_were_not_refused():
+    """Guards the guard: with a real volume group present, a SAFE request does reach mount, so the refusals above
+    are the validators working and not just 'no volume group'."""
+    result, runner = _act("mount_volume", lv_name="root", mountpoint="/mnt/safe-name")
+    assert result.ok is True and any(c[0] == "mount" for c in runner.calls)
+
+
+@pytest.mark.parametrize("value", ["SomeOtherDrive-1", "ZCT2WCM2", "", "a"])
+def test_expected_serial_must_be_one_of_the_allowed_drives(value):
+    with pytest.raises(ValueError):
+        da.validate_action_params("build_self_installer", {"device_path": "/dev/sdb", "expected_serial": value})

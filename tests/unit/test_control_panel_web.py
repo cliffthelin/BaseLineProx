@@ -72,23 +72,23 @@ def test_handle_differences_computes_the_real_diff_when_config_exists():
 def test_handle_backup_runs_the_real_tar_backup():
     runner = FakeRunner()
     result = cpw.handle_backup(runner, dest="/mnt/INSTALLER_CACHE/backups/x.tar.gz",
-                                targets=["/mnt/USER"], config_only=False)
+                                targets=["/mnt/USER_PERSONAL"], config_only=False)
     assert result.outcome == "applied"
     assert runner.calls[0][:2] == ["tar", "-czf"]
 
 
 def test_handle_backup_refused_with_no_targets():
     runner = FakeRunner()
-    result = cpw.handle_backup(runner, dest="/tmp/x.tar.gz", targets=[], config_only=False)
+    result = cpw.handle_backup(runner, dest="/mnt/INSTALLER_CACHE/backups/x.tar.gz", targets=[], config_only=False)
     assert result.outcome == "refused"
     assert runner.calls == []
 
 
 def test_handle_backup_list_returns_the_real_tar_contents():
-    runner = FakeRunner(command_responses=[
+    runner = FakeRunner(files={"/mnt/INSTALLER_CACHE/backups/x.tar.gz": ""}, command_responses=[
         (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(0, "USER/\nUSER/doc.txt\n", "")),
     ])
-    result = cpw.handle_backup_list(runner, archive="/tmp/x.tar.gz")
+    result = cpw.handle_backup_list(runner, archive="/mnt/INSTALLER_CACHE/backups/x.tar.gz")
     assert result.outcome == "applied"
     assert result.body["contents"] == ["USER/", "USER/doc.txt"]
 
@@ -99,9 +99,9 @@ def test_handle_restore_runs_the_real_tar_extract():
     backup manifest to pass the hard gate, same as backup_restore's
     own tests."""
     import backup_restore
-    runner = FakeRunner()
+    runner = FakeRunner(files={"/mnt/INSTALLER_CACHE/backups/x.tar.gz": ""})
     backup_restore.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
-    result = cpw.handle_restore(runner, archive="/tmp/x.tar.gz", dest_root="/mnt", members=[],
+    result = cpw.handle_restore(runner, archive="/mnt/INSTALLER_CACHE/backups/x.tar.gz", dest_root="/mnt", members=[],
                                  now=1700000000.0 + 60)
     assert result.outcome == "applied"
     assert any(c[:2] == ["tar", "-xzf"] for c in runner.calls)

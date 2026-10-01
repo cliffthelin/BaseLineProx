@@ -35,6 +35,8 @@ bypass an encryption or password someone set up.
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 
 try:
@@ -226,3 +228,83 @@ def restore_backup(runner: Runner, *, archive_path: str, dest_root: str = "/", m
     if proc.returncode != 0:
         return CommandResult(False, f"tar extract failed: {proc.stderr.strip()}")
     return CommandResult(True, f"restored {archive_path} into {dest_root}")
+
+
+# ---------------------------------------------------------------------------
+# Request-boundary checks for the backup / restore / encrypt routes. A request used to name any destination
+# and any source paths, and tar / gpg ran as root: a logged-in session could overwrite /etc/passwd with an
+# archive or archive /root/.ssh somewhere readable. Now: a backup is written only as a NEW file in a known
+# backup folder, reads only Baseline's own volumes and config, and a restore goes only to /mnt or a Baseline
+# volume. Each check raises ValueError; callers turn that into a refusal before anything runs.
+# ---------------------------------------------------------------------------
+
+BACKUP_DIRS = ("/mnt/INSTALLER_CACHE/backups", "/mnt/INSTALLER_CACHE/encrypted_backups")
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _clean_abs(path, what: str) -> str:
+    if (not isinstance(path, str) or not path or "\x00" in path or "\n" in path or "\r" in path
+            or not os.path.isabs(path) or os.path.normpath(path) != path):
+        raise ValueError(f"{what} must be a clean absolute path")
+    return path
+
+
+def _in_backup_dir(path: str, what: str) -> None:
+    parent, name = os.path.split(path)
+    if parent not in BACKUP_DIRS or not _NAME_RE.match(name):
+        raise ValueError(f"{what} must be a plain file name directly inside one of: {', '.join(BACKUP_DIRS)}")
+
+
+def check_new_backup_file(runner, path, *, suffix: str, what: str = "destination") -> str:
+    """A file Baseline may create: inside a backup folder, right extension, and it must not already exist."""
+    path = _clean_abs(path, what)
+    _in_backup_dir(path, what)
+    name = os.path.basename(path)
+    if not name.endswith(suffix) or name == suffix:
+        raise ValueError(f"{what} must end in {suffix}")
+    if runner.path_exists(path):
+        raise ValueError(f"{path} already exists; a backup never overwrites an existing file")
+    return path
+
+
+def check_existing_backup_file(runner, path, *, what: str = "archive") -> str:
+    path = _clean_abs(path, what)
+    _in_backup_dir(path, what)
+    if not runner.path_exists(path):
+        raise ValueError(f"{path} was not found")
+    return path
+
+
+def _baseline_roots() -> list:
+    import drive_installer
+    return [mp for *_rest, mp in drive_installer.BASELINE_VOLUMES] + list(DEFAULT_CONFIG_PATHS) + ["/etc/baseline"]
+
+
+def check_backup_sources(targets) -> list:
+    if not isinstance(targets, list) or not targets or not all(isinstance(x, str) for x in targets):
+        raise ValueError("targets must be a non-empty list of paths")
+    roots = _baseline_roots()
+    for target in targets:
+        _clean_abs(target, "a backup source")
+        if not any(target == root or target.startswith(root + "/") for root in roots):
+            raise ValueError(f"{target} is not one of Baseline's own volumes or configuration")
+    return list(targets)
+
+
+def check_restore_root(path) -> str:
+    import drive_installer
+    path = _clean_abs(path, "restore destination")
+    if path != "/mnt" and path not in [mp for *_rest, mp in drive_installer.BASELINE_VOLUMES]:
+        raise ValueError("a restore can only go to /mnt or one of Baseline's own volumes")
+    return path
+
+
+def check_restore_members(members) -> list:
+    if members in (None, []):
+        return []
+    if not isinstance(members, list) or not all(isinstance(m, str) and m for m in members):
+        raise ValueError("members must be a list of archive entry names")
+    for m in members:
+        if m.startswith("/") or os.path.normpath(m) != m or ".." in m.split("/") or "\n" in m or m.startswith("-"):
+            raise ValueError(f"unsafe archive entry name {m!r}")
+    return list(members)

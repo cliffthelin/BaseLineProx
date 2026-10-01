@@ -42,6 +42,9 @@ drifting copy of "what this button actually does."
 """
 from __future__ import annotations
 
+import ipaddress
+import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -783,6 +786,12 @@ def mount_logical_volume(runner, *, device_path, lv_name="root", mountpoint=None
     remembered and re-typed by hand every single time. Read-write by
     design (direct instruction) - genuinely mounts, not a dry run."""
     progress = on_progress or (lambda line: None)
+    try:
+        _check_lv_name(lv_name)
+        if mountpoint is not None:
+            _check_mountpoint(mountpoint)
+    except ValueError as exc:
+        return ActionResult(False, f"refused: invalid parameter: {exc}")
     vg_name = find_vg_for_device(runner, device_path)
     if vg_name is None:
         return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to mount")
@@ -810,6 +819,12 @@ def unmount_logical_volume(runner, *, device_path, lv_name="root", mountpoint=No
     later. Refuses cleanly (never a fake success) if the target isn't
     actually mounted."""
     progress = on_progress or (lambda line: None)
+    try:
+        _check_lv_name(lv_name)
+        if mountpoint is not None:
+            _check_mountpoint(mountpoint)
+    except ValueError as exc:
+        return ActionResult(False, f"refused: invalid parameter: {exc}")
     vg_name = find_vg_for_device(runner, device_path)
     if vg_name is None:
         return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to unmount")
@@ -1035,6 +1050,124 @@ def describe_actions() -> list:
               "requires_device": spec.requires_device} for spec in ACTIONS.values()]
 
 
+# ---------------------------------------------------------------------------
+# Request parameters. The page posts {action_id, params}; these used to be splatted straight into
+# privileged functions, so a volume name like "../../sda1" built /dev/<vg>/../../sda1 and reached a drive
+# outside the allowlist, and a mountpoint could be "/etc". Every action now has an allowlist of parameter
+# names and each value is validated. Anything unknown, or malformed, is refused before anything runs.
+# ---------------------------------------------------------------------------
+
+_LV_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_+.-]{0,63}$")
+_VOLUME_LABEL_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")
+_MOUNT_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_PATH_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._+-]{1,128}$")
+_HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
+_MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+_DMI_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
+_SERIAL_RE = re.compile(r"^[A-Za-z0-9._-]{4,40}$")
+_SAFE_PATH_ROOTS = ("/mnt/INSTALLER_CACHE/", "/etc/baseline/", "/var/lib/baseline/")
+_MAX_SELECTED = 20
+
+ACTION_PARAMS = {
+    "build_self_installer": frozenset({"device_path", "expected_serial", "proxmox_source_iso", "server_host",
+                                       "cert_path", "key_path", "target_mac", "target_dmi_product"}),
+    "repair": frozenset({"device_path"}),
+    "mount_volume": frozenset({"device_path", "lv_name", "mountpoint"}),
+    "unmount_volume": frozenset({"device_path", "lv_name", "mountpoint"}),
+    "update_selected": frozenset({"selected", "device_path"}),     # the page sends device_path for every action
+}
+
+
+def _check_str(name: str, value) -> str:
+    if not isinstance(value, str) or not value or "\x00" in value or "\n" in value or "\r" in value:
+        raise ValueError(f"{name} must be a single-line, non-empty string")
+    return value
+
+
+def _check_lv_name(value) -> str:
+    value = _check_str("lv_name", value)
+    if not _LV_NAME_RE.match(value):
+        raise ValueError("lv_name must be a plain volume name (letters, digits, _ + . -), at most 64 characters, "
+                         "with no slash or leading dash")
+    return value
+
+
+def _check_mountpoint(value) -> str:
+    value = _check_str("mountpoint", value)
+    if os.path.normpath(value) != value or not value.startswith("/mnt/"):
+        raise ValueError("mountpoint must be a clean absolute path under /mnt/")
+    parts = value.split("/")[2:]
+    if not 1 <= len(parts) <= 3 or not all(_MOUNT_COMPONENT_RE.match(c) for c in parts):
+        raise ValueError("mountpoint must be one to three plain folder names under /mnt/")
+    known = {mp for *_rest, mp in drive_installer.BASELINE_VOLUMES} | {"/mnt/10TB"}
+    if value in known:
+        raise ValueError("mountpoint must not be one of Baseline's own volume mountpoints")
+    return value
+
+
+def _check_safe_path(name: str, value) -> str:
+    value = _check_str(name, value)
+    if (len(value) > 4096 or not os.path.isabs(value) or os.path.normpath(value) != value
+            or not value.startswith(_SAFE_PATH_ROOTS)
+            or not all(_PATH_COMPONENT_RE.match(c) for c in value.split("/")[1:])):
+        raise ValueError(f"{name} must be a clean absolute path inside INSTALLER_CACHE or /etc/baseline or /var/lib/baseline")
+    return value
+
+
+def _check_server_host(value) -> str:
+    value = _check_str("server_host", value)
+    try:
+        ipaddress.ip_address(value)
+        return value
+    except ValueError:
+        pass
+    if not _HOSTNAME_RE.match(value):
+        raise ValueError("server_host must be an IP address or a plain host name")
+    return value
+
+
+def _check_expected_serial(value) -> str:
+    value = _check_str("expected_serial", value)
+    if not _SERIAL_RE.match(value) or value not in ALLOWED_TARGET_SERIALS:
+        raise ValueError("expected_serial is not one of the drives Baseline is allowed to act on")
+    return value
+
+
+def _check_selected(value) -> list:
+    if (not isinstance(value, list) or len(value) > _MAX_SELECTED
+            or not all(isinstance(v, str) and _VOLUME_LABEL_RE.match(v) for v in value)):
+        raise ValueError("selected must be a short list of volume labels")
+    return list(value)
+
+
+_PARAM_CHECKS = {
+    "device_path": lambda v: _check_str("device_path", v),
+    "lv_name": _check_lv_name,
+    "mountpoint": _check_mountpoint,
+    "selected": _check_selected,
+    "expected_serial": _check_expected_serial,
+    "proxmox_source_iso": lambda v: _check_safe_path("proxmox_source_iso", v),
+    "cert_path": lambda v: _check_safe_path("cert_path", v),
+    "key_path": lambda v: _check_safe_path("key_path", v),
+    "server_host": _check_server_host,
+    "target_mac": lambda v: v if isinstance(v, str) and _MAC_RE.match(v) else (_ for _ in ()).throw(
+        ValueError("target_mac must look like aa:bb:cc:dd:ee:ff")),
+    "target_dmi_product": lambda v: v if isinstance(v, str) and _DMI_RE.match(v) else (_ for _ in ()).throw(
+        ValueError("target_dmi_product must be plain text up to 64 characters")),
+}
+
+
+def validate_action_params(action_id: str, params: dict) -> dict:
+    """Returns a cleaned copy of `params`, or raises ValueError. Unknown parameter names are refused outright."""
+    allowed = ACTION_PARAMS.get(action_id)
+    if allowed is None:
+        raise ValueError(f"unknown action {action_id!r}")
+    unknown = sorted(set(params) - allowed)
+    if unknown:
+        raise ValueError(f"unknown parameter(s) for {action_id}: {', '.join(unknown)}")
+    return {name: _PARAM_CHECKS[name](value) for name, value in params.items()}
+
+
 def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None, pds_runner=None) -> ActionResult:
     """`on_progress` (direct instruction, 2026-09-29 - "add a console
     log of what is running and doing"): threaded through as a real
@@ -1046,7 +1179,10 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
     spec = ACTIONS.get(action_id)
     if spec is None:
         return ActionResult(False, f"unknown action {action_id!r}")
-    call_params = dict(params)
+    try:
+        call_params = validate_action_params(action_id, dict(params))
+    except ValueError as exc:
+        return ActionResult(False, f"refused: invalid parameter: {exc}")
     if spec.requires_device and action_id != "update_selected":
         # The one gate every drive action passes through. Nothing runs against a drive
         # unless it is one of the allowed SK hynix drives, and the action is handed the
