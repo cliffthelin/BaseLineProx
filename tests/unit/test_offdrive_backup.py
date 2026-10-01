@@ -223,10 +223,10 @@ def test_the_manifest_is_written_last_so_an_unfinished_set_never_looks_complete(
     during = []
     real = ob._stream_tar
 
-    def spy(argv, out_file, timeout=None):
+    def spy(argv, out_file, timeout=None, **kw):
         set_dir = Path(out_file.name).parent
         during.append((set_dir / ob.MANIFEST_NAME).exists())
-        return real(argv, out_file, timeout)
+        return real(argv, out_file, timeout, **kw)
 
     monkeypatch.setattr(ob, "_stream_tar", spy)
     s = _make(d, sources)
@@ -249,7 +249,7 @@ def test_a_failed_backup_leaves_an_incomplete_marked_set_and_touches_nothing_els
     before = _snapshot(dest_root)
     first_files = {p.name: p.read_bytes() for p in first.path.iterdir()}
 
-    def failing_stream(argv, out_file, timeout=None):
+    def failing_stream(argv, out_file, timeout=None, **kw):
         out_file.write(b"half an archive")
         raise ob.BackupError("tar failed: No space left on device")
 
@@ -269,7 +269,7 @@ def test_a_failed_backup_leaves_an_incomplete_marked_set_and_touches_nothing_els
 def test_a_later_backup_works_after_a_failed_one_and_never_reuses_its_folder(dest_root, sources, monkeypatch):
     d = _dest(dest_root)
     real = ob._stream_tar
-    monkeypatch.setattr(ob, "_stream_tar", lambda argv, out_file, timeout=None: (_ for _ in ()).throw(ob.BackupError("boom")))
+    monkeypatch.setattr(ob, "_stream_tar", lambda argv, out_file, timeout=None, **kw: (_ for _ in ()).throw(ob.BackupError("boom")))
     with pytest.raises(ob.BackupError):
         _make(d, sources)
     monkeypatch.setattr(ob, "_stream_tar", real)
@@ -409,7 +409,7 @@ def test_the_job_creates_nothing_when_the_destination_is_refused(dest_root, sour
 
 def test_freshness_is_not_recorded_when_the_backup_fails(dest_root, sources, monkeypatch):
     monkeypatch.setattr(ob, "_free_and_total", lambda path: (2 * 2**40, 9 * 2**40))
-    monkeypatch.setattr(ob, "_stream_tar", lambda argv, out_file, timeout=None: (_ for _ in ()).throw(ob.BackupError("boom")))
+    monkeypatch.setattr(ob, "_stream_tar", lambda argv, out_file, timeout=None, **kw: (_ for _ in ()).throw(ob.BackupError("boom")))
     recorded = []
     with pytest.raises(ob.BackupError):
         ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root), sources=sources, now=1.0,
@@ -449,3 +449,103 @@ def test_a_dry_run_does_not_record_freshness(dest_root, sources, monkeypatch):
                   allowed_serials=ALLOWED, min_interval_hours=0, dry_run=True,
                   record_success=lambda t, n: recorded.append(t))
     assert recorded == []
+
+
+
+# --- empty space is never backed up; the backup can never exceed the data -----
+
+def _make_sparse(path, apparent=2 * 2**30, data=b"real data"):
+    with open(path, "wb") as fh:
+        fh.write(data)
+        fh.truncate(apparent)
+
+
+def _du_allocated(path):
+    return int(subprocess.run(["du", "-s", "--block-size=1", "--", str(path)], capture_output=True, text=True).stdout.split()[0])
+
+
+def test_the_size_estimate_counts_data_actually_stored_not_apparent_size(tmp_path):
+    vol = tmp_path / "vol"
+    vol.mkdir()
+    _make_sparse(vol / "vm-disk.raw")                       # looks like 2 GiB, holds a few KB
+    est = ob.estimate_bytes({"v": [str(vol)]}, run=ob._default_run)
+    assert est < 10 * 2**20, f"estimated {est} bytes for a sparse file of almost no real data"
+
+
+def test_a_sparse_file_is_archived_without_its_empty_holes_and_restores_sparse(dest_root, tmp_path):
+    import tarfile
+    vol = tmp_path / "vol"
+    vol.mkdir()
+    _make_sparse(vol / "vm-disk.raw")
+    s = _make(_dest(dest_root), {"vol": [str(vol)]})
+    archive = s.path / "vol.tar.gz"
+    assert archive.stat().st_size < 1 * 2**20               # not 2 GiB of zeros, even compressed
+    out = tmp_path / "restored"
+    out.mkdir()
+    with tarfile.open(archive) as tf:
+        tf.extractall(out, filter="data")
+    restored = out / str(vol).lstrip("/") / "vm-disk.raw"
+    assert restored.stat().st_size == 2 * 2**30             # same apparent size
+    assert restored.stat().st_blocks * 512 < 10 * 2**20     # and still sparse: no space invented
+    with open(restored, "rb") as fh:
+        assert fh.read(9) == b"real data"
+
+
+def test_tar_is_asked_for_sparse_handling_and_to_stay_on_one_filesystem(dest_root, sources, monkeypatch):
+    seen = []
+    real = ob._stream_tar
+    monkeypatch.setattr(ob, "_stream_tar", lambda argv, out_file, timeout=None, **kw: seen.append(list(argv)) or real(argv, out_file, timeout, **kw))
+    _make(_dest(dest_root), sources)
+    argv = seen[0]
+    assert "--sparse" in argv and "--one-file-system" in argv and "-czf" in argv
+
+
+def test_the_archive_is_compressed(dest_root, tmp_path):
+    vol = tmp_path / "vol"
+    vol.mkdir()
+    (vol / "compressible.txt").write_bytes(b"baseline " * 2_000_000)      # 18 MB of repetitive real data
+    s = _make(_dest(dest_root), {"vol": [str(vol)]})
+    assert (s.path / "vol.tar.gz").stat().st_size < 1 * 2**20
+
+
+def test_a_backup_can_never_grow_past_the_data_it_is_backing_up(dest_root, tmp_path):
+    vol = tmp_path / "vol"
+    vol.mkdir()
+    (vol / "random.bin").write_bytes(os.urandom(2 * 2**20))              # incompressible: archive is ~2 MiB
+    d = _dest(dest_root)
+    with pytest.raises(ob.BackupError, match="larger than the data"):
+        ob.create_backup_set(d, {"vol": [str(vol)]}, now=1_800_000_000.0, budgets={"vol": 1000})
+    (failed,) = list(d.backup_dir.iterdir())
+    assert not (failed / ob.MANIFEST_NAME).exists()
+    assert (failed / "vol.tar.gz").stat().st_size <= 1000 + 2 * ob._CHUNK    # stopped early, did not run on
+
+
+def test_a_normal_backup_stays_within_its_budget(dest_root, tmp_path):
+    vol = tmp_path / "vol"
+    vol.mkdir()
+    (vol / "random.bin").write_bytes(os.urandom(2 * 2**20))
+    s = _make(_dest(dest_root), {"vol": [str(vol)]})
+    assert (s.path / "vol.tar.gz").stat().st_size <= _du_allocated(vol) * 1.02 + 64 * 2**20
+
+
+def test_the_job_budgets_each_archive_from_the_real_data_and_reports_it(dest_root, tmp_path, monkeypatch):
+    vol = tmp_path / "vol"
+    vol.mkdir()
+    (vol / "random.bin").write_bytes(os.urandom(1 * 2**20))
+    monkeypatch.setattr(ob, "_free_and_total", lambda path: (2 * 2**40, 9 * 2**40))
+    seen = {}
+    real = ob.create_backup_set
+    monkeypatch.setattr(ob, "create_backup_set", lambda dest, sources, now, budgets=None: seen.update(b=budgets) or real(dest, sources, now=now, budgets=budgets))
+    ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root), sources={"vol": [str(vol)]}, now=1_800_000_000.0,
+                  allowed_serials=ALLOWED, min_interval_hours=0)
+    assert set(seen["b"]) == {"vol"} and 1 * 2**20 <= seen["b"]["vol"] < 200 * 2**20
+
+
+def test_the_dry_run_reports_the_real_data_size_and_that_empty_space_is_not_copied(dest_root, tmp_path, monkeypatch):
+    vol = tmp_path / "vol"
+    vol.mkdir()
+    _make_sparse(vol / "vm-disk.raw")
+    monkeypatch.setattr(ob, "_free_and_total", lambda path: (2 * 2**40, 9 * 2**40))
+    r = ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root), sources={"vol": [str(vol)]}, now=1.0,
+                      allowed_serials=ALLOWED, min_interval_hours=0, dry_run=True)
+    assert "empty space is never copied" in r.detail and r.bytes_written < 10 * 2**20

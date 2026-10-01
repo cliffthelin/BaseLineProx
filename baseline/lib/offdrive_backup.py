@@ -170,7 +170,8 @@ def estimate_bytes(sources: dict, *, run) -> int:
     total = 0
     for paths in sources.values():
         for path in paths:
-            proc = run(["du", "-sb", "--", path], timeout=600)
+            # Bytes actually stored, not apparent size: a sparse 100 GB disk image holding 3 GB counts as 3 GB.
+            proc = run(["du", "-s", "--block-size=1", "-x", "--", path], timeout=600)
             if proc.returncode not in (0, 1):
                 raise BackupError(f"could not size source {path}: {proc.stderr.strip()[:200]}")
             first = (proc.stdout or "").split()
@@ -225,15 +226,23 @@ def _sha256_file(path) -> str:
     return h.hexdigest()
 
 
-def _stream_tar(argv, out_file, timeout=None) -> tuple:
+def _stream_tar(argv, out_file, timeout=None, max_bytes=None) -> tuple:
     """Run tar writing to stdout and stream it into the new file. Returns (bytes, sha256, rc, stderr tail).
-    Exit status 1 ("a file changed while being read") is normal on live volumes and is recorded, not fatal."""
+    Exit status 1 ("a file changed while being read") is normal on live volumes and is recorded, not fatal.
+    `max_bytes` is a hard cap: the archive can never be larger than the data it is backing up (compression
+    only shrinks it), so growing past that means something is being read that is not data (for example empty
+    space). Stop at once instead of running on."""
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     h, size = hashlib.sha256(), 0
     for chunk in iter(lambda: proc.stdout.read(_CHUNK), b""):
         out_file.write(chunk)
         h.update(chunk)
         size += len(chunk)
+        if max_bytes is not None and size > max_bytes:
+            proc.kill()
+            proc.wait()
+            raise BackupError(f"the backup is growing larger than the data it is backing up ({size} bytes against "
+                              f"a limit of {max_bytes}); stopping")
     stderr = proc.stderr.read().decode(errors="replace")
     rc = proc.wait()
     if rc not in (0, 1):
@@ -306,8 +315,9 @@ def _new_set_dir(backup_dir: Path, now: float) -> Path:
     raise BackupError("could not find a free name for the backup set")
 
 
-def create_backup_set(dest: Destination, sources: dict, *, now: float) -> BackupSet:
-    """Add one new, verified backup set. `sources` maps an archive label to a list of absolute paths."""
+def create_backup_set(dest: Destination, sources: dict, *, now: float, budgets: dict | None = None) -> BackupSet:
+    """Add one new, verified backup set. `sources` maps an archive label to a list of absolute paths.
+    `budgets` optionally maps a label to the most bytes its archive may take (see `_stream_tar`)."""
     for label, paths in sources.items():
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", label):
             raise BackupError(f"unsafe archive label {label!r}")
@@ -319,10 +329,13 @@ def create_backup_set(dest: Destination, sources: dict, *, now: float) -> Backup
     entries = []
     for label, paths in sources.items():
         archive = set_dir / f"{label}.tar.gz"
-        argv = ["tar", "-czf", "-", "--numeric-owner", "-C", "/"] + [p.lstrip("/") for p in paths]
+        # Files, not blocks: free space is never read. --sparse skips the holes in sparse files (VM disk images),
+        # --one-file-system never wanders into another mounted drive, and -z compresses.
+        argv = ["tar", "-czf", "-", "--sparse", "--one-file-system", "--numeric-owner", "-C", "/"] \
+            + [p.lstrip("/") for p in paths]
         out = _create_new_file(archive)
         try:
-            size, streamed_sha, rc, stderr = _stream_tar(argv, out)
+            size, streamed_sha, rc, stderr = _stream_tar(argv, out, max_bytes=(budgets or {}).get(label))
             out.fsync()
         finally:
             out.close()
@@ -388,13 +401,15 @@ def run_backup(*, destination: str, run, sources: dict, now: float, allowed_seri
     dest = resolve_destination(destination, run=run, allowed_serials=allowed_serials, boot_serial=boot_serial)
     if not force and not is_due(dest, now=now, min_interval_hours=min_interval_hours):
         return BackupResult(None, False, True, 0, f"skipped: a backup newer than {min_interval_hours:g}h already exists")
-    needed = estimate_bytes(sources, run=run)
+    estimates = {label: estimate_bytes({label: paths}, run=run) for label, paths in sources.items()}
+    needed = sum(estimates.values())
     check_space(dest, needed_bytes=needed)
     if dry_run:
         return BackupResult(None, False, False, needed,
-                            f"dry run: would add a backup set of about {needed / 2**30:.1f} GiB to {dest.backup_dir}; "
-                            "nothing was written")
-    made = create_backup_set(dest, sources, now=now)
+                            f"dry run: would add a backup set of at most {needed / 2**30:.1f} GiB of data, compressed, "
+                            f"to {dest.backup_dir}; empty space is never copied; nothing was written")
+    budgets = {label: int(est * 1.02) + 64 * 2**20 for label, est in estimates.items()}
+    made = create_backup_set(dest, sources, now=now, budgets=budgets)
     if record_success is not None:
         record_success([p for paths in sources.values() for p in paths], now)
     written = sum(a["bytes"] for a in made.manifest["archives"])

@@ -69,6 +69,13 @@ deleting, renaming or overwriting call is ever added.
 - **A set** is a new `baseline-<UTC time>` folder. `INCOMPLETE.txt` is written first and `MANIFEST.json` last,
   with a SHA-256 for every archive; the set is read back and verified before it counts. A set with no manifest
   is incomplete. It is safe for **you** to delete by hand; Baseline never will.
+- **Size: only real data, compressed, and hard-capped.** The backup copies *files*, not blocks, so empty
+  space is never read or stored: if the drives hold 30 GB of data, the backup cannot exceed about 30 GB, and
+  it is gzip-compressed on top of that. Sparse files (a VM disk image that looks like 100 GB but holds 3 GB)
+  are archived without their holes (`tar --sparse`) and restore sparse. The size is estimated from bytes
+  actually stored, not apparent size, and `--one-file-system` stops it wandering into any other mounted
+  drive. Each archive has a hard cap of its estimated data plus 2% and 64 MiB; if it grows past that the run
+  stops at once (compression can only shrink data, so growth means something that is not data is being read).
 - **Space and cadence:** nothing can be deleted to make room, so a backup is refused if it would not fit with
   10% headroom and leave at least 3% free, and a minimum interval (default one week) stops full backups piling
   up. Clearing old sets is your decision.
