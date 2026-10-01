@@ -38,6 +38,7 @@ KIND_ISO = "OS image"
 KIND_PACKAGE = "apt package"
 KIND_FIRMWARE = "driver / firmware"
 KIND_SCRIPT = "VM / LXC script"
+KIND_IMAGE = "container image"
 
 # Subdirectory on the volume per kind. A self-replicating build reads
 # these by name, so they are part of the on-disk contract.
@@ -46,7 +47,16 @@ SUBDIR = {
     KIND_PACKAGE: "packages",
     KIND_FIRMWARE: "firmware",
     KIND_SCRIPT: "vm-scripts",
+    KIND_IMAGE: "images",
 }
+
+# Provenance states, weakest to strongest. Kept as distinct words because
+# collapsing them is how a page ends up claiming more than was checked:
+# a digest read from a registry proves which bytes are meant, not that a
+# trusted party signed them.
+PROVENANCE_NONE = "no pinned provenance"
+PROVENANCE_OBSERVED = "digest pinned, signature not yet verified"
+PROVENANCE_VERIFIED = "digest pinned, signature verified"
 
 
 @dataclass(frozen=True)
@@ -59,10 +69,30 @@ class CatalogEntry:
     config_section: str  # settings section on User Persistence that configures it
     filename: str = ""   # expected name on the volume ("" = any match by stem)
     notes: str = ""
+    # Supply-chain fields - used by container images today. A tag is a
+    # moving pointer, so an image is only ever referenced by digest.
+    registry_ref: str = ""       # e.g. quay.io/hummingbird/caddy
+    version: str = ""
+    digest: str = ""             # multi-arch index digest, sha256:...
+    attachments: tuple = ()      # what the registry publishes for that digest
+    observed_at: str = ""        # when the digest was read from the registry
+    signature_verified: bool = False
 
     @property
     def cache_path(self) -> str:
         return f"{SUBDIR[self.kind]}/{self.filename or self.entry_id}"
+
+    @property
+    def pinned_ref(self) -> str:
+        """`registry@digest` - the only form a build may pull. Empty when
+        nothing is pinned, so a caller cannot fall back to a tag."""
+        return f"{self.registry_ref}@{self.digest}" if self.registry_ref and self.digest else ""
+
+    @property
+    def provenance(self) -> str:
+        if not self.digest:
+            return PROVENANCE_NONE
+        return PROVENANCE_VERIFIED if self.signature_verified else PROVENANCE_OBSERVED
 
 
 @dataclass
@@ -131,6 +161,47 @@ _FIRMWARE = (
     ("intel-microcode", "Intel CPU microcode", "drivers.cpu_microcode_package"),
     ("firmware-mediatek", "MediaTek Wi-Fi firmware", "drivers.wifi_firmware_package"),
     ("firmware-realtek", "Realtek Wi-Fi firmware", "drivers.wifi_firmware_package"),
+)
+
+
+# Container images. Every value below was read from the registry itself
+# on 2026-09-30 (quay.io v2 manifest + config blob + tag API), not taken
+# from documentation - the Hummingbird docs list registry patterns but do
+# not name a caddy image, so its existence was confirmed directly.
+#
+# Caddy was chosen as the first image because the gateway already had a
+# validated Caddyfile renderer (gateway_config.py) and registry-backed
+# routes (gateway_routes.py) but no binary at all: it was in neither
+# provision.sh nor this catalog, which is why `caddy validate` had never
+# run. Project Hummingbird publishes caddy as a minimal, non-root image
+# with an SBOM, a signature and SLSA provenance attached per digest.
+_IMAGES = (
+    CatalogEntry(
+        "caddy", "Caddy (gateway)", KIND_IMAGE,
+        origin="Project Hummingbird (Red Hat), built in Konflux from Fedora components; "
+               "source gitlab.com/redhat/hummingbird/containers @ b5468096ea87",
+        install_helper="appdata.container_spec -> quadlet.generate_unit / write_and_start "
+                       "(rootless podman, pulled by digest)",
+        config_section="gateway routes (gateway_routes.py) rendered by gateway_config.render_caddyfile",
+        filename="caddy-2.11.4.oci.tar",
+        registry_ref="quay.io/hummingbird/caddy",
+        version="2.11.4",
+        digest="sha256:3db6c559f2321928d08c9378bb4438f969c2a1f9807c4974abb126eb50b3d7ea",
+        attachments=(".sig", ".sbom", ".att (SLSA provenance)", ".src (source image)"),
+        observed_at="2026-09-30",
+        signature_verified=False,
+        notes=(
+            "Image config, as published: runs as non-root user `caddy`; listens on 8080/8443 "
+            "(not 80/443, because it is non-root); exposes the admin API on 2019, which must "
+            "never be published; reads /etc/caddy/Caddyfile; XDG_DATA_HOME=/data, "
+            "XDG_CONFIG_HOME=/config. Distroless: no shell, no package manager. amd64 "
+            "manifest sha256:2fe81ec43563918d11a9e885bad115a2a760023fd0c88a0bf6e738ea477b6a6e. "
+            "License: Red Hat UBI EULA. 'Zero-CVE' describes the image at build time "
+            "(created 2026-09-29T22:52:46Z), not a standing property - observed_at is when "
+            "this digest was pinned, and the claim ages from there. Signature not yet "
+            "verified: no cosign/podman on the build host."
+        ),
+    ),
 )
 
 
@@ -203,6 +274,9 @@ def catalog() -> list:
             filename=f"{pkg}.deb",
             notes="Selected per target hardware; the exported config's own package name wins.",
         ))
+
+    for image in _IMAGES:
+        entries.append(image)
 
     origin = _script_origin()
     for script_id, description, path in _curated_scripts():

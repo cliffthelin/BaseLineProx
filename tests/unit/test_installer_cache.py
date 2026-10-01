@@ -37,7 +37,7 @@ def _runner(*, mounted=True, isos=ISOS_LS, packages=PACKAGES_LS):
 
 def test_catalog_covers_every_kind_the_instruction_named():
     kinds = {e.kind for e in ic.catalog()}
-    assert kinds == {ic.KIND_ISO, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT}
+    assert kinds == {ic.KIND_ISO, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT, ic.KIND_IMAGE}
 
 
 def test_every_catalog_entry_names_a_real_origin_helper_and_config():
@@ -164,3 +164,64 @@ def test_reconcile_on_an_empty_volume_reports_everything_missing_not_an_error():
 def test_human_size_is_readable():
     assert ic.human_size(0) == "-"
     assert ic.human_size(1706178560).endswith("GiB")
+
+
+# -- Container images (Project Hummingbird caddy) ----------------------
+
+def _caddy():
+    return next(e for e in ic.catalog() if e.entry_id == "caddy")
+
+
+def test_caddy_is_catalogued_as_a_container_image():
+    """The gateway had a Caddyfile renderer and routes but no binary in
+    any acquisition path - this entry is what closes that gap."""
+    assert _caddy().kind == ic.KIND_IMAGE
+
+
+def test_an_image_is_referenced_by_digest_never_by_tag():
+    ref = _caddy().pinned_ref
+    assert ref.startswith("quay.io/hummingbird/caddy@sha256:")
+    assert ":latest" not in ref and ":2.11" not in ref
+
+
+def test_pinned_ref_is_empty_rather_than_a_tag_when_nothing_is_pinned():
+    entry = ic.CatalogEntry("x", "x", ic.KIND_IMAGE, origin="o", install_helper="h",
+                            config_section="c", registry_ref="quay.io/x/y")
+    assert entry.pinned_ref == ""
+    assert entry.provenance == ic.PROVENANCE_NONE
+
+
+def test_an_observed_digest_is_not_reported_as_verified():
+    """A digest read from a registry proves which bytes are meant, not
+    that a trusted party signed them. The two states stay distinct."""
+    assert _caddy().signature_verified is False
+    assert _caddy().provenance == ic.PROVENANCE_OBSERVED
+    assert "not yet verified" in _caddy().provenance
+
+
+def test_a_verified_signature_is_its_own_state():
+    entry = ic.CatalogEntry("x", "x", ic.KIND_IMAGE, origin="o", install_helper="h",
+                            config_section="c", registry_ref="r", digest="sha256:ab",
+                            signature_verified=True)
+    assert entry.provenance == ic.PROVENANCE_VERIFIED
+
+
+def test_caddy_records_when_its_digest_was_pinned_so_zero_cve_can_age():
+    """'Zero-CVE' describes an image at build time. Without a date the
+    catalog would present it as a standing property."""
+    assert _caddy().observed_at == "2026-09-30"
+    assert "not a standing property" in _caddy().notes
+
+
+def test_caddy_records_its_published_supply_chain_attachments():
+    attachments = " ".join(_caddy().attachments)
+    for kind in (".sig", ".sbom", ".att"):
+        assert kind in attachments
+
+
+def test_caddy_notes_record_the_admin_port_that_must_not_be_published():
+    assert "2019" in _caddy().notes
+
+
+def test_images_are_cached_in_their_own_subdirectory():
+    assert _caddy().cache_path == "images/caddy-2.11.4.oci.tar"

@@ -635,8 +635,8 @@ def render_app_isolation_page(persona: str, plans: list, *,
     operator-authorized action, not a page view."""
     import appdata
 
-    with_data = [p for p in plans if p.app.has_persistent_data or p.overlays]
-    total_overlays = sum(len(p.overlays) for p in plans)
+    with_data = [p for p in plans if p.app.has_persistent_data or p.overlays or p.binds]
+    total_overlays = sum(len(p.overlays) + len(p.binds) for p in plans)
     guarantees_hold = not leaks and not conflicts and all(p.isolated for p in plans)
 
     verdict = (
@@ -654,15 +654,24 @@ def render_app_isolation_page(persona: str, plans: list, *,
         f'<div class="ic-stats">'
         f'<div class="ic-stat"><span class="n">{len(plans)}</span><span class="l">applications</span></div>'
         f'<div class="ic-stat"><span class="n ok">{len(with_data)}</span><span class="l">with personal data</span></div>'
-        f'<div class="ic-stat"><span class="n">{total_overlays}</span><span class="l">overlays</span></div>'
+        f'<div class="ic-stat"><span class="n">{total_overlays}</span><span class="l">overlays + binds</span></div>'
         f'<div class="ic-stat"><span class="n {"ok" if not leaks else "warn"}">{len(leaks)}</span><span class="l">cross-app leaks</span></div>'
         f'<div class="ic-stat"><span class="n {"ok" if not conflicts else "warn"}">{len(conflicts)}</span><span class="l">target conflicts</span></div>'
         f'</div>'
     )
 
     app_rows = []
-    for plan in sorted(plans, key=lambda p: (not p.overlays, p.app.app_id)):
-        if plan.overlays:
+    for plan in sorted(plans, key=lambda p: (not (p.overlays or p.binds), p.app.app_id)):
+        if plan.binds:
+            overlay_html = "<br>".join(
+                f'<span class="ov-upper">{b.host}</span>'
+                f'<span class="ov-arrow"> &rArr; </span>'
+                f'<span class="ov-target">{b.container}</span>'
+                f'{" <span class=ov-none>(read-only)</span>" if b.read_only else ""}'
+                for b in plan.binds
+            ) + (f'<br><span class="ov-none">bind mounts into the container &middot; '
+                 f'image {plan.app.image_ref or "NOT PINNED"}</span>')
+        elif plan.overlays:
             overlay_html = "<br>".join(
                 f'<span class="ov-target">{o.target}</span>'
                 f'<span class="ov-arrow"> &rarr; </span>'
@@ -784,7 +793,16 @@ def render_installer_cache_page(report, *, elevated: bool = False) -> bytes:
     )
 
     sections = []
-    for kind in (ic.KIND_ISO, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT):
+    def _origin_cell(entry) -> str:
+        if not entry.registry_ref:
+            return entry.origin
+        state_cls = "drv-ok" if entry.signature_verified else "drv-none"
+        return (f"{entry.origin}<br><code>{entry.pinned_ref or entry.registry_ref + ' (NOT PINNED)'}</code>"
+                f"<br><span class='{state_cls}'>{entry.provenance}</span>"
+                f"<br><span class='prov-meta'>v{entry.version} &middot; pinned {entry.observed_at}"
+                f" &middot; registry publishes {', '.join(entry.attachments)}</span>")
+
+    for kind in (ic.KIND_ISO, ic.KIND_IMAGE, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT):
         rows = [r for r in report.rows if r.entry.kind == kind]
         if not rows:
             continue
@@ -793,7 +811,7 @@ def render_installer_cache_page(report, *, elevated: bool = False) -> bytes:
             "<tr>"
             f'<td>{"<span class=\'drv-ok\'>on volume</span>" if r.present else "<span class=\'drv-none\'>missing</span>"}</td>'
             f"<td>{r.entry.name}</td>"
-            f"<td>{r.entry.origin}</td>"
+            f"<td>{_origin_cell(r.entry)}</td>"
             f"<td>{r.entry.install_helper}</td>"
             f"<td>{r.entry.config_section}</td>"
             f"<td>{ic.human_size(r.size_bytes)}</td>"
@@ -858,6 +876,8 @@ def render_installer_cache_page(report, *, elevated: bool = False) -> bytes:
 .ic-btn:hover {{ background: #4a72cf; }}
 .ic-btn.plain {{ background: #23263a; }} .ic-btn.plain:hover {{ background: #2c3048; }}
 .ic-elevated {{ color: #6fc28a; font-size: .82rem; }}
+.hw-table code {{ color: #9db4ec; font-size: .76rem; word-break: break-all; }}
+.prov-meta {{ color: #7d84a0; font-size: .76rem; }}
 </style></head>
 <body>
 <h1>Installer Cache</h1>

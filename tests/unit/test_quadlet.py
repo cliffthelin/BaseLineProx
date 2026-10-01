@@ -242,3 +242,19 @@ def test_status_rootless_uses_runuser():
 def test_status_rootless_without_user_is_unknown_not_a_crash():
     runner = FakeRunner()
     assert quadlet.status(runner, "pihole", rootless=True, user=None) == "unknown"
+
+
+def test_a_rootless_unit_targets_default_target_not_multi_user():
+    """A rootless unit runs under the user's own systemd instance, which
+    has no multi-user.target. Targeting it there made [Install] a no-op
+    and the container never started at boot."""
+    spec = ContainerSpec(name="caddy", image="quay.io/x/caddy@sha256:ab",
+                         rootless=True, user="baseline-app-caddy")
+    content = quadlet.generate_unit(spec)
+    assert "WantedBy=default.target" in content
+    assert "multi-user.target" not in content
+
+
+def test_a_rootful_unit_still_targets_multi_user():
+    content = quadlet.generate_unit(ContainerSpec(name="p", image="i@sha256:ab"))
+    assert "WantedBy=multi-user.target" in content

@@ -108,6 +108,21 @@ FORMATS: dict = {
             "not a free addition."
         ),
     ),
+    KIND_CONTAINER: PackageFormat(
+        KIND_CONTAINER, "OCI container image",
+        data_root_template="",            # container-internal paths, see CONTAINER_BINDS
+        brings_own_sandbox=True,
+        isolation_mechanism="rootless podman: user + mount + network namespaces; the image's own non-root user",
+        requires=("podman",),
+        baseline_must_supply=("AppData bind placement", "pin by digest"),
+        notes=(
+            "Data paths exist only inside the container's own mount namespace, so a "
+            "container gets bind mounts from its AppData home rather than host overlays - "
+            "overlaying /data on the host would capture nothing the container writes. "
+            "Two containers may each use /data without conflict for the same reason. "
+            "A tag is a moving pointer, so an image is only ever pulled by digest."
+        ),
+    ),
     KIND_APPIMAGE: PackageFormat(
         KIND_APPIMAGE, "AppImage",
         data_root_template="~/.config/{app}",
@@ -156,7 +171,41 @@ def confinement_gap(kind: str) -> tuple:
 
 
 def supported_formats() -> list:
-    return [FORMATS[k] for k in (KIND_PACKAGE, KIND_FLATPAK, KIND_SNAP, KIND_APPIMAGE)]
+    return [FORMATS[k] for k in (KIND_PACKAGE, KIND_CONTAINER, KIND_FLATPAK, KIND_SNAP, KIND_APPIMAGE)]
+
+
+# Container-internal paths per image, from each image's own published
+# config (read from the registry, not assumed). (container_path, read_only)
+CONTAINER_BINDS: dict = {
+    # Hummingbird caddy: XDG_DATA_HOME=/data (certificates, ACME state),
+    # XDG_CONFIG_HOME=/config (autosaved config), and the Caddyfile its
+    # Cmd reads. The Caddyfile is Baseline-rendered input, so the
+    # container gets it read-only - caddy must not be able to rewrite
+    # its own routing.
+    "caddy": (("/data", False), ("/config", False), ("/etc/caddy", True)),
+}
+
+# Ports per image. Never includes an image's admin/control port: caddy
+# exposes its admin API on 2019, and publishing it would let anything
+# that can reach the host reconfigure the gateway.
+CONTAINER_PUBLISH: dict = {
+    "caddy": ("8080:8080", "8443:8443"),
+}
+CONTAINER_NEVER_PUBLISH: dict = {
+    "caddy": (2019,),
+}
+
+
+@dataclass(frozen=True)
+class ContainerBind:
+    """One AppData directory bound into a container at a path the image
+    already uses. Host side always lives under the app's own home."""
+    host: str
+    container: str
+    read_only: bool = False
+
+    def volume_arg(self) -> str:
+        return f"{self.host}:{self.container}{':ro' if self.read_only else ''}"
 
 # Persistent-data targets per application, by app id. A path here is a
 # real location that application writes to and that must therefore be
@@ -208,10 +257,11 @@ class AppSpec:
     source: str                      # the original installer it came from
     data_targets: tuple = ()         # real paths holding persistent data
     notes: str = ""
+    image_ref: str = ""              # containers only: registry@digest, never a tag
 
     @property
     def has_persistent_data(self) -> bool:
-        return bool(self.data_targets)
+        return bool(self.data_targets) or bool(CONTAINER_BINDS.get(self.app_id))
 
 
 @dataclass(frozen=True)
@@ -237,6 +287,7 @@ class AppPlan:
     owner_group: str
     mode: str                       # 0700 - no cross-app access
     overlays: list = field(default_factory=list)
+    binds: list = field(default_factory=list)   # containers: AppData -> container path
 
     @property
     def isolated(self) -> bool:
@@ -244,7 +295,8 @@ class AppPlan:
         return (self.home.startswith(APPDATA_PREFIX_MARKER)
                 and self.registry_db.startswith(self.home)
                 and self.mode == "0700"
-                and all(o.upperdir.startswith(self.home) for o in self.overlays))
+                and all(o.upperdir.startswith(self.home) for o in self.overlays)
+                and all(b.host.startswith(self.home + "/") for b in self.binds))
 
 
 APPDATA_PREFIX_MARKER = "/mnt/APPDATA_"
@@ -298,7 +350,8 @@ def installable_apps() -> list:
     """Everything installable that is not a driver, derived from
     installer_cache's catalog so the two cannot drift."""
     import installer_cache as ic
-    kind_map = {ic.KIND_PACKAGE: KIND_PACKAGE, ic.KIND_SCRIPT: KIND_GUEST}
+    kind_map = {ic.KIND_PACKAGE: KIND_PACKAGE, ic.KIND_SCRIPT: KIND_GUEST,
+                ic.KIND_IMAGE: KIND_CONTAINER}
     apps = []
     for entry in ic.catalog():
         if _skip_substrate_and_drivers(entry):
@@ -310,6 +363,7 @@ def installable_apps() -> list:
             source=entry.origin,
             data_targets=tuple(DATA_TARGETS.get(entry.entry_id, ())),
             notes=entry.notes,
+            image_ref=entry.pinned_ref if entry.kind == ic.KIND_IMAGE else "",
         ))
     return apps
 
@@ -333,6 +387,15 @@ def plan_for(persona: str, app: AppSpec) -> AppPlan:
     registry, its own owner, and one overlay per real data target."""
     home = app_home(persona, app.app_id)
     user, group = app_identity(app.app_id)
+    if app.kind == KIND_CONTAINER:
+        binds = [
+            ContainerBind(host=f"{home}/binds/{_escape_target(path)}",
+                          container=path, read_only=ro)
+            for path, ro in CONTAINER_BINDS.get(app.app_id, ())
+        ]
+        return AppPlan(app=app, home=home, registry_db=f"{home}/registry.db",
+                       owner_user=user, owner_group=group, mode=APPDATA_MODE,
+                       binds=binds)
     overlays = [
         OverlayMount(
             target=target,
@@ -345,6 +408,41 @@ def plan_for(persona: str, app: AppSpec) -> AppPlan:
     return AppPlan(app=app, home=home, registry_db=f"{home}/registry.db",
                    owner_user=user, owner_group=group, mode=APPDATA_MODE,
                    overlays=overlays)
+
+
+class UnpinnedImage(ValueError):
+    """Raised rather than falling back to a tag: a tag is a moving
+    pointer, and a self-replicating build that pulls one cannot say
+    which bytes it shipped."""
+
+
+def container_spec(plan: AppPlan):
+    """The real quadlet.ContainerSpec for a container plan - rootless,
+    running as the app's own identity, pulled by digest, with only its
+    own AppData bound in and never its admin port published."""
+    import quadlet
+    if plan.app.kind != KIND_CONTAINER:
+        raise ValueError(f"{plan.app.app_id} is not a container")
+    if "@sha256:" not in plan.app.image_ref:
+        raise UnpinnedImage(f"{plan.app.app_id} has no digest-pinned image reference")
+    return quadlet.ContainerSpec(
+        name=f"baseline-{plan.app.app_id}",
+        image=plan.app.image_ref,
+        description=f"{plan.app.name} - AppData {plan.home}",
+        volumes=[b.volume_arg() for b in plan.binds],
+        publish=list(CONTAINER_PUBLISH.get(plan.app.app_id, ())),
+        rootless=True,
+        user=plan.owner_user,
+    )
+
+
+def published_ports(plan: AppPlan) -> set:
+    """Host-side and container-side port numbers this plan publishes."""
+    ports = set()
+    for mapping in CONTAINER_PUBLISH.get(plan.app.app_id, ()):
+        for part in mapping.split(":"):
+            ports.add(int(part))
+    return ports
 
 
 def plan_all(persona: str) -> list:
@@ -363,6 +461,8 @@ def required_directories(plan: AppPlan) -> list:
     dirs = [plan.home, f"{plan.home}/upper", f"{plan.home}/work"]
     for overlay in plan.overlays:
         dirs.extend([overlay.upperdir, overlay.workdir])
+    for bind in plan.binds:
+        dirs.append(bind.host)
     return dirs
 
 
@@ -393,4 +493,7 @@ def cross_app_leaks(plans: list) -> list:
             for overlay in plan.overlays:
                 if overlay.upperdir.startswith(other.home + "/"):
                     leaks.append((plan.app.app_id, other.app.app_id, overlay.upperdir))
+            for bind in plan.binds:
+                if bind.host.startswith(other.home + "/"):
+                    leaks.append((plan.app.app_id, other.app.app_id, bind.host))
     return leaks

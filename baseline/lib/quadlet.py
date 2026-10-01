@@ -173,7 +173,11 @@ def generate_unit(spec: ContainerSpec) -> str:
     lines.append("")
 
     lines.append("[Install]")
-    lines.append("WantedBy=multi-user.target")
+    # A rootless unit is generated into the user's own systemd instance,
+    # which has no multi-user.target - only default.target. Writing
+    # multi-user.target there made the generator's [Install] a no-op, so
+    # a rootless container silently never started at boot.
+    lines.append("WantedBy=default.target" if spec.rootless else "WantedBy=multi-user.target")
     return "\n".join(lines) + "\n"
 
 

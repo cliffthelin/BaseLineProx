@@ -289,3 +289,78 @@ def test_flatpak_records_its_conflict_with_the_declined_portal_decision():
     fmt = appdata.format_for(appdata.KIND_FLATPAK)
     assert "xdg-desktop-portal" in fmt.requires
     assert "portal" in fmt.notes.lower()
+
+
+# -- Containers: binds, digest pinning, quadlet wiring -----------------
+
+def test_caddy_is_a_container_application():
+    assert _app("caddy").kind == appdata.KIND_CONTAINER
+
+
+def test_a_container_gets_bind_mounts_not_host_overlays():
+    """/data exists only inside the container's mount namespace - a host
+    overlay at /data would capture nothing the container writes."""
+    plan = appdata.plan_for("personal", _app("caddy"))
+    assert plan.overlays == []
+    assert {b.container for b in plan.binds} == {"/data", "/config", "/etc/caddy"}
+
+
+def test_every_container_bind_comes_from_the_apps_own_appdata_home():
+    plan = appdata.plan_for("personal", _app("caddy"))
+    for bind in plan.binds:
+        assert bind.host.startswith(plan.home + "/binds/")
+    assert plan.isolated
+
+
+def test_the_caddyfile_is_bound_read_only_so_caddy_cannot_rewrite_its_routing():
+    plan = appdata.plan_for("personal", _app("caddy"))
+    etc = next(b for b in plan.binds if b.container == "/etc/caddy")
+    assert etc.read_only is True
+    assert etc.volume_arg().endswith(":/etc/caddy:ro")
+
+
+def test_container_spec_pulls_by_digest_runs_rootless_as_the_apps_own_user():
+    plan = appdata.plan_for("personal", _app("caddy"))
+    spec = appdata.container_spec(plan)
+    assert "@sha256:" in spec.image
+    assert spec.rootless is True
+    assert spec.user == plan.owner_user
+    assert all(v.split(":")[0].startswith(plan.home) for v in spec.volumes)
+
+
+def test_container_spec_refuses_an_unpinned_image_rather_than_using_a_tag():
+    import pytest
+    app = appdata.AppSpec("x", "x", appdata.KIND_CONTAINER, source="s",
+                          image_ref="quay.io/x/y:latest")
+    with pytest.raises(appdata.UnpinnedImage):
+        appdata.container_spec(appdata.plan_for("personal", app))
+
+
+def test_caddys_admin_port_is_never_published():
+    plan = appdata.plan_for("personal", _app("caddy"))
+    for port in appdata.CONTAINER_NEVER_PUBLISH["caddy"]:
+        assert port not in appdata.published_ports(plan)
+
+
+def test_container_spec_renders_a_real_quadlet_unit():
+    import quadlet
+    unit = quadlet.generate_unit(appdata.container_spec(appdata.plan_for("personal", _app("caddy"))))
+    assert "Image=quay.io/hummingbird/caddy@sha256:" in unit
+    assert "PublishPort=8443:8443" in unit
+    assert "2019" not in unit
+    assert ":/etc/caddy:ro" in unit
+
+
+def test_two_containers_may_share_an_internal_path_without_conflict():
+    """Separate mount namespaces: two containers each using /data is not
+    the target collision that broke the LXC guests."""
+    plans = appdata.plan_all("personal")
+    assert appdata.target_conflicts(plans) == []
+    assert appdata.cross_app_leaks(plans) == []
+
+
+def test_container_bind_directories_are_created_with_the_plan():
+    plan = appdata.plan_for("personal", _app("caddy"))
+    dirs = appdata.required_directories(plan)
+    for bind in plan.binds:
+        assert bind.host in dirs
