@@ -410,7 +410,8 @@ class _RealServerCase:
         url = f"http://127.0.0.1:{self.port}{path}"
         data = json.dumps(payload).encode()
         req = urllib.request.Request(url, data=data, method="POST",
-                                      headers={"Content-Type": "application/json", "Cookie": f"session={self.token}"})
+                                      headers={"Content-Type": "application/json", "Cookie": f"session={self.token}",
+                                              "Origin": f"http://127.0.0.1:{self.port}"})
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, json.loads(resp.read())
@@ -678,7 +679,8 @@ def test_settings_section_save_route_exists_and_applies_real_typed_values():
         req = urllib.request.Request(
             url, method="POST",
             data=b"hostname__type=str&hostname=newhost&dhcp__type=bool",  # dhcp checkbox left unchecked
-            headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"session={session.token}"},
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"session={session.token}",
+                     "Origin": f"http://127.0.0.1:{case.port}"},
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             status = resp.status
@@ -696,7 +698,8 @@ def _post_form_no_redirect(port, path, form_bytes, cookie):
     import http.client
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     conn.request("POST", path, body=form_bytes,
-                 headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"session={cookie}"})
+                 headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"session={cookie}",
+                          "Origin": f"http://127.0.0.1:{port}"})
     resp = conn.getresponse()
     resp.read()
     status = resp.status

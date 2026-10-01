@@ -31,6 +31,8 @@ def _request(server, method, path, cookie=None, body=b""):
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     if cookie:
         headers["Cookie"] = f"session={cookie}"
+    if method == "POST":
+        headers.setdefault("Origin", f"http://127.0.0.1:{port}")      # a browser always sends Origin on a POST
     conn.request(method, path, body=body if method == "POST" else None, headers=headers)
     resp = conn.getresponse()
     data = resp.read()

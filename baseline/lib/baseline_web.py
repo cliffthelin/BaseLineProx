@@ -44,6 +44,7 @@ import drive_admin as da
 import drive_installer
 import physical_device_safety as pds
 import settings_web as sw
+import web_security as ws
 
 try:
     from repair import Runner  # type: ignore
@@ -1174,7 +1175,7 @@ def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict, pds_
 _PUBLIC_PATHS = frozenset({"/", "/login", "/logout"})
 
 
-class UnifiedHandler(http.server.BaseHTTPRequestHandler):
+class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, default=str).encode()
         self.send_response(status)
@@ -1276,7 +1277,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, sw.render_login_page())
 
         if path == "/logout":
-            return self._redirect("/login", set_cookie="session=; Path=/; Max-Age=0")
+            return self._redirect("/login", set_cookie=ws.clear_session_cookie())
 
         if path == "/settings":
             result = sw.handle_settings_view(deps["sessions"], deps["source"], self._cookie_token(), now,
@@ -1423,17 +1424,24 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         now = deps["clock"]()
         path = self.path
 
+        # A POST must come from this site (SameSite=Strict on the cookie is the first line of defence).
+        if not ws.origin_ok(self.headers, has_cookie=bool(self._cookie_token())):
+            return self._reject(403, "cross-site request refused")
+
         if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path.split("?", 1)[0]):
             return
 
         body = self._read_request_body()
 
         if path == "/login":
+            if self._throttled("login", now):
+                return
             result = sw.handle_login(deps["verifier"], deps["sessions"],
                                       body.get("username", ""), body.get("password", ""), now,
                                       persona_provider=deps.get("persona_provider"))
+            self._record_attempt("login", now, ok=result.outcome == "applied")
             if result.outcome == "applied":
-                return self._redirect("/settings", set_cookie=f"session={result.body['token']}; Path=/; HttpOnly")
+                return self._redirect("/settings", set_cookie=ws.session_cookie(result.body["token"]))
             return self._html_response(401, _with_nav(sw.render_login_page("Invalid username or password."), "/login"))
 
         if path.startswith("/settings/"):
@@ -1452,8 +1460,12 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(result.status, _with_nav(sw.render_settings_page(settings, notice), "/settings"))
 
         if path == "/admin/elevate":
+            if self._throttled("elevate", now):
+                return
             result = sw.handle_admin_elevate(deps["elevation_store"], deps.get("elevation_verify_fn"),
                                               deps["sessions"], self._cookie_token(), body.get("passphrase", ""), now)
+            if result.outcome == "applied" or result.body.get("error") == "invalid elevation passphrase":
+                self._record_attempt("elevate", now, ok=result.outcome == "applied")
             notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
             return self._redirect(f"/admin?notice={notice}")
 
@@ -1473,8 +1485,12 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             return self._redirect(f"/setup?notice={quote(notice)}")
 
         if path == "/recovery/unlock":
+            if self._throttled("recovery", now):
+                return
             result = sw.handle_admin_elevate(deps["recovery_store"], deps.get("recovery_verify_fn"),
                                               deps["sessions"], self._cookie_token(), body.get("passphrase", ""), now)
+            if result.outcome == "applied" or result.body.get("error") == "invalid elevation passphrase":
+                self._record_attempt("recovery", now, ok=result.outcome == "applied")
             return self._redirect("/recovery")
 
         if path == "/recovery/exit":

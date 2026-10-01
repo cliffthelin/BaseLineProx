@@ -42,6 +42,8 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import web_security
 from urllib.parse import parse_qs, urlparse
 
 
@@ -478,7 +480,7 @@ _UNGATED_PATHS = frozenset({"/", "/login", "/logout"})
 _FIRST_RUN_PATHS = frozenset({"/setup", "/setup/new-account", "/setup/rebuild"})
 
 
-class SettingsHandler(http.server.BaseHTTPRequestHandler):
+class SettingsHandler(web_security.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
     """Serves both a real server-rendered HTML UI (browser form posts +
     a `session` cookie) and a JSON API (X-Session-Token header, used
     by tests and any future programmatic client) from the same routes,
@@ -567,18 +569,24 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
         json_mode = self._is_json_request()
+        # A POST must come from this site (SameSite=Strict on the cookie is the first line of defence).
+        if not web_security.origin_ok(self.headers, has_cookie=bool(self._cookie_token())):
+            return self._reject(403, "cross-site request refused")
         if self._refuse_unauthenticated(deps, now, json_mode):
             return
         body = self._read_json_body() if json_mode else self._read_form_body()
 
         if self.path == "/login":
+            if self._throttled("login", now):
+                return
             result = handle_login(deps["verifier"], deps["sessions"],
                                    body.get("username", ""), body.get("password", ""), now,
                                    persona_provider=deps.get("persona_provider"))
+            self._record_attempt("login", now, ok=result.outcome == "applied")
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "applied":
-                return self._redirect("/settings", set_cookie=f"session={result.body['token']}; Path=/; HttpOnly")
+                return self._redirect("/settings", set_cookie=web_security.session_cookie(result.body["token"]))
             return self._html_response(result.status, render_login_page("Invalid username or password."))
 
         if self.path.startswith("/settings/"):
@@ -623,8 +631,12 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(result.status, render_setup_page("rebuild", notice))
 
         if self.path == "/recovery/unlock":
+            if self._throttled("recovery", now):
+                return
             result = handle_admin_elevate(deps["recovery_store"], deps.get("recovery_verify_fn"),
                                            deps["sessions"], self._token(), body.get("passphrase", ""), now)
+            if result.outcome == "applied" or result.body.get("error") == "invalid elevation passphrase":
+                self._record_attempt("recovery", now, ok=result.outcome == "applied")
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             return self._redirect("/recovery")
@@ -641,8 +653,12 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._redirect(f"/recovery?notice={notice}")
 
         if self.path == "/admin/elevate":
+            if self._throttled("elevate", now):
+                return
             result = handle_admin_elevate(deps["elevation_store"], deps.get("elevation_verify_fn"),
                                            deps["sessions"], self._token(), body.get("passphrase", ""), now)
+            if result.outcome == "applied" or result.body.get("error") == "invalid elevation passphrase":
+                self._record_attempt("elevate", now, ok=result.outcome == "applied")
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "refused" and result.status == 401 and \
@@ -682,7 +698,7 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, render_login_page())
 
         if self.path == "/logout":
-            return self._redirect("/login", set_cookie="session=; Path=/; Max-Age=0")
+            return self._redirect("/login", set_cookie=web_security.clear_session_cookie())
 
         if self.path == "/setup":
             return self._html_response(200, render_setup_page("account"))

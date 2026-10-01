@@ -263,6 +263,7 @@ cp "$SRC/baseline/lib/control_panel_web.py" /opt/baseline/lib/control_panel_web.
 cp "$SRC/baseline/lib/backup_recurring.py" /opt/baseline/lib/backup_recurring.py
 cp "$SRC/baseline/bin/baseline-backup-recurring" /opt/baseline/bin/baseline-backup-recurring
 cp "$SRC/baseline/lib/offdrive_backup.py" /opt/baseline/lib/offdrive_backup.py
+cp "$SRC/baseline/lib/web_security.py" /opt/baseline/lib/web_security.py
 cp "$SRC/baseline/bin/baseline-backup-offdrive" /opt/baseline/bin/baseline-backup-offdrive
 # The merged Baseline web app (decision record 83) - direct
 # instruction: "merge those two together and add a Drive
@@ -385,6 +386,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/sensors_interval_control.py \
          /opt/baseline/lib/backup_recurring.py /opt/baseline/bin/baseline-backup-recurring \
          /opt/baseline/lib/offdrive_backup.py /opt/baseline/bin/baseline-backup-offdrive \
+         /opt/baseline/lib/web_security.py \
          /opt/baseline/lib/recovery_mode.py /opt/baseline/bin/baseline-recovery-mode \
          /opt/baseline/lib/drive_admin.py /opt/baseline/lib/baseline_web.py /opt/baseline/bin/baseline-web \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
