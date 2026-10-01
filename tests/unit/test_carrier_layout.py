@@ -106,3 +106,33 @@ def test_agent_index_names_the_real_volume_and_its_baseline_rules():
     assert "INSTALLER_CACHE" in text and "/mnt/INSTALLER_CACHE" in text
     assert "noexec" in text and "MD89N41071210AP4E" in text
     assert "never by kernel letter" in text
+
+
+def test_adding_appdata_does_not_renumber_existing_partitions():
+    """Real hazard: interleaving AppData per persona moved
+    USER_PERSISTENCE_PERSONAL from partition 6 to 7. The real carrier
+    already has partitions 1-6 laid out, so re-applying a renumbered plan
+    would treat the personal persona's partition as AppData. New volumes
+    append; existing numbers never move."""
+    by_label = {p["label"]: p["number"] for p in cl.plan_partitions(476 * 1024**3)}
+    assert by_label["BASELINE"] == 1
+    assert by_label["INSTALLER_CACHE"] == 2
+    assert by_label["SESSION_TEMP"] == 3
+    assert by_label["SUBSTRATE_PERSISTENCE"] == 4
+    assert by_label["USER_PERSISTENCE_ADMIN"] == 5
+    assert by_label["USER_PERSISTENCE_PERSONAL"] == 6
+    assert by_label["APPDATA_ADMIN"] == 7
+    assert by_label["APPDATA_PERSONAL"] == 8
+
+
+def test_every_planned_partition_has_a_role_including_appdata():
+    """_role() raised KeyError for APPDATA_*, so agentIndex.md could not
+    be generated for those partitions."""
+    for p in cl.plan_partitions(476 * 1024**3):
+        assert cl.agent_index(p, serial="TESTSERIAL").strip()
+
+
+def test_appdata_labels_fit_ext4_for_the_default_personas():
+    for p in cl.plan_partitions(476 * 1024**3):
+        if p["label"].startswith("APPDATA_"):
+            assert p["fs_label"] == p["label"], f"{p['label']} truncates"

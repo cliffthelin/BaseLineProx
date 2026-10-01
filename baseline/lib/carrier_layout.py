@@ -44,6 +44,11 @@ def _role(label: str) -> str:
     if di.is_persistence_label(label):
         persona = label.removeprefix("USER_PERSISTENCE_").lower()
         return f"Isolated persistence for the '{persona}' persona (scripts inbox lives here; it may hold executables)."
+    if di.is_appdata_label(label):
+        persona = label.removeprefix("APPDATA_").lower()
+        return (f"Personal-owned application data for the '{persona}' persona: one isolated "
+                f"tree per application (its own data, registry.db, owner, mode 0700) holding "
+                f"that application's overlay upper layers and container binds. See appdata.py.")
     return _ROLES[label]
 
 

@@ -139,11 +139,17 @@ def baseline_volumes_for(personas: tuple = DEFAULT_PERSONAS) -> tuple:
     shared volumes plus, per persona, one USER_PERSISTENCE_<PERSONA>
     and one APPDATA_<PERSONA>. `personas=()` gives just the shared
     volumes - useful for provisioning the substrate before any persona
-    is created."""
-    per_persona = tuple(
-        vol for p in personas for vol in (persona_volume(p), appdata_volume(p))
-    )
-    return SHARED_VOLUMES + per_persona
+    is created.
+
+    Order is part of the on-disk contract: carrier_layout numbers GPT
+    partitions in this order. AppData is therefore appended AFTER every
+    pre-existing volume rather than interleaved per persona - an
+    interleaved order moved USER_PERSISTENCE_PERSONAL from partition 6 to
+    7, so re-applying the plan to an already laid-out carrier would have
+    treated the personal persona's partition as AppData."""
+    return (SHARED_VOLUMES
+            + tuple(persona_volume(p) for p in personas)
+            + tuple(appdata_volume(p) for p in personas))
 
 
 # The real, default set this module ensures unless a caller passes its
