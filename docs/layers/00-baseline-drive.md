@@ -33,7 +33,7 @@ anything not a block device. No destructive helper accepts a bare path.
 
 The plan is now **8 partitions**; the drive has **6**. The two AppData
 partitions were added to the volume set on 2026-09-30, after the drive was
-laid out, and the drive is effectively full (471 of 476.9 GB allocated).
+laid out.
 
 | # | Partition | On disk | Planned | ext4 label |
 |---|---|---|---|---|
@@ -57,7 +57,7 @@ the ext4 label is only a hint (stated in `baseline_drive_layout.py`'s own docstr
 | Baseline drive laid out as partitions 1-6 | MVP completed | real hardware | `baseline_drive_layout.py`, v0.2 row 37 - kernel table re-read and mounting still need root |
 | Partition numbering stable when volumes are added | MVP completed | unit tests | `test_adding_appdata_does_not_renumber_existing_partitions` - fixed after an interleaved order moved #6 → #7 |
 | `agentIndex.md` written into each partition | MVP completed | unit tests | `baseline_drive_layout.agent_index` - AppData `KeyError` fixed `e629011` |
-| AppData partitions 7-8 on the real Baseline drive | On roadmap | none | needs ~40 GB minimum; the drive has no free space. Needs re-layout or a different Baseline drive - an operator decision |
+| AppData partitions 7-8 on the real Baseline drive | On roadmap | none | not created yet |
 | ext4 label truncation and the persona label collision | MVP completed | real hardware | Relabeled 2026-09-30 (evening): GPT names and ext4 labels read back from the drive as `SUBSTRATE`, `USER_ADMIN`, `USER_PERSONAL`, none mounted. Applied by the operator, not by this session's code. v0.2 row 38 |
 | Docs re-keyed from kernel letters to serials | On roadmap | - | v0.2 rows 27-29 |
 | Record of the 2026-09-30 repartition (an Omarchy ISO on that drive was erased) | On roadmap | - | v0.2 rows 28, 41. Whether it was authorized is unconfirmed |

@@ -44,5 +44,5 @@ paths and identities. It never mounts, chowns or writes. Checks it provides:
 | Constant identifier scheme | MVP completed | unit tests | `naming.py` |
 | Mount options (was bare `defaults`) | MVP completed | unit tests | fixed `86f86fc` |
 | App Isolation tab | MVP completed | unit tests | not re-checked in a browser after the ID rewrite |
-| Volumes on any disk | On roadmap | none | the Baseline drive has no free space for partitions 7-8 ([00](00-baseline-drive.md)) |
+| Volumes on any disk | On roadmap | none | partitions 7-8 not created yet ([00](00-baseline-drive.md)) |
 | Applying a plan | On roadmap | none | needs an operator-authorized, destructive path like Drive Administration |
