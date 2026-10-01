@@ -1,5 +1,7 @@
 # Decision record: Recovery Mode itself - real entry, userless discovery, hard exit condition
 
+> **Note, 2026-09-30 (docs-vs-code audit, v0.2 row 30):** There is no `recovery_web.py`. The logic is `recovery_mode.py` and `recovery_tiers.py`, and the page is in `settings_web.py` / `baseline_web.py`. Since 2026-09-30 recovery also needs a login plus this machine's root password or passphrase (v0.2 row 45), so any statement below that recovery discovery needs no credential is superseded. The record below is left as written.
+
 Status: **implemented and tested (1223/1223 suite passing, up from
 1194 after decision record 80). Not run against real hardware.**
 

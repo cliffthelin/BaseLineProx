@@ -1,5 +1,7 @@
 # Decision record: OpenCode as the second HarnessAdapter, normalized through real ACP - not a bespoke wire format
 
+> **Note, 2026-09-30 (docs-vs-code audit, v0.2 row 30):** There is no `opencode.py`; the adapter is `opencode_adapter.py`, with the protocol in `acp_protocol.py` and `acp_transport.py`. The record below is left as written.
+
 Status: **implemented, unit-tested (39 new tests across 4 new modules,
 740/740 suite passing), a full real round trip confirmed live against
 the actual `opencode acp` binary** (initialize, session creation, a

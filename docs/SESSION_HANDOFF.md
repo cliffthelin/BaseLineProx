@@ -828,7 +828,7 @@ anything else.
      Custom minimal framing (tag byte + length-prefixed path + length-
      prefixed data, written by a remote Python process, parsed by a
      local Python process into individual real files on local disk -
-     see `remote_backup3.py`/`local_receive.py` if still present in
+     see `remote_backup3.py`/`local_receive.py` (neither is in the repo as of 2026-09-30, v0.2 row 31: treat as obsolete or never committed) if still present in
      that session's scratchpad, otherwise trivial to rewrite from this
      description) - **worked cleanly**: 2966 files, 417MB, local
      receiver's count matched the remote sender's count exactly, zero

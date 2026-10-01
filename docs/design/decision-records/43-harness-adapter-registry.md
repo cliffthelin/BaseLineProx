@@ -1,5 +1,7 @@
 # Decision record: a real HarnessAdapter contract + registry, replacing hardcoded dispatch
 
+> **Note, 2026-09-30 (docs-vs-code audit, v0.2 row 30):** `hermes.py` and `opencode.py` were never built as named. The adapters live in `harness_adapter.py`, `harness_registry.py`, `opencode_adapter.py`, `providers.py` and `acp_protocol.py` / `acp_transport.py`. The record below is left as written.
+
 Status: **implemented, unit-tested (10 new tests, 707/707 suite
 passing), not yet verified live on a real boot.**
 

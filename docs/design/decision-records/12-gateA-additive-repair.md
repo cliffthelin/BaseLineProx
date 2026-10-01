@@ -1,5 +1,7 @@
 # Decision record: Gate A implementation — additive network repair for Fixture A
 
+> **Note, 2026-09-30 (docs-vs-code audit, v0.2 row 30):** `harness.propose_repair()` and `firstboot_network_repair._observed_dev` no longer exist under those names. Repair planning is `repair.plan_repair` and `repair_additive.plan_additive_repair`. The record below is left as written.
+
 Date: 2026-09-21
 Investigator: Claude Code
 Status: complete. **71/71 unit tests passing. One disposable QEMU integration run performed, per instruction. Gate A does not fully pass — full success (verified working DHCP) was not reached — but the pipeline's fail-closed safety properties (exact backup/restore, refuse-rather-than-risk on a real tooling warning) were directly demonstrated against real infrastructure, and the actual, unmodified Fixture A is preserved as the primary case throughout, with no `ipv6=off` correction used anywhere in this pass.**

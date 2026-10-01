@@ -1,5 +1,7 @@
 # Decision record: real QEMU smoke test of vm_scripts.py and quadlet.py - two real bugs found and fixed, one important behavioral finding disclosed
 
+> **Note, 2026-09-30 (docs-vs-code audit, v0.2 row 30):** `quadlet.write_and_enable()` was renamed `write_and_start()` (this record says so below); only `write_and_start` exists now. The record below is left as written.
+
 Status: **real QEMU execution, twice (before and after fixes). Genuinely
 verified against real Podman, real systemd, a real network fetch, and
 real (non-mocked) execution of the actual upstream Helper-Script - not

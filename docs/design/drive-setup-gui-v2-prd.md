@@ -386,6 +386,24 @@ Per the project's testing rules: 80% minimum coverage, unit + integration + e2e,
 - `test_secret_handling.py` — no code path places a password/passphrase into a subprocess `argv` list; tmpfs secret file unlinked on every exit path including simulated exception/signal; prepared-ISO content is inspected in a fixture to confirm no unexpected plaintext credential ends up embedded beyond what §7.1's findings say is unavoidable.
 - `test_setup_intent_handoff.py` — the signed bundle the installer GUI produces for the destination-hardware TUI round-trips correctly and is rejected if tampered, malformed, expired, target-mismatched, replayed, or of an unrecognized schema (per §5.6's integrity/authentication distinction — see decision record 09's prototype in `experiments/m0-inv9/` as the reference implementation shape).
 
+**Status of the planned files, checked 2026-09-30 (v0.2 row 32).** None of the 11 files above exists anywhere under `tests/`. The behaviours are partly covered elsewhere:
+
+| Planned file | Built? | Nearest existing coverage |
+|---|---|---|
+| `test_answer_file.py` | No | `test_drive_setup_answer.py`, `test_self_installer.py` (answer template) |
+| `test_firewall_rule.py` | No | firewall cases in `test_setup_intent.py`, `test_config_pipeline.py` |
+| `test_storage_ancestry.py` | No | `test_topology.py` covers network-topology derivation, not storage ancestry; the sysfs `holders`/`slaves` walk is unbuilt |
+| `test_eligibility_states.py` | No | signature cases in `test_drive_setup_acquire.py`, `test_physical_device_safety.py` |
+| `test_stable_identity.py` | No | serial/identity checks in `test_physical_device_safety.py`, `test_install_identity.py` |
+| `test_backend_surface.py` | No | none |
+| `test_handoff_transaction.py` | No | **none: `handoff.py` has no tests at all** (v0.2 row 50) |
+| `test_ssh_key_ordering.py` | No | `authorized_keys` handling in `inventory_tests/test_proxmox.py` only |
+| `test_ssh_host_key_restore.py` | No | none |
+| `test_secret_handling.py` | No | argv/password cases in `test_drive_admin.py` only |
+| `test_setup_intent_handoff.py` | No | `test_setup_intent.py` |
+
+The PRD's status is still draft. Treat the list above as a plan, not as built.
+
 Example (AAA):
 ```python
 def test_eligibility_no_signatures_is_not_labeled_blank():

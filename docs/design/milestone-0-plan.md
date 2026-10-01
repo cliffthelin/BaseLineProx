@@ -1,5 +1,7 @@
 # Milestone 0 execution plan — feasibility and safety investigation
 
+> **Note, 2026-09-30 (v0.2 row 32):** the test files this plan names (`test_backend_surface.py`, `test_eligibility_states.py` and others) do not exist. See the status table in `drive-setup-gui-v2-prd.md` section 8.1 for what is built and where related coverage lives.
+
 Status: **complete** — all nine investigations closed 2026-09-21. See §6 (Milestone ledger) below for per-investigation status. Milestone 1 has not started.
 Parent: [drive-setup-gui-v2-prd.md](drive-setup-gui-v2-prd.md) §9, §11
 Decision records: [decision-records/](decision-records/) (one file per investigation, filled in as each completes)

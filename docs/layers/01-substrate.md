@@ -22,6 +22,34 @@ and `/var/log/baseline` are bind-mounted from the active persona's USER
 volume; if that volume is not mounted, `ensure_redirect` refuses to touch the
 path rather than write through to this disposable layer.
 
+## Service start gates (`ExecStartPre`)
+
+These decide whether a service may *start*. They are not login checks; the
+login gate is separate and lives in the web apps (`_refuse_unauthenticated`,
+v0.2 row 43).
+
+| Gate | Entry point | Service | Refuses to start until |
+|---|---|---|---|
+| `settings_web_gate.py` | `baseline/bin/baseline-settings-web-gate` | `baseline-web.service` (the deployed web app, `boot/baseline-web.service`; also the older standalone `baseline-settings-web.service`) | `baseline-firstboot.service` has genuinely committed, so editing network/firewall/SSH in the UI cannot race firstboot |
+| `kiosk_gate.py` | `baseline-kiosk-gate` | `baseline-kiosk.service` | the same condition, so the kiosk never shows on an unconfigured machine |
+| `scripts_inbox_gate.py` | `baseline-scripts-inbox-gate` | `baseline-scripts-inbox.service` | USER is actually mounted, so a pushed script cannot land on the disposable substrate |
+
+All three fail closed: `settings_web_gate.check()` returns 0 only if
+`firstboot_statemachine.already_completed()` is true, and the entry point prints
+a refusal to stderr and exits non-zero otherwise. They reuse the real checks
+(`already_completed`, `persist_bind_mounts.is_mounted`) rather than a second
+notion of "done" that could drift. `boot/provision.sh` copies and `chmod +x`'s
+them.
+
+## Known gap: no first-run setup on the deployed app
+
+`baseline_web.py` (what `baseline-web.service` runs) logs in against the system
+account's password and elevates with the root password, and it does not route
+`/setup/new-account`. The first-run flow that sets the machine passphrase and the
+admin elevation passphrase exists only on the standalone `settings_web.py` server
+(v0.2 rows 46-48). On a deployed machine recovery therefore accepts the root
+password only, until a first-run route is added to the deployed app (v0.2 row 49).
+
 ## Status
 
 | Item | Status | Verified | Evidence |
@@ -29,6 +57,7 @@ path rather than write through to this disposable layer.
 | Install pipeline (answer file, ISO build, firstboot) | In progress | QEMU | v0.2 work queue; real-hardware end to end still pending |
 | Drive targeting by serial, refusing the boot drive | MVP completed | unit tests | `physical_device_safety.py` |
 | Control-plane paths redirected onto USER via bind mounts | In progress | unit tests | `persist_bind_mounts.py` says itself it has not run on real hardware (DR 62) |
+| Service start gates documented | MVP completed | unit tests | table above; v0.2 row 33 |
 | Measured boot, gateway | On roadmap | none | [Hardened-appliance PRD](../design/hardened-appliance-prd.md) |
 
 ## Deeper reading

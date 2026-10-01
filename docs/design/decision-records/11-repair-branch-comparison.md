@@ -1,5 +1,7 @@
 # Decision record: comparison against existing host-network repair (`cliffthelin/baseline`, `repair/host-network-reset-to-dhcp`)
 
+> **Note, 2026-09-30 (docs-vs-code audit, v0.2 row 30):** `harness.propose_repair()` does not exist in `harness.py` today. Repair planning is `repair.plan_repair` and `repair_additive.plan_additive_repair`. The record below is left as written.
+
 Date: 2026-09-21
 Investigator: Claude Code
 Status: complete, read-only analysis only. **No code copied, no push or modification to `cliffthelin/baseline`, no new QEMU installation, no privileged operation.** The branch was inspected via `git fetch cliff repair/host-network-reset-to-dhcp` (a read-only fetch, confirmed non-interactive, no prompt) and `git show`/`git diff` against the fetched ref — the working tree's checked-out branch (`main`) was never touched.
