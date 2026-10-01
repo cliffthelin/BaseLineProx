@@ -91,6 +91,10 @@ deleting, renaming or overwriting call is ever added.
 - **What is covered:** the mounted Baseline volumes (not the ephemeral SESSION_TEMP; a volume that is not
   actually mounted is skipped, not backed up as an empty directory) and the Proxmox configuration. VMs and LXCs
   live on INSTALLER_CACHE, so they are included.
+- **Not encrypted, by decision** (2026-10-01): encryption can be added as an option later, but there is no
+  reason for it in the short term. The sets therefore contain the same secrets as the volumes they copy
+  (password-hash store, SSH keys, tokens), so keep the backup drive somewhere only you can reach. The
+  checksums detect alteration of a backup but cannot prevent it.
 - **First run:** `baseline-backup-offdrive --dry-run` validates the destination, sizes the data and checks space,
   and writes nothing. Set `backups.offdrive_destination` in the Admin tab first.
 
