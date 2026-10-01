@@ -9,6 +9,22 @@ import pytest
 import offdrive_backup as ob
 import settings_store
 
+
+@pytest.fixture(autouse=True)
+def _asked_by_the_web_app(monkeypatch):
+    """These tests exercise the backup itself; each call carries a genuinely signed web origin."""
+    import web_origin_helper as woh
+    gate = woh.configured_gate()
+    for name in ("run_backup", "main"):
+        real = getattr(ob, name)
+
+        def wrapper(*a, _real=real, **kw):
+            kw.setdefault("origin", woh.origin_for("backup_offdrive", {"dry_run": kw.get("dry_run", False),
+                                                                        "force": kw.get("force", False)}, gate=gate))
+            return _real(*a, **kw)
+        monkeypatch.setattr(ob, name, wrapper)
+
+
 ROOT = Path(__file__).resolve().parents[2]
 PROVISION = (ROOT / "boot" / "provision.sh").read_text()
 
@@ -116,52 +132,21 @@ def test_main_never_forces_a_backup(monkeypatch):
     assert not seen.get("force")
 
 
-# --- unit, timer and provisioning -------------------------------------------
+# --- no script or timer entry point: only the web application can start a backup ----------
 
-UNIT = (ROOT / "boot" / "baseline-backup-offdrive.service").read_text()
-TIMER = (ROOT / "boot" / "baseline-backup-offdrive.timer").read_text()
-
-
-def test_the_unit_is_a_oneshot_that_runs_the_installed_script_with_the_code_read_only():
-    assert "Type=oneshot" in UNIT
-    assert re.search(r"^ExecStart=/opt/baseline/bin/baseline-backup-offdrive$", UNIT, re.M)
-    assert "ReadOnlyPaths=/opt/baseline" in UNIT and "PYTHONDONTWRITEBYTECODE=1" in UNIT
-
-
-def test_the_unit_runs_at_low_priority_so_it_does_not_starve_the_machine():
-    assert "Nice=19" in UNIT and "IOSchedulingClass=idle" in UNIT
-
-
-def test_the_unit_waits_for_the_volumes_it_backs_up():
-    assert "After=baseline-persist-bind-mounts.service" in UNIT
-
-
-def test_the_timer_is_persistent_and_checks_regularly():
-    assert "Persistent=true" in TIMER and re.search(r"^(OnBootSec|OnCalendar|OnUnitActiveSec)=", TIMER, re.M)
-
-
-def test_the_entry_point_script_exists_and_is_thin():
-    script = (ROOT / "baseline" / "bin" / "baseline-backup-offdrive").read_text()
-    assert "offdrive_backup" in script and "/opt/baseline/lib" in script
-
-
-@pytest.mark.parametrize("needle", [
-    "baseline/lib/offdrive_backup.py", "baseline/bin/baseline-backup-offdrive",
-    "boot/baseline-backup-offdrive.service", "boot/baseline-backup-offdrive.timer",
-    "systemctl enable baseline-backup-offdrive.timer",
+@pytest.mark.parametrize("gone", [
+    "baseline/bin/baseline-backup-offdrive", "boot/baseline-backup-offdrive.service",
+    "boot/baseline-backup-offdrive.timer", "baseline/bin/baseline-backup-recurring",
+    "boot/baseline-backup-recurring.service", "boot/baseline-backup-recurring.timer",
 ])
-def test_provisioning_installs_and_enables_it(needle):
-    assert needle in PROVISION
+def test_there_is_no_script_service_or_timer_that_starts_a_backup(gone):
+    assert not (ROOT / gone).exists()
 
 
-def test_provisioning_verifies_the_new_files():
-    assert "/opt/baseline/lib/offdrive_backup.py" in PROVISION
-    assert "baseline-backup-offdrive.service" in PROVISION and "baseline-backup-offdrive.timer" in PROVISION
-
-
-def test_the_timer_is_enabled_for_next_boot_not_started_now():
-    line = [l for l in PROVISION.splitlines() if "baseline-backup-offdrive.timer" in l and "systemctl enable" in l][0]
-    assert "--now" not in line
+def test_provisioning_installs_the_web_side_and_no_backup_timer():
+    for needle in ("baseline/lib/offdrive_backup.py", "baseline/lib/web_gate.py", "baseline/lib/operations.py"):
+        assert needle in PROVISION
+    assert "backup-offdrive" not in PROVISION and "backup-recurring" not in PROVISION
 
 
 def test_main_passes_a_dry_run_flag_through(monkeypatch):
@@ -171,8 +156,3 @@ def test_main_passes_a_dry_run_flag_through(monkeypatch):
     monkeypatch.setattr(ob, "_boot_serial", lambda: None)
     rc = ob.main(get_setting=lambda g, k: S[(g, k)], now=lambda: 1.0, print_fn=lambda l: None, dry_run=True)
     assert rc == 0 and seen["dry_run"] is True
-
-
-def test_the_script_accepts_dry_run_and_rejects_anything_else():
-    script = (ROOT / "baseline" / "bin" / "baseline-backup-offdrive").read_text()
-    assert "--dry-run" in script

@@ -121,6 +121,12 @@ SCHEMA = (
     SettingDef("backups", "offdrive_min_interval_hours", 168,
                "Minimum hours between off-drive backups. Nothing is ever deleted from the destination, so "
                "backups are not made more often than this; the default is a week."),
+    SettingDef("access", "operator_users", "",
+               "Comma-separated names of machine accounts that log in with a limited OPERATOR role: they can run, "
+               "schedule and watch backups and checks on the Operations page and nothing else (no settings, no "
+               "recovery, no drive actions, and they can never confirm one). They sign in with that machine "
+               "account's own password; Baseline creates no accounts and stores no passwords. Empty means none.",
+               scope=registry.GLOBAL),
     SettingDef("startup", "auto_start_persona", "personal",
                "Which persona's USER volume mounts automatically on boot. GLOBAL "
                "scope (decision record 89) - recovery must be able to read this even when a "

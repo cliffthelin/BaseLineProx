@@ -172,6 +172,8 @@ class LoginSession:
     # underneath it if the active persona switches mid-session, so
     # this field lets that be caught rather than silently ignored.
     persona: str | None = None
+    # "admin" (full access, the default) or "operator": a limited role (operations.py OPERATOR_PATHS only).
+    role: str = "admin"
 
     def expired(self, now: float) -> bool:
         return now > self.created + self.ttl_s
@@ -195,9 +197,9 @@ class ActivePersonaProvider:
 class SessionStore:
     sessions: dict = field(default_factory=dict)
 
-    def create(self, username: str, now: float, persona: str | None = None) -> LoginSession:
+    def create(self, username: str, now: float, persona: str | None = None, role: str = "admin") -> LoginSession:
         token = secrets.token_urlsafe(32)
-        session = LoginSession(token=token, username=username, created=now, persona=persona)
+        session = LoginSession(token=token, username=username, created=now, persona=persona, role=role)
         self.sessions[token] = session
         return session
 

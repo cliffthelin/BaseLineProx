@@ -214,3 +214,10 @@ def _hardware_safety_guard(monkeypatch):
         monkeypatch.setattr(drive_guard, "_default_run", _no_real_drive_reads)
     except ImportError:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _no_web_gate_leaks_between_tests():
+    yield
+    import web_gate
+    web_gate.configure(None)

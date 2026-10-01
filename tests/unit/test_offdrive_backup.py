@@ -20,6 +20,22 @@ import pytest
 
 import offdrive_backup as ob
 
+
+@pytest.fixture(autouse=True)
+def _asked_by_the_web_app(monkeypatch):
+    """These tests exercise the backup itself; each call carries a genuinely signed web origin."""
+    import web_origin_helper as woh
+    gate = woh.configured_gate()
+    for name in ("run_backup", "main"):
+        real = getattr(ob, name)
+
+        def wrapper(*a, _real=real, **kw):
+            kw.setdefault("origin", woh.origin_for("backup_offdrive", {"dry_run": kw.get("dry_run", False),
+                                                                        "force": kw.get("force", False)}, gate=gate))
+            return _real(*a, **kw)
+        monkeypatch.setattr(ob, name, wrapper)
+
+
 ALLOWED = frozenset({"MD89N41071210AP4E", "FD01N6557110C271B"})   # the two SK hynix drives
 MEDIA_SERIAL = "JEHBBVWM"
 DEFAULT_CHAIN = (("sdj1", "part"), ("sdj", "disk"))

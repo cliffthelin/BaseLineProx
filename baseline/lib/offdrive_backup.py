@@ -41,6 +41,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import web_gate
+
 BACKUP_DIR_NAME = "baseline-backups"
 MANIFEST_NAME = "MANIFEST.json"
 INCOMPLETE_NAME = "INCOMPLETE.txt"
@@ -575,9 +577,11 @@ def is_due(dest: Destination, *, now: float, min_interval_hours: float = DEFAULT
 def run_backup(*, destination: str, run, sources: dict, now: float, allowed_serials,
                boot_serial: str | None = None, min_interval_hours: float = DEFAULT_MIN_INTERVAL_HOURS,
                record_success=None, force: bool = False, dry_run: bool = False,
-               changes_only=frozenset()) -> BackupResult:
-    """Validate the destination, skip if a recent set exists, check space, add a verified set, and only
+               changes_only=frozenset(), origin=None) -> BackupResult:
+    """Runs only when the web application asked for it (`origin`, web_gate.py).
+    Validate the destination, skip if a recent set exists, check space, add a verified set, and only
     then record freshness. Raises BackupError (leaving whatever it wrote untouched) on any failure."""
+    web_gate.require(origin, "backup_offdrive", {"dry_run": dry_run, "force": force})
     if not destination:
         raise BackupError("no backup destination is configured")
     dest = resolve_destination(destination, run=run, allowed_serials=allowed_serials, boot_serial=boot_serial)
@@ -651,10 +655,12 @@ def _record_freshness(targets, now) -> None:
         backup_restore.record_backup_manifest(runner, target=target, ts=now)
 
 
-def main(*, get_setting=None, now=time.time, print_fn=print, run=_default_run, dry_run: bool = False) -> int:
+def main(*, get_setting=None, now=time.time, print_fn=print, run=_default_run, dry_run: bool = False,
+         force: bool = False, origin=None) -> int:
     """Entry point for baseline-backup-offdrive.service. Exit 0 for a verified backup or a skip because a recent
     one exists; 1 for anything else, so a missing or refused backup shows up as a failed unit, never silently."""
     import drive_admin
+    web_gate.require(origin, "backup_offdrive", {"dry_run": dry_run, "force": force})
     if get_setting is None:
         import settings_store
         get_setting = settings_store.get_setting
@@ -670,7 +676,7 @@ def main(*, get_setting=None, now=time.time, print_fn=print, run=_default_run, d
         result = run_backup(destination=destination, run=run, sources=sources, now=now(),
                             allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS, boot_serial=_boot_serial(),
                             min_interval_hours=get_setting("backups", "offdrive_min_interval_hours"),
-                            record_success=_record_freshness, dry_run=dry_run,
+                            record_success=_record_freshness, dry_run=dry_run, force=force, origin=origin,
                             changes_only=CHANGES_ONLY_LABELS)
     except BackupError as exc:
         print_fn(f"[FAILED] {exc}")

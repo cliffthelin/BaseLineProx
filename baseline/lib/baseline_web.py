@@ -45,6 +45,9 @@ import drive_installer
 import physical_device_safety as pds
 import settings_web as sw
 import hitl
+import operations as ops
+import operations_page
+import web_gate as wg
 import web_security as ws
 
 try:
@@ -60,6 +63,7 @@ NAV_TABS = (
     ("/admin", "Admin"),
     ("/recovery", "Recovery"),
     ("/drive-admin", "Drive Administration"),
+    ("/operations", "Operations"),
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -1244,6 +1248,38 @@ def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict, pds_
             _JOBS[job_id].update(done=True, outcome="error", detail=f"{type(exc).__name__}: {exc}")
 
 
+def _operator_users(deps: dict) -> frozenset:
+    """Machine accounts that get the limited operator role (settings access.operator_users)."""
+    source = deps.get("operator_users")
+    names = source() if callable(source) else (source or ())
+    return frozenset(n.strip() for n in (names.split(",") if isinstance(names, str) else names) if n.strip())
+
+
+def _run_operation_job(job_id: str, op_id: str, params: dict, origin, deps: dict) -> None:
+    def line(text: str) -> None:
+        with _JOBS_LOCK:
+            _JOBS[job_id]["lines"].append(text)
+
+    try:
+        code = ops.execute(op_id, params, origin, print_fn=line, get_setting=deps.get("operation_get_setting"),
+                           run=deps.get("operation_run"))
+        with _JOBS_LOCK:
+            _JOBS[job_id].update(done=True, outcome="applied" if code == 0 else "refused", detail=f"exit code {code}")
+    except Exception as exc:  # noqa: BLE001 - must reach the operator, not hang the poll
+        with _JOBS_LOCK:
+            _JOBS[job_id].update(done=True, outcome="error", detail=f"{type(exc).__name__}: {exc}")
+
+
+def _start_operation_job(deps: dict, op_id: str, params: dict, origin) -> str:
+    job_id = uuid.uuid4().hex
+    with _JOBS_LOCK:
+        _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
+    threading.Thread(target=_run_operation_job, args=(job_id, op_id, params, origin, deps), daemon=True).start()
+    return job_id
+
+
+DEFAULT_STATE_DIR = Path("/var/lib/baseline")     # audit log, signing key and schedules (root-only, mode 0600)
+
 # The only routes reachable without a session: the login screen itself.
 _PUBLIC_PATHS = frozenset({"/", "/login", "/logout"})
 
@@ -1322,6 +1358,28 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                                                        authorization, store), daemon=True).start()
         return self._json(200, {"outcome": "started", "job_id": job_id})
 
+    def _post_operations(self, deps: dict, path: str, body: dict, now: float) -> None:
+        gate, scheduler, session = deps.get("web_gate"), deps.get("scheduler"), self._cookie_token()
+        if gate is None or scheduler is None:
+            return self._json(503, {"outcome": "refused", "detail": "operations are not available on this server"})
+        op_id = body.get("op", "")
+        try:
+            if path == "/operations/run":
+                params = ops.validate(op_id, body.get("params", {}))
+                origin = gate.origin_for_session(deps["sessions"], session, op_id, params, now)
+                return self._json(200, {"outcome": "started", "job_id": _start_operation_job(deps, op_id, params, origin)})
+            if path == "/operations/schedule":
+                scheduler.set(deps["sessions"], session, op_id, body.get("params", {}), every_hours=body.get("every_hours"))
+                return self._json(200, {"outcome": "applied"})
+            if path == "/operations/schedule/remove":
+                scheduler.remove(deps["sessions"], session, op_id)
+                return self._json(200, {"outcome": "applied"})
+        except wg.NotFromWebApp as exc:
+            return self._json(403, {"outcome": "refused", "detail": f"refused: {exc}"})
+        except (ValueError, TypeError) as exc:
+            return self._json(400, {"outcome": "refused", "detail": f"refused: {exc}"})
+        return self._json(404, {"outcome": "refused", "detail": "no such operation route"})
+
     def _cookie_token(self) -> str:
         raw = self.headers.get("Cookie", "")
         for part in raw.split(";"):
@@ -1337,7 +1395,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         answering) when the request has no valid session. Applies to every
         route except `_PUBLIC_PATHS`, unknown routes included, so the set
         of routes is not revealed either."""
-        if deps["sessions"].get(self._cookie_token(), now) is not None:
+        session = deps["sessions"].get(self._cookie_token(), now)
+        if session is not None:
+            if session.role == "operator" and not ops.operator_may_reach(path):
+                self._json(403, {"outcome": "refused", "detail": "refused: this account may use Operations only"}) \
+                    if (path.startswith("/api/") or self._is_json_request()) else \
+                    self._reject(403, "This account may use Operations only.")
+                return True
             return False
         if path.startswith("/api/") or self._is_json_request():
             self._json(401, {"outcome": "refused", "error": "not authenticated"})
@@ -1356,8 +1420,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return
 
         if path in ("/", "/login"):
-            if deps["sessions"].get(self._cookie_token(), now) is not None:
-                return self._redirect("/settings")
+            session = deps["sessions"].get(self._cookie_token(), now)
+            if session is not None:
+                return self._redirect("/operations" if session.role == "operator" else "/settings")
             return self._html_response(200, sw.render_login_page())
 
         if path == "/logout":
@@ -1440,6 +1505,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 report = ic.reconcile(scan_runner)
             return self._html_response(200, _with_nav(
                 render_installer_cache_page(report, elevated=elevated), path))
+
+        if path == "/operations":
+            scheduler = deps.get("scheduler")
+            return self._html_response(200, _with_nav(
+                operations_page.render_operations_page(ops.OPERATIONS, scheduler.listing() if scheduler else []), path))
 
         if path.startswith("/drive-admin/actions"):
             return self._json(200, {"actions": da.describe_actions()})
@@ -1526,9 +1596,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             result = sw.handle_login(deps["verifier"], deps["sessions"],
                                       body.get("username", ""), body.get("password", ""), now,
                                       persona_provider=deps.get("persona_provider"))
+            if result.outcome == "applied" and body.get("username", "") in _operator_users(deps):
+                deps["sessions"].sessions[result.body["token"]].role = "operator"
             self._record_attempt("login", now, ok=result.outcome == "applied")
             if result.outcome == "applied":
-                return self._redirect("/settings", set_cookie=ws.session_cookie(result.body["token"]))
+                role = deps["sessions"].sessions[result.body["token"]].role
+                return self._redirect("/operations" if role == "operator" else "/settings",
+                                      set_cookie=ws.session_cookie(result.body["token"]))
             return self._html_response(401, _with_nav(sw.render_login_page("Invalid username or password."), "/login"))
 
         if path.startswith("/settings/"):
@@ -1651,6 +1725,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             gid = body.get("id", "")
             return self._json(200, {"outcome": "applied" if gid in mine and store.revoke(gid) else "refused"})
 
+        if path.startswith("/operations/"):
+            return self._post_operations(deps, path, body, now)
+
         if path == "/api/backup":
             result = cpw.handle_backup(deps["runner"], dest=body.get("dest", ""),
                                         targets=body.get("targets", []), config_only=bool(body.get("config_only")),
@@ -1668,7 +1745,7 @@ def make_server(*, deps: dict, host: str = "127.0.0.1", port: int = 8200) -> htt
 
 
 def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
-                       elevation_username: str = "root") -> http.server.HTTPServer:
+                       elevation_username: str = "root", state_dir=None) -> http.server.HTTPServer:
     """The real, systemd-launched merged app.
 
     Drive Administration does **not** use `elevation_verify_fn` at all
@@ -1698,6 +1775,19 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     deps["config_path"] = cpw.DEFAULT_CONFIG_PATH
     deps["network_interface"] = "eno1"
     deps["pds_runner"] = pds.Runner()
+    # Operations: only the web service holds the signing key (root-only file); nothing else can ask for one to run.
+    state = Path(state_dir or DEFAULT_STATE_DIR)
+    audit_path = state / "audit" / "web-actions.jsonl"
+    audit = hitl.AuditFile(audit_path)
+    gate = wg.WebGate(wg.load_or_create_key(state / "web-signing.key"), audit=audit)
+    wg.configure(gate)
+    deps["web_gate"] = gate
+    deps["scheduler"] = ops.Scheduler(
+        gate, ops.ScheduleStore(state / "schedules.json"),
+        lambda op, params, origin: _start_operation_job(deps, op, params, origin))
+    import settings_store
+    deps["operator_users"] = lambda: settings_store.get_setting("access", "operator_users")
+    deps["hitl_audit_path"] = audit_path
     deps["elevation_verify_fn"] = sw.SystemElevationVerifier(elevation_username)
     # Recovery mode: this machine's root password (or its passphrase), checked
     # against the system's own one-way hash. Its own ticket store; Admin
@@ -1718,6 +1808,7 @@ def main() -> int:
     server = build_real_server(port=port, data_path=data_path)
     print(f"Baseline web app on http://0.0.0.0:{port}/  (login: this machine's account password)")
     print(f"Data store: {data_path}")
+    server.deps["scheduler"].start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

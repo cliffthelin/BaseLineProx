@@ -630,7 +630,7 @@ def test_build_real_server_defaults_to_port_8100(tmp_path):
 
 def test_build_real_server_wires_a_real_system_elevation_verifier(tmp_path):
     import settings_web as sw
-    real_server = bw.build_real_server(host="127.0.0.1", port=0, data_path=tmp_path / "store.json")
+    real_server = bw.build_real_server(host="127.0.0.1", port=0, data_path=tmp_path / "store.json", state_dir=tmp_path / "state")
     try:
         assert isinstance(real_server.deps["elevation_verify_fn"], sw.SystemElevationVerifier)
         assert real_server.deps["elevation_verify_fn"].username == "root"
@@ -639,7 +639,7 @@ def test_build_real_server_wires_a_real_system_elevation_verifier(tmp_path):
 
 
 def test_build_real_server_honors_a_custom_elevation_username(tmp_path):
-    real_server = bw.build_real_server(host="127.0.0.1", port=0, data_path=tmp_path / "store.json",
+    real_server = bw.build_real_server(host="127.0.0.1", port=0, data_path=tmp_path / "store.json", state_dir=tmp_path / "state",
                                         elevation_username="cane")
     try:
         assert real_server.deps["elevation_verify_fn"].username == "cane"
@@ -649,7 +649,7 @@ def test_build_real_server_honors_a_custom_elevation_username(tmp_path):
 
 def test_build_real_server_wires_the_drive_admin_pds_runner(tmp_path):
     import physical_device_safety as pds
-    real_server = bw.build_real_server(host="127.0.0.1", port=0, data_path=tmp_path / "store.json")
+    real_server = bw.build_real_server(host="127.0.0.1", port=0, data_path=tmp_path / "store.json", state_dir=tmp_path / "state")
     try:
         assert isinstance(real_server.deps["pds_runner"], pds.Runner)
     finally:
