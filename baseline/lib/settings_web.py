@@ -33,6 +33,7 @@ discipline `repair.py`'s `Runner`/`FakeRunner` established.
 """
 from __future__ import annotations
 
+import html
 import http.server
 import json
 import secrets
@@ -426,6 +427,21 @@ def handle_new_account(hasher, username: str, password: str, *, store=None) -> R
         return RouteResult("refused", 400, {"error": "username and password required"})
     account = PendingRebuildAccount(username=username, password_hash=hasher(password))
     return RouteResult("applied", 200, {"account": account.username})
+
+
+def handle_set_machine_passphrase(store, passphrase: str) -> RouteResult:
+    """Deployed-app first-run step: set this machine's recovery passphrase.
+    Stored only as a salted one-way hash. Works once: while a passphrase
+    already exists it is refused, so a later caller cannot replace it. The
+    caller must already be logged in (the HTTP layer gates every route)."""
+    if store is None:
+        return RouteResult("refused", 503, {"error": "no store configured on this deployment"})
+    if store.get_machine_passphrase_hash():
+        return RouteResult("refused", 409, {"error": "a machine passphrase is already set"})
+    if not passphrase:
+        return RouteResult("refused", 400, {"error": "a passphrase is required"})
+    store.set_machine_passphrase_hash(_sha512crypt(passphrase, _new_salt()))
+    return RouteResult("applied", 200, {"detail": "machine passphrase set"})
 
 
 def handle_rebuild(eligibility: RebuildEligibility, trigger: RebuildTrigger,
@@ -1287,7 +1303,7 @@ def _html(title: str, body: str) -> bytes:
 
 
 def render_login_page(error: str = "") -> bytes:
-    notice = f'<p class="notice">{error}</p>' if error else ""
+    notice = f'<p class="notice">{html.escape(error, quote=False)}</p>' if error else ""
     return _html("Log in", f"""
 {notice}
 <form method="post" action="/login">
@@ -1379,7 +1395,7 @@ def render_settings_page(settings: dict, notice: str = "") -> bytes:
 </form>"""
         for section, values in settings.items() if not section.startswith("_")
     )
-    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>' if notice else ""
     return _html("Settings", f"""
 {notice_html}
 <p>Every current setting is shown below. Change any section and save it -
@@ -1399,10 +1415,28 @@ def recovery_unlocked(deps: dict, now: float) -> bool:
     return store is not None and store.is_elevated(deps.get("runner"), now)
 
 
+def render_machine_passphrase_page(already_set: bool, notice: str = "") -> bytes:
+    """First-run setup on the deployed app: the machine passphrase that, with
+    the root password, unlocks recovery mode."""
+    notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>' if notice else ""
+    if already_set:
+        return _html("Setup", f"{notice_html}<p>The machine passphrase is already set. "
+                              "It cannot be replaced from this page.</p>")
+    return _html("Setup", f"""
+{notice_html}
+<p>Set this machine's recovery passphrase. Recovery mode accepts it or the root password. It is stored
+only as a one-way hash, so it can be checked but never read back; keep a copy somewhere safe.</p>
+<form method="post" action="/setup/machine-passphrase">
+  <label>Machine passphrase <input name="passphrase" type="password" autocomplete="off"></label>
+  <button type="submit">Set passphrase</button>
+</form>
+""")
+
+
 def render_recovery_locked_page(notice: str = "") -> bytes:
     """Shown instead of any machine state until the recovery credential is
     entered. Reveals nothing about personas or volumes."""
-    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>' if notice else ""
     return _html("Recovery", f"""
 {notice_html}
 <p>Recovery mode needs this machine's root password or its recovery passphrase.</p>
@@ -1418,7 +1452,7 @@ def render_recovery_page(discovery: dict, notice: str = "") -> bytes:
     recovery is unlocked (`recovery_unlocked`); until then
     `render_recovery_locked_page` is served instead. `discovery` is `handle_recovery_view`'s own body
     dict; an empty dict (the hand-off case) renders a plain notice."""
-    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>' if notice else ""
     if not discovery:
         return _html("Recovery", f"{notice_html}<p>Recovery discovery is not available on this deployment.</p>")
     found = ", ".join(discovery.get("personas_found") or []) or "none"
@@ -1501,7 +1535,7 @@ passphrase from your login, matching real sudo's own short-lived cache.</p>"""
         )
         for group, values in settings.items()
     )
-    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>' if notice else ""
     deps_html = render_dependencies_section(dependencies or [], dependency_results or {})
     return _html("Admin", f"""
 {notice_html}
@@ -1515,7 +1549,7 @@ requires elevation (above) first - matching admin's own "sudo or root" design.</
 
 
 def render_setup_page(step: str = "account", notice: str = "") -> bytes:
-    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>' if notice else ""
     if step == "account":
         body = """
 <form method="post" action="/setup/new-account">

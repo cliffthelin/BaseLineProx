@@ -41,14 +41,17 @@ a refusal to stderr and exits non-zero otherwise. They reuse the real checks
 notion of "done" that could drift. `boot/provision.sh` copies and `chmod +x`'s
 them.
 
-## Known gap: no first-run setup on the deployed app
+## First-run setup on the deployed app
 
 `baseline_web.py` (what `baseline-web.service` runs) logs in against the system
-account's password and elevates with the root password, and it does not route
-`/setup/new-account`. The first-run flow that sets the machine passphrase and the
-admin elevation passphrase exists only on the standalone `settings_web.py` server
-(v0.2 rows 46-48). On a deployed machine recovery therefore accepts the root
-password only, until a first-run route is added to the deployed app (v0.2 row 49).
+account's password and elevates with the root password. Its `/setup` page sets the
+machine passphrase that, together with the root password, unlocks recovery mode
+(v0.2 row 49). It sits behind the normal login, because an open page would let
+whoever reaches a fresh machine first set its recovery passphrase. It works once:
+while a passphrase exists, a second attempt is refused and cannot replace it. Only a
+salted one-way hash is stored. The standalone `settings_web.py` server has its own
+first-run flow (`create_first_account`) that also creates the first account and the
+admin elevation passphrase (rows 44-48).
 
 ## Status
 

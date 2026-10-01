@@ -30,6 +30,7 @@ the operator a script to run in a terminal themselves.
 """
 from __future__ import annotations
 
+import html
 import http.server
 import json
 import threading
@@ -183,11 +184,11 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
     if not notice:
         notice_html = ""
     elif notice_ok is True:
-        notice_html = f'<div class="action-banner ok">&#10003; {notice}</div>'
+        notice_html = f'<div class="action-banner ok">&#10003; {html.escape(notice, quote=False)}</div>'
     elif notice_ok is False:
-        notice_html = f'<div class="action-banner fail">&#10007; {notice}</div>'
+        notice_html = f'<div class="action-banner fail">&#10007; {html.escape(notice, quote=False)}</div>'
     else:
-        notice_html = f'<p class="notice">{notice}</p>'
+        notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>'
 
     if drives:
         # A radio group can only ever have ONE genuinely checked option
@@ -1285,7 +1286,13 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(sw.render_settings_page(result.body["settings"]), path))
 
         if path == "/setup":
-            return self._html_response(200, _with_nav(sw.render_setup_page("account"), path))
+            store = deps.get("store")
+            if store is None:
+                return self._html_response(503, _with_nav(sw.render_machine_passphrase_page(
+                    True, "No store is configured on this deployment."), path))
+            notice = qs.get("notice", [""])[0]
+            return self._html_response(200, _with_nav(sw.render_machine_passphrase_page(
+                bool(store.get_machine_passphrase_hash()), notice), path))
 
         if path == "/api/export-config":
             result = sw.handle_settings_view(deps["sessions"], deps["source"], self._cookie_token(), now,
@@ -1458,6 +1465,12 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                                            self._cookie_token(), group, key, values.get("value"), now)
             notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
             return self._redirect(f"/admin?notice={notice}")
+
+        if path == "/setup/machine-passphrase":
+            result = sw.handle_set_machine_passphrase(deps.get("store"), body.get("passphrase", ""))
+            notice = result.body.get("detail") or result.body.get("error", "")
+            from urllib.parse import quote
+            return self._redirect(f"/setup?notice={quote(notice)}")
 
         if path == "/recovery/unlock":
             result = sw.handle_admin_elevate(deps["recovery_store"], deps.get("recovery_verify_fn"),
