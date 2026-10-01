@@ -452,6 +452,10 @@ def _base_deps(**overrides):
         "pds_runner": FakePdsRunner(), "vg_name": "pve", "pkexec_executor": None,
         "recovery_store": None, "recovery_verify_fn": None,
     }
+    import web_gate
+    gate = web_gate.WebGate(b"b" * 32, clock=lambda: deps["clock"]())
+    web_gate.configure(gate)
+    deps["web_gate"] = gate
     deps.update(overrides)
     return deps
 

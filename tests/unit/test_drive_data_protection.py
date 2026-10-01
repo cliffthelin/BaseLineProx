@@ -7,7 +7,7 @@ from test_drive_admin import FakePdsRunner
 import drive_admin as da
 import drive_guard as dg
 import hitl
-from hitl_helpers import authorize, perform_confirmed
+from hitl_helpers import authorize, perform_confirmed, perform_with_origin
 
 GUID = "11111111-2222-3333-4444-555555555555"
 DATA = f"sdb disk  {GUID} \nsdb1 part ntfs  Media\n"
@@ -26,7 +26,7 @@ def test_prepare_refuses_a_data_drive_so_no_challenge_can_be_raised():
 @pytest.mark.parametrize("extra", [{}, {"force": True}, {"confirmed": True}, {"i_know": "yes"}])
 def test_no_parameter_gets_a_data_drive_formatted(extra):
     runner = FakeRunner()
-    result = da.perform_action(runner, "build_self_installer", {"device_path": "/dev/sdb", **extra},
+    result = perform_with_origin(runner, "build_self_installer", {"device_path": "/dev/sdb", **extra},
                                pds_runner=pds(DATA))
     assert result.ok is False
     assert runner.calls == []
@@ -37,7 +37,7 @@ def test_a_human_confirmation_does_not_override_the_data_rule():
     ok_pds = pds("sdb disk  " + GUID + " \n")
     auth, store = authorize("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=ok_pds)
     # The same authorization, replayed against a drive that now holds data, still gets nothing.
-    result = da.perform_action(runner, "build_self_installer", {"device_path": "/dev/sdb"},
+    result = perform_with_origin(runner, "build_self_installer", {"device_path": "/dev/sdb"},
                                pds_runner=pds(DATA), authorization=auth, hitl_store=store)
     assert result.ok is False
     assert runner.calls == []
@@ -89,7 +89,7 @@ def test_self_installer_pipeline_refuses_a_data_drive_by_itself(tmp_path):
 
 
 def test_stamp_needs_a_human_confirmation():
-    result = da.perform_action(FakeRunner(), "stamp_installer_identity", {"device_path": "/dev/sdb"},
+    result = perform_with_origin(FakeRunner(), "stamp_installer_identity", {"device_path": "/dev/sdb"},
                                pds_runner=pds(DATA))
     assert result.ok is False
     assert hitl.VERBS["stamp_installer_identity"] == "STAMP"

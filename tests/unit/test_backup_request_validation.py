@@ -3,6 +3,7 @@ request and hand them to tar / gpg as root: a logged-in session could overwrite 
 archive /root/.ssh somewhere readable. Now a backup may only be written as a NEW file in a known backup folder,
 may only read Baseline's own volumes and config, and a restore may only go to /mnt or a Baseline volume."""
 import pytest
+import web_origin_helper
 from fake_runner import FakeProc, FakeRunner
 
 import backup_restore as br
@@ -37,14 +38,14 @@ def test_a_backup_never_overwrites_an_existing_file():
 
 def test_a_good_destination_and_target_still_work():
     runner = FakeRunner(command_responses=[(lambda a: a[0] == "tar", FakeProc(0, "", ""))])
-    result = cpw.handle_backup(runner, dest=GOOD_DEST, targets=["/mnt/BASELINE", "/etc/baseline"], now=1.0)
+    result = cpw.handle_backup(runner, dest=GOOD_DEST, targets=["/mnt/BASELINE", "/etc/baseline"], now=1.0, origin=web_origin_helper.origin_for("cpw_backup", {}))
     assert result.outcome == "applied" and any(c[0] == "tar" for c in runner.calls)
 
 
 def test_the_encrypted_backup_folder_is_a_valid_destination_too():
     runner = FakeRunner(command_responses=[(lambda a: a[0] == "tar", FakeProc(0, "", ""))])
     assert cpw.handle_backup(runner, dest="/mnt/INSTALLER_CACHE/encrypted_backups/x.tar.gz",
-                             targets=["/mnt/BASELINE"], now=1.0).outcome == "applied"
+                             targets=["/mnt/BASELINE"], now=1.0, origin=web_origin_helper.origin_for("cpw_backup", {})).outcome == "applied"
 
 
 # --- sources --------------------------------------------------------------------
@@ -99,7 +100,7 @@ def test_restore_members_must_be_plain_relative_names(members):
 def test_restore_into_mnt_or_a_baseline_volume_is_accepted():
     for root in ("/mnt", "/mnt/BASELINE"):
         runner = FakeRunner(files={ARCHIVE: "x"}, command_responses=[(lambda a: a[0] == "tar", FakeProc(0, "", ""))])
-        result = cpw.handle_restore(runner, archive=ARCHIVE, dest_root=root, members=["BASELINE/state/a"], now=1.0)
+        result = cpw.handle_restore(runner, archive=ARCHIVE, dest_root=root, members=["BASELINE/state/a"], now=1.0, origin=web_origin_helper.origin_for("cpw_restore", {}))
         assert result.outcome in ("applied", "refused")
         assert result.outcome == "applied" or "backup" in result.body["detail"].lower()    # refused only by the 24h gate
 

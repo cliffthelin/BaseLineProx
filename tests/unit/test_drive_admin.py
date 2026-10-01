@@ -5,7 +5,7 @@ import pytest
 from fake_runner import FakeProc, FakeRunner
 
 import drive_admin as da
-from hitl_helpers import authorize, perform_confirmed
+from hitl_helpers import authorize, perform_confirmed, perform_with_origin
 import drive_installer as di
 import physical_device_safety as pds
 
@@ -1007,14 +1007,14 @@ def test_describe_actions_exposes_requires_device_for_the_web_pages_device_picke
 
 def test_perform_action_refuses_an_unknown_action_id():
     runner = FakeRunner()
-    result = da.perform_action(runner, "nonexistent", {})
+    result = perform_with_origin(runner, "nonexistent", {})
     assert result.ok is False
 
 
 def test_perform_action_does_not_choke_on_on_progress_for_an_action_that_ignores_it():
     """`update_selected`'s own lambda doesn't forward on_progress -
     passing one anyway must never raise."""
-    result = da.perform_action(FakeRunner(), "update_selected", {"selected": []}, on_progress=lambda line: None)
+    result = perform_with_origin(FakeRunner(), "update_selected", {"selected": []}, on_progress=lambda line: None)
     assert result.ok is False  # "no volumes selected" - the real point is that it didn't crash
 
 
@@ -1038,7 +1038,7 @@ def test_there_are_device_actions_to_guard():
 @pytest.mark.parametrize("action_id", DEVICE_ACTIONS)
 def test_an_action_on_a_drive_outside_the_allowlist_is_refused_and_runs_nothing(action_id):
     runner = FakeRunner()
-    result = da.perform_action(runner, action_id, {"device_path": "/dev/sda"},
+    result = perform_with_origin(runner, action_id, {"device_path": "/dev/sda"},
                                pds_runner=FakePdsRunner(serial="ZCT2WCM2"))
     assert result.ok is False and "allowed" in result.detail.lower()
     assert runner.calls == [], f"{action_id} ran commands against a drive outside the allowlist"
@@ -1062,7 +1062,7 @@ def test_the_action_receives_the_validated_path_not_the_raw_string():
             def realpath(self, path):
                 return "/dev/sdb" if path == "/dev/disk/by-id/some-link" else path
         # a path that resolves to the real device: the action must get the resolved one
-        da.perform_action(FakeRunner(), "probe", {"device_path": "/dev/sdb"},
+        perform_with_origin(FakeRunner(), "probe", {"device_path": "/dev/sdb"},
                           pds_runner=Resolving(serial="MD89N41071210AP4E"))
         assert seen["p"] == "/dev/sdb"
     finally:
@@ -1072,13 +1072,13 @@ def test_the_action_receives_the_validated_path_not_the_raw_string():
 
 def test_a_device_action_with_no_device_path_is_refused():
     runner = FakeRunner()
-    result = da.perform_action(runner, "repair", {}, pds_runner=FakePdsRunner())
+    result = perform_with_origin(runner, "repair", {}, pds_runner=FakePdsRunner())
     assert result.ok is False
     assert runner.calls == []
 
 
 def test_actions_that_need_no_device_are_unaffected():
-    result = da.perform_action(FakeRunner(), "update_selected", {"selected": []}, pds_runner=FakePdsRunner())
+    result = perform_with_origin(FakeRunner(), "update_selected", {"selected": []}, pds_runner=FakePdsRunner())
     assert result.ok is not None
 
 
@@ -1106,7 +1106,7 @@ def _act(action_id, **params):
         auth, store = authorize(action_id, request, pds_runner=pds_runner)
     except ValueError:
         auth, store = None, None
-    result = da.perform_action(runner, action_id, request, pds_runner=pds_runner, authorization=auth, hitl_store=store)
+    result = perform_with_origin(runner, action_id, request, pds_runner=pds_runner, authorization=auth, hitl_store=store)
     if not result.ok and auth is None:
         assert "human confirmation" not in result.detail, "refused for a missing confirmation, not for the bad value"
     return result, runner
@@ -1204,21 +1204,21 @@ def test_expected_serial_must_be_one_of_the_allowed_drives(value):
 ])
 def test_no_drive_action_runs_without_a_confirmation_and_no_command_is_issued(action_id, extra):
     runner = _runner_with_a_volume_group()
-    result = da.perform_action(runner, action_id, {**ALLOWED_DEV, **extra}, pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
+    result = perform_with_origin(runner, action_id, {**ALLOWED_DEV, **extra}, pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
     assert result.ok is False and "human confirmation" in result.detail
     assert runner.calls == []
 
 
 def test_update_selected_also_needs_a_confirmation():
     runner = FakeRunner()
-    result = da.perform_action(runner, "update_selected", {"selected": ["BASELINE"]})
+    result = perform_with_origin(runner, "update_selected", {"selected": ["BASELINE"]})
     assert result.ok is False and "human confirmation" in result.detail
 
 
 @pytest.mark.parametrize("bogus", ["yes", True, 1, "approved", {"ok": 1}, object()])
 def test_a_made_up_authorization_does_not_work(bogus):
     runner = _runner_with_a_volume_group()
-    result = da.perform_action(runner, "repair", ALLOWED_DEV, pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"),
+    result = perform_with_origin(runner, "repair", ALLOWED_DEV, pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"),
                                authorization=bogus)
     assert result.ok is False and runner.calls == []
 
@@ -1227,7 +1227,7 @@ def test_an_authorization_for_one_request_does_not_run_a_different_one():
     pds_runner = FakePdsRunner(serial="MD89N41071210AP4E")
     auth, store = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
     runner = _runner_with_a_volume_group()
-    result = da.perform_action(runner, "mount_volume", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store)
+    result = perform_with_origin(runner, "mount_volume", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store)
     assert result.ok is False and runner.calls == []
 
 
@@ -1235,10 +1235,10 @@ def test_an_authorization_works_once_and_a_replay_is_refused():
     pds_runner = FakePdsRunner(serial="MD89N41071210AP4E")
     auth, store = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
     first = _runner_with_a_volume_group()
-    assert da.perform_action(first, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store).ok is not None
+    assert perform_with_origin(first, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store).ok is not None
     assert first.calls, "the confirmed action should have run"
     replay = _runner_with_a_volume_group()
-    result = da.perform_action(replay, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store)
+    result = perform_with_origin(replay, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store)
     assert result.ok is False and replay.calls == []
 
 
@@ -1247,11 +1247,11 @@ def test_an_authorization_from_a_different_store_is_refused():
     auth, _ = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
     other_store = __import__("hitl_helpers").new_store()
     runner = _runner_with_a_volume_group()
-    result = da.perform_action(runner, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=other_store)
+    result = perform_with_origin(runner, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=other_store)
     assert result.ok is False and runner.calls == []
 
 
 def test_the_confirmation_is_checked_after_validation_so_a_bad_drive_is_still_refused_for_the_right_reason():
-    result = da.perform_action(FakeRunner(), "repair", {"device_path": "/dev/sda"},
+    result = perform_with_origin(FakeRunner(), "repair", {"device_path": "/dev/sda"},
                                pds_runner=FakePdsRunner(serial="ZCT2WCM2"))
     assert "allowed drives" in result.detail

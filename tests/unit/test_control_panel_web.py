@@ -1,3 +1,4 @@
+import web_origin_helper
 """Unit tests for control_panel_web.py's routing/decision logic - the
 real "Master Config" control-plane web app. Direct correction this
 module exists to satisfy: "THIS IS A WEB APPLICATION... IT IS NOT A
@@ -72,7 +73,7 @@ def test_handle_differences_computes_the_real_diff_when_config_exists():
 def test_handle_backup_runs_the_real_tar_backup():
     runner = FakeRunner()
     result = cpw.handle_backup(runner, dest="/mnt/INSTALLER_CACHE/backups/x.tar.gz",
-                                targets=["/mnt/USER_PERSONAL"], config_only=False)
+                                targets=["/mnt/USER_PERSONAL"], config_only=False, origin=web_origin_helper.origin_for("cpw_backup", {}))
     assert result.outcome == "applied"
     assert runner.calls[0][:2] == ["tar", "-czf"]
 
@@ -102,7 +103,7 @@ def test_handle_restore_runs_the_real_tar_extract():
     runner = FakeRunner(files={"/mnt/INSTALLER_CACHE/backups/x.tar.gz": ""})
     backup_restore.record_backup_manifest(runner, target="/mnt/USER", ts=1700000000.0)
     result = cpw.handle_restore(runner, archive="/mnt/INSTALLER_CACHE/backups/x.tar.gz", dest_root="/mnt", members=[],
-                                 now=1700000000.0 + 60)
+                                 now=1700000000.0 + 60, origin=web_origin_helper.origin_for("cpw_restore", {}))
     assert result.outcome == "applied"
     assert any(c[:2] == ["tar", "-xzf"] for c in runner.calls)
 
@@ -112,7 +113,7 @@ def test_handle_restore_runs_the_real_tar_extract():
 def test_handle_update_hands_off_when_no_config_file_exists():
     runner = FakeRunner()
     result = cpw.handle_update(runner, config_path="/etc/baseline/install-config.json",
-                                categories={"drivers": True}, network_interface="eno1")
+                                categories={"drivers": True}, network_interface="eno1", origin=web_origin_helper.origin_for("cpw_update", {}))
     assert result.outcome == "handed_off"
 
 
@@ -121,7 +122,7 @@ def test_handle_update_applies_the_real_selective_update():
     config = {"proxmox": {}, "drivers": {"cpu_microcode": True, "cpu_microcode_package": "amd64-microcode"}}
     runner = FakeRunner(files={"/etc/baseline/install-config.json": json.dumps(config)})
     result = cpw.handle_update(runner, config_path="/etc/baseline/install-config.json",
-                                categories={"drivers": True}, network_interface="eno1")
+                                categories={"drivers": True}, network_interface="eno1", origin=web_origin_helper.origin_for("cpw_update", {}))
     assert result.outcome == "applied"
     assert "cpu_microcode" in result.body["applied"]
 

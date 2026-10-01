@@ -34,6 +34,7 @@ from urllib.parse import urlparse, parse_qs
 import backup_restore
 import config_crypto
 import config_diff
+import web_gate
 import drive_installer
 import physical_device_safety as pds
 import update_pipeline
@@ -80,6 +81,15 @@ def _load_config(runner: Runner, config_path: str) -> dict | None:
 # or hands back a command for the caller to run somewhere else.
 # ---------------------------------------------------------------------------
 
+def _not_from_web_app(origin, op: str):
+    """None if the web application asked for this (a signed origin for `op`), else the refusal to return."""
+    try:
+        web_gate.require(origin, op, {})
+    except web_gate.NotFromWebApp as exc:
+        return RouteResult("refused", 403, {"detail": f"refused: {exc}"})
+    return None
+
+
 def handle_detect(runner: Runner, *, vg_name: str = drive_installer.DEFAULT_VG_NAME) -> RouteResult:
     result = drive_installer.detect_existing_baseline_install(runner, vg_name=vg_name)
     return RouteResult("applied", 200, result)
@@ -111,7 +121,7 @@ def handle_differences(runner: Runner, *, config_path: str = DEFAULT_CONFIG_PATH
 
 
 def handle_backup(runner: Runner, *, dest: str, targets: list, config_only: bool = False,
-                   now: float = None) -> RouteResult:
+                   now: float = None, origin=None) -> RouteResult:
     """`now` (real wall-clock time from the caller) records a fresh
     backup-success manifest per target on success - the durable proof
     `handle_restore`'s own hard gate checks before allowing any
@@ -122,6 +132,9 @@ def handle_backup(runner: Runner, *, dest: str, targets: list, config_only: bool
             targets = backup_restore.check_backup_sources(targets)
     except ValueError as exc:
         return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
+    refusal = _not_from_web_app(origin, "cpw_backup")
+    if refusal:
+        return refusal
     result = backup_restore.create_backup(runner, dest_path=dest, targets=targets,
                                            config_only=config_only, now=now)
     if not result.ok:
@@ -139,7 +152,7 @@ def handle_backup_list(runner: Runner, *, archive: str) -> RouteResult:
 
 
 def handle_restore(runner: Runner, *, archive: str, dest_root: str, members: list = None,
-                    now: float = None) -> RouteResult:
+                    now: float = None, origin=None) -> RouteResult:
     """`now` (real wall-clock time from the caller) is required to
     pass backup_restore.restore_backup's own hard gate: any restore
     touching USER refuses outright without a fresh backup
@@ -151,6 +164,9 @@ def handle_restore(runner: Runner, *, archive: str, dest_root: str, members: lis
         members = backup_restore.check_restore_members(members)
     except ValueError as exc:
         return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
+    refusal = _not_from_web_app(origin, "cpw_restore")
+    if refusal:
+        return refusal
     result = backup_restore.restore_backup(runner, archive_path=archive, dest_root=dest_root,
                                             members=members or None, now=now)
     if not result.ok:
@@ -159,7 +175,10 @@ def handle_restore(runner: Runner, *, archive: str, dest_root: str, members: lis
 
 
 def handle_update(runner: Runner, *, config_path: str = DEFAULT_CONFIG_PATH,
-                   categories: dict, network_interface: str = "eno1") -> RouteResult:
+                   categories: dict, network_interface: str = "eno1", origin=None) -> RouteResult:
+    refusal = _not_from_web_app(origin, "cpw_update")
+    if refusal:
+        return refusal
     config = _load_config(runner, config_path)
     if config is None:
         return RouteResult("handed_off", 409,
@@ -180,7 +199,7 @@ def handle_validate_drive(pds_runner: "pds.Runner", *, path: str, min_size_bytes
         return RouteResult("refused", 422, {"error": str(exc)})
 
 
-def handle_backup_encrypt(runner: Runner, *, in_path: str, out_path: str, password: str) -> RouteResult:
+def handle_backup_encrypt(runner: Runner, *, in_path: str, out_path: str, password: str, origin=None) -> RouteResult:
     """The password never touches an argv, a log line, or disk beyond
     an ephemeral 0600 temp file that is removed immediately after -
     the same discipline this project's key-handling code already
@@ -190,6 +209,9 @@ def handle_backup_encrypt(runner: Runner, *, in_path: str, out_path: str, passwo
         out_path = backup_restore.check_new_backup_file(runner, out_path, suffix=".gpg", what="out_path")
     except ValueError as exc:
         return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
+    refusal = _not_from_web_app(origin, "cpw_encrypt")
+    if refusal:
+        return refusal
     fd, pw_path = tempfile.mkstemp(prefix=".baseline-cpw-")
     try:
         os.chmod(pw_path, 0o600)
@@ -206,12 +228,15 @@ def handle_backup_encrypt(runner: Runner, *, in_path: str, out_path: str, passwo
     return RouteResult("applied", 200, {"detail": result.detail, "out_path": out_path})
 
 
-def handle_backup_decrypt(runner: Runner, *, in_path: str, out_path: str, password: str) -> RouteResult:
+def handle_backup_decrypt(runner: Runner, *, in_path: str, out_path: str, password: str, origin=None) -> RouteResult:
     try:
         in_path = backup_restore.check_existing_backup_file(runner, in_path, what="in_path")
         out_path = backup_restore.check_new_backup_file(runner, out_path, suffix=".tar.gz", what="out_path")
     except ValueError as exc:
         return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
+    refusal = _not_from_web_app(origin, "cpw_decrypt")
+    if refusal:
+        return refusal
     fd, pw_path = tempfile.mkstemp(prefix=".baseline-cpw-")
     try:
         os.chmod(pw_path, 0o600)

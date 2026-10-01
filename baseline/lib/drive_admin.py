@@ -56,6 +56,7 @@ import hitl
 import persist_bind_mounts as pbm
 import physical_device_safety as pds
 import settings_store
+import web_gate
 
 # Real bug found live, 2026-09-29: `build_self_installer` used to
 # default `repo_root` to a *hardcoded* `Path("/opt/baseline").parent`
@@ -1276,7 +1277,7 @@ def prepare_action(action_id: str, params: dict, *, pds_runner=None) -> dict:
 
 
 def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None, pds_runner=None,
-                   authorization=None, hitl_store=None) -> ActionResult:
+                   authorization=None, hitl_store=None, origin=None) -> ActionResult:
     """`on_progress` (direct instruction, 2026-09-29 - "add a console
     log of what is running and doing"): threaded through as a real
     keyword argument, never required by any action's own signature -
@@ -1293,6 +1294,11 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
         message = str(exc)
         return ActionResult(False, message if message.startswith(("refused", "unknown action")) or "needs a drive" in message
                             else f"refused: {message}")
+    try:
+        # Two independent proofs: the web application asked (signed origin), and a person confirmed (hitl).
+        web_gate.require(origin, "drive_action", {"action_id": action_id, "params": call_params})
+    except web_gate.NotFromWebApp as exc:
+        return ActionResult(False, f"refused: {exc}")
     try:
         hitl.require(authorization, action_id, call_params, serial, store=hitl_store)
     except hitl.ConfirmationRequired as exc:

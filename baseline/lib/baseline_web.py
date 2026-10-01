@@ -1233,14 +1233,14 @@ def _hitl_store(deps: dict):
 
 
 def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict, pds_runner=None,
-                    authorization=None, hitl_store=None) -> None:
+                    authorization=None, hitl_store=None, origin=None) -> None:
     def on_progress(line: str) -> None:
         with _JOBS_LOCK:
             _JOBS[job_id]["lines"].append(line)
 
     try:
         result = da.perform_action(sudo_runner, action_id, params, on_progress=on_progress, pds_runner=pds_runner,
-                                   authorization=authorization, hitl_store=hitl_store)
+                                   authorization=authorization, hitl_store=hitl_store, origin=origin)
         with _JOBS_LOCK:
             _JOBS[job_id].update(done=True, outcome="applied" if result.ok else "refused", detail=result.detail)
     except Exception as exc:  # a real, unexpected crash must still reach the operator, not hang the poll forever
@@ -1351,11 +1351,19 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         # No password field, no `verify_sudo_password` preflight: `PkexecRunner` authenticates per real privileged call
         # via PolicyKit's native agent (direct instruction, 2026-09-29). The human confirmation above is separate.
         pkexec_runner = da.PkexecRunner(executor=deps.get("pkexec_executor"))   # None in a real deployment -> subprocess.run
+        gate = deps.get("web_gate")
+        if gate is None:
+            return self._json(503, {"outcome": "refused", "detail": "refused: no web gate on this server"})
+        try:
+            origin = gate.origin_for_session(deps["sessions"], self._cookie_token(), "drive_action",
+                                             {"action_id": action_id, "params": params}, deps["clock"]())
+        except wg.NotFromWebApp as exc:
+            return self._json(403, {"outcome": "refused", "detail": f"refused: {exc}"})
         job_id = uuid.uuid4().hex
         with _JOBS_LOCK:
             _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
         threading.Thread(target=_run_action_job, args=(job_id, pkexec_runner, action_id, params, deps.get("pds_runner"),
-                                                       authorization, store), daemon=True).start()
+                                                       authorization, store, origin), daemon=True).start()
         return self._json(200, {"outcome": "started", "job_id": job_id})
 
     def _post_operations(self, deps: dict, path: str, body: dict, now: float) -> None:
@@ -1729,9 +1737,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._post_operations(deps, path, body, now)
 
         if path == "/api/backup":
+            gate = deps.get("web_gate")
+            if gate is None:
+                return self._json(503, {"outcome": "refused", "detail": "refused: no web gate on this server"})
+            origin = gate.origin_for_session(deps["sessions"], self._cookie_token(), "cpw_backup", {}, now)
             result = cpw.handle_backup(deps["runner"], dest=body.get("dest", ""),
                                         targets=body.get("targets", []), config_only=bool(body.get("config_only")),
-                                        now=time.time())
+                                        now=time.time(), origin=origin)
             return self._json(result.status, {"outcome": result.outcome, **result.body})
 
         result = {"outcome": "handed_off", "reason": f"no route for {path!r}"}
