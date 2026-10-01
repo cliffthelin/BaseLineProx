@@ -258,3 +258,56 @@ def test_a_rootless_unit_targets_default_target_not_multi_user():
 def test_a_rootful_unit_still_targets_multi_user():
     content = quadlet.generate_unit(ContainerSpec(name="p", image="i@sha256:ab"))
     assert "WantedBy=multi-user.target" in content
+
+
+# --- persistence enforcement (v0.2 row 22) -------------------------------
+
+def test_volumes_on_persistent_roots_are_accepted():
+    spec = ContainerSpec(name="a", image="x@sha256:1", volumes=[
+        "/mnt/APPDATA_PERSONAL/A_C_00001/binds/data:/data",
+        "/mnt/USER_ADMIN/state:/state:ro",
+        "/mnt/BASELINE/shared:/shared",
+        "/var/lib/baseline/guardian:/data",
+    ])
+    assert quadlet.non_persistent_volumes(spec) == []
+
+
+def test_volume_on_the_root_filesystem_is_flagged():
+    spec = ContainerSpec(name="a", image="x", volumes=["/opt/data:/data"])
+    assert quadlet.non_persistent_volumes(spec) == ["/opt/data:/data"]
+
+
+def test_named_podman_volume_is_flagged_because_it_lives_in_podman_storage():
+    spec = ContainerSpec(name="a", image="x", volumes=["mydata:/data"])
+    assert quadlet.non_persistent_volumes(spec) == ["mydata:/data"]
+
+
+def test_volume_on_a_disposable_volume_is_flagged():
+    spec = ContainerSpec(name="a", image="x", volumes=[
+        "/mnt/SESSION_TEMP/x:/x", "/mnt/INSTALLER_CACHE/y:/y"])
+    assert len(quadlet.non_persistent_volumes(spec)) == 2
+
+
+def test_dotdot_cannot_escape_a_persistent_root():
+    spec = ContainerSpec(name="a", image="x", volumes=["/mnt/BASELINE/../../etc:/e"])
+    assert quadlet.non_persistent_volumes(spec) == ["/mnt/BASELINE/../../etc:/e"]
+
+
+def test_prefix_lookalike_is_not_a_persistent_root():
+    spec = ContainerSpec(name="a", image="x", volumes=["/mnt/BASELINE_EVIL/x:/x"])
+    assert quadlet.non_persistent_volumes(spec) == ["/mnt/BASELINE_EVIL/x:/x"]
+
+
+def test_no_volumes_means_nothing_to_flag():
+    assert quadlet.non_persistent_volumes(ContainerSpec(name="a", image="x")) == []
+
+
+def test_write_and_start_refuses_a_non_persistent_volume_and_writes_nothing():
+    runner = FakeRunner()
+    runner.script_prefix("podman", returncode=0, stdout="podman version 5.7.0", stderr="")
+    spec = ContainerSpec(name="pihole", image="pihole/pihole", volumes=["/opt/pihole:/etc/pihole"])
+    result = quadlet.write_and_start(runner, spec)
+    assert result.applied is False
+    assert "/opt/pihole:/etc/pihole" in result.detail
+    assert runner.writes == []
+    assert not any(call[0] == "systemctl" for call in runner.calls)

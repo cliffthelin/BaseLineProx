@@ -43,6 +43,8 @@ won't have satisfied. Opt into rootless deliberately, per container,
 once that prerequisite is actually met."""
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -138,6 +140,37 @@ def _systemctl_prefix(rootless: bool, user: str | None = None, *, uid: str | Non
     return ["runuser", "-u", user, "--", "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", "systemctl", "--user"]
 
 
+_PERSISTENT_VOLUME_ROOT = re.compile(r"^/mnt/(BASELINE|SUBSTRATE|USER(_[A-Z0-9_]+)?|APPDATA_[A-Z0-9_]+)(/|$)")
+
+
+def non_persistent_volumes(spec: ContainerSpec) -> list:
+    """Volume strings whose host side is not on a persistent Baseline
+    volume (v0.2 row 22). Pure - checks, never rewrites.
+
+    Persistent means under BASELINE, SUBSTRATE, a USER_<PERSONA> or an
+    APPDATA_<PERSONA> mount, or one of the control-plane paths
+    `persist_bind_mounts` redirects onto a persona volume. Everything else
+    is flagged: a path on the root filesystem is lost on a substrate
+    rebuild, SESSION_TEMP and INSTALLER_CACHE are disposable by design, and
+    a named Podman volume lives in Podman's own storage on the substrate.
+    The path is normalised first so `..` cannot climb out of a root, and
+    the match is on whole path components so `/mnt/BASELINE_EVIL` is not
+    mistaken for `/mnt/BASELINE`."""
+    from persist_bind_mounts import REDIRECT_PATHS
+    flagged = []
+    for volume in spec.volumes:
+        host = os.path.normpath(volume.split(":", 1)[0])
+        if not host.startswith("/"):
+            flagged.append(volume)
+        elif _PERSISTENT_VOLUME_ROOT.match(host):
+            continue
+        elif any(host == r or host.startswith(r + "/") for r in REDIRECT_PATHS):
+            continue
+        else:
+            flagged.append(volume)
+    return flagged
+
+
 def generate_unit(spec: ContainerSpec) -> str:
     """Pure - no I/O, no subprocess. Returns Quadlet `.container` file
     content (systemd's own Quadlet INI format); the caller writes it
@@ -208,9 +241,16 @@ def write_and_start(runner: Runner, spec: ContainerSpec) -> ApplyResult:
     simply the wrong verb, not a stricter version of the right one.
     Refuses (never guesses) if Podman itself isn't present, or if
     `spec.rootless` is set without a real, resolvable `spec.user` - a
-    missing dependency is reported, not silently worked around."""
+    missing dependency is reported, not silently worked around. Also
+    refuses a spec with any volume off the persistent Baseline volumes
+    (`non_persistent_volumes`, v0.2 row 22)."""
     if not is_podman_installed(runner):
         return ApplyResult(False, "podman is not installed on this host - install it before writing any Quadlet unit")
+
+    ephemeral = non_persistent_volumes(spec)
+    if ephemeral:
+        return ApplyResult(False, "refusing to write a unit whose data would not survive a rebuild - volume(s) not on a persistent "
+                                  f"Baseline volume: {', '.join(ephemeral)}")
 
     uid = user_home = None
     if spec.rootless:

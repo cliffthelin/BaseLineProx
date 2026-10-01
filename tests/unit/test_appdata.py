@@ -489,3 +489,11 @@ def test_the_same_app_has_the_same_identifier_in_every_persona():
     admin = {p.app.app_id: p.baseline_id for p in appdata.plan_all("admin")}
     personal = {p.app.app_id: p.baseline_id for p in appdata.plan_all("personal")}
     assert admin == personal
+
+
+def test_container_spec_volumes_are_all_persistent():
+    import quadlet
+    plans = [p for p in appdata.plan_all("personal") if p.app.kind == appdata.KIND_CONTAINER]
+    assert plans
+    for plan in plans:
+        assert quadlet.non_persistent_volumes(appdata.container_spec(plan)) == []

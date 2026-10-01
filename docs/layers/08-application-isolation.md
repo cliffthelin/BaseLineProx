@@ -28,5 +28,6 @@ it needs a real target user. The Caddy gateway is the first container.
 | Overlay and bind plans per medium | MVP completed | unit tests | `appdata.plan_for` |
 | Quadlet unit generation | MVP completed | unit tests | `quadlet.py`; rootless units now target `default.target` (`4012834`) |
 | LXC guests no longer share one overlay path | MVP completed | unit tests | fixed `5a11c35` |
+| Container volumes must be persistent | MVP completed | unit tests | `quadlet.non_persistent_volumes`; `write_and_start` refuses otherwise (v0.2 row 22) |
 | Any plan applied on a host | On roadmap | none | planning only |
 | Caddy image verified | In discovery | registry read | digest pinned, signature not verified |
