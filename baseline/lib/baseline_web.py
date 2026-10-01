@@ -1393,8 +1393,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         username = body.get("username", "")
         try:
             if path == "/operators/add":
-                accounts.add(username, body.get("password"))
-                audit({"event": "operator_added", "username": username})
+                role = body.get("role", "operator")
+                accounts.add(username, body.get("password"), role)
+                audit({"event": "operator_added", "username": username, "role": role})
             else:
                 if not accounts.remove(username):
                     return self._json(404, {"outcome": "refused", "detail": "refused: no such operator"})
@@ -1442,10 +1443,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         of routes is not revealed either."""
         session = deps["sessions"].get(self._cookie_token(), now)
         if session is not None:
-            if session.role == "operator" and not ops.operator_may_reach(path):
-                self._json(403, {"outcome": "refused", "detail": "refused: this account may use Operations only"}) \
+            if not ops.role_may_reach(session.role, path):
+                self._json(403, {"outcome": "refused", "detail": "refused: this login is not authorized for that"}) \
                     if (path.startswith("/api/") or self._is_json_request()) else \
-                    self._reject(403, "This account may use Operations only.")
+                    self._reject(403, "This login is not authorized for that.")
                 return True
             return False
         if path.startswith("/api/") or self._is_json_request():
@@ -1554,7 +1555,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/operators":
             accounts = deps.get("operator_accounts")
             return self._html_response(200, _with_nav(
-                operations_page.render_operators_page(accounts.names() if accounts else []), path))
+                operations_page.render_operators_page(accounts.roles() if accounts else {}), path))
 
         if path == "/operations":
             scheduler = deps.get("scheduler")
@@ -1644,8 +1645,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             if self._throttled("login", now):
                 return
             accounts = deps.get("operator_accounts")
-            if accounts is not None and accounts.verify(body.get("username", ""), body.get("password", "")):
-                session = deps["sessions"].create(body["username"], now, role="operator")
+            role = accounts.authenticate(body.get("username", ""), body.get("password", "")) if accounts is not None else None
+            if role is not None:
+                session = deps["sessions"].create(body["username"], now, role=role)
                 session.ttl_s = _operator_session_seconds(deps)
                 self._record_attempt("login", now, ok=True)
                 return self._redirect("/operations", set_cookie=ws.session_cookie(session.token))
@@ -1726,6 +1728,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             params = body.get("params", {})
             if not isinstance(action_id, str) or not isinstance(params, dict):
                 return self._json(400, {"outcome": "refused", "detail": "refused: malformed request"})
+            if not wg.role_permits(deps["sessions"].get(self._cookie_token(), now).role, "drive_action", {"action_id": action_id}):
+                return self._json(403, {"outcome": "refused", "detail": "refused: this login is not authorized for that action"})
             try:
                 prepared = da.prepare_action(action_id, params, pds_runner=deps.get("pds_runner"))
             except ValueError as exc:

@@ -73,6 +73,21 @@ def load_or_create_key(path) -> bytes:
     return key
 
 
+BOT_PREFIX = "bot:"
+
+
+def role_permits(role: str, op: str, params: dict) -> bool:
+    """May a login with this role ask for this operation? `admin` and `operator` may ask for any (the routes
+    they can reach limit them further); a `bot:<action>` role may ask for exactly its one action: an operation
+    with that id, or a drive action (op "drive_action") whose action_id is that."""
+    if role in ("admin", "operator"):
+        return True
+    if not isinstance(role, str) or not role.startswith(BOT_PREFIX):
+        return False
+    action = role[len(BOT_PREFIX):]
+    return op == action or (op == "drive_action" and params.get("action_id") == action)
+
+
 class WebGate:
     def __init__(self, key: bytes, clock=time.time, audit=None):
         if len(key) != KEY_BYTES:
@@ -89,12 +104,15 @@ class WebGate:
         return WebOrigin(kind, op, d, expires, self._mac("origin", kind, op, d, expires))
 
     @staticmethod
-    def _require_login(sessions, token, now: float) -> None:
-        if not isinstance(token, str) or not token or sessions.get(token, now) is None:
+    def _require_login(sessions, token, now: float, op: str | None = None, params: dict | None = None) -> None:
+        session = sessions.get(token, now) if isinstance(token, str) and token else None
+        if session is None:
             raise NotFromWebApp("no logged-in session asked for this")
+        if op is not None and not role_permits(session.role, op, params or {}):
+            raise NotFromWebApp(f"this login is not authorized for {op}")
 
     def origin_for_session(self, sessions, token, op: str, params: dict, now: float) -> WebOrigin:
-        self._require_login(sessions, token, now)
+        self._require_login(sessions, token, now, op, params)
         self._audit({"event": "operation_requested", "op": op, "kind": "session"})
         return self._origin("session", op, params, now)
 
@@ -104,7 +122,7 @@ class WebGate:
                          record.get("created", 0))
 
     def sign_schedule(self, sessions, token, record: dict, now: float) -> dict:
-        self._require_login(sessions, token, now)
+        self._require_login(sessions, token, now, record["op"], record.get("params", {}))
         if record["op"] in hitl.CONFIRMED_ACTIONS:
             raise ValueError(f"{record['op']} is confirmed by a person every time and can never be scheduled")
         every = record["every_hours"]

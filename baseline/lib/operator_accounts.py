@@ -23,6 +23,21 @@ _RESERVED = frozenset({"root", "admin", "administrator", "baseline", "guest", "s
 _SCRYPT = {"n": 2 ** 15, "r": 8, "p": 1, "maxmem": 64 * 2 ** 20, "dklen": 32}
 
 
+ROLE_OPERATOR = "operator"
+BOT_PREFIX = "bot:"
+
+
+def known_actions() -> frozenset:
+    import drive_admin
+    import operations
+    return frozenset(operations.OPERATIONS) | frozenset(drive_admin.ACTIONS)
+
+
+def valid_role(role) -> bool:
+    return role == ROLE_OPERATOR or (isinstance(role, str) and role.startswith(BOT_PREFIX)
+                                     and role[len(BOT_PREFIX):] in known_actions())
+
+
 def _machine_account(name: str) -> bool:
     import pwd
     try:
@@ -63,11 +78,13 @@ class OperatorAccounts:
     def names(self) -> list:
         return sorted(self._load())
 
-    def add(self, username, password) -> None:
+    def add(self, username, password, role=ROLE_OPERATOR) -> None:
         if not isinstance(username, str) or not _NAME_RE.match(username) or username in _RESERVED:
             raise ValueError("a name is 3 to 32 lowercase letters, digits, - or _, starting with a letter, and not a reserved word")
         if not isinstance(password, str) or not MIN_PASSWORD <= len(password) <= MAX_PASSWORD:
             raise ValueError(f"a password is {MIN_PASSWORD} to {MAX_PASSWORD} characters")
+        if not valid_role(role):
+            raise ValueError("a role is operator, or bot:<one action>")
         if self._is_system_user(username):
             raise ValueError(f"{username} is already a machine account; choose another name")
         with self._lock:
@@ -77,7 +94,7 @@ class OperatorAccounts:
             if len(accounts) >= MAX_OPERATORS:
                 raise ValueError(f"at most {MAX_OPERATORS} operator accounts")
             salt = os.urandom(16)
-            accounts[username] = {"salt": salt.hex(), "hash": _hash(password, salt)}
+            accounts[username] = {"salt": salt.hex(), "hash": _hash(password, salt), "role": role}
             self._save(accounts)
 
     def remove(self, username) -> bool:
@@ -97,3 +114,15 @@ class OperatorAccounts:
             return hmac.compare_digest(_hash(password, bytes.fromhex(record["salt"])), str(record["hash"]))
         except (KeyError, ValueError, TypeError):
             return False
+
+    def role_of(self, username) -> str | None:
+        record = self._load().get(username) if isinstance(username, str) else None
+        role = (record or {}).get("role", ROLE_OPERATOR)
+        return role if valid_role(role) else None
+
+    def roles(self) -> dict:
+        return {name: self.role_of(name) for name in self.names()}
+
+    def authenticate(self, username, password) -> str | None:
+        """The role of this account if the password is right (and the stored role is still valid), else None."""
+        return self.role_of(username) if self.verify(username, password) else None

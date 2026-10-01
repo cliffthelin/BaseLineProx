@@ -72,21 +72,30 @@ document.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => 
     return body.encode()
 
 
-def render_operators_page(names: list) -> bytes:
+def render_operators_page(accounts: dict, actions: list | None = None) -> bytes:
+    """`accounts`: name -> role ("operator" or "bot:<action>"). `actions`: action ids a bot may be limited to."""
+    if actions is None:
+        import drive_admin
+        import operations
+        actions = sorted(set(operations.OPERATIONS) | set(drive_admin.ACTIONS))
+    options = '<option value="operator">operator (all operations)</option>' + "".join(
+        f'<option value="bot:{html.escape(a)}">bot: {html.escape(a)} only</option>' for a in actions)
     rows = "".join(
-        f'<li>{html.escape(n)} <button type="button" data-remove="{html.escape(n)}">Remove</button></li>' for n in names
+        f'<li>{html.escape(n)} <em>({html.escape(str(r))})</em> '
+        f'<button type="button" data-remove="{html.escape(n)}">Remove</button></li>' for n, r in sorted(accounts.items())
     ) or "<li>No operator accounts yet.</li>"
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Operator accounts</title>
 <style>body{{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:44rem;padding:1rem}}
 label{{display:block;margin:.6rem 0}} input{{padding:.4rem;width:100%;box-sizing:border-box}} button{{padding:.4rem .8rem}}
 #msg{{margin-top:1rem}}</style></head><body><h1>Operator accounts</h1>
-<p>An operator can run, schedule and watch backups on the Operations page and nothing else: no settings, no recovery,
+<p>A bot account may do exactly one action and nothing else. An operator can run, schedule and watch backups on the Operations page and nothing else: no settings, no recovery,
 no drive actions, and never a confirmation. Adding or removing one needs this machine's root password or passphrase.
 Passwords are stored only as salted one-way hashes.</p>
 <ul>{rows}</ul>
 <h2>Add an operator</h2>
 <form id="add" autocomplete="off">
 <label>Name <input name="username" required pattern="[a-z][a-z0-9_-]{{2,31}}"></label>
+<label>Role <select name="role">{options}</select></label>
 <label>Password for this operator (12+ characters) <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
 <label>Your root password or passphrase <input name="secret" type="password" required autocomplete="off"></label>
 <button type="submit">Add operator</button></form><div id="msg"></div>

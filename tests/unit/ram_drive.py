@@ -15,6 +15,8 @@ class RamDrive:
         self.marker.write_text("precious")
         self.mounted = {}
         self.installs = 0
+        self.calls = []                 # every stand-in action that ran against this RAM drive: (action_id, params)
+        self.backups = []               # backup sets 'written' to the RAM drive
 
     def intact(self) -> bool:
         return self.marker.exists() and self.marker.read_text() == "precious"
@@ -45,7 +47,43 @@ class RamDrive:
             self.unmount(mountpoint)
             return da.ActionResult(True, f"unmounted {mountpoint}")
 
+        def recorder(action_id):
+            def fake(runner, device_path=None, **p):
+                p.pop("on_progress", None)
+                self.calls.append((action_id, {"device_path": device_path, **p}))
+                return da.ActionResult(True, f"{action_id} ran against the RAM drive")
+            return fake
+
+        for action_id in ("repair", "update_selected", "stamp_installer_identity"):
+            monkeypatch.setitem(da.ACTIONS, action_id, da.ActionSpec(
+                action_id, f"RAM-drive stand-in for {action_id}", recorder(action_id),
+                requires_device=action_id != "update_selected"))
         for action_id, fn in (("build_self_installer", fake_install), ("mount_volume", fake_mount),
                               ("unmount_volume", fake_unmount)):
             monkeypatch.setitem(da.ACTIONS, action_id, da.ActionSpec(action_id, f"RAM-drive stand-in for {action_id}", fn,
                                                                      requires_device=True))
+
+    def install_fake_backups(self, monkeypatch) -> None:
+        """Backups, verifies and listings that read and write only this RAM drive."""
+        import operations as ops
+        import web_gate
+
+        def fake_backup(**kw):
+            web_gate.require(kw["origin"], "backup_offdrive", {"dry_run": kw["dry_run"], "force": kw["force"]})
+            if not kw["dry_run"]:
+                self.backups.append(f"set-{len(self.backups) + 1}")
+                (self.root / self.backups[-1]).write_text("backup")
+            kw["print_fn"]("[ok] RAM drive backup" + (" (dry run)" if kw["dry_run"] else ""))
+            return 0
+
+        def fake_verify(origin, params, *, print_fn, **kw):
+            print_fn(f"[ok] verified {len(self.backups)} set(s) on the RAM drive")
+            return 0
+
+        def fake_list(origin, params, *, print_fn, **kw):
+            print_fn(f"[ok] {len(self.backups)} set(s)")
+            return 0
+
+        monkeypatch.setattr(ops.offdrive_backup, "main", fake_backup)
+        monkeypatch.setattr(ops, "_verify_newest", fake_verify)
+        monkeypatch.setattr(ops, "_list_sets", fake_list)

@@ -28,6 +28,26 @@ def operator_may_reach(path: str) -> bool:
     return any(path == p or path.startswith(p + "/") for p in OPERATOR_PATHS)
 
 
+_BOT_OPERATION_PATHS = frozenset({"/operations", "/operations/run", "/operations/schedule", "/operations/schedule/remove",
+                                  "/drive-admin/job-log", "/logout"})
+_BOT_DRIVE_PATHS = frozenset({"/drive-admin", "/drive-admin/action", "/drive-admin/confirm", "/drive-admin/actions",
+                              "/drive-admin/job-log", "/logout"})
+
+
+def role_may_reach(role: str, path: str) -> bool:
+    """Routes a limited login may reach. A bot role reaches only the pages its one action needs (never settings,
+    recovery, standing approvals or operator accounts); which action it may ask for is enforced again by
+    web_gate.role_permits and by the routes themselves."""
+    if role == "admin":
+        return True
+    if role == "operator":
+        return operator_may_reach(path)
+    if isinstance(role, str) and role.startswith(web_gate.BOT_PREFIX):
+        action = role[len(web_gate.BOT_PREFIX):]
+        return path in (_BOT_OPERATION_PATHS if action in OPERATIONS else _BOT_DRIVE_PATHS)
+    return False
+
+
 @dataclass(frozen=True)
 class Operation:
     op_id: str

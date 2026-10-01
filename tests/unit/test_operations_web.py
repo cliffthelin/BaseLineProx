@@ -210,7 +210,7 @@ def test_an_admin_adds_an_operator_with_the_root_password_and_the_operator_can_l
     try:
         status, body = _req(case, "POST", "/operators/add", {"username": "claude", "password": OPPW, "secret": SECRET})
         assert status == 200 and accounts.names() == ["claude"]
-        assert log == [{"event": "operator_added", "username": "claude"}] and OPPW not in str(log)
+        assert log == [{"event": "operator_added", "username": "claude", "role": "operator"}] and OPPW not in str(log)
         assert b"claude" in case.get("/operators")[1]
         conn = http.client.HTTPConnection("127.0.0.1", case.port, timeout=5)
         conn.request("POST", "/login", body=json.dumps({"username": "claude", "password": OPPW}).encode(),
@@ -253,5 +253,115 @@ def test_bad_names_and_machine_accounts_are_refused_and_remove_works(tmp_path):
         assert _req(case, "POST", "/operators/remove", {"username": "claude", "secret": SECRET})[0] == 200
         assert accounts.names() == []
         assert _req(case, "POST", "/operators/remove", {"username": "claude", "secret": SECRET})[0] == 404
+    finally:
+        case.close()
+
+
+# -- bot roles: one account, one action ---------------------------------------------
+
+def _bot_case(tmp_path, action):
+    return _case(tmp_path, role=f"bot:{action}")
+
+
+def test_a_backup_bot_may_run_and_schedule_its_own_operation_only(tmp_path, fake_backup):
+    case = _bot_case(tmp_path, "backup_offdrive")
+    try:
+        status, body = _req(case, "POST", "/operations/run", {"op": "backup_offdrive", "params": {"dry_run": True}})
+        assert status == 200
+        assert _req(case, "POST", "/operations/schedule", {"op": "backup_offdrive", "every_hours": 12})[0] == 200
+        for other in ("backup_verify", "backup_list"):
+            assert _req(case, "POST", "/operations/run", {"op": other})[0] == 403
+            assert _req(case, "POST", "/operations/schedule", {"op": other, "every_hours": 12})[0] in (400, 403)
+        assert len(fake_backup) == 1
+    finally:
+        case.close()
+
+
+@pytest.mark.parametrize("path", ["/settings", "/admin", "/recovery", "/hardware", "/installer-cache", "/operators",
+                                  "/master-config", "/drive-admin", "/drive-admin/approvals", "/api/detect"])
+def test_a_backup_bot_cannot_open_anything_but_its_pages(tmp_path, path):
+    case = _bot_case(tmp_path, "backup_verify")
+    try:
+        assert case.get(path)[0] == 403
+        assert case.get("/operations")[0] == 200
+    finally:
+        case.close()
+
+
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/operators/add", {"username": "xxxxx", "password": OPPW, "secret": SECRET}),
+    ("/drive-admin/approvals", {"action_id": "repair"}),
+    ("/admin/elevate", {"passphrase": "x"}), ("/recovery/unlock", {"passphrase": "x"}),
+    ("/api/backup", {"dest": "/tmp/x.tar.gz", "targets": []}),
+])
+def test_a_bot_cannot_reach_account_approval_or_credential_routes(tmp_path, path, body):
+    case = _bot_case(tmp_path, "backup_offdrive")
+    try:
+        assert _req(case, "POST", path, body)[0] == 403
+    finally:
+        case.close()
+
+
+def test_a_drive_bot_requests_only_its_action_and_gets_a_challenge_not_a_run(tmp_path):
+    import hitl
+    case = _case(tmp_path, role="bot:repair", hitl=hitl.ConfirmationStore(verify_secret=lambda s: False, clock=Clock()))
+    try:
+        own = _req(case, "POST", "/drive-admin/action", {"action_id": "repair", "params": {"device_path": "/dev/sdb"}})
+        assert own[1].get("outcome") == "confirmation_required"
+        other = _req(case, "POST", "/drive-admin/action", {"action_id": "mount_volume", "params": {"device_path": "/dev/sdb"}})
+        assert other[0] == 403
+        assert _req(case, "POST", "/operations/run", {"op": "backup_list"})[0] == 403
+    finally:
+        case.close()
+
+
+def test_the_gate_itself_refuses_a_bot_for_another_action(tmp_path):
+    gate = wg.WebGate(b"g" * 32, clock=Clock())
+    sessions = sw.SessionStore()
+    token = sessions.create("b", NOW, role="bot:backup_verify").token
+    gate.origin_for_session(sessions, token, "backup_verify", {}, NOW)
+    with pytest.raises(wg.NotFromWebApp):
+        gate.origin_for_session(sessions, token, "backup_offdrive", {}, NOW)
+    with pytest.raises(wg.NotFromWebApp):
+        gate.origin_for_session(sessions, token, "drive_action", {"action_id": "repair", "params": {}}, NOW)
+    with pytest.raises(wg.NotFromWebApp):
+        gate.sign_schedule(sessions, token, {"op": "backup_offdrive", "params": {}, "every_hours": 5}, NOW)
+
+
+def test_roles_are_validated_stored_and_drive_the_login(tmp_path):
+    import http.client
+    import operator_accounts as oa
+    accounts = oa.OperatorAccounts(tmp_path / "o.json", is_system_user=lambda n: False)
+    for bad in ("admin", "bot:nope", "bot:", "operator ", None, "bot:../x"):
+        with pytest.raises(ValueError):
+            accounts.add("claude", OPPW, bad)
+    accounts.add("botrepair", OPPW, "bot:repair")
+    assert accounts.role_of("botrepair") == "bot:repair" and accounts.authenticate("botrepair", "wrong password!!") is None
+    deps = _base_deps(sessions=sw.SessionStore(), clock=Clock(), operator_accounts=accounts)
+    deps["sessions"].create("seed", NOW)
+    case = _RealServerCase(deps)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", case.port, timeout=5)
+        conn.request("POST", "/login", body=json.dumps({"username": "botrepair", "password": OPPW}).encode(),
+                     headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{case.port}"})
+        resp = conn.getresponse()
+        resp.read()
+        token = resp.getheader("Set-Cookie").split("session=")[1].split(";")[0]
+        assert deps["sessions"].sessions[token].role == "bot:repair"
+    finally:
+        case.close()
+
+
+def test_an_admin_can_add_a_bot_account_with_a_role(tmp_path):
+    case, accounts = _acct_case(tmp_path)
+    try:
+        status, _ = _req(case, "POST", "/operators/add",
+                         {"username": "botrepair", "password": OPPW, "secret": SECRET, "role": "bot:repair"})
+        assert status == 200 and accounts.role_of("botrepair") == "bot:repair"
+        assert _req(case, "POST", "/operators/add",
+                    {"username": "botbad", "password": OPPW, "secret": SECRET, "role": "bot:everything"})[0] == 400
+        assert b"bot:repair" in case.get("/operators")[1]
     finally:
         case.close()
