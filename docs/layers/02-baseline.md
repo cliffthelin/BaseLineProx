@@ -21,7 +21,7 @@ they are as long as it can reach them. There is no guest user anywhere in the
 system (`recovery_tiers`: only the login screen is credential-free).
 
 BASELINE holds Baseline's own install-wide records: the registry and markers.
-Guests are not per-persona AppData, and `appdata.py` no longer plans them.
+VMs and LXCs are not per-persona AppData, and `appdata.py` no longer plans them.
 The master PRD's storage table still lists "VM, LXC state" under BASELINE and
 needs updating to match.
 

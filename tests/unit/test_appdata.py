@@ -210,7 +210,7 @@ def _assign(app, code="00099"):
 
 
 def test_no_two_applications_overlay_the_same_target():
-    """Real defect this caught (back when guests were planned here): several
+    """Real defect this caught (back when LXCs were planned here): several
     apps targeted one shared path, so their overlays contended for one
     mount point and silently shared data. Upperdir separation does not
     prevent that; the target has to be distinct too."""
@@ -370,7 +370,7 @@ def test_every_app_medium_in_naming_has_a_contract():
     """ISO is an operating-system image, not an application medium."""
     import naming
     letters = {m.letter for m in appdata.MEDIA.values()}
-    # ISO is an OS image; L (LXC) and V (VM) are guests, which live on
+    # ISO is an OS image; L (LXC) and V (VM) live on
     # INSTALLER_CACHE rather than in per-persona AppData.
     assert letters == set(naming.MEDIA) - {"I", "L", "V"}
 
@@ -485,12 +485,12 @@ def test_container_spec_volumes_are_all_persistent():
         assert quadlet.non_persistent_volumes(appdata.container_spec(plan)) == []
 
 
-def test_vm_and_lxc_guests_are_not_persona_appdata():
+def test_vms_and_lxcs_are_not_persona_appdata():
     """VM/LXC state is install-wide and lives on BASELINE, with Proxmox only
     needing to reach it (master PRD §3); installers live on INSTALLER_CACHE.
     Neither is per-persona AppData."""
     import installer_cache as ic
-    guest_ids = {e.entry_id for e in ic.catalog() if e.kind == ic.KIND_SCRIPT}
-    assert guest_ids, "the catalog should still list guest installers"
-    assert not (guest_ids & {a.app_id for a in appdata.installable_apps()})
+    vm_lxc_ids = {e.entry_id for e in ic.catalog() if e.kind == ic.KIND_SCRIPT}
+    assert vm_lxc_ids, "the catalog should still list VM/LXC installers"
+    assert not (vm_lxc_ids & {a.app_id for a in appdata.installable_apps()})
     assert not hasattr(appdata, "KIND_LXC") and not hasattr(appdata, "KIND_VM")

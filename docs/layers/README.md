@@ -36,7 +36,7 @@ still only proven in a test harness:
 ## The stack
 
 ```
-  applications     apt packages · VM/LXC guests · containers (Caddy) · Flatpak/Snap/AppImage
+  applications     apt packages · VMs/LXCs · containers (Caddy) · Flatpak/Snap/AppImage
        |           each one isolated: own data, own registry.db, own owner, mode 0700
        v
   isolation layer  overlays (host apps) and bind mounts (containers) - 08
@@ -97,7 +97,7 @@ was invisible until something looked at the whole layout at once:
 | AppData interleaved per persona, renumbering existing Baseline drive partitions (`USER_PERSONAL` 6 → 7) | fixed, `e629011` | [00](00-baseline-drive.md) |
 | `baseline_drive_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-baseline-drive.md) |
 | Rootless Quadlet units targeted `multi-user.target`, so they never started at boot | fixed, `4012834` | [08](08-application-isolation.md) |
-| Four LXC guests overlaid one path, silently sharing data | fixed, `5a11c35` | [08](08-application-isolation.md) |
+| Four LXC containers overlaid one path, silently sharing data | fixed, `5a11c35` | [08](08-application-isolation.md) |
 | Web UI served hardware serials, Drive Administration, recovery and the installer/app pages to anyone, and accepted state-changing POSTs without a session | fixed 2026-09-30, v0.2 row 43 | [01](01-substrate.md) |
 | ext4 16-char labels: `SUBSTRATE` and the persona volumes truncated or collided on the real drive | fixed, relabeled 2026-09-30 | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |
 | `/mnt/INSTALLER_CACHE` is a plain directory on the root filesystem, not the volume | **open** | [04](04-installer-cache.md) |
