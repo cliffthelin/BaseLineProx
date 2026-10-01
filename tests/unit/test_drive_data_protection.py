@@ -120,3 +120,26 @@ def test_stamp_refuses_a_drive_with_someone_elses_data(monkeypatch):
     result = perform_confirmed(runner, "stamp_installer_identity", {"device_path": "/dev/sdb"}, pds_runner=pds(DATA))
     assert result.ok is False
     assert not any(c[0] == "sgdisk" for c in runner.calls)
+
+
+def test_a_baseline_drive_with_data_is_not_formatted_without_a_recent_backup(monkeypatch):
+    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
+    monkeypatch.setattr(da, "backup_is_fresh", lambda: False)
+    with pytest.raises(ValueError, match="backup"):
+        da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
+    monkeypatch.setattr(da, "backup_is_fresh", lambda: True)
+    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
+
+
+def test_a_blank_drive_needs_no_backup(monkeypatch):
+    monkeypatch.setattr(da, "backup_is_fresh", lambda: False)
+    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(f"sdb disk  {GUID} \n"))
+
+
+def test_freshness_check_failing_to_look_counts_as_no_backup(monkeypatch):
+    import backup_restore
+
+    def boom(*a, **k):
+        raise OSError("x")
+    monkeypatch.setattr(backup_restore, "has_recent_successful_backup", boom)
+    assert da._read_backup_freshness() is False

@@ -200,6 +200,12 @@ def _hardware_safety_guard(monkeypatch):
     # Reading what is ON a real drive (drive_guard's lsblk) is read-only, but a test must still never depend on
     # the real machine's drives: every test that exercises it supplies a fake drive explicitly.
     try:
+        import drive_admin
+        # Backup freshness lives on the real drive; tests state it explicitly (default: a fresh backup exists).
+        monkeypatch.setattr(drive_admin, "backup_is_fresh", lambda: True)
+    except ImportError:
+        pass
+    try:
         import drive_guard
 
         def _no_real_drive_reads(argv):

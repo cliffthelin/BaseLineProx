@@ -1120,6 +1120,25 @@ def _lsblk_run(pds_runner):
     return run
 
 
+def backup_is_fresh() -> bool:
+    return _read_backup_freshness()
+
+
+def _read_backup_freshness() -> bool:
+    """Is there proof of a successful backup within the last 24 hours (same proof the restore gate uses)?
+    Reads the freshness records on the SK hynix drive; any failure to look counts as "no proof"."""
+    import time
+
+    import backup_restore
+    from repair import RealRunner
+    try:
+        runner, now = RealRunner(), time.time()
+        return any(backup_restore.has_recent_successful_backup(runner, target=target, now=now)
+                   for target in backup_restore.all_volume_targets())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _check_str(name: str, value) -> str:
     if not isinstance(value, str) or not value or "\x00" in value or "\n" in value or "\r" in value:
         raise ValueError(f"{name} must be a single-line, non-empty string")
@@ -1241,6 +1260,10 @@ def _prepare(action_id: str, params: dict, pds_runner=None) -> tuple:
                 drive_guard.require_may_format(validated["path"], run=_lsblk_run(pds_runner))
             except drive_guard.DataProtectionError as exc:
                 raise ValueError(str(exc)) from None
+            state = drive_guard.read_drive_state(validated["path"], run=_lsblk_run(pds_runner))
+            if state.has_data and not backup_is_fresh():
+                raise ValueError("refused: this drive holds Baseline's data and there is no proof of a successful "
+                                 "backup in the last 24 hours. Run a backup first")
     return spec, call_params, serial
 
 
