@@ -58,7 +58,7 @@ the ext4 label is only a hint (stated in `carrier_layout.py`'s own docstring).
 | Partition numbering stable when volumes are added | MVP completed | unit tests | `test_adding_appdata_does_not_renumber_existing_partitions` - fixed after an interleaved order moved #6 → #7 |
 | `agentIndex.md` written into each partition | MVP completed | unit tests | `carrier_layout.agent_index` - AppData `KeyError` fixed `e629011` |
 | AppData partitions 7-8 on the real carrier | On roadmap | none | needs ~40 GB minimum; the drive has no free space. Needs re-layout or a different carrier - an operator decision |
-| ext4 label truncation and the persona label collision | In discovery | - | v0.2 row 38. Candidate identities: GPT partname, LV name, filesystem UUID |
+| ext4 label truncation and the persona label collision | On roadmap | - | Fix is `carrier_layout.legacy_relabel_plan`: 6 metadata-only commands on partitions 4-6, no root needed (the operator is in the `disk` group and the devices are `root:disk` 0660). Not applied. v0.2 row 38. Candidate identities: GPT partname, LV name, filesystem UUID |
 | Docs re-keyed from kernel letters to serials | On roadmap | - | v0.2 rows 27-29 |
 | Record of the 2026-09-30 repartition (an Omarchy ISO on that drive was erased) | On roadmap | - | v0.2 rows 28, 41. Whether it was authorized is unconfirmed |
 

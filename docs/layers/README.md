@@ -63,7 +63,7 @@ still only proven in a test harness:
 |---|---|---|---|
 | 00 | [Physical carrier](00-physical-carrier.md) | In progress | Drives by serial; the carrier's on-disk layout is now 2 partitions behind the plan |
 | 01 | [Substrate](01-substrate.md) | In progress | Proxmox install pipeline proven in QEMU; real-hardware end to end still pending |
-| 02 | [BASELINE](02-baseline.md) | In discovery | Holds app/VM/LXC state that the AppData rule says belongs elsewhere |
+| 02 | [BASELINE](02-baseline.md) | In progress | Install-wide state incl. app/VM/LXC (decided); VM/LXC placement in `appdata.py` still to reconcile |
 | 03 | [SUBSTRATE](03-substrate-persistence.md) | In progress | Volume exists and mounts; nothing writes to it yet |
 | 04 | [INSTALLER_CACHE](04-installer-cache.md) | In progress | Catalog and tab built; on this machine it is not mounted and 25 of 26 artifacts are missing |
 | 05 | [SESSION_TEMP](05-session-temp.md) | MVP completed | Ephemeral state and recovery-mode working state |
