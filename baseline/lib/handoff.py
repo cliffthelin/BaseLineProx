@@ -23,6 +23,40 @@ import time
 from pathlib import Path
 
 MANIFEST_NAME = "handoff_manifest.json"
+_MAX_MANIFEST_BYTES = 1024 * 1024
+
+
+class HandoffError(ValueError):
+    """A packet that is malformed, unsafe to extract, or carries a bad manifest.
+    Distinct from the RuntimeError a failed gpg run raises (wrong passphrase,
+    not a packet at all)."""
+
+
+def _require_passphrase(passphrase: str) -> None:
+    if not isinstance(passphrase, str) or not passphrase:
+        raise ValueError("passphrase must not be empty: a packet with an empty passphrase protects nothing")
+
+
+def _is_unsafe_name(name: str) -> bool:
+    """Absolute, or any path component that climbs out of the directory.
+    A legitimate packet only ever holds relative names it wrote itself."""
+    return name.startswith("/") or "\\" in name or ".." in Path(name).parts
+
+
+def validate_manifest(manifest) -> dict:
+    """The manifest travels inside an archive we did not necessarily make, so
+    check its shape before anything is extracted or trusted."""
+    if not isinstance(manifest, dict):
+        raise HandoffError("handoff manifest is not a JSON object")
+    label = manifest.get("host_label")
+    if not isinstance(label, str) or not label:
+        raise HandoffError("handoff manifest has no host_label")
+    files = manifest.get("files_included")
+    if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
+        raise HandoffError("handoff manifest files_included must be a list of names")
+    if any(_is_unsafe_name(f) for f in files):
+        raise HandoffError("handoff manifest lists a name that is absolute or climbs out of the packet")
+    return manifest
 
 # (source path, name inside the packet). Directories are copied whole;
 # files are copied individually. Anything missing is skipped, not fatal
@@ -105,6 +139,7 @@ def encrypt(archive_path: Path, encrypted_path: Path, passphrase: str) -> None:
     """GPG symmetric AES256 encryption. Passphrase goes in via a pipe
     (--passphrase-fd 0), never as a CLI argument or env var, so it never
     appears in `ps` output or shell history."""
+    _require_passphrase(passphrase)
     proc = subprocess.run(
         ["gpg", "--batch", "--yes", "--symmetric", "--cipher-algo", "AES256",
          "--s2k-digest-algo", "SHA512", "--s2k-count", "65011712",
@@ -116,6 +151,7 @@ def encrypt(archive_path: Path, encrypted_path: Path, passphrase: str) -> None:
 
 
 def decrypt(encrypted_path: Path, archive_path: Path, passphrase: str) -> None:
+    _require_passphrase(passphrase)
     proc = subprocess.run(
         ["gpg", "--batch", "--yes", "--decrypt", "--passphrase-fd", "0",
          "--output", str(archive_path), str(encrypted_path)],
@@ -127,16 +163,32 @@ def decrypt(encrypted_path: Path, archive_path: Path, passphrase: str) -> None:
 
 
 def read_manifest(archive_path: Path) -> dict:
-    with tarfile.open(archive_path, "r:gz") as tf:
-        member = tf.getmember(MANIFEST_NAME)
-        f = tf.extractfile(member)
-        return json.loads(f.read())
+    try:
+        with tarfile.open(archive_path, "r:gz") as tf:
+            try:
+                member = tf.getmember(MANIFEST_NAME)
+            except KeyError:
+                raise HandoffError("not a handoff packet: it has no manifest") from None
+            if member.size > _MAX_MANIFEST_BYTES:
+                raise HandoffError(f"handoff manifest is too large ({member.size} bytes)")
+            f = tf.extractfile(member)
+            if f is None:
+                raise HandoffError("handoff manifest is not a regular file")
+            raw = f.read(_MAX_MANIFEST_BYTES + 1)
+    except tarfile.TarError as exc:
+        raise HandoffError(f"not a readable handoff archive: {exc}") from exc
+    try:
+        manifest = json.loads(raw)
+    except ValueError as exc:
+        raise HandoffError(f"handoff manifest is not valid JSON: {exc}") from exc
+    return validate_manifest(manifest)
 
 
 def create_packet(host_label: str, encrypted_output: Path, passphrase: str) -> dict:
     """End-to-end: collect -> archive -> encrypt -> clean up the
     intermediate plaintext. Returns the manifest for display to the
     operator."""
+    _require_passphrase(passphrase)
     with tempfile.TemporaryDirectory(prefix="baseline-handoff-") as tmp:
         staging = Path(tmp) / "staging"
         manifest = collect(staging, host_label)
@@ -148,15 +200,30 @@ def create_packet(host_label: str, encrypted_output: Path, passphrase: str) -> d
 
 
 def open_packet(encrypted_path: Path, passphrase: str, extract_to: Path) -> dict:
-    """End-to-end: decrypt -> extract -> return manifest. extract_to is
-    created if needed; caller applies the extracted files to the
-    running system explicitly (this function never writes outside
-    extract_to)."""
+    """End-to-end: decrypt -> check -> extract -> return manifest. Nothing
+    reaches `extract_to` unless the whole archive passed: the manifest is
+    validated, every entry name is checked (no absolute names, no `..`), and
+    extraction uses tarfile's `data` filter (no device nodes, no links that
+    leave the tree). It extracts into a private staging directory first and
+    only then copies across, so a bad entry late in the archive cannot leave
+    earlier ones behind. The caller applies the extracted files to the
+    running system explicitly; this function never writes outside
+    `extract_to`."""
+    _require_passphrase(passphrase)
     with tempfile.TemporaryDirectory(prefix="baseline-handoff-") as tmp:
         archive_path = Path(tmp) / "packet.tar.gz"
         decrypt(encrypted_path, archive_path, passphrase)
         manifest = read_manifest(archive_path)
+        staging = Path(tmp) / "extracted"
+        staging.mkdir(mode=0o700)
+        try:
+            with tarfile.open(archive_path, "r:gz") as tf:
+                for member in tf.getmembers():
+                    if _is_unsafe_name(member.name):
+                        raise HandoffError(f"unsafe entry name in packet: {member.name!r}")
+                tf.extractall(staging, filter="data")
+        except tarfile.TarError as exc:
+            raise HandoffError(f"unsafe or corrupt entry in packet: {exc}") from exc
         extract_to.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive_path, "r:gz") as tf:
-            tf.extractall(extract_to, filter="data")
+        shutil.copytree(staging, extract_to, symlinks=True, dirs_exist_ok=True)
     return manifest
