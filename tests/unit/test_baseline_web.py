@@ -84,11 +84,10 @@ def test_real_drive_state_lists_every_real_candidate_drive_via_drive_admin():
     runner = FakeRunner(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(0, _LSBLK_PAIRS, ""))])
     drives = bw.real_drive_state(runner, pds_runner=FakePdsRunner())
     paths = {d["path"] for d in drives}
-    assert paths == {"/dev/sdb", "/dev/sdz"}
+    assert paths == {"/dev/sdb"}          # only the allowed SK hynix drive; /dev/sdz is never offered
     by_path = {d["path"]: d for d in drives}
     assert by_path["/dev/sdb"]["is_default"] is True
     assert by_path["/dev/sdb"]["drive_type"] == "NVMe"
-    assert by_path["/dev/sdz"]["is_default"] is False
 
 
 def test_real_drive_state_returns_empty_list_when_no_runner_is_configured():
@@ -597,7 +596,7 @@ def test_drive_admin_action_reaches_the_real_action_via_a_real_pkexec_runner():
     case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
         status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "repair", "params": {"device_path": "/dev/sdz"}})
+                                       {"action_id": "repair", "params": {"device_path": "/dev/sdb"}})
         assert status == 200
         job = _poll_job(case, body["job_id"])
         assert job["done"] is True
@@ -955,3 +954,18 @@ def test_app_isolation_page_states_an_app_with_no_overlay_rather_than_blanking_i
         "personal", plans, leaks=[], conflicts=[],
         formats=appdata.supported_formats()).decode()
     assert "no overlay (stated, not assumed)" in body
+
+
+def test_a_drive_action_on_a_drive_outside_the_allowlist_never_reaches_pkexec():
+    """Over the real socket: the job is refused and the privileged runner is never invoked."""
+    executor = FakeSudoExecutor(returncode=0, stdout="")
+    case = _RealServerCase(_base_deps(pkexec_executor=executor))
+    try:
+        status, body = case.post_json("/drive-admin/action",
+                                       {"action_id": "repair", "params": {"device_path": "/dev/sdz"}})
+        assert status == 200
+        job = _poll_job(case, body["job_id"])
+        assert job["done"] is True and job["outcome"] == "refused"
+        assert executor.calls == []
+    finally:
+        case.close()

@@ -1156,13 +1156,13 @@ _JOBS_LOCK = threading.Lock()
 _JOBS: dict = {}
 
 
-def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict) -> None:
+def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict, pds_runner=None) -> None:
     def on_progress(line: str) -> None:
         with _JOBS_LOCK:
             _JOBS[job_id]["lines"].append(line)
 
     try:
-        result = da.perform_action(sudo_runner, action_id, params, on_progress=on_progress)
+        result = da.perform_action(sudo_runner, action_id, params, on_progress=on_progress, pds_runner=pds_runner)
         with _JOBS_LOCK:
             _JOBS[job_id].update(done=True, outcome="applied" if result.ok else "refused", detail=result.detail)
     except Exception as exc:  # a real, unexpected crash must still reach the operator, not hang the poll forever
@@ -1503,7 +1503,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             job_id = uuid.uuid4().hex
             with _JOBS_LOCK:
                 _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
-            threading.Thread(target=_run_action_job, args=(job_id, pkexec_runner, action_id, params), daemon=True).start()
+            threading.Thread(target=_run_action_job, args=(job_id, pkexec_runner, action_id, params, deps.get("pds_runner")), daemon=True).start()
             return self._json(200, {"outcome": "started", "job_id": job_id})
 
         if path == "/api/backup":

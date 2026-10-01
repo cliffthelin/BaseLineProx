@@ -71,11 +71,16 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
             raise NotImplementedError
 
 
-# This project's own two pre-authorized disposable drives (decision
-# records 45-47) - marks the default *pre-selection* in the drive
-# picker only. Never a restriction: any other real, non-boot, large
-# enough device validates and runs identically (see module docstring).
-DEFAULT_TARGET_SERIALS = {"MD89N41071210AP4E", "FD01N6557110C271B"}
+# The two SK hynix drives Baseline is set up with (decision records 45-47): the
+# PC601 holding the Proxmox install and the PC401 that is the Baseline drive.
+# Direct instruction, 2026-10-01: "this can't have any effect outside of the SK
+# hynix". So this is an ENFORCED allowlist, not a pre-selection hint: the picker
+# offers only these, and every device action refuses any other drive before it
+# runs anything (`perform_action`). It reverses an earlier recorded instruction
+# that targets should not be locked to two drives (v0.2 row 55). Matched by
+# serial because two drives of one model would otherwise look identical.
+ALLOWED_TARGET_SERIALS = frozenset({"MD89N41071210AP4E", "FD01N6557110C271B"})
+DEFAULT_TARGET_SERIALS = ALLOWED_TARGET_SERIALS      # older name, same set
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +487,8 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
         serial = row.get("SERIAL") or None
         if not name or (boot_serial is not None and serial == boot_serial):
             continue
+        if serial not in ALLOWED_TARGET_SERIALS:
+            continue      # never offered, and never probed: not one of the SK hynix drives
         path = f"/dev/{name}"
         tran = row.get("TRAN", "")
         # Only a USB-attached device can sit behind a bridge chip -
@@ -563,13 +570,11 @@ def resolve_target(device_path: str, *, pds_runner=None) -> dict:
     """Real validation via physical_device_safety - refuses (raises
     PhysicalDeviceSafetyError) unless the real, currently-attached
     device at `device_path` is a genuine, non-boot block device of at
-    least `MIN_TARGET_SIZE_BYTES`. Deliberately unrestricted by serial
-    (`expected_serial` omitted) - any real candidate `list_candidate_drives`
-    listed validates, per physical_device_safety.py's own documented,
-    direct-instruction design; `DEFAULT_TARGET_SERIALS` only affects
-    which candidate the UI pre-selects, never which ones this function
-    accepts."""
-    return pds.validate_target_device(device_path, min_size_bytes=MIN_TARGET_SIZE_BYTES, runner=pds_runner)
+    least `MIN_TARGET_SIZE_BYTES` AND its serial is one of
+    `ALLOWED_TARGET_SERIALS`. Any other drive, however real and large, is
+    refused (direct instruction, 2026-10-01)."""
+    return pds.validate_target_device(device_path, expected_serial=sorted(ALLOWED_TARGET_SERIALS),
+                                      min_size_bytes=MIN_TARGET_SIZE_BYTES, runner=pds_runner)
 
 
 def rebuild_persistence_lvm(runner: Runner, *, device_path: str, pds_runner=None) -> ActionResult:
@@ -1030,7 +1035,7 @@ def describe_actions() -> list:
               "requires_device": spec.requires_device} for spec in ACTIONS.values()]
 
 
-def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None) -> ActionResult:
+def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None, pds_runner=None) -> ActionResult:
     """`on_progress` (direct instruction, 2026-09-29 - "add a console
     log of what is running and doing"): threaded through as a real
     keyword argument, never required by any action's own signature -
@@ -1042,6 +1047,19 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
     if spec is None:
         return ActionResult(False, f"unknown action {action_id!r}")
     call_params = dict(params)
+    if spec.requires_device and action_id != "update_selected":
+        # The one gate every drive action passes through. Nothing runs against a drive
+        # unless it is one of the allowed SK hynix drives, and the action is handed the
+        # path that was actually validated, not the string the caller supplied.
+        device_path = call_params.get("device_path")
+        if not device_path:
+            return ActionResult(False, f"{action_id} needs a drive and none was given")
+        try:
+            validated = resolve_target(device_path, pds_runner=pds_runner)
+        except pds.PhysicalDeviceSafetyError:
+            return ActionResult(False, f"refused: Baseline acts only on the SK hynix drives it is set up with, "
+                                       f"and {device_path} is not one of the allowed drives")
+        call_params["device_path"] = validated["path"]
     if on_progress is not None:
         call_params["on_progress"] = on_progress
     return spec.run(runner, **call_params)

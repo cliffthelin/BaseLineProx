@@ -1,6 +1,7 @@
 """Unit tests for drive_admin.py - real Drive Administration actions
 for the merged web app (decision record 83). No real device is ever
 touched - FakeRunner/FakePdsRunner record every argv."""
+import pytest
 from fake_runner import FakeProc, FakeRunner
 
 import drive_admin as da
@@ -380,8 +381,7 @@ def test_list_candidate_drives_excludes_the_real_boot_device():
     drives = da.list_candidate_drives(runner, pds_runner=pds_runner)
     paths = {d["path"] for d in drives}
     assert "/dev/nvme0n1" not in paths
-    assert "/dev/sda" in paths
-    assert "/dev/sdb" in paths
+    assert "/dev/sdb" in paths           # an allowed SK hynix drive
 
 
 def test_list_candidate_drives_marks_the_real_default_serials():
@@ -390,7 +390,6 @@ def test_list_candidate_drives_marks_the_real_default_serials():
     drives = da.list_candidate_drives(runner, pds_runner=FakePdsRunner())
     by_path = {d["path"]: d for d in drives}
     assert by_path["/dev/sdb"]["is_default"] is True
-    assert by_path["/dev/sda"]["is_default"] is False
 
 
 def test_list_candidate_drives_returns_real_type_and_model_for_each():
@@ -400,7 +399,7 @@ def test_list_candidate_drives_returns_real_type_and_model_for_each():
     by_path = {d["path"]: d for d in drives}
     assert by_path["/dev/sdb"]["drive_type"] == "NVMe"
     assert by_path["/dev/sdb"]["model"] == "PC401 NVMe SK hynix 512GB"
-    assert by_path["/dev/sda"]["drive_type"] == "HDD"
+    assert "/dev/sda" not in by_path      # a hard disk outside the allowlist is never offered
 
 
 def test_list_candidate_drives_returns_empty_on_a_real_lsblk_failure():
@@ -413,9 +412,8 @@ def test_list_candidate_drives_includes_real_partition_count_and_usage():
     """Proves the two real lsblk calls (candidate list + whole-system
     partition tree) are correctly distinguished, and the shared tree
     is applied to the right drive by name - "sdb" gets its own real
-    3-partition result, "sda" (present in the candidate list but not
-    in the tree fixture at all) correctly gets 0/"not mounted", not a
-    copy of sdb's result."""
+    3-partition result. (Drives outside the allowlist are never offered,
+    so the tree fixture only needs to cover the allowed one.)"""
     from fake_runner import FakeRunner as _FR
     tree = (
         'NAME="sdb" TYPE="disk" FSTYPE="" FSUSED="" FSSIZE="" MOUNTPOINT="" PKNAME=""\n'
@@ -431,8 +429,7 @@ def test_list_candidate_drives_includes_real_partition_count_and_usage():
     by_path = {d["path"]: d for d in drives}
     assert by_path["/dev/sdb"]["partition_count"] == 3
     assert by_path["/dev/sdb"]["usage_text"] == "not mounted"
-    assert by_path["/dev/sda"]["partition_count"] == 0
-    assert by_path["/dev/sda"]["usage_text"] == "not mounted"
+    assert "/dev/sda" not in by_path
 
 
 # -- pure argv builders ------------------------------------------------------
@@ -445,22 +442,34 @@ def test_vgcreate_argv():
     assert da.vgcreate_argv("baseline_persist", "/dev/sdb") == ["vgcreate", "baseline_persist", "/dev/sdb"]
 
 
-# -- resolve_target: any real, sufficiently large, non-boot device ------------
-# validates - never restricted to the two pre-authorized serials (direct
-# instruction: "you need to actual be able to select the drive and if
-# determined elsewhere the target then that is default but not locked
-# to just that drive").
+# -- the allowlist: Baseline acts only on the SK hynix drives it is set up with --
+# Direct instruction, 2026-10-01: "this can't have any effect outside of the SK
+# hynix". This reverses an earlier recorded instruction that targets should not
+# be locked to two drives (v0.2 row 55).
 
-def test_resolve_target_accepts_any_real_non_boot_device_regardless_of_serial():
-    validated = da.resolve_target("/dev/sdb", pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
-    assert validated["path"] == "/dev/sdb"
+ALLOWED = ("MD89N41071210AP4E", "FD01N6557110C271B")
 
 
-def test_resolve_target_accepts_a_device_whose_serial_is_not_one_of_the_defaults():
-    """Proves the "not locked to just that drive" requirement directly -
-    a completely different, real serial still validates."""
-    validated = da.resolve_target("/dev/sdX", pds_runner=FakePdsRunner(serial="SomeOtherRealDriveSerial-123"))
-    assert validated["serial"] == "SomeOtherRealDriveSerial-123"
+def test_resolve_target_accepts_each_allowed_drive():
+    for serial in ALLOWED:
+        validated = da.resolve_target("/dev/sdb", pds_runner=FakePdsRunner(serial=serial))
+        assert validated["serial"] == serial
+
+
+def test_resolve_target_refuses_every_other_drive():
+    import pytest
+    for other in ("SomeOtherRealDriveSerial-123", "ZCT2WCM2", "S6WRNS0TA12638A", ""):
+        with pytest.raises(pds.PhysicalDeviceSafetyError):
+            da.resolve_target("/dev/sdX", pds_runner=FakePdsRunner(serial=other))
+
+
+def test_the_candidate_list_never_offers_a_drive_outside_the_allowlist():
+    from fake_runner import FakeRunner as _FR
+    runner = _FR(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(0, LSBLK_PAIRS_OUTPUT, ""))])
+    drives = da.list_candidate_drives(runner, pds_runner=FakePdsRunner())
+    assert drives, "the allowed drive should still be offered"
+    assert {d["path"] for d in drives} <= {"/dev/sdb"}
+    assert "/dev/sda" not in {d["path"] for d in drives}
 
 
 def test_resolve_target_refuses_the_machines_own_boot_device():
@@ -496,14 +505,15 @@ def test_rebuild_persistence_lvm_wipes_then_creates_pv_and_vg_on_the_selected_de
     assert ["vgcreate", "baseline_persist", "/dev/sdb"] in runner.calls
 
 
-def test_rebuild_persistence_lvm_works_on_a_real_non_default_drive_too():
-    """The whole point of the drive picker: an operator can target ANY
-    real, validated device, not only the two pre-authorized serials."""
+def test_rebuild_persistence_lvm_refuses_a_drive_outside_the_allowlist():
+    """Baseline acts only on the SK hynix drives it is set up with (v0.2 row 55):
+    a real, large, non-boot drive of any other make is refused and nothing runs."""
     runner = FakeRunner()
     pds_runner = FakePdsRunner(serial="SomeCompletelyDifferentDrive-42")
     result = da.rebuild_persistence_lvm(runner, device_path="/dev/sdz", pds_runner=pds_runner)
-    assert result.ok is True
-    assert ["pvcreate", "-ff", "-y", "/dev/sdz"] in runner.calls
+    assert result.ok is False
+    assert runner.calls == []
+    assert pds_runner.wipe_calls == []
 
 
 def test_rebuild_persistence_lvm_reports_a_real_pvcreate_failure_and_never_calls_vgcreate():
@@ -1008,3 +1018,59 @@ def test_perform_action_dispatches_update_selected_with_its_params():
     result = da.perform_action(runner, "update_selected", {"selected": ["INSTALLER_CACHE"], "device_path": "/dev/sdd"})
     assert result.ok is False  # honest placeholder - see test_update_selected_is_an_honest_not_implemented_placeholder
     assert "not implemented" in result.detail
+
+
+
+# -- perform_action: nothing runs against a drive outside the allowlist -------
+
+DEVICE_ACTIONS = [aid for aid, spec in da.ACTIONS.items() if spec.requires_device and aid != "update_selected"]
+
+
+def test_there_are_device_actions_to_guard():
+    assert {"build_self_installer", "repair", "mount_volume", "unmount_volume"} <= set(DEVICE_ACTIONS)
+
+
+@pytest.mark.parametrize("action_id", DEVICE_ACTIONS)
+def test_an_action_on_a_drive_outside_the_allowlist_is_refused_and_runs_nothing(action_id):
+    runner = FakeRunner()
+    result = da.perform_action(runner, action_id, {"device_path": "/dev/sda"},
+                               pds_runner=FakePdsRunner(serial="ZCT2WCM2"))
+    assert result.ok is False and "allowed" in result.detail.lower()
+    assert runner.calls == [], f"{action_id} ran commands against a drive outside the allowlist"
+
+
+@pytest.mark.parametrize("action_id", ["repair", "mount_volume", "unmount_volume"])
+def test_an_action_on_an_allowed_drive_is_let_through(action_id):
+    runner = FakeRunner()
+    da.perform_action(runner, action_id, {"device_path": "/dev/sdb"},
+                      pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
+    assert runner.calls, f"{action_id} should have reached the real action for an allowed drive"
+
+
+def test_the_action_receives_the_validated_path_not_the_raw_string():
+    seen = {}
+    spec = da.ActionSpec("probe", "probe", lambda runner, device_path, **p: seen.setdefault("p", device_path) or da.ActionResult(True, "ok"),
+                         requires_device=True)
+    da.ACTIONS["probe"] = spec
+    try:
+        class Resolving(FakePdsRunner):
+            def realpath(self, path):
+                return "/dev/sdb" if path == "/dev/disk/by-id/some-link" else path
+        # a path that resolves to the real device: the action must get the resolved one
+        da.perform_action(FakeRunner(), "probe", {"device_path": "/dev/sdb"},
+                          pds_runner=Resolving(serial="MD89N41071210AP4E"))
+        assert seen["p"] == "/dev/sdb"
+    finally:
+        del da.ACTIONS["probe"]
+
+
+def test_a_device_action_with_no_device_path_is_refused():
+    runner = FakeRunner()
+    result = da.perform_action(runner, "repair", {}, pds_runner=FakePdsRunner())
+    assert result.ok is False
+    assert runner.calls == []
+
+
+def test_actions_that_need_no_device_are_unaffected():
+    result = da.perform_action(FakeRunner(), "update_selected", {"selected": []}, pds_runner=FakePdsRunner())
+    assert result.ok is not None
