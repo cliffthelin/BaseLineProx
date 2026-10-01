@@ -177,6 +177,14 @@ def mount_options_for(label: str) -> str:
     prefix, not by an ever-growing dict of every persona name."""
     if is_persistence_label(label):
         return _PERSISTENCE_MOUNT_OPTIONS
+    # AppData holds every application's writable layer, so it gets at
+    # least the persona policy. Without this branch APPDATA_* fell
+    # through to bare "defaults" - setuid binaries and device nodes
+    # permitted on the one volume every app can write to. Not noexec:
+    # podman's own image layers live in an AppData upper layer and must
+    # execute; whether a narrower policy is possible is an open question.
+    if is_appdata_label(label):
+        return _PERSISTENCE_MOUNT_OPTIONS
     return MOUNT_OPTIONS.get(label, "defaults")
 
 

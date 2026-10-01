@@ -527,3 +527,19 @@ def test_seed_installer_cache_with_baseline_reports_a_real_tar_failure():
     result = di.seed_installer_cache_with_baseline(runner, now=1700000000.0)
     assert result.ok is False
     assert "no space" in result.detail
+
+
+def test_appdata_is_mounted_nosuid_and_nodev():
+    """Real gap: APPDATA_* labels fell through to bare "defaults", so the
+    one volume every application writes to allowed setuid binaries and
+    device nodes."""
+    for persona in di.DEFAULT_PERSONAS:
+        opts = di.mount_options_for(di.appdata_label(persona))
+        assert "nosuid" in opts and "nodev" in opts
+
+
+def test_no_baseline_volume_mounts_with_bare_defaults():
+    for _lv, _min, _max, label, _mnt in di.BASELINE_VOLUMES:
+        opts = di.mount_options_for(label)
+        assert "nosuid" in opts, f"{label} mounts without nosuid"
+        assert "nodev" in opts, f"{label} mounts without nodev"
