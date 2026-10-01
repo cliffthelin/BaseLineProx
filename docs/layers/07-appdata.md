@@ -14,13 +14,20 @@ installable that is not a driver; drivers are filtered out by
 ## Layout
 
 ```
-/mnt/APPDATA_<PERSONA>/<ID>/          app home, keyed by constant ID (e.g. A_C_00001)
+/mnt/APPDATA_<PERSONA>/<ID>/          app home, keyed by constant ID (shape: A_C_nnnnn)
 /mnt/APPDATA_<PERSONA>/<ID>/registry.db   that app's own registry
 /mnt/APPDATA_<PERSONA>/by-name/<name> -> <ID>   alias only, never a mount path
 ```
 
 Identifiers come from [`naming.py`](../../baseline/lib/naming.py):
 `<L>_<M>_<NNNNN>`, nine characters, allocated once and never reused.
+
+**Previews are not allocations.** The App Isolation page shows IDs from
+`naming.preview()`: numbered in catalog order across the whole App cluster
+(on 2026-09-30 the Caddy container previewed as `A_C_00015`, because it is the
+15th app) and marked unreserved. They can change if the catalog changes.
+Nothing is stored until `naming.allocate_many` runs from an explicit
+provisioning step, which has not happened on any host.
 
 ## Planning only
 
