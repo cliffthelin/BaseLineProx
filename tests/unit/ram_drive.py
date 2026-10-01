@@ -84,6 +84,11 @@ class RamDrive:
             print_fn(f"[ok] {len(self.backups)} set(s)")
             return 0
 
+        def fake_test_restore(origin, params, *, print_fn, **kw):
+            print_fn(f"[ok] test restore of {len(self.backups)} set(s) from the RAM drive")
+            return 0
+
+        monkeypatch.setattr(ops, "_test_restore", fake_test_restore)
         monkeypatch.setattr(ops.offdrive_backup, "main", fake_backup)
         monkeypatch.setattr(ops, "_verify_newest", fake_verify)
         monkeypatch.setattr(ops, "_list_sets", fake_list)

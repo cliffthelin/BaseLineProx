@@ -68,6 +68,12 @@ OPERATIONS = {
         "Check the newest backup set on the backup drive: every archive against its checksum, and that "
         "changes-only sets still have the earlier sets they depend on. Read-only.",
         {}, True),
+    "backup_test_restore": Operation(
+        "backup_test_restore",
+        "Prove the newest backup restores: rebuild its smallest archive into a temporary folder on this machine "
+        "(never on the backup drive), check the files came back, then remove that temporary folder. Read-only on "
+        "the backup drive.",
+        {}, True),
     "backup_list": Operation(
         "backup_list", "List the backup sets on the backup drive. Read-only.", {}, False),
 }
@@ -112,6 +118,34 @@ def _verify_newest(origin, params, *, print_fn, get_setting, run) -> int:
     return 0
 
 
+def _test_restore(origin, params, *, print_fn, get_setting, run) -> int:
+    import shutil
+    import tempfile
+    dest = _destination(get_setting, run)
+    sets = offdrive_backup.list_sets(dest)
+    if not sets:
+        print_fn("[FAILED] there are no backup sets to test")
+        return 1
+    newest = sets[0]
+    archives = newest.manifest.get("archives", [])
+    if not archives:
+        print_fn(f"[FAILED] {newest.name} lists no archives")
+        return 1
+    smallest = min(archives, key=lambda a: a.get("bytes", 0))
+    label = smallest["name"].removesuffix(".tar.gz")
+    scratch = tempfile.mkdtemp(prefix="baseline-test-restore-")
+    try:
+        offdrive_backup.restore_label(dest, newest.name, label, scratch)
+        restored = sum(len(files) for _root, _dirs, files in os.walk(scratch))
+        if restored == 0:
+            print_fn(f"[FAILED] restoring {label} from {newest.name} produced no files")
+            return 1
+        print_fn(f"[ok] {newest.name}: {label} restored {restored} file(s) into a temporary folder, which was then removed")
+        return 0
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)          # only the folder this function just made
+
+
 def _list_sets(origin, params, *, print_fn, get_setting, run) -> int:
     dest = _destination(get_setting, run)
     sets = offdrive_backup.list_sets(dest)
@@ -137,6 +171,8 @@ def execute(op_id: str, params: dict, origin, *, print_fn=print, get_setting=Non
                                         dry_run=params["dry_run"], force=params["force"], origin=origin)
         if op_id == "backup_verify":
             return _verify_newest(origin, params, print_fn=print_fn, get_setting=get_setting, run=run)
+        if op_id == "backup_test_restore":
+            return _test_restore(origin, params, print_fn=print_fn, get_setting=get_setting, run=run)
         return _list_sets(origin, params, print_fn=print_fn, get_setting=get_setting, run=run)
     except offdrive_backup.BackupError as exc:
         print_fn(f"[FAILED] {exc}")

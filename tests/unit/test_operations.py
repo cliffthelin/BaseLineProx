@@ -1,6 +1,7 @@
 """operations.py: what the web app can run (ad hoc, in the background, or on a schedule) and the scheduler."""
 import json
 
+import os
 import pytest
 
 import operations as ops
@@ -149,3 +150,49 @@ def test_remove_and_list(tmp_path):
     assert [s["op"] for s in sched.listing()] == ["backup_offdrive"]
     sched.remove(sessions, token, "backup_offdrive")
     assert sched.listing() == []
+
+
+# -- test restore ----------------------------------------------------------------
+
+class _Set:
+    name = "2026-10-01T000000Z"
+    manifest = {"archives": [{"name": "big.tar.gz", "bytes": 900}, {"name": "small.tar.gz", "bytes": 5}]}
+
+
+def _origin(op="backup_test_restore", params=None):
+    gate = woh.configured_gate()
+    return woh.origin_for(op, params or {}, gate=gate)
+
+
+def test_test_restore_rebuilds_the_smallest_archive_into_a_temp_folder_and_removes_it(monkeypatch, tmp_path):
+    import os
+    seen = {}
+    monkeypatch.setattr(ops, "_destination", lambda gs, run: object())
+    monkeypatch.setattr(ops.offdrive_backup, "list_sets", lambda dest: [_Set])
+
+    def fake_restore(dest, set_name, label, out_dir):
+        seen.update(label=label, out=out_dir)
+        (tmp_path / "x").mkdir(exist_ok=True)
+        open(os.path.join(out_dir, "a.txt"), "w").write("data")
+    monkeypatch.setattr(ops.offdrive_backup, "restore_label", fake_restore)
+    lines = []
+    assert ops.execute("backup_test_restore", {}, _origin(), print_fn=lines.append, get_setting=lambda g, k: "x") == 0
+    assert seen["label"] == "small" and "[ok]" in lines[-1]
+    assert not os.path.exists(seen["out"])                  # the temporary folder is gone
+
+
+def test_test_restore_fails_loudly_when_nothing_comes_back_or_there_are_no_sets(monkeypatch):
+    monkeypatch.setattr(ops, "_destination", lambda gs, run: object())
+    monkeypatch.setattr(ops.offdrive_backup, "list_sets", lambda dest: [_Set])
+    monkeypatch.setattr(ops.offdrive_backup, "restore_label", lambda *a: None)
+    lines = []
+    assert ops.execute("backup_test_restore", {}, _origin(), print_fn=lines.append, get_setting=lambda g, k: "x") == 1
+    assert "[FAILED]" in lines[-1]
+    monkeypatch.setattr(ops.offdrive_backup, "list_sets", lambda dest: [])
+    assert ops.execute("backup_test_restore", {}, _origin(), print_fn=lines.append, get_setting=lambda g, k: "x") == 1
+
+
+def test_test_restore_needs_the_web_app(monkeypatch):
+    woh.configured_gate()
+    with pytest.raises(wg.NotFromWebApp):
+        ops.execute("backup_test_restore", {}, None, print_fn=print, get_setting=lambda g, k: "x")
