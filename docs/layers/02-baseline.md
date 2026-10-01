@@ -15,16 +15,19 @@ app, VM and LXC state may need to run things stored here.
 
 ## Decision (2026-09-30)
 
-Baseline supports app, VM and LXC state on this volume. That is the intended
-role, not a defect. It is install-wide state, shared across personas, and the
-volume's size range (5-50 GB) and mount options (`nosuid,nodev`, not `noexec`)
-were chosen for it.
+Baseline supports app, VM and LXC state. Where the guests themselves live:
+VMs and LXCs are kept on [INSTALLER_CACHE](04-installer-cache.md), and Proxmox
+does not care where they are as long as it can reach them. So BASELINE holds
+Baseline's own install-wide state about apps and guests (registry, markers),
+not the guest disks.
 
-**Follow-up this exposes.** [07](07-appdata.md) and `appdata.py` currently
-plan VM and LXC guest data as an overlay on the per-persona AppData volume,
-which is the opposite placement. The code has not been changed. Which kinds of
-state go on BASELINE and which on AppData needs to be settled per medium
-before any plan is applied.
+**Not yet reconciled in code.** `appdata.py` plans VM and LXC guest data as
+overlays at Proxmox's own paths (`/var/lib/vz/images/<guest>`,
+`/var/lib/vz/private/<guest>`) with the upper layer on per-persona AppData.
+That matches neither statement above. It is planning only and nothing is
+applied. Open question: are guest *disks* on INSTALLER_CACHE (which is mounted
+`noexec` and sized 50-200 GB) at runtime, or only the images they are built
+from?
 
 ## Known defect
 
@@ -39,4 +42,4 @@ documented for the cache in [04](04-installer-cache.md).
 |---|---|---|---|
 | Global registry and identifier allocation | MVP completed | unit tests | `registry.py`, `naming.py` |
 | Active-persona marker | MVP completed | unit tests | `persist_bind_mounts.py` |
-| App, VM and LXC state belongs here | On roadmap | none | decided; `appdata.py` placement for VM/LXC not yet reconciled |
+| Install-wide app/guest state | On roadmap | none | decided; guest placement vs `appdata.py` not yet reconciled |

@@ -14,7 +14,7 @@ renamed from `SUBSTRATE_PERSISTENCE`; the old name is still recognised.
 
 | Finding | Status |
 |---|---|
-| ext4 labels are 16 characters. `SUBSTRATE_PERSISTENCE` truncated to `SUBSTRATE_PERSIS`. The new name `SUBSTRATE` fits, but the real carrier partition still carries the old name | open, needs the metadata-only relabel (`carrier_layout.legacy_relabel_plan`) |
+| ext4 labels are 16 characters. `SUBSTRATE_PERSISTENCE` truncated to `SUBSTRATE_PERSIS`. The new name `SUBSTRATE` fits, but the real Baseline drive partition still carries the old name | open, needs the metadata-only relabel (`carrier_layout.legacy_relabel_plan`) |
 | `carrier_layout.py` describes this volume as holding the encrypted admin installer/recovery passphrase. No code writes it | open |
 
 ## Status

@@ -61,7 +61,7 @@ still only proven in a test harness:
 
 | # | Layer | Status | One line |
 |---|---|---|---|
-| 00 | [Physical carrier](00-physical-carrier.md) | In progress | Drives by serial; the carrier's on-disk layout is now 2 partitions behind the plan |
+| 00 | [Baseline drive](00-baseline-drive.md) | In progress | Drives by serial; the Baseline drive's on-disk layout is now 2 partitions behind the plan |
 | 01 | [Substrate](01-substrate.md) | In progress | Proxmox install pipeline proven in QEMU; real-hardware end to end still pending |
 | 02 | [BASELINE](02-baseline.md) | In progress | Install-wide state incl. app/VM/LXC (decided); VM/LXC placement in `appdata.py` still to reconcile |
 | 03 | [SUBSTRATE](03-substrate-persistence.md) | In progress | Volume exists and mounts; nothing writes to it yet |
@@ -80,8 +80,8 @@ was invisible until something looked at the whole layout at once:
 | Finding | Status | Where |
 |---|---|---|
 | AppData mounted with bare `defaults` (no `nosuid,nodev`) | fixed, `86f86fc` | [07](07-appdata.md) |
-| AppData interleaved per persona, renumbering existing carrier partitions (`USER_PERSONAL` 6 → 7) | fixed, `e629011` | [00](00-physical-carrier.md) |
-| `carrier_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-physical-carrier.md) |
+| AppData interleaved per persona, renumbering existing Baseline drive partitions (`USER_PERSONAL` 6 → 7) | fixed, `e629011` | [00](00-baseline-drive.md) |
+| `carrier_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-baseline-drive.md) |
 | Rootless Quadlet units targeted `multi-user.target`, so they never started at boot | fixed, `4012834` | [08](08-application-isolation.md) |
 | Four LXC guests overlaid one path, silently sharing data | fixed, `5a11c35` | [08](08-application-isolation.md) |
 | ext4 16-char labels: `SUBSTRATE` truncates too, not only the persona volumes | **open** | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |
