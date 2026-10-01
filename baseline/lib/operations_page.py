@@ -5,7 +5,10 @@ from __future__ import annotations
 import html
 
 
-def render_operations_page(operations: dict, schedules: list) -> bytes:
+def render_operations_page(operations: dict, schedules: list, alerts: list | None = None) -> bytes:
+    banner = "".join(
+        f'<p class="op-alert" role="alert">Integrity alert: {html.escape(str(a.get("detail", "")))} '
+        f'({html.escape(str(a.get("namespace", "")))})</p>' for a in (alerts or []))
     by_op = {s["op"]: s for s in schedules}
     cards = []
     for op in operations.values():
@@ -32,6 +35,7 @@ body{{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:56rem;padding:1
 .op-flag{{margin-right:1rem}} button{{padding:.4rem .8rem}} .op-schedule{{margin-top:.8rem}}
 #op-log{{white-space:pre-wrap;background:#1114;padding:.8rem;border-radius:6px;min-height:4rem}}
 </style></head><body><h1>Operations</h1>
+{banner}
 <p>Run now, or set a schedule. Each run is added to the log below. Backups only ever add files to the backup drive.</p>
 {''.join(cards)}<h2>Log</h2><pre id="op-log">Nothing has run yet.</pre>
 <script>

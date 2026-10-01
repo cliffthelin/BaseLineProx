@@ -53,6 +53,11 @@ class WebOrigin:
     mac: str
 
 
+def derive_key(root_key: bytes, purpose: str) -> bytes:
+    """A separate key for each purpose, so a signature made for one thing can never be replayed as another."""
+    return hmac.new(root_key, b"baseline-key|" + purpose.encode(), hashlib.sha256).digest()
+
+
 def load_or_create_key(path) -> bytes:
     """The signing key. Created with mode 0600 if missing; an existing key readable by anyone else is refused."""
     path = Path(path)

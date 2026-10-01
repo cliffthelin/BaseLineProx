@@ -52,25 +52,42 @@ def _hash(password: str, salt: bytes) -> str:
 
 
 class OperatorAccounts:
-    def __init__(self, path, is_system_user=_machine_account):
+    def __init__(self, path, is_system_user=_machine_account, mac_key: bytes | None = None, on_tamper=None):
         self.path = Path(path)
+        self._mac_key = mac_key
+        self._on_tamper = on_tamper or (lambda alert: None)
         self._is_system_user = is_system_user
         self._lock = threading.Lock()
+
+    def _sign(self, accounts: dict) -> str:
+        blob = json.dumps(accounts, sort_keys=True, separators=(",", ":")).encode()
+        return hmac.new(self._mac_key, b"operator-accounts|" + blob, hashlib.sha256).hexdigest()
 
     def _load(self) -> dict:
         try:
             data = json.loads(self.path.read_text())
             accounts = data["accounts"]
-            return accounts if isinstance(accounts, dict) else {}
+            if not isinstance(accounts, dict):
+                return {}
+        except FileNotFoundError:
+            return {}
         except (OSError, ValueError, KeyError, TypeError):
             return {}
+        if self._mac_key is not None and not hmac.compare_digest(str(data.get("mac", "")), self._sign(accounts)):
+            self._on_tamper({"namespace": "operator_accounts", "key": str(self.path),
+                             "detail": "the operator accounts file failed its integrity check and is being ignored"})
+            return {}
+        return accounts
 
     def _save(self, accounts: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = self.path.with_name(self.path.name + ".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            os.write(fd, json.dumps({"accounts": accounts}, sort_keys=True).encode())
+            body = {"accounts": accounts}
+            if self._mac_key is not None:
+                body["mac"] = self._sign(accounts)
+            os.write(fd, json.dumps(body, sort_keys=True).encode())
         finally:
             os.close(fd)
         os.replace(tmp, self.path)

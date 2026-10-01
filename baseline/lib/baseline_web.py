@@ -1569,7 +1569,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/operations":
             scheduler = deps.get("scheduler")
             return self._html_response(200, _with_nav(
-                operations_page.render_operations_page(ops.OPERATIONS, scheduler.listing() if scheduler else []), path))
+                operations_page.render_operations_page(ops.OPERATIONS, scheduler.listing() if scheduler else [],
+                                                       deps.get("tamper_alerts")), path))
 
         if path.startswith("/drive-admin/actions"):
             return self._json(200, {"actions": da.describe_actions()})
@@ -1858,23 +1859,35 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     from repair import RealRunner
 
     runner = RealRunner()
+    # The signing key lives in a root-only file. Everything that proves "the web application did this" or "this
+    # credential row is genuine" is derived from it, with a different label for each purpose.
+    state = Path(state_dir or DEFAULT_STATE_DIR)
+    audit = hitl.AuditFile(state / "audit" / "web-actions.jsonl")
+    root_key = wg.load_or_create_key(state / "web-signing.key")
+    tamper_alerts: list = []
+
+    def on_tamper(alert: dict) -> None:
+        tamper_alerts.append(alert)
+        audit({"event": "integrity_failure", **alert})
+
     settings_server = sw.build_real_server(bind_host="127.0.0.1", bind_port=0,
                                             data_path=data_path or Path("/var/lib/baseline/settings-web/store.json"),
-                                            runner=runner)
+                                            runner=runner, store_mac_key=wg.derive_key(root_key, "settings-store"),
+                                            store_mac_marker=state / "settings-store.initialized", on_tamper=on_tamper)
     deps = dict(settings_server.deps)
     deps["vg_name"] = drive_installer.DEFAULT_VG_NAME
     deps["config_path"] = cpw.DEFAULT_CONFIG_PATH
     deps["network_interface"] = "eno1"
     deps["pds_runner"] = pds.Runner()
     # Operations: only the web service holds the signing key (root-only file); nothing else can ask for one to run.
-    state = Path(state_dir or DEFAULT_STATE_DIR)
     audit_path = state / "audit" / "web-actions.jsonl"
-    audit = hitl.AuditFile(audit_path)
-    gate = wg.WebGate(wg.load_or_create_key(state / "web-signing.key"), audit=audit)
+    gate = wg.WebGate(wg.derive_key(root_key, "web-gate"), audit=audit)
     wg.configure(gate)
     deps["web_gate"] = gate
     deps["audit"] = audit
-    deps["operator_accounts"] = operator_accounts.OperatorAccounts(state / "operators.json")
+    deps["operator_accounts"] = operator_accounts.OperatorAccounts(
+        state / "operators.json", mac_key=wg.derive_key(root_key, "operator-accounts"), on_tamper=on_tamper)
+    deps["tamper_alerts"] = tamper_alerts
     deps["scheduler"] = ops.Scheduler(
         gate, ops.ScheduleStore(state / "schedules.json"),
         lambda op, params, origin: _start_operation_job(deps, op, params, origin))

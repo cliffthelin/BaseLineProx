@@ -885,8 +885,15 @@ class LocalAppStore:
     `FileBackedSectionApplier`, `FileBackedElevationVerifier`,
     `LoggingRebuildTrigger`, `scripts_inbox_web.py`) needed to change."""
 
-    def __init__(self, path: Path):
+    # Namespaces that hold password hashes. With a `mac_key` each of their rows carries an HMAC, checked on every
+    # read; a row that fails (edited, planted, moved or unsigned) is ignored and reported, never trusted.
+    PROTECTED_NAMESPACES = frozenset({"users", "auth", "pending_accounts"})
+
+    def __init__(self, path: Path, mac_key: bytes | None = None, mac_marker=None, on_tamper=None):
         self.path = path
+        self._mac_key = mac_key
+        self._on_tamper = on_tamper or (lambda alert: None)
+        self._reported: set = set()
         import sqlite3
         is_new = not self.path.exists()
         if is_new:
@@ -907,6 +914,11 @@ class LocalAppStore:
             "target TEXT NOT NULL, config TEXT NOT NULL, at REAL NOT NULL)"
         )
         self._conn.commit()
+        if self._mac_key is not None:
+            self._conn.execute("CREATE TABLE IF NOT EXISTS kv_mac (namespace TEXT NOT NULL, key TEXT NOT NULL, "
+                               "mac TEXT NOT NULL, PRIMARY KEY (namespace, key))")
+            self._conn.commit()
+            self._adopt_once(mac_marker)
         if is_new:
             # Non-secret defaults only. There is deliberately NO seeded user,
             # elevation passphrase or machine passphrase (direct instruction,
@@ -915,23 +927,73 @@ class LocalAppStore:
             for section, values in _DEFAULT_SETTINGS_SECTIONS.items():
                 self._put("settings", section, values)
 
+    # -- integrity (v0.2 row 52) ------------------------------------------------------
+    def _protected(self, namespace: str) -> bool:
+        return self._mac_key is not None and namespace in self.PROTECTED_NAMESPACES
+
+    def _sign(self, namespace: str, key: str, value_json: str) -> str:
+        import hashlib
+        import hmac as _hmac
+        return _hmac.new(self._mac_key, f"{namespace}\0{key}\0{value_json}".encode(), hashlib.sha256).hexdigest()
+
+    def _trusted(self, namespace: str, key: str, value_json: str) -> bool:
+        """True for an unprotected row, or a protected row whose signature verifies. Otherwise reports it once."""
+        if not self._protected(namespace):
+            return True
+        import hmac as _hmac
+        row = self._conn.execute("SELECT mac FROM kv_mac WHERE namespace = ? AND key = ?", (namespace, key)).fetchone()
+        if row is not None and _hmac.compare_digest(row[0], self._sign(namespace, key, value_json)):
+            return True
+        if (namespace, key) not in self._reported:
+            self._reported.add((namespace, key))
+            self._on_tamper({"namespace": namespace, "key": key,
+                             "detail": "a stored credential row failed its integrity check and is being ignored"})
+        return False
+
+    def _adopt_once(self, marker) -> None:
+        """First run with a key on an existing store: sign what is there, once. After the marker exists nothing is
+        adopted, so a database someone swapped in (unsigned) is never trusted."""
+        if marker is None or os.path.exists(marker):
+            return
+        for namespace, key, value in self._conn.execute("SELECT namespace, key, value FROM kv").fetchall():
+            if namespace in self.PROTECTED_NAMESPACES:
+                self._conn.execute("INSERT OR REPLACE INTO kv_mac (namespace, key, mac) VALUES (?, ?, ?)",
+                                   (namespace, key, self._sign(namespace, key, value)))
+        self._conn.commit()
+        os.makedirs(os.path.dirname(marker), exist_ok=True, mode=0o700)
+        os.close(os.open(marker, os.O_CREAT | os.O_WRONLY, 0o600))
+
     def _get(self, namespace: str, key: str):
         row = self._conn.execute(
             "SELECT value FROM kv WHERE namespace = ? AND key = ?", (namespace, key)
         ).fetchone()
-        return json.loads(row[0]) if row is not None else None
+        if row is None or not self._trusted(namespace, key, row[0]):
+            return None
+        return json.loads(row[0])
 
     def _put(self, namespace: str, key: str, value) -> None:
+        encoded = json.dumps(value)
         self._conn.execute(
             "INSERT INTO kv (namespace, key, value) VALUES (?, ?, ?) "
             "ON CONFLICT(namespace, key) DO UPDATE SET value = excluded.value",
-            (namespace, key, json.dumps(value)),
+            (namespace, key, encoded),
         )
+        if self._protected(namespace):
+            self._conn.execute("INSERT OR REPLACE INTO kv_mac (namespace, key, mac) VALUES (?, ?, ?)",
+                               (namespace, key, self._sign(namespace, key, encoded)))
+            self._reported.discard((namespace, key))
         self._conn.commit()
 
     def _namespace(self, namespace: str) -> dict:
         rows = self._conn.execute("SELECT key, value FROM kv WHERE namespace = ?", (namespace,)).fetchall()
-        return {k: json.loads(v) for k, v in rows}
+        return {k: json.loads(v) for k, v in rows if self._trusted(namespace, k, v)}
+
+    def _exists_untrusted(self, namespace: str, key: str | None = None) -> bool:
+        """Is there ANY row, signed or not? Used where a tampered row must still count as 'there is data'."""
+        sql, args = "SELECT 1 FROM kv WHERE namespace = ?", [namespace]
+        if key is not None:
+            sql, args = sql + " AND key = ?", args + [key]
+        return self._conn.execute(sql + " LIMIT 1", args).fetchone() is not None
 
     def get_user_hash(self, username: str) -> str | None:
         return self._get("users", username)
@@ -946,8 +1008,10 @@ class LocalAppStore:
         """Any user, any account waiting on a rebuild, or a machine
         passphrase. First-run account creation is available only while this
         is False. A brand-new store seeds none of these."""
-        return bool(self._namespace("users") or self._namespace("pending_accounts")
-                    or self._get("auth", "machine_passphrase_hash"))
+        # Counted from the raw rows on purpose: tampering with a credential row must never make the store look
+        # empty, because an empty store lets anyone create the first account.
+        return (self._exists_untrusted("users") or self._exists_untrusted("pending_accounts")
+                or self._exists_untrusted("auth", "machine_passphrase_hash"))
 
     def get_machine_passphrase_hash(self) -> str | None:
         return self._get("auth", "machine_passphrase_hash")
@@ -1642,7 +1706,8 @@ class SettingsWebServer:
 
 
 def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
-                       data_path: Path | None = None, runner=None) -> SettingsWebServer:
+                       data_path: Path | None = None, runner=None, store_mac_key: bytes | None = None,
+                       store_mac_marker=None, on_tamper=None) -> SettingsWebServer:
     """A genuinely working, standalone deployment - one small SQLite
     database, no real Proxmox install required. Login now verifies via
     the machine's own real `sudo` (`SudoPasswordVerifier`, decision
@@ -1656,7 +1721,8 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
     omitted (the default) keeps this fully usable standalone with no
     Runner/persistence layer available at all, matching this
     function's own "no real hardware required" design."""
-    store = LocalAppStore(data_path or Path("/tmp/baseline-settings-web/store.db"))
+    store = LocalAppStore(data_path or Path("/tmp/baseline-settings-web/store.db"), mac_key=store_mac_key,
+                          mac_marker=store_mac_marker, on_tamper=on_tamper)
     persona_provider = RunnerBackedActivePersonaProvider(runner) if runner is not None else None
     return SettingsWebServer(
         bind_host, bind_port,
