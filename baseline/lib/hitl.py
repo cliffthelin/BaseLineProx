@@ -311,6 +311,11 @@ class ConfirmationStore:
             return [{"id": did, "action": d["action"], "serial": d["serial"], "day": d["day"]}
                     for did, d in self._daily.items() if hmac.compare_digest(d["account"], str(account))]
 
+    def list_all_daily(self) -> list:
+        with self._lock:
+            self._prune(self.clock())
+            return [{"id": did, **d} for did, d in self._daily.items()]
+
     def revoke_daily(self, daily_id: str) -> bool:
         with self._lock:
             existed = self._daily.pop(daily_id, None) is not None

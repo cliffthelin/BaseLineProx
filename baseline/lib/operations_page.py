@@ -123,3 +123,42 @@ document.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => 
 }});
 </script></body></html>"""
     return page.encode()
+
+
+def render_audit_page(records: list) -> bytes:
+    import time
+    rows = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            html.escape(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r.get("ts", 0))) if isinstance(r.get("ts"), (int, float)) else ""),
+            html.escape(str(r.get("event", ""))),
+            html.escape(", ".join(f"{k}={v}" for k, v in sorted(r.items()) if k not in ("ts", "event"))))
+        for r in records) or '<tr><td colspan="3">No events recorded yet.</td></tr>'
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Audit</title>
+<style>body{{font:14px/1.5 system-ui,sans-serif;margin:0 auto;max-width:70rem;padding:1rem}}
+table{{border-collapse:collapse;width:100%}}td,th{{border-top:1px solid #8884;padding:.35rem .5rem;text-align:left;vertical-align:top}}</style>
+</head><body><h1>Audit</h1><p>The most recent events, newest first. Read-only; secrets are never recorded.</p>
+<table><tr><th>When</th><th>Event</th><th>Details</th></tr>{rows}</table></body></html>"""
+    return page.encode()
+
+
+def render_approvals_page(daily: list) -> bytes:
+    rows = "".join(
+        f'<tr><td>{html.escape(d["account"])}</td><td>{html.escape(d["action"])}</td>'
+        f'<td>{html.escape(d["serial"][-6:])}</td><td>{html.escape(d["day"])}</td>'
+        f'<td><button type="button" data-revoke="{html.escape(d["id"])}">Revoke</button></td></tr>' for d in daily
+    ) or '<tr><td colspan="5">No daily authorizations right now.</td></tr>'
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Approvals</title>
+<style>body{{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:56rem;padding:1rem}}
+table{{border-collapse:collapse;width:100%}}td,th{{border-top:1px solid #8884;padding:.4rem .5rem;text-align:left}}</style>
+</head><body><h1>Approvals</h1>
+<p>A bot account you authorized for today may run that one action on that one drive without asking again until the
+day ends. Revoke one here and it must be confirmed again. Revoking needs no password.</p>
+<table><tr><th>Account</th><th>Action</th><th>Drive (last 6)</th><th>Day</th><th></th></tr>{rows}</table>
+<script>
+document.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {{
+  await fetch('/approvals/daily/revoke', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{id: b.dataset.revoke}})}});
+  location.reload();
+}});
+</script></body></html>"""
+    return page.encode()

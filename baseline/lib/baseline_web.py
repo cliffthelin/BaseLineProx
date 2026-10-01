@@ -46,6 +46,7 @@ import physical_device_safety as pds
 import settings_web as sw
 import hitl
 import operations as ops
+import audit_view
 import operations_page
 import operator_accounts
 import web_gate as wg
@@ -66,6 +67,8 @@ NAV_TABS = (
     ("/drive-admin", "Drive Administration"),
     ("/operations", "Operations"),
     ("/operators", "Operators"),
+    ("/approvals", "Approvals"),
+    ("/audit", "Audit"),
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -1561,6 +1564,15 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(
                 render_installer_cache_page(report, elevated=elevated), path))
 
+        if path == "/audit":
+            return self._html_response(200, _with_nav(
+                operations_page.render_audit_page(audit_view.read_tail(deps["audit_log_path"], 200) if deps.get("audit_log_path") else []),
+                path))
+
+        if path == "/approvals":
+            return self._html_response(200, _with_nav(
+                operations_page.render_approvals_page(_hitl_store(deps).list_all_daily()), path))
+
         if path == "/operators":
             accounts = deps.get("operator_accounts")
             return self._html_response(200, _with_nav(
@@ -1813,6 +1825,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path.startswith("/operations/"):
             return self._post_operations(deps, path, body, now)
 
+        if path == "/approvals/daily/revoke":
+            gone = _hitl_store(deps).revoke_daily(body.get("id", "")) if isinstance(body.get("id", ""), str) else False
+            return self._json(200 if gone else 404, {"outcome": "applied" if gone else "refused"})
+
         if path in ("/operators/add", "/operators/remove"):
             return self._post_operators(deps, path, body, now)
 
@@ -1895,6 +1911,7 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     deps["operator_users"] = lambda: settings_store.get_setting("access", "operator_users")
     deps["operator_session_hours"] = lambda: settings_store.get_setting("access", "operator_session_hours")
     deps["hitl_audit_path"] = audit_path
+    deps["audit_log_path"] = audit_path
     deps["elevation_verify_fn"] = sw.SystemElevationVerifier(elevation_username)
     # Recovery mode: this machine's root password (or its passphrase), checked
     # against the system's own one-way hash. Its own ticket store; Admin
