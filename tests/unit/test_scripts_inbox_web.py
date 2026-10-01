@@ -162,8 +162,8 @@ def test_build_real_server_wires_real_auth_and_real_runner(tmp_path):
         assert "verifier" in httpd.deps
         assert "sessions" in httpd.deps
         assert httpd.deps["inbox_dir"] == str(inbox_dir)
-        # the default seed account (root/baseline) really works end to end
-        assert httpd.deps["verifier"].verify("root", "baseline") is True
+        # no seeded default account: nobody can log in until first-run setup creates one
+        assert httpd.deps["verifier"].verify("root", "baseline") is False
         assert httpd.deps["verifier"].verify("root", "wrong") is False
     finally:
         httpd.server_close()

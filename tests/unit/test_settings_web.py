@@ -3,6 +3,8 @@ login, settings review/edit, and the two-safe-flow-else-hand-off gate
 around rebuild. Exercises the handle_* functions directly with fakes,
 not real sockets - the real HTTP wiring is a thin pass-through covered
 by manual browser verification (see decision record for this module)."""
+import pytest
+
 import settings_web as sw
 
 
@@ -500,11 +502,18 @@ def test_file_backed_verifier_round_trips_a_real_sha512crypt_hash(tmp_path):
     assert verifier.verify("nobody", "x") is False
 
 
-def test_file_backed_elevation_verifier_accepts_the_real_dev_seed_passphrase(tmp_path):
-    store = sw.LocalAppStore(tmp_path / "store.db")  # creates the store, seeding elevation_password_hash
+def test_a_new_store_has_no_default_credentials_at_all(tmp_path):
+    """No seeded user, elevation passphrase or machine passphrase: nothing a
+    reader of the source could log in with (direct instruction, 2026-09-30)."""
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    assert store.has_user_data() is False
+    assert store.get_user_hash("root") is None
+    assert store.get_elevation_hash() is None
+    assert store.get_machine_passphrase_hash() is None
     verifier = sw.FileBackedElevationVerifier(store)
-    assert verifier("baseline-admin") is True
-    assert verifier("baseline") is False  # the login password must not also work as elevation
+    for guess in ("baseline-admin", "baseline", "", "admin", "password"):
+        assert verifier(guess) is False
+    assert sw.FileBackedPasswordVerifier(store).verify("root", "baseline") is False
 
 
 def test_system_password_verifier_accepts_the_real_matching_password():
@@ -696,7 +705,7 @@ def test_build_real_server_always_wires_a_real_elevation_verifier(tmp_path):
     server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json")
     try:
         assert isinstance(server.deps["elevation_verify_fn"], sw.FileBackedElevationVerifier)
-        assert server.deps["elevation_verify_fn"]("baseline-admin") is True
+        assert server.deps["elevation_verify_fn"]("baseline-admin") is False   # no seeded default
     finally:
         server.httpd.server_close()
 
@@ -943,3 +952,82 @@ def test_a_stored_secret_hash_does_not_contain_the_secret_and_cannot_be_reversed
     verifier = sw.FileBackedPasswordVerifier(store)
     assert verifier.verify("alice", "correct horse") is True
     assert verifier.verify("alice", "wrong") is False
+
+
+# --- machine passphrase: stored one-way, checked by match only -------------
+
+def test_machine_passphrase_verifier_matches_only_the_right_passphrase(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "s.db")
+    store.set_machine_passphrase_hash(sw._sha512crypt("blue heron 42", sw._new_salt()))
+    verify = sw.MachinePassphraseVerifier(store)
+    assert verify("blue heron 42") is True
+    assert verify("blue heron 43") is False
+    assert verify("") is False
+
+
+def test_machine_passphrase_verifier_is_false_when_none_is_set(tmp_path):
+    verify = sw.MachinePassphraseVerifier(sw.LocalAppStore(tmp_path / "s.db"))
+    assert verify("anything") is False and verify("") is False
+
+
+def test_the_stored_machine_passphrase_is_a_salted_one_way_hash(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "s.db")
+    store.set_machine_passphrase_hash(sw._sha512crypt("blue heron 42", "saltsalt"))
+    stored = store.get_machine_passphrase_hash()
+    assert stored.startswith("$6$saltsalt$") and "blue heron" not in stored
+    raw = (tmp_path / "s.db").read_bytes()
+    assert b"blue heron" not in raw
+
+
+def test_any_credential_verifier_accepts_either_and_neither():
+    yes, no = (lambda s: s == "a"), (lambda s: s == "b")
+    assert sw.AnyCredentialVerifier(yes, no)("a") is True
+    assert sw.AnyCredentialVerifier(yes, no)("b") is True
+    assert sw.AnyCredentialVerifier(yes, no)("c") is False
+
+
+def test_a_verifier_that_raises_never_counts_as_a_match():
+    def boom(_):
+        raise RuntimeError("shadow unreadable")
+    assert sw.AnyCredentialVerifier(boom)("x") is False
+
+
+def test_first_account_sets_the_login_and_the_machine_passphrase(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "s.db")
+    result = sw.create_first_account(store, "alice", "pw-one", "blue heron 42")
+    assert result.outcome == "applied"
+    assert sw.FileBackedPasswordVerifier(store).verify("alice", "pw-one") is True
+    assert sw.MachinePassphraseVerifier(store)("blue heron 42") is True
+    assert store.has_user_data() is True
+
+
+@pytest.mark.parametrize("username,password,passphrase", [("", "p", "x"), ("a", "", "x"), ("a", "p", "")])
+def test_first_account_needs_a_username_a_password_and_a_passphrase(tmp_path, username, password, passphrase):
+    store = sw.LocalAppStore(tmp_path / "s.db")
+    result = sw.create_first_account(store, username, password, passphrase)
+    assert result.outcome == "refused" and result.status == 400
+    assert store.has_user_data() is False
+
+
+def test_first_account_is_refused_once_user_data_exists(tmp_path):
+    store = sw.LocalAppStore(tmp_path / "s.db")
+    assert sw.create_first_account(store, "alice", "p1", "x1").outcome == "applied"
+    again = sw.create_first_account(store, "mallory", "p2", "x2")
+    assert again.outcome == "refused" and again.status == 403
+    assert store.get_user_hash("mallory") is None
+    assert sw.MachinePassphraseVerifier(store)("x2") is False
+
+
+def test_the_setup_form_asks_for_the_passphrase():
+    assert b'name="passphrase"' in sw.render_setup_page("account")
+
+
+def test_build_real_server_recovery_accepts_the_machine_passphrase(tmp_path):
+    server = sw.build_real_server(bind_port=0, data_path=tmp_path / "store.json")
+    try:
+        sw.create_first_account(server.deps["store"], "alice", "pw-one", "blue heron 42")
+        verify = server.deps["recovery_verify_fn"]
+        assert verify("blue heron 42") is True
+        assert verify("blue heron 41") is False
+    finally:
+        server.httpd.server_close()

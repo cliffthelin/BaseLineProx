@@ -583,17 +583,18 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
             return self._html_response(result.status, render_settings_page(settings, notice))
 
         if self.path == "/setup/new-account":
-            result = handle_new_account(deps["hasher"], body.get("username", ""), body.get("password", ""),
-                                         store=deps.get("store"))
+            store = deps.get("store")
+            if store is None:
+                result = RouteResult("refused", 403, {"error": "no store configured"})
+            else:
+                result = create_first_account(store, body.get("username", ""), body.get("password", ""),
+                                               body.get("passphrase", ""), hasher=deps.get("hasher"))
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "applied":
-                hashed = deps["hasher"](body["password"])
-                deps["store"].add_user(body["username"], hashed)
-                deps["store"].save_pending_account(body["username"], hashed)
                 return self._html_response(200, render_setup_page("rebuild",
-                    f"Account {body['username']!r} created. Now build the rebuild target."))
-            return self._html_response(result.status, render_setup_page("account", "Username and password are both required."))
+                    f"Account {body['username']!r} created and the machine passphrase set. Now build the rebuild target."))
+            return self._html_response(result.status, render_setup_page("account", result.body.get("error", "")))
 
         if self.path == "/setup/rebuild":
             result = handle_rebuild(deps["eligibility"], deps["trigger"],
@@ -867,19 +868,12 @@ class LocalAppStore:
         )
         self._conn.commit()
         if is_new:
-            # DEV-ONLY seed account so this is usable the moment it's
-            # launched: username "root", password "baseline". A real
-            # deployment wires PasswordVerifier to the actual system
-            # account instead of this store.
-            self._put("users", "root", _sha512crypt("baseline", _new_salt()))
+            # Non-secret defaults only. There is deliberately NO seeded user,
+            # elevation passphrase or machine passphrase (direct instruction,
+            # 2026-09-30: no backdoors): the first account and the machine
+            # passphrase are created by first-run setup (`create_first_account`).
             for section, values in _DEFAULT_SETTINGS_SECTIONS.items():
                 self._put("settings", section, values)
-            # DEV-ONLY seed elevation passphrase (work-queue item 28):
-            # "baseline-admin" - deliberately different from the login
-            # password above, matching decision record 76's "a
-            # SEPARATE, additional passphrase - not the same secret as
-            # admin's own base login."
-            self._put("auth", "elevation_password_hash", _sha512crypt("baseline-admin", _new_salt()))
 
     def _get(self, namespace: str, key: str):
         row = self._conn.execute(
@@ -909,11 +903,17 @@ class LocalAppStore:
         self._put("users", username, password_hash)
 
     def has_user_data(self) -> bool:
-        """Any user, or any account waiting on a rebuild. First-run account
-        creation is available only while this is False. NOTE: a brand-new
-        store seeds a DEV-ONLY `root` user (see `__init__`), so on a
-        freshly created store file this is already True."""
-        return bool(self._namespace("users") or self._namespace("pending_accounts"))
+        """Any user, any account waiting on a rebuild, or a machine
+        passphrase. First-run account creation is available only while this
+        is False. A brand-new store seeds none of these."""
+        return bool(self._namespace("users") or self._namespace("pending_accounts")
+                    or self._get("auth", "machine_passphrase_hash"))
+
+    def get_machine_passphrase_hash(self) -> str | None:
+        return self._get("auth", "machine_passphrase_hash")
+
+    def set_machine_passphrase_hash(self, password_hash: str) -> None:
+        self._put("auth", "machine_passphrase_hash", password_hash)
 
     def settings(self) -> dict:
         return self._namespace("settings")
@@ -1032,6 +1032,57 @@ class SudoPasswordVerifier(PasswordVerifier):
     def verify(self, username: str, password: str) -> bool:
         import drive_admin
         return drive_admin.verify_sudo_password(password, executor=self._executor)
+
+
+class MachinePassphraseVerifier:
+    """Checks a candidate against the machine passphrase set at first-run
+    setup. Only a salted one-way hash is stored: a candidate can be checked
+    for a match, nothing stored can be decrypted back to the passphrase."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def __call__(self, passphrase: str) -> bool:
+        stored_hash = self.store.get_machine_passphrase_hash()
+        if not stored_hash or not passphrase:
+            return False
+        parts = stored_hash.split("$")
+        if len(parts) < 4:
+            return False
+        return _hashes_match(_sha512crypt(passphrase, parts[2]), stored_hash)
+
+
+class AnyCredentialVerifier:
+    """True if any one verifier accepts. A verifier that raises (for example
+    an unreadable shadow file) counts as no match, never as a pass."""
+
+    def __init__(self, *verifiers):
+        self.verifiers = verifiers
+
+    def __call__(self, secret: str) -> bool:
+        for verify in self.verifiers:
+            try:
+                if verify(secret):
+                    return True
+            except Exception:  # noqa: BLE001 - a failing check must not grant access
+                continue
+        return False
+
+
+def create_first_account(store, username: str, password: str, passphrase: str, *, hasher=None) -> RouteResult:
+    """First-run setup: the first account and the machine passphrase, both
+    stored only as salted one-way hashes. Available only while the store has
+    no user data at all."""
+    if store.has_user_data():
+        return RouteResult("refused", 403, {"error": "an account already exists on this machine"})
+    if not username or not password or not passphrase:
+        return RouteResult("refused", 400, {"error": "username, password and passphrase are all required"})
+    hash_password = hasher or (lambda pw: _sha512crypt(pw, _new_salt()))
+    hashed = hash_password(password)
+    store.add_user(username, hashed)
+    store.save_pending_account(username, hashed)
+    store.set_machine_passphrase_hash(_sha512crypt(passphrase, _new_salt()))
+    return RouteResult("applied", 200, {"account": username})
 
 
 class SystemElevationVerifier:
@@ -1462,6 +1513,7 @@ def render_setup_page(step: str = "account", notice: str = "") -> bytes:
 <form method="post" action="/setup/new-account">
   <label>New username <input name="username"></label>
   <label>New password <input name="password" type="password"></label>
+  <label>Machine passphrase <input name="passphrase" type="password" autocomplete="off"></label>
   <button type="submit">Create account</button>
 </form>
 <p class="hint">Building a fresh configuration under a new account never
@@ -1552,7 +1604,10 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
         persona_provider=persona_provider,
         runner=runner,
         elevation_verify_fn=FileBackedElevationVerifier(store),
-        recovery_verify_fn=SystemElevationVerifier("root"),
+        # This machine's passphrase (set at first run) or its root password.
+        # The passphrase is checked first so no shadow read is needed for it.
+        recovery_verify_fn=AnyCredentialVerifier(MachinePassphraseVerifier(store),
+                                                 SystemElevationVerifier("root")),
     )
 
 
@@ -1576,7 +1631,7 @@ def main() -> int:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8100
     data_path = resolve_data_path(os.environ)
     server = build_real_server(bind_port=port, data_path=data_path, runner=RealRunner())
-    print(f"Baseline settings web UI on http://0.0.0.0:{port}/  (login: root / baseline)")
+    print(f"Baseline settings web UI on http://0.0.0.0:{port}/  (first run: /setup creates the first account and machine passphrase)")
     print(f"Data store: {data_path}")
     try:
         server.serve_forever()

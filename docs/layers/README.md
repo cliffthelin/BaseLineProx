@@ -80,9 +80,10 @@ the passphrase. This is enforced deny-by-default in `baseline_web.py` and
 `settings_web.py` (v0.2 row 43). Recovery mode needs this machine's root password (or
 its passphrase) on top of a login (row 45), and a new account can only be
 created while there is no user data (row 44). Passwords and passphrases are
-stored only as one-way hashes, never encrypted. Open: the seeded dev credentials
-default login and elevation passphrase in `LocalAppStore` (row 46) and the
-machine-passphrase hash (row 47).
+stored only as one-way hashes, never encrypted. There are no seeded credentials any more (row 46): the first account and the
+machine passphrase come only from first-run setup (row 47), and recovery accepts
+either the root password or that passphrase. Open: the admin elevation
+passphrase has no way to be set yet (row 48).
 
 ## Cross-cutting findings from writing these pages
 

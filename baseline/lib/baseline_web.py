@@ -1546,7 +1546,8 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     # elevation never opens recovery.
     import admin_elevation
     deps["recovery_store"] = admin_elevation.ElevationStore()
-    deps["recovery_verify_fn"] = sw.SystemElevationVerifier("root")
+    deps["recovery_verify_fn"] = sw.AnyCredentialVerifier(
+        sw.MachinePassphraseVerifier(deps["store"]), sw.SystemElevationVerifier("root"))
     settings_server.httpd.server_close()
     return make_server(deps=deps, host=host, port=port)
 
@@ -1557,7 +1558,7 @@ def main() -> int:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8100
     data_path = sw.resolve_data_path(os.environ)
     server = build_real_server(port=port, data_path=data_path)
-    print(f"Baseline web app on http://0.0.0.0:{port}/  (login: root / baseline)")
+    print(f"Baseline web app on http://0.0.0.0:{port}/  (login: this machine's account password)")
     print(f"Data store: {data_path}")
     try:
         server.serve_forever()
