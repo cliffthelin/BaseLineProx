@@ -1169,6 +1169,10 @@ def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict) -> N
             _JOBS[job_id].update(done=True, outcome="error", detail=f"{type(exc).__name__}: {exc}")
 
 
+# The only routes reachable without a session: the login screen itself.
+_PUBLIC_PATHS = frozenset({"/", "/login", "/logout"})
+
+
 class UnifiedHandler(http.server.BaseHTTPRequestHandler):
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, default=str).encode()
@@ -1240,12 +1244,30 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 return part[len("session="):]
         return ""
 
+    def _refuse_unauthenticated(self, deps, now, path: str) -> bool:
+        """Nothing beyond the login screen without a credential. There is
+        no guest user and no setting that grants one; recovery mode
+        needs a validated login like everything else. Returns True (after
+        answering) when the request has no valid session. Applies to every
+        route except `_PUBLIC_PATHS`, unknown routes included, so the set
+        of routes is not revealed either."""
+        if deps["sessions"].get(self._cookie_token(), now) is not None:
+            return False
+        if path.startswith("/api/") or self._is_json_request():
+            self._json(401, {"outcome": "refused", "error": "not authenticated"})
+        else:
+            self._redirect("/login")
+        return True
+
     def do_GET(self):  # noqa: N802
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         path = parsed.path
+
+        if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path):
+            return
 
         if path in ("/", "/login"):
             if deps["sessions"].get(self._cookie_token(), now) is not None:
@@ -1390,8 +1412,12 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
-        body = self._read_request_body()
         path = self.path
+
+        if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path.split("?", 1)[0]):
+            return
+
+        body = self._read_request_body()
 
         if path == "/login":
             result = sw.handle_login(deps["verifier"], deps["sessions"],

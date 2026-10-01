@@ -386,6 +386,13 @@ class FakeSudoExecutor:
 
 class _RealServerCase:
     def __init__(self, deps):
+        # Every route but the login screen needs a session, so the harness
+        # logs in by default; test_baseline_web_auth_gate.py covers the
+        # unauthenticated side by sending its own requests.
+        sessions = deps["sessions"]
+        if not sessions.sessions:
+            sessions.create("root", now=deps["clock"]())
+        self.token = next(iter(sessions.sessions))
         self.server = bw.make_server(deps=deps, host="127.0.0.1", port=0)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -393,7 +400,7 @@ class _RealServerCase:
 
     def get(self, path):
         url = f"http://127.0.0.1:{self.port}{path}"
-        req = urllib.request.Request(url, headers={"Accept": "text/html"})
+        req = urllib.request.Request(url, headers={"Accept": "text/html", "Cookie": f"session={self.token}"})
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, resp.read()
@@ -404,7 +411,7 @@ class _RealServerCase:
         url = f"http://127.0.0.1:{self.port}{path}"
         data = json.dumps(payload).encode()
         req = urllib.request.Request(url, data=data, method="POST",
-                                      headers={"Content-Type": "application/json"})
+                                      headers={"Content-Type": "application/json", "Cookie": f"session={self.token}"})
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, json.loads(resp.read())

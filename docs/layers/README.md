@@ -71,6 +71,16 @@ still only proven in a test harness:
 | 07 | [APPDATA](07-appdata.md) | In progress | Per-persona app data volume; planned and in the layout, not yet on any disk |
 | 08 | [Application isolation](08-application-isolation.md) | In progress | Overlays, formats, containers, the Caddy gateway |
 
+## Access rule
+
+There is no guest user. Nothing is reachable beyond the login screen without a
+credential, and recovery mode needs a validated login like everything else.
+No setting and no admin can change that; the only way past is the credential or
+the passphrase. This is enforced deny-by-default in `baseline_web.py` and
+`settings_web.py` (v0.2 row 43). Two items remain open: the `/setup` first-run
+routes on the standalone server (row 44) and the older "guest tier" wording in
+`recovery_tiers.py` (row 45).
+
 ## Cross-cutting findings from writing these pages
 
 Documenting the volumes against the code turned up real defects. They are
@@ -84,6 +94,7 @@ was invisible until something looked at the whole layout at once:
 | `baseline_drive_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-baseline-drive.md) |
 | Rootless Quadlet units targeted `multi-user.target`, so they never started at boot | fixed, `4012834` | [08](08-application-isolation.md) |
 | Four LXC guests overlaid one path, silently sharing data | fixed, `5a11c35` | [08](08-application-isolation.md) |
+| Web UI served hardware serials, Drive Administration, recovery and the installer/app pages to anyone, and accepted state-changing POSTs without a session | fixed 2026-09-30, v0.2 row 43 | [01](01-substrate.md) |
 | ext4 16-char labels: `SUBSTRATE` and the persona volumes truncated or collided on the real drive | fixed, relabeled 2026-09-30 | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |
 | `/mnt/INSTALLER_CACHE` is a plain directory on the root filesystem, not the volume | **open** | [04](04-installer-cache.md) |
 | SUBSTRATE is described as holding the encrypted admin passphrase; no code writes it | **open** | [03](03-substrate-persistence.md) |

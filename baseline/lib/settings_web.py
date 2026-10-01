@@ -440,6 +440,12 @@ def handle_rebuild(eligibility: RebuildEligibility, trigger: RebuildTrigger,
 # functions above so it's testable without opening a real socket.
 # ---------------------------------------------------------------------------
 
+# Reachable without a session. The login routes, plus the first-run /setup
+# routes, which stay open only until the operator decides whether a fresh
+# install may create its first account unauthenticated.
+_UNGATED_PATHS = frozenset({"/", "/login", "/logout", "/setup", "/setup/new-account", "/setup/rebuild"})
+
+
 class SettingsHandler(http.server.BaseHTTPRequestHandler):
     """Serves both a real server-rendered HTML UI (browser form posts +
     a `session` cookie) and a JSON API (X-Session-Token header, used
@@ -504,12 +510,30 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # noqa: A002 - stdlib signature
         pass  # quiet by default; caller can override via subclassing
 
+    def _refuse_unauthenticated(self, deps, now, json_mode: bool) -> bool:
+        """Nothing beyond the login screen without a credential - no guest
+        user exists and recovery mode needs a validated login too (direct
+        instruction, 2026-09-30). True (after answering) when there is no
+        valid session. Unknown routes are refused the same way so the
+        route set is not revealed. `_UNGATED_PATHS` is the whole exception
+        list."""
+        path = self.path.split("?", 1)[0]
+        if path in _UNGATED_PATHS or deps["sessions"].get(self._token(), now) is not None:
+            return False
+        if json_mode or path.startswith("/api/"):
+            self._json(401, {"outcome": "refused", "error": "not authenticated"})
+        else:
+            self._redirect("/login")
+        return True
+
     # -- POST -----------------------------------------------------------
 
     def do_POST(self):  # noqa: N802 - stdlib method name
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
         json_mode = self._is_json_request()
+        if self._refuse_unauthenticated(deps, now, json_mode):
+            return
         body = self._read_json_body() if json_mode else self._read_form_body()
 
         if self.path == "/login":
@@ -600,6 +624,8 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
         json_mode = self._is_json_request() or "application/json" in self.headers.get("Accept", "")
+        if self._refuse_unauthenticated(deps, now, json_mode):
+            return
 
         if self.path == "/" or self.path == "/login":
             if deps["sessions"].get(self._cookie_token(), now) is not None:
