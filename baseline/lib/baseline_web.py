@@ -58,6 +58,7 @@ NAV_TABS = (
     ("/recovery", "Recovery"),
     ("/drive-admin", "Drive Administration"),
     ("/hardware", "Hardware"),
+    ("/installer-cache", "Installer Cache"),
     ("/master-config", "Master Config"),
 )
 
@@ -621,6 +622,128 @@ def real_hardware_state(runner) -> dict:
             "smart": smart, "sysinfo": sysinfo, "inventory": inventory}
 
 
+def render_installer_cache_page(report, *, elevated: bool = False) -> bytes:
+    """INSTALLER_CACHE transparency report (direct instruction,
+    2026-09-30): every artifact this application involves, its original
+    installer, the helper that installs it, the settings section that
+    configures it, and whether it is actually on the volume right now.
+
+    `report` is an `installer_cache.CacheReport`. Missing artifacts are
+    rendered as missing rather than omitted, and files on the volume that
+    no catalog entry claims are listed too - both directions of the gap
+    matter to anyone trusting a self-replicating build."""
+    import installer_cache as ic
+
+    if report.mounted:
+        banner = (f'<div class="ic-banner ok"><strong>Volume mounted.</strong> '
+                  f'{report.root} - {report.mount_detail}</div>')
+    else:
+        banner = (f'<div class="ic-banner warn"><strong>Not a mount point.</strong> '
+                  f'{report.mount_detail}</div>')
+
+    total = len(report.rows)
+    stats = (
+        f'<div class="ic-stats">'
+        f'<div class="ic-stat"><span class="n ok">{report.present_count}</span><span class="l">on the volume</span></div>'
+        f'<div class="ic-stat"><span class="n warn">{report.missing_count}</span><span class="l">missing</span></div>'
+        f'<div class="ic-stat"><span class="n">{total}</span><span class="l">required for a build</span></div>'
+        f'<div class="ic-stat"><span class="n">{len(report.extras)}</span><span class="l">uncatalogued</span></div>'
+        f'</div>'
+    )
+
+    sections = []
+    for kind in (ic.KIND_ISO, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT):
+        rows = [r for r in report.rows if r.entry.kind == kind]
+        if not rows:
+            continue
+        present = sum(1 for r in rows if r.present)
+        body = "".join(
+            "<tr>"
+            f'<td>{"<span class=\'drv-ok\'>on volume</span>" if r.present else "<span class=\'drv-none\'>missing</span>"}</td>'
+            f"<td>{r.entry.name}</td>"
+            f"<td>{r.entry.origin}</td>"
+            f"<td>{r.entry.install_helper}</td>"
+            f"<td>{r.entry.config_section}</td>"
+            f"<td>{ic.human_size(r.size_bytes)}</td>"
+            "</tr>"
+            for r in rows
+        )
+        sections.append(
+            f'<h2 class="section-title">{kind} '
+            f'<span class="ic-count">{present}/{len(rows)} present</span></h2>'
+            '<table class="hw-table"><thead><tr><th>State</th><th>Artifact</th>'
+            '<th>Original installer / source</th><th>Install helper</th>'
+            '<th>Configuration</th><th>Size</th></tr></thead>'
+            f"<tbody>{body}</tbody></table>"
+        )
+
+    if report.extras:
+        extra_rows = "".join(
+            f"<tr><td>{e.path}</td><td>{ic.human_size(e.size_bytes)}</td></tr>"
+            for e in report.extras
+        )
+        sections.append(
+            f'<h2 class="section-title">On the volume but not in the catalog '
+            f'<span class="ic-count">{len(report.extras)}</span></h2>'
+            '<p class="hw-note">No install helper or configuration references these. '
+            'A self-replicating build would not reproduce them, and nothing here '
+            'consumes them.</p>'
+            '<table class="hw-table"><thead><tr><th>Path</th><th>Size</th></tr></thead>'
+            f"<tbody>{extra_rows}</tbody></table>"
+        )
+
+    elevated_note = ('<span class="ic-elevated">re-scanned with root</span>' if elevated else "")
+
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Installer Cache</title><style>{_DRIVE_ADMIN_CSS}
+.hw-table {{ width: 100%; border-collapse: collapse; margin: 0 0 1rem; font-size: .82rem;
+  background: #14151d; border: 1px solid #262838; border-radius: 8px; overflow: hidden; }}
+.hw-table th {{ text-align: left; padding: .5rem .7rem; color: #7d84a0; font-weight: 600;
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .05em;
+  background: #171923; border-bottom: 1px solid #262838; }}
+.hw-table td {{ padding: .45rem .7rem; border-bottom: 1px solid #1c1e29; color: #ccd0e0;
+  vertical-align: top; }}
+.hw-table tr:last-child td {{ border-bottom: none; }}
+.hw-table tr:hover td {{ background: #171b26; }}
+.drv-ok {{ color: #6fc28a; font-weight: 600; }}
+.drv-none {{ color: #c8a24a; font-weight: 600; }}
+.hw-note {{ color: #8890a6; font-size: .82rem; margin: -.4rem 0 .8rem; line-height: 1.5; }}
+.ic-banner {{ padding: .8rem 1rem; border-radius: 10px; margin: 0 0 1.25rem; font-size: .88rem; line-height: 1.55; }}
+.ic-banner.ok {{ background: #14241a; border: 1px solid #2c5238; color: #b7e4c7; }}
+.ic-banner.warn {{ background: #2a1f14; border: 1px solid #6b4a1f; color: #f0d5a8; }}
+.ic-stats {{ display: flex; gap: 12px; margin: 0 0 1.5rem; flex-wrap: wrap; }}
+.ic-stat {{ background: #14151d; border: 1px solid #262838; border-radius: 10px;
+  padding: 12px 18px; min-width: 120px; }}
+.ic-stat .n {{ display: block; font-size: 1.5rem; font-weight: 700; color: #e7e9f0; }}
+.ic-stat .n.ok {{ color: #6fc28a; }} .ic-stat .n.warn {{ color: #c8a24a; }}
+.ic-stat .l {{ display: block; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .06em; color: #7d84a0; margin-top: 2px; }}
+.ic-count {{ color: #5c6180; font-weight: 400; text-transform: none; letter-spacing: 0; }}
+.ic-actions {{ display: flex; align-items: center; gap: 12px; margin: 0 0 1.5rem; }}
+.ic-btn {{ display: inline-block; padding: .55rem 1.1rem; background: #3f63b8; color: #f2f3f8;
+  border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: .88rem;
+  text-decoration: none; }}
+.ic-btn:hover {{ background: #4a72cf; }}
+.ic-btn.plain {{ background: #23263a; }} .ic-btn.plain:hover {{ background: #2c3048; }}
+.ic-elevated {{ color: #6fc28a; font-size: .82rem; }}
+</style></head>
+<body>
+<h1>Installer Cache</h1>
+<p class="subtitle">Everything this application installs, where it originally comes from,
+and whether it is on {report.root} right now</p>
+
+<div class="ic-actions">
+  <a class="ic-btn" href="/installer-cache?root=1">Refresh with Root</a>
+  <a class="ic-btn plain" href="/installer-cache">Refresh</a>
+  {elevated_note}
+</div>
+
+{banner}
+{stats}
+{''.join(sections)}
+</body></html>""".encode()
+
+
 def _render_inventory(inventory: dict) -> str:
     """Every real device on every bus, grouped - the Hardware tab's
     primary content (direct instruction, 2026-09-30: "All hardware must
@@ -1016,6 +1139,27 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             if result.outcome != "applied":
                 return self._html_response(result.status, _with_nav(sw.render_recovery_page({}, result.body.get("reason", "")), path))
             return self._html_response(200, _with_nav(sw.render_recovery_page(result.body), path))
+
+        if path == "/installer-cache":
+            # "Refresh with Root": the unprivileged scan can miss a
+            # root-only mount or a directory it cannot read. ?root=1
+            # swaps in PkexecRunner, which authenticates per call via
+            # PolicyKit's own agent - same mechanism Drive Administration
+            # already uses, so there is no password field here either.
+            import installer_cache as ic
+            elevated = qs.get("root", [""])[0] == "1"
+            if elevated:
+                scan_runner = da.PkexecRunner(executor=deps.get("pkexec_executor"))
+            else:
+                scan_runner = deps.get("runner")
+            if scan_runner is None:
+                report = ic.CacheReport(root=ic.DEFAULT_CACHE_ROOT, mounted=False,
+                                        mount_detail="no runner configured - cannot read the volume",
+                                        scanned_ok=False)
+            else:
+                report = ic.reconcile(scan_runner)
+            return self._html_response(200, _with_nav(
+                render_installer_cache_page(report, elevated=elevated), path))
 
         if path.startswith("/drive-admin/actions"):
             return self._json(200, {"actions": da.describe_actions()})

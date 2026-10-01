@@ -782,3 +782,109 @@ def test_render_drive_admin_page_css_actually_hides_a_hidden_action_card():
     `.action-card[hidden] { display: none; }` rule is required."""
     body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[]).decode()
     assert ".action-card[hidden]" in body
+
+
+# -- Installer Cache tab (direct instruction, 2026-09-30: show all -----
+# -- software/packages/OS distros/drivers with their original installer,
+# -- what is on the volume now, and a Refresh-with-Root button) --------
+
+def _cache_report(*, mounted=True, present_ids=()):
+    import installer_cache as ic
+    report = ic.CacheReport(
+        root="/mnt/INSTALLER_CACHE", mounted=mounted,
+        mount_detail="mounted from /dev/sdd2 ext4" if mounted else
+                     "/mnt/INSTALLER_CACHE is NOT a mount point - it is a plain directory",
+    )
+    for entry in ic.catalog():
+        hit = entry.entry_id in present_ids
+        report.rows.append(ic.Presence(entry, hit, entry.cache_path if hit else "",
+                                       1024 if hit else 0,
+                                       "on the volume" if hit else "not on the volume"))
+    return report
+
+
+def test_installer_cache_tab_is_in_the_nav():
+    assert any(path == "/installer-cache" for path, _ in bw.NAV_TABS)
+
+
+def test_installer_cache_page_shows_a_present_and_a_missing_artifact():
+    body = bw.render_installer_cache_page(
+        _cache_report(present_ids={"proxmox-ve-source"})).decode()
+    assert "on volume" in body
+    assert "missing" in body
+    assert "Proxmox VE" in body
+
+
+def test_installer_cache_page_names_each_artifacts_original_installer():
+    """The instruction asked for the original installer, the install
+    helper and the configuration - all three must reach the page."""
+    body = bw.render_installer_cache_page(_cache_report()).decode()
+    assert "Original installer / source" in body
+    assert "Install helper" in body
+    assert "Configuration" in body
+    assert "enterprise.proxmox.com" in body
+
+
+def test_installer_cache_page_warns_loudly_when_the_volume_is_not_mounted():
+    body = bw.render_installer_cache_page(_cache_report(mounted=False)).decode()
+    assert "Not a mount point" in body
+    assert "ic-banner warn" in body
+
+
+def test_installer_cache_page_confirms_a_real_mount():
+    body = bw.render_installer_cache_page(_cache_report(mounted=True)).decode()
+    assert "ic-banner ok" in body
+    assert "/dev/sdd2" in body
+
+
+def test_installer_cache_page_has_a_refresh_with_root_button():
+    body = bw.render_installer_cache_page(_cache_report()).decode()
+    assert "Refresh with Root" in body
+    assert "/installer-cache?root=1" in body
+
+
+def test_installer_cache_page_lists_uncatalogued_files_rather_than_hiding_them():
+    import installer_cache as ic
+    report = _cache_report()
+    report.extras.append(ic.Uncatalogued("isos/omarchy-4.0.4.iso", 6185304064))
+    body = bw.render_installer_cache_page(report).decode()
+    assert "omarchy-4.0.4.iso" in body
+    assert "not in the catalog" in body
+
+
+def test_installer_cache_route_renders_without_a_runner_instead_of_crashing():
+    deps = _base_deps(runner=None)
+    case = _RealServerCase(deps)
+    try:
+        status, body = case.get("/installer-cache")
+        assert status == 200
+        assert b"Installer Cache" in body
+    finally:
+        case.close()
+
+
+def test_installer_cache_route_uses_pkexec_only_when_root_is_requested():
+    """?root=1 must go through PkexecRunner (PolicyKit's own agent),
+    and a plain refresh must not escalate at all."""
+    escalated = []
+
+    class _Spy:
+        def __init__(self, *a, **kw):
+            escalated.append(True)
+
+        def run(self, argv, timeout=10):
+            import subprocess
+            return subprocess.CompletedProcess(argv, 1, "", "")
+
+    deps = _base_deps()
+    case = _RealServerCase(deps)
+    original = da.PkexecRunner
+    da.PkexecRunner = _Spy
+    try:
+        case.get("/installer-cache")
+        assert escalated == [], "a plain refresh must not escalate"
+        case.get("/installer-cache?root=1")
+        assert escalated == [True], "Refresh with Root must go through PkexecRunner"
+    finally:
+        da.PkexecRunner = original
+        case.close()
