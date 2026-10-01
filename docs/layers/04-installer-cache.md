@@ -6,6 +6,18 @@ What a rebuild needs, never executed. Mounted at `/mnt/INSTALLER_CACHE`,
 50-200 GB, `defaults,nosuid,nodev,noexec`: ISOs and packages are consumed by
 name through `dpkg`, `mount` and `xorriso`, never run from here.
 
+## VMs and LXCs live here
+
+VMs and LXCs are kept on this volume (direct instruction, 2026-09-30).
+Proxmox has no requirement about where a guest is, only that it can reach it,
+so this volume has to be reachable by Proxmox as a storage location. They are
+not per-persona AppData (`appdata.py` excludes them). Guests are created today
+on Proxmox's own `local-lvm` by default (`vm_provision.DEFAULT_VM_STORAGE`,
+`pct_provision.DEFAULT_STORAGE`); pointing that at this volume is not done.
+Because the volume is mounted `noexec`, a guest *disk image* is fine (it is
+data, not an executable), but the mount options and the "never executed"
+description should be revisited if anything else is stored here.
+
 ## Catalog versus reality
 
 [`installer_cache.py`](../../baseline/lib/installer_cache.py) keeps two

@@ -31,8 +31,8 @@ Volumes on one drive, defined in `baseline/lib/drive_installer.py` (the single s
 
 | Volume | Class | Size range | Mount options | Holds |
 |---|---|---|---|---|
-| `BASELINE` | 1 substrate / app state | 5-50 GB | `nosuid,nodev` | app, VM, LXC state; never daily-driver data, never installer cache |
-| `INSTALLER_CACHE` | 0 | 50-200 GB | `nosuid,nodev,noexec` | vanilla ISOs, packages, backups (`isos/`, `seed/`, `backups/`, `encrypted_backups/`, `backup_manifests/`); never customized |
+| `BASELINE` | 1 substrate / app state | 5-50 GB | `nosuid,nodev` | install-wide app state and records; never daily-driver data. (Superseded 2026-09-30: VMs and LXCs live on `INSTALLER_CACHE`, not here) |
+| `INSTALLER_CACHE` | 0 | 50-200 GB | `nosuid,nodev,noexec` | vanilla ISOs, packages, backups (`isos/`, `seed/`, `backups/`, `encrypted_backups/`, `backup_manifests/`); VMs and LXCs live here (Proxmox only needs to reach them; operator decision 2026-09-30) |
 | `SESSION_TEMP` | 6-ish | 5-50 GB | `nosuid,nodev,noexec` | staging/quarantine; nothing promoted without a decision |
 | `SUBSTRATE_PERSISTENCE` | 2 | 1 GB fixed | `nosuid,nodev,noexec` | recovery + substrate config, encrypted admin passphrase |
 | `USER_PERSISTENCE_<PERSONA>` | 2-5 | 50-200 GB each | `nosuid,nodev` | one isolated volume per persona (default `admin` = root-like, `personal` = daily driver) |

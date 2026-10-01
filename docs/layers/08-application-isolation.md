@@ -16,9 +16,13 @@ registered and admin-approved. There is no guest user, so the policy governs
 workloads, not people. Nothing in the code implements the setting, the
 registration or the approval yet (v0.2 row 42).
 
+Guests are out of scope for this layer's overlays: VMs and LXCs live on
+[INSTALLER_CACHE](04-installer-cache.md), and Proxmox's own isolation (KVM,
+namespaces) is what separates them.
+
 ## Mediums
 
-`appdata.py` defines a contract per medium: apt package, LXC guest, VM guest,
+`appdata.py` defines a contract per medium: apt package,
 container, Flatpak, AppImage, Snap, Nix. `confinement_gap(kind)` states what
 each medium cannot confine, rather than leaving it implied.
 
@@ -35,7 +39,7 @@ it needs a real target user. The Caddy gateway is the first container.
 |---|---|---|---|
 | Overlay and bind plans per medium | MVP completed | unit tests | `appdata.plan_for` |
 | Quadlet unit generation | MVP completed | unit tests | `quadlet.py`; rootless units now target `default.target` (`4012834`) |
-| LXC guests no longer share one overlay path | MVP completed | unit tests | fixed `5a11c35` |
+| Overlay targets never collide between apps | MVP completed | unit tests | `appdata.target_conflicts`; the LXC-guest collision that motivated it (`5a11c35`) is moot now that guests are not planned here |
 | Container volumes must be persistent | MVP completed | unit tests | `quadlet.non_persistent_volumes`; `write_and_start` refuses otherwise (v0.2 row 22) |
 | Deny-unless-registered-and-approved option | On roadmap | none | v0.2 row 42; open: where the setting lives, who approves, what "accessible" covers |
 | Any plan applied on a host | On roadmap | none | planning only |

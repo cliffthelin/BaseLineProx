@@ -49,8 +49,6 @@ from dataclasses import dataclass, field
 import naming
 
 KIND_PACKAGE = "apt package"
-KIND_LXC = "lxc guest"
-KIND_VM = "vm guest"
 KIND_CONTAINER = "container"
 KIND_FLATPAK = "flatpak"
 KIND_APPIMAGE = "appimage"
@@ -140,34 +138,6 @@ MEDIA: dict = {m.kind: m for m in (
                "real; it has not been started (no podman on the build host)."),
     ),
     Medium(
-        "L", KIND_LXC, "LXC guest",
-        method_of_use="a Proxmox pct container created from a sha256-pinned helper script",
-        rules=("created only from the curated, sha256-verified script catalog",
-               "its rootfs is its own per-VMID path, never the shared Proxmox store",
-               "its data disk lives on AppData so a rebuilt guest reattaches it"),
-        helpers=("vm_scripts.run_script", "pct_provision"),
-        status=IN_PROGRESS,
-        brings_own_sandbox=True,
-        isolation_mechanism="Linux namespaces + AppArmor via Proxmox pct",
-        requires=("proxmox-ve",),
-        baseline_must_supply=("AppData placement of the guest's disk",),
-        notes="Scripts are real-executed in QEMU (decision record 97); AppData placement is planned.",
-    ),
-    Medium(
-        "V", KIND_VM, "VM guest",
-        method_of_use="a Proxmox qm virtual machine created from a sha256-pinned helper script",
-        rules=("created only from the curated, sha256-verified script catalog",
-               "its disk images are its own per-VMID path, never the shared Proxmox store",
-               "its data disk lives on AppData so a rebuilt guest reattaches it"),
-        helpers=("vm_scripts.run_script", "vm_provision"),
-        status=IN_PROGRESS,
-        brings_own_sandbox=True,
-        isolation_mechanism="hardware virtualisation (KVM) via Proxmox qm",
-        requires=("proxmox-ve",),
-        baseline_must_supply=("AppData placement of the guest's disk",),
-        notes="Scripts are real-executed in QEMU (decision record 97); AppData placement is planned.",
-    ),
-    Medium(
         "F", KIND_FLATPAK, "Flatpak",
         method_of_use="flatpak install <app-id>; flatpak run <app-id>",
         rules=("its ~/.var/app/<app-id> data root is overlaid onto AppData",
@@ -252,7 +222,7 @@ def confinement_gap(kind: str) -> tuple:
 
 
 def supported_formats() -> list:
-    order = (KIND_PACKAGE, KIND_CONTAINER, KIND_LXC, KIND_VM, KIND_FLATPAK, KIND_SNAP,
+    order = (KIND_PACKAGE, KIND_CONTAINER, KIND_FLATPAK, KIND_SNAP,
              KIND_APPIMAGE, KIND_NIX)
     return [MEDIA[k] for k in order]
 
@@ -313,19 +283,6 @@ DATA_TARGETS: dict = {
     "gnupg": ("~/.gnupg",),
     "cage": (),              # compositor; holds no per-person state itself
     "nodejs": ("~/.npm",),
-    # --- VM / LXC guests ---------------------------------------------
-    # A guest's persistent data is its OWN disk, never the shared Proxmox
-    # storage directory. Targeting `/var/lib/vz/private` directly was a
-    # real bug caught by `target_conflicts`: four LXC guests would each
-    # have overlay-mounted the same path and silently shared it. Proxmox
-    # lays guests out per-VMID; VMID is assigned at creation, so the
-    # catalog id stands in here until the real VMID substitutes.
-    "debian-lxc": ("/var/lib/vz/private/debian-lxc",),
-    "docker-lxc": ("/var/lib/vz/private/docker-lxc",),
-    "homeassistant-lxc": ("/var/lib/vz/private/homeassistant-lxc",),
-    "pihole-lxc": ("/var/lib/vz/private/pihole-lxc",),
-    "debian-vm": ("/var/lib/vz/images/debian-vm",),
-    "haos-vm": ("/var/lib/vz/images/haos-vm",),
 }
 
 
@@ -426,15 +383,12 @@ def _escape_target(target: str) -> str:
 
 def _skip_substrate_and_drivers(entry) -> bool:
     """Drivers are excluded by the instruction; the Proxmox source ISO is
-    the substrate itself, not an application running on it."""
+    the substrate itself, not an application running on it. VM and LXC guest
+    installers are excluded as well: guest state is install-wide and lives on
+    BASELINE with Proxmox only needing to reach it, and the installers live on
+    INSTALLER_CACHE (master PRD §3) - neither is per-persona AppData."""
     import installer_cache as ic
-    return entry.kind in (ic.KIND_FIRMWARE, ic.KIND_ISO)
-
-
-def _guest_kind(entry_id: str) -> str:
-    import vm_scripts
-    info = vm_scripts.SCRIPT_MANIFEST.get(entry_id)
-    return KIND_VM if info is not None and info.kind == "vm" else KIND_LXC
+    return entry.kind in (ic.KIND_FIRMWARE, ic.KIND_ISO, ic.KIND_SCRIPT)
 
 
 def installable_apps() -> list:
@@ -447,8 +401,6 @@ def installable_apps() -> list:
             continue
         if entry.kind == ic.KIND_PACKAGE:
             kind = KIND_PACKAGE
-        elif entry.kind == ic.KIND_SCRIPT:
-            kind = _guest_kind(entry.entry_id)
         elif entry.kind == ic.KIND_IMAGE:
             kind = KIND_CONTAINER
         else:

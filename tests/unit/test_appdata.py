@@ -28,10 +28,10 @@ def test_the_substrate_iso_is_not_an_application():
     assert "proxmox-ve-source" not in {a.app_id for a in appdata.installable_apps()}
 
 
-def test_every_installable_package_and_guest_is_an_application():
+def test_every_installable_package_is_an_application():
     app_ids = {a.app_id for a in appdata.installable_apps()}
     for entry in ic.catalog():
-        if entry.kind in (ic.KIND_PACKAGE, ic.KIND_SCRIPT):
+        if entry.kind == ic.KIND_PACKAGE:
             assert entry.entry_id in app_ids
 
 
@@ -40,11 +40,10 @@ def test_apps_are_derived_from_the_installer_catalog_so_they_cannot_drift():
     assert {a.app_id for a in appdata.installable_apps()} <= catalog_ids
 
 
-def test_both_vm_lxc_guests_and_packages_are_represented():
+def test_packages_and_containers_are_represented():
     kinds = {a.kind for a in appdata.installable_apps()}
     assert appdata.KIND_PACKAGE in kinds
-    assert appdata.KIND_LXC in kinds
-    assert appdata.KIND_VM in kinds
+    assert appdata.KIND_CONTAINER in kinds
 
 
 # -- Data: AppData volume and nowhere else -----------------------------
@@ -130,7 +129,7 @@ def test_every_plan_satisfies_the_full_isolation_contract():
 def test_the_immutable_base_is_the_lowerdir_and_is_never_written_to():
     """NixOS-style: the installed base is read-only; every write goes to
     the upper layer on AppData."""
-    plan = _plan("pihole-lxc")
+    plan = _plan("chromium")
     overlay = plan.overlays[0]
     assert overlay.lowerdir == overlay.target
     assert not overlay.lowerdir.startswith(plan.home)
@@ -139,9 +138,9 @@ def test_the_immutable_base_is_the_lowerdir_and_is_never_written_to():
 
 def test_overlay_mounts_back_at_the_path_the_app_already_uses():
     """The app needs no cooperation - it writes where it always did.
-    For a guest that is its own per-VMID disk, not the shared store."""
-    plan = _plan("pihole-lxc")
-    assert plan.overlays[0].target == "/var/lib/vz/private/pihole-lxc"
+    """
+    plan = _plan("chromium")
+    assert plan.overlays[0].target == "~/.config/chromium"
 
 
 def test_mount_argv_is_a_real_overlay_invocation():
@@ -211,22 +210,11 @@ def _assign(app, code="00099"):
 
 
 def test_no_two_applications_overlay_the_same_target():
-    """Real defect this caught: every LXC guest originally targeted
-    /var/lib/vz/private, so four overlays would have contended for one
-    mount point - the second hiding the first and the guests silently
-    sharing data. Upperdir separation does not prevent that; the target
-    has to be distinct too."""
+    """Real defect this caught (back when guests were planned here): several
+    apps targeted one shared path, so their overlays contended for one
+    mount point and silently shared data. Upperdir separation does not
+    prevent that; the target has to be distinct too."""
     assert appdata.target_conflicts(appdata.plan_all("personal")) == []
-
-
-def test_each_guest_targets_its_own_disk_not_the_shared_proxmox_store():
-    for plan in appdata.plan_all("personal"):
-        if plan.app.kind not in (appdata.KIND_LXC, appdata.KIND_VM):
-            continue
-        for overlay in plan.overlays:
-            assert overlay.target not in ("/var/lib/vz/private", "/var/lib/vz/images"), (
-                f"{plan.app.app_id} targets the shared Proxmox store")
-            assert plan.app.app_id in overlay.target
 
 
 # -- Package formats (Flatpak / Snap / AppImage) -----------------------
@@ -363,7 +351,7 @@ def test_container_spec_renders_a_real_quadlet_unit():
 
 def test_two_containers_may_share_an_internal_path_without_conflict():
     """Separate mount namespaces: two containers each using /data is not
-    the target collision that broke the LXC guests."""
+    the target collision that once broke overlapping targets."""
     plans = appdata.plan_all("personal")
     assert appdata.target_conflicts(plans) == []
     assert appdata.cross_app_leaks(plans) == []
@@ -382,7 +370,9 @@ def test_every_app_medium_in_naming_has_a_contract():
     """ISO is an operating-system image, not an application medium."""
     import naming
     letters = {m.letter for m in appdata.MEDIA.values()}
-    assert letters == set(naming.MEDIA) - {"I"}
+    # ISO is an OS image; L (LXC) and V (VM) are guests, which live on
+    # INSTALLER_CACHE rather than in per-persona AppData.
+    assert letters == set(naming.MEDIA) - {"I", "L", "V"}
 
 
 def test_every_contract_states_its_method_of_use_and_status():
@@ -413,10 +403,6 @@ def test_each_medium_stands_alone_one_letter_per_kind():
     letters = [m.letter for m in appdata.MEDIA.values()]
     assert len(letters) == len(set(letters))
 
-
-def test_lxc_and_vm_guests_are_separate_media():
-    assert _app("pihole-lxc").medium.letter == "L"
-    assert _app("haos-vm").medium.letter == "V"
 
 
 # -- Identifiers -------------------------------------------------------
@@ -497,3 +483,14 @@ def test_container_spec_volumes_are_all_persistent():
     assert plans
     for plan in plans:
         assert quadlet.non_persistent_volumes(appdata.container_spec(plan)) == []
+
+
+def test_vm_and_lxc_guests_are_not_persona_appdata():
+    """VM/LXC state is install-wide and lives on BASELINE, with Proxmox only
+    needing to reach it (master PRD §3); installers live on INSTALLER_CACHE.
+    Neither is per-persona AppData."""
+    import installer_cache as ic
+    guest_ids = {e.entry_id for e in ic.catalog() if e.kind == ic.KIND_SCRIPT}
+    assert guest_ids, "the catalog should still list guest installers"
+    assert not (guest_ids & {a.app_id for a in appdata.installable_apps()})
+    assert not hasattr(appdata, "KIND_LXC") and not hasattr(appdata, "KIND_VM")
