@@ -102,16 +102,48 @@ def persona_volume(persona: str, *, min_gb: int = 50, max_gb: int = 200) -> tupl
     return (persona_lv_name(persona), min_gb, max_gb, persona_label(persona), persona_mountpoint(persona))
 
 
+# Per-persona AppData (direct instruction, 2026-09-30): "Application
+# data is personal owned application data and does not go anywhere
+# other than an AppData persistence volume or container." It is a
+# separate volume from USER_PERSISTENCE on purpose - USER_PERSISTENCE
+# holds the person's own settings/state, AppData holds the writable
+# upper layer of every installed application's overlay (appdata.py).
+# Per-persona rather than shared, following the phone-OS model: app
+# data belongs to a person, so it is owned by one.
+def appdata_label(persona: str) -> str:
+    return f"APPDATA_{persona.upper()}"
+
+
+def appdata_lv_name(persona: str) -> str:
+    return f"baseline_appdata_{persona.lower()}"
+
+
+def appdata_mountpoint(persona: str) -> str:
+    return f"/mnt/{appdata_label(persona)}"
+
+
+def appdata_volume(persona: str, *, min_gb: int = 20, max_gb: int = 200) -> tuple:
+    return (appdata_lv_name(persona), min_gb, max_gb, appdata_label(persona), appdata_mountpoint(persona))
+
+
 def is_persistence_label(label: str) -> bool:
     return label.startswith("USER_PERSISTENCE_") or label == "USER_PERSISTENCE"
 
 
+def is_appdata_label(label: str) -> bool:
+    return label.startswith("APPDATA_")
+
+
 def baseline_volumes_for(personas: tuple = DEFAULT_PERSONAS) -> tuple:
     """The real, complete volume set for a given persona set: the
-    three shared volumes plus one USER_PERSISTENCE_<PERSONA> volume
-    per persona. `personas=()` gives just the shared volumes - useful
-    for provisioning the substrate before any persona is created."""
-    return SHARED_VOLUMES + tuple(persona_volume(p) for p in personas)
+    shared volumes plus, per persona, one USER_PERSISTENCE_<PERSONA>
+    and one APPDATA_<PERSONA>. `personas=()` gives just the shared
+    volumes - useful for provisioning the substrate before any persona
+    is created."""
+    per_persona = tuple(
+        vol for p in personas for vol in (persona_volume(p), appdata_volume(p))
+    )
+    return SHARED_VOLUMES + per_persona
 
 
 # The real, default set this module ensures unless a caller passes its

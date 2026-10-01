@@ -101,7 +101,7 @@ def test_real_volume_state_returns_the_full_planned_volume_list_even_when_nothin
     lvs/df calls returning empty output) is a real, honest "not
     provisioned yet" state, not a failure."""
     details = bw.real_volume_state(FakeRunner())
-    assert len(details) == 6
+    assert len(details) == 8
     assert all(d["lv_exists"] is False for d in details)
 
 

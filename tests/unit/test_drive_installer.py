@@ -198,6 +198,7 @@ def test_ensure_baseline_volumes_creates_all_six_when_space_allows():
     ])
     results = di.ensure_baseline_volumes(runner, vg_name="pve")
     assert set(results) == {"BASELINE", "USER_PERSISTENCE_ADMIN", "USER_PERSISTENCE_PERSONAL",
+                             "APPDATA_ADMIN", "APPDATA_PERSONAL",
                              "INSTALLER_CACHE", "SESSION_TEMP", "SUBSTRATE_PERSISTENCE"}
     assert all(r.ok for r in results.values())
 
@@ -230,13 +231,16 @@ def test_detect_existing_baseline_install_true_when_all_volumes_present():
             "  pve  baseline_user_persistence_personal\n"
             "  pve  baseline_installer_cache\n"
             "  pve  baseline_session_temp\n"
-            "  pve  baseline_substrate_persistence\n",
+            "  pve  baseline_substrate_persistence\n"
+            "  pve  baseline_appdata_admin\n"
+            "  pve  baseline_appdata_personal\n",
             "")),
     ])
     result = di.detect_existing_baseline_install(runner, vg_name="pve")
     assert result["has_existing_install"] is True
     assert set(result["found_volumes"]) == {
         "baseline_app_state", "baseline_user_persistence_admin", "baseline_user_persistence_personal",
+        "baseline_appdata_admin", "baseline_appdata_personal",
         "baseline_installer_cache", "baseline_session_temp", "baseline_substrate_persistence"}
     assert result["missing_volumes"] == []
 
@@ -250,6 +254,7 @@ def test_detect_existing_baseline_install_false_when_none_present():
     assert result["found_volumes"] == []
     assert set(result["missing_volumes"]) == {
         "baseline_app_state", "baseline_user_persistence_admin", "baseline_user_persistence_personal",
+        "baseline_appdata_admin", "baseline_appdata_personal",
         "baseline_installer_cache", "baseline_session_temp", "baseline_substrate_persistence"}
 
 
@@ -265,7 +270,8 @@ def test_detect_existing_baseline_install_false_when_only_some_present():
     assert result["found_volumes"] == ["baseline_user_persistence_admin"]
     assert set(result["missing_volumes"]) == {
         "baseline_app_state", "baseline_installer_cache", "baseline_session_temp",
-        "baseline_user_persistence_personal", "baseline_substrate_persistence"}
+        "baseline_user_persistence_personal", "baseline_substrate_persistence",
+        "baseline_appdata_admin", "baseline_appdata_personal"}
 
 
 def test_detect_existing_baseline_install_handles_a_real_lvs_failure():
@@ -403,24 +409,28 @@ def test_adaptive_single_size_gb_returns_zero_when_truly_out_of_space():
 
 
 def test_compute_adaptive_plan_uses_every_volumes_own_max_when_space_comfortably_covers_it():
-    # total max across all 6 volumes: 50+200+50+1+200+200 = 701G
-    free_bytes = 800 * (1024 ** 3)
+    # total max across all 8 volumes (AppData adds 200+200):
+    # 50+200+50+1+200+200+200+200 = 1101G
+    free_bytes = 1200 * (1024 ** 3)
     plan = di.compute_adaptive_plan(free_bytes)
     assert plan == {"BASELINE": 50, "USER_PERSISTENCE_ADMIN": 200, "USER_PERSISTENCE_PERSONAL": 200,
+                     "APPDATA_ADMIN": 200, "APPDATA_PERSONAL": 200,
                      "INSTALLER_CACHE": 200, "SESSION_TEMP": 50, "SUBSTRATE_PERSISTENCE": 1}
 
 
 def test_compute_adaptive_plan_gives_every_volume_at_least_its_own_minimum_when_space_is_between_min_and_max():
-    # total min across all 6 volumes: 5+50+5+1+50+50 = 161G
-    free_bytes = 300 * (1024 ** 3)
+    # total min across all 8 volumes (AppData adds 20+20): 5+50+5+1+50+50+20+20 = 201G
+    free_bytes = 400 * (1024 ** 3)
     plan = di.compute_adaptive_plan(free_bytes)
     mins = {"BASELINE": 5, "USER_PERSISTENCE_ADMIN": 50, "USER_PERSISTENCE_PERSONAL": 50,
+            "APPDATA_ADMIN": 20, "APPDATA_PERSONAL": 20,
             "INSTALLER_CACHE": 50, "SESSION_TEMP": 5, "SUBSTRATE_PERSISTENCE": 1}
     maxs = {"BASELINE": 50, "USER_PERSISTENCE_ADMIN": 200, "USER_PERSISTENCE_PERSONAL": 200,
+            "APPDATA_ADMIN": 200, "APPDATA_PERSONAL": 200,
             "INSTALLER_CACHE": 200, "SESSION_TEMP": 50, "SUBSTRATE_PERSISTENCE": 1}
     for label, size_gb in plan.items():
         assert mins[label] <= size_gb <= maxs[label]
-    assert sum(plan.values()) <= 300
+    assert sum(plan.values()) <= 400
 
 
 def test_compute_adaptive_plan_refuses_every_volume_when_space_cannot_cover_every_minimum():
@@ -452,7 +462,7 @@ def test_ensure_baseline_volumes_adapts_sizes_within_range_when_space_is_moderat
     results = di.ensure_baseline_volumes(runner, vg_name="pve")
     assert all(r.ok for r in results.values())
     lvcreate_calls = [c for c in runner.calls if c[0] == "lvcreate"]
-    assert len(lvcreate_calls) == 6
+    assert len(lvcreate_calls) == 8
     # none of the adapted sizes should be the old, no-longer-real fixed maxima
     sizes_used = {c[c.index("-L") + 1] for c in lvcreate_calls}
     assert "300G" not in sizes_used

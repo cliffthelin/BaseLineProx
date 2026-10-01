@@ -125,10 +125,10 @@ def test_collect_once_records_real_volume_usage_samples():
     ]
     conn = make_db()
     count = sc.collect_once(runner, conn, now=1700000000.0)
-    # 6 volumes (BASELINE, USER_PERSISTENCE_ADMIN, USER_PERSISTENCE_PERSONAL,
-    # INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE_PERSISTENCE) x 2 samples
-    # each (percent_used, used_bytes)
-    assert count == 12
+    # 8 volumes (BASELINE, USER_PERSISTENCE_ADMIN, USER_PERSISTENCE_PERSONAL,
+    # APPDATA_ADMIN, APPDATA_PERSONAL, INSTALLER_CACHE, SESSION_TEMP,
+    # SUBSTRATE_PERSISTENCE) x 2 samples each (percent_used, used_bytes)
+    assert count == 16
     rows = sh.query_history(conn, source="volume", key="SESSION_TEMP/percent_used", since_ts=0)
     assert rows == [(1700000000.0, 20.0)]
     rows = sh.query_history(conn, source="volume", key="USER_PERSISTENCE_ADMIN/used_bytes", since_ts=0)
