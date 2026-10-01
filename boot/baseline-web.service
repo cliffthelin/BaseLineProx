@@ -8,6 +8,10 @@ Requires=baseline-persist-bind-mounts.service
 Type=simple
 ExecStartPre=/opt/baseline/bin/baseline-settings-web-gate
 ExecStart=/opt/baseline/bin/baseline-web 8100
+# The installed code is mounted read-only for the service, so nothing it runs can rewrite
+# the code that decides who gets privileges. (No NoNewPrivileges: Drive Administration needs pkexec.)
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure
 RestartSec=5
 Environment=BASELINE_SETTINGS_WEB_DATA=/var/lib/baseline/settings-web/store.json

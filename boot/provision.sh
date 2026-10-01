@@ -297,6 +297,15 @@ cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
 chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check
 
+echo "=== Locking the installed code: root-owned, not writable by anyone else ==="
+# Nothing that runs this code may be able to rewrite it (an attacker in a service, or a bug,
+# could otherwise edit the access-control logic to grant itself rights). Services also mount
+# /opt/baseline read-only (ReadOnlyPaths= in each unit). Runs after every copy into the tree.
+chown -R root:root /opt/baseline
+chmod -R go-w /opt/baseline
+# Stores created before the code made them private (they hold password hashes).
+if [ -d /var/lib/baseline ]; then chmod -R go-rwx /var/lib/baseline; fi
+
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
@@ -403,6 +412,8 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-dependency-check; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done
+bad=$(find /opt/baseline ! -type l \( ! -user root -o -perm -g+w -o -perm -o+w \) -print -quit)
+[ -z "$bad" ] || verify_fail "installed code is not root-owned and unwritable by others: $bad"
 echo "PASS: all staged files and units present and correctly permissioned."
 
 echo "=== Enabling units for next boot (no --now, no getty changes - nothing here touches this session's tty) ==="

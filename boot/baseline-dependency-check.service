@@ -6,4 +6,8 @@ After=baseline-persist-bind-mounts.service
 [Service]
 Type=oneshot
 ExecStart=/opt/baseline/bin/baseline-dependency-check
+# The installed code is mounted read-only for the service, so nothing it runs can rewrite
+# the code that decides who gets privileges. (No NoNewPrivileges: Drive Administration needs pkexec.)
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
 RemainAfterExit=no

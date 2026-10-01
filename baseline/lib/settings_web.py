@@ -34,6 +34,7 @@ discipline `repair.py`'s `Runner`/`FakeRunner` established.
 from __future__ import annotations
 
 import html
+import os
 import http.server
 import json
 import secrets
@@ -871,7 +872,11 @@ class LocalAppStore:
         import sqlite3
         is_new = not self.path.exists()
         if is_new:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # This file holds password hashes, so it is created private to its owner
+            # whatever the umask. Create it before SQLite does: SQLite gives its -wal and
+            # -shm files the main file's mode, so they inherit this too.
+            os.close(os.open(str(self.path), os.O_CREAT | os.O_WRONLY, 0o600))
         self._conn = sqlite3.connect(str(self.path))
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")

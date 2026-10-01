@@ -1044,3 +1044,19 @@ def test_build_real_server_recovery_accepts_the_machine_passphrase(tmp_path):
         assert verify("blue heron 41") is False
     finally:
         server.httpd.server_close()
+
+
+def test_a_new_store_file_is_private_to_its_owner(tmp_path):
+    """The store holds password hashes, so it is never created group- or
+    world-readable, whatever the process umask."""
+    import os
+    old = os.umask(0o022)
+    try:
+        store = sw.LocalAppStore(tmp_path / "private" / "store.db")
+        store.add_user("alice", sw._sha512crypt("pw", "saltsalt"))
+    finally:
+        os.umask(old)
+    assert (tmp_path / "private" / "store.db").stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "private").stat().st_mode & 0o777 == 0o700
+    for extra in (tmp_path / "private").glob("store.db-*"):
+        assert extra.stat().st_mode & 0o077 == 0, extra.name

@@ -13,6 +13,10 @@ Environment=HOME=/root
 # a different image doesn't block startup.
 ExecStartPre=-/usr/bin/setfont /usr/share/consolefonts/Lat15-Fixed16.psf.gz -C /dev/tty1
 ExecStart=/opt/baseline/bin/baseline
+# The installed code is mounted read-only for the service, so nothing it runs can rewrite
+# the code that decides who gets privileges. (No NoNewPrivileges: Drive Administration needs pkexec.)
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=always
 RestartSec=1
 StandardInput=tty

@@ -22,6 +22,25 @@ and `/var/log/baseline` are bind-mounted from the active persona's USER
 volume; if that volume is not mounted, `ensure_redirect` refuses to touch the
 path rather than write through to this disposable layer.
 
+## Code integrity: the installed code is not writable by what runs it
+
+An attacker (or a bug) inside a service must not be able to rewrite the code that
+decides who gets privileges. Provisioning therefore makes `/opt/baseline` root-owned
+and not group- or world-writable (`chown -R root:root`, `chmod -R go-w`), tightens any
+existing state under `/var/lib/baseline`, and **fails the verification step** if any
+installed file is not root-owned or is writable by others. Every unit that runs code
+from `/opt/baseline` also mounts it read-only for the service (`ReadOnlyPaths=`) and
+sets `PYTHONDONTWRITEBYTECODE=1`. New settings stores are created mode 0600 in a 0700
+directory. These are checked statically in `tests/unit/test_deploy_hardening.py`;
+none of it has run on a real host yet.
+
+What this does **not** cover, and why a bare SHA comparison would not either: anyone
+with root can still change everything, and a hash checked by the same code can be
+rewritten along with it. The stronger controls need something below the application:
+measured boot with the privileged secrets sealed to a TPM, and an integrity check on
+the store (v0.2 rows 52-53). `NoNewPrivileges=` is deliberately not set because Drive
+Administration needs `pkexec`.
+
 ## Service start gates (`ExecStartPre`)
 
 These decide whether a service may *start*. They are not login checks; the

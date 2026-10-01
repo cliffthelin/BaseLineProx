@@ -8,6 +8,10 @@ Requires=local-fs.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/baseline/bin/baseline-persist-bind-mounts
+# The installed code is mounted read-only for the service, so nothing it runs can rewrite
+# the code that decides who gets privileges. (No NoNewPrivileges: Drive Administration needs pkexec.)
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
 
 [Install]
 WantedBy=multi-user.target

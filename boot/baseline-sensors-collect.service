@@ -4,4 +4,8 @@ Description=Baseline host-sensor collection cycle (Track A5 dashboard)
 [Service]
 Type=oneshot
 ExecStart=/opt/baseline/bin/baseline-sensors-collect
+# The installed code is mounted read-only for the service, so nothing it runs can rewrite
+# the code that decides who gets privileges. (No NoNewPrivileges: Drive Administration needs pkexec.)
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
 RemainAfterExit=no
