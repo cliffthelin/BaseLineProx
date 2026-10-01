@@ -88,6 +88,15 @@ class RamDrive:
             print_fn(f"[ok] test restore of {len(self.backups)} set(s) from the RAM drive")
             return 0
 
+        def fake_guests(**kw):
+            web_gate.require(kw["origin"], "backup_guests", {"dry_run": kw["dry_run"]})
+            if not kw["dry_run"]:
+                self.backups.append(f"guests-{len(self.backups) + 1}")
+                (self.root / self.backups[-1]).write_text("guest dumps")
+            kw["print_fn"]("[ok] RAM drive guest backup")
+            return 0
+
+        monkeypatch.setattr(ops.offdrive_backup, "main_guests", fake_guests)
         monkeypatch.setattr(ops, "_test_restore", fake_test_restore)
         monkeypatch.setattr(ops.offdrive_backup, "main", fake_backup)
         monkeypatch.setattr(ops, "_verify_newest", fake_verify)

@@ -63,6 +63,12 @@ OPERATIONS = {
         "Only ever adds files; deletes and overwrites nothing. `dry_run` checks and reports without writing; "
         "`force` skips the minimum interval between backups.",
         {"dry_run": False, "force": False}, True),
+    "backup_guests": Operation(
+        "backup_guests",
+        "Add a new set holding a vzdump backup of each Proxmox VM and container that has a disk on the PC601's "
+        "local-lvm (guests kept on the installer cache are already covered by the volume backup). Only ever adds "
+        "files; deletes and overwrites nothing. `dry_run` lists what would be dumped without writing.",
+        {"dry_run": False}, True),
     "backup_verify": Operation(
         "backup_verify",
         "Check the newest backup set on the backup drive: every archive against its checksum, and that "
@@ -122,7 +128,7 @@ def _test_restore(origin, params, *, print_fn, get_setting, run) -> int:
     import shutil
     import tempfile
     dest = _destination(get_setting, run)
-    sets = offdrive_backup.list_sets(dest)
+    sets = [s for s in offdrive_backup.list_sets(dest) if s.manifest.get("content", "volumes") != "guests"]
     if not sets:
         print_fn("[FAILED] there are no backup sets to test")
         return 1
@@ -169,6 +175,9 @@ def execute(op_id: str, params: dict, origin, *, print_fn=print, get_setting=Non
         if op_id == "backup_offdrive":
             return offdrive_backup.main(get_setting=get_setting, now=now, print_fn=print_fn, run=run,
                                         dry_run=params["dry_run"], force=params["force"], origin=origin)
+        if op_id == "backup_guests":
+            return offdrive_backup.main_guests(get_setting=get_setting, now=now, print_fn=print_fn, run=run,
+                                               dry_run=params["dry_run"], origin=origin)
         if op_id == "backup_verify":
             return _verify_newest(origin, params, print_fn=print_fn, get_setting=get_setting, run=run)
         if op_id == "backup_test_restore":

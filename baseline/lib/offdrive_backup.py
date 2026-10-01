@@ -313,7 +313,8 @@ def verify_set(path, run=None) -> bool:
             raise BackupError(f"{set_path.name} is missing archive {name}")
         if archive.stat().st_size != entry.get("bytes") or _sha256_file(archive) != entry.get("sha256"):
             raise BackupError(f"checksum mismatch for {name} in {set_path.name}")
-        _check_readable(archive)
+        if name.endswith(".tar.gz"):
+            _check_readable(archive)          # a vzdump dump is verified by size and checksum only
     return True
 
 
@@ -564,7 +565,8 @@ def list_sets(dest: Destination) -> list:
 
 
 def is_due(dest: Destination, *, now: float, min_interval_hours: float = DEFAULT_MIN_INTERVAL_HOURS) -> bool:
-    sets = list_sets(dest)
+    # Only sets of the Baseline volumes count: a set of VM/container dumps must not make that backup look recent.
+    sets = [s for s in list_sets(dest) if s.manifest.get("content", "volumes") != "guests"]
     if not sets:
         return True
     return now - float(sets[0].manifest.get("created_epoch", 0)) >= min_interval_hours * 3600
@@ -635,6 +637,128 @@ def build_sources(*, is_mount=os.path.ismount, exists=os.path.exists) -> dict:
     if config:
         sources["proxmox-config"] = config
     return sources
+
+
+# ---------------------------------------------------------------------------
+# Proxmox guests on the PC601's local-lvm (v0.2 row 60)
+# ---------------------------------------------------------------------------
+
+LOCAL_LVM_STORAGE = "local-lvm"
+_VMID_RE = re.compile(r"^\d{1,9}$")
+_DUMP_RE = re.compile(r"^vzdump-(qemu|lxc|openvz)-(\d+)-[A-Za-z0-9_.-]+\.(vma|tar)(\.zst|\.gz|\.lzo)?$")
+_SIZE_RE = re.compile(r"size=(\d+(?:\.\d+)?)([KMGT]?)")
+_UNIT = {"": 1, "K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
+_VZDUMP_TIMEOUT_S = 24 * 3600
+
+
+def _guest_ids(output: str) -> list:
+    """First column of `qm list` / `pct list`, header skipped. Only plain numbers are ever used."""
+    ids = []
+    for line in (output or "").splitlines()[1:]:
+        first = line.split()[0] if line.split() else ""
+        if _VMID_RE.match(first):
+            ids.append(first)
+    return ids
+
+
+def list_guests_on_local_lvm(guest_run) -> list:
+    """[(kind, vmid, estimated_bytes)] for VMs and containers with a disk on local-lvm. Guests kept on
+    INSTALLER_CACHE are not included: the volume backup already covers those files."""
+    found = []
+    for tool, kind in (("qm", "qemu"), ("pct", "lxc")):
+        listing = guest_run([tool, "list"], timeout=60)
+        if listing.returncode != 0:
+            continue
+        for vmid in _guest_ids(listing.stdout):
+            config = guest_run([tool, "config", vmid], timeout=60)
+            if config.returncode != 0:
+                continue
+            lines = [l for l in (config.stdout or "").splitlines() if f"{LOCAL_LVM_STORAGE}:" in l]
+            if lines:
+                size = 0
+                for line in lines:
+                    m = _SIZE_RE.search(line)
+                    if m:
+                        size += int(float(m.group(1)) * _UNIT[m.group(2)])
+                found.append((kind, vmid, size))
+    return found
+
+
+def create_guest_backup_set(dest: Destination, guests: list, *, now: float, guest_run) -> BackupSet:
+    """Add one new set holding a vzdump of each guest. vzdump writes only into the new set's own folder."""
+    ids = [vmid for _kind, vmid, _size in guests]
+    if not ids or not all(_VMID_RE.match(i) for i in ids):
+        raise BackupError("no valid guest ids to back up")
+    set_dir = _new_set_dir(dest.backup_dir, now)
+    _write_new_text(set_dir / INCOMPLETE_NAME, _INCOMPLETE_TEXT)
+    argv = ["vzdump", *ids, "--dumpdir", str(set_dir), "--mode", "snapshot", "--compress", "zstd", "--quiet", "1"]
+    proc = guest_run(argv, timeout=_VZDUMP_TIMEOUT_S)
+    if proc.returncode != 0:
+        raise BackupError(f"vzdump failed: {(proc.stderr or '').strip()[:300]}")
+    entries = []
+    for child in sorted(set_dir.iterdir()):
+        m = _DUMP_RE.match(child.name)
+        if m and child.is_file() and not child.is_symlink():
+            entries.append({"name": child.name, "bytes": child.stat().st_size, "sha256": _sha256_file(child),
+                            "guest": m.group(2), "type": m.group(1)})
+    missing = set(ids) - {e["guest"] for e in entries}
+    if missing:
+        raise BackupError(f"vzdump produced no dump for guest(s) {', '.join(sorted(missing))}")
+    manifest = {
+        "kind": MANIFEST_KIND, "version": 1, "tool": "offdrive_backup", "content": "guests",
+        "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), "created_epoch": now,
+        "host": socket.gethostname(), "archives": entries, "depends_on": [],
+    }
+    _write_new_text(set_dir / MANIFEST_NAME, json.dumps(manifest, indent=2))
+    try:
+        verify_set(set_dir)
+    except BackupError:
+        _write_new_text(set_dir / FAILED_VERIFY_NAME, "This set failed read-back verification. Do not rely on it.\n")
+        raise
+    return BackupSet(name=set_dir.name, path=set_dir, manifest=manifest)
+
+
+def run_guest_backup(*, destination: str, run, guest_run, now: float, allowed_serials, boot_serial=None,
+                     dry_run: bool = False, origin=None) -> BackupResult:
+    web_gate.require(origin, "backup_guests", {"dry_run": dry_run})
+    if not destination:
+        raise BackupError("no backup destination is configured")
+    dest = resolve_destination(destination, run=run, allowed_serials=allowed_serials, boot_serial=boot_serial)
+    guests = list_guests_on_local_lvm(guest_run)
+    if not guests:
+        return BackupResult(None, False, True, 0, "skipped: no VM or container has a disk on local-lvm")
+    needed = sum(size for _k, _v, size in guests) or STRUCTURE_ESTIMATE
+    check_space(dest, needed_bytes=needed)
+    names = ", ".join(f"{kind} {vmid}" for kind, vmid, _ in guests)
+    if dry_run:
+        return BackupResult(None, False, False, needed,
+                            f"dry run: would add a set of vzdump backups of {names}, at most {needed / 2**30:.1f} GiB "
+                            f"before compression, to {dest.backup_dir}; nothing was written")
+    made = create_guest_backup_set(dest, guests, now=now, guest_run=guest_run)
+    written = sum(a["bytes"] for a in made.manifest["archives"])
+    return BackupResult(made.path, True, False, written, f"guest backup set {made.name} written and verified ({names})")
+
+
+def main_guests(*, get_setting=None, now=time.time, print_fn=print, run=_default_run, guest_run=None,
+                dry_run: bool = False, origin=None) -> int:
+    import drive_admin
+    web_gate.require(origin, "backup_guests", {"dry_run": dry_run})
+    if get_setting is None:
+        import settings_store
+        get_setting = settings_store.get_setting
+    destination = get_setting("backups", "offdrive_destination")
+    if not destination:
+        print_fn("[FAILED] no backup destination is configured (backups.offdrive_destination)")
+        return 1
+    try:
+        result = run_guest_backup(destination=destination, run=run, guest_run=guest_run or _default_run, now=now(),
+                                  allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS, boot_serial=_boot_serial(),
+                                  dry_run=dry_run, origin=origin)
+    except BackupError as exc:
+        print_fn(f"[FAILED] {exc}")
+        return 1
+    print_fn(f"[{'skipped' if result.skipped else 'ok'}] {result.detail}")
+    return 0
 
 
 def _boot_serial():
