@@ -184,7 +184,7 @@ def _network_argv(*, mac: str, restrict_network: bool,
                    guestfwd_host: str | None, guestfwd_port: int | None) -> list:
     """Real bug found live, 2026-09-29 (a real regression from decision
     record 03's own already-proven fix): `-nic user,restrict=on,mac=...`
-    alone blocks the guest from reaching *any* real host-bound TCP
+    alone blocks the VM from reaching *any* real host-bound TCP
     service via SLIRP's `10.0.2.2` gateway - demonstrated directly, at
     the time, with a real `io: Connection refused` on the installer's
     own answer-file POST, and re-confirmed the same way here. DHCP/DNS/
@@ -220,7 +220,7 @@ def build_sparse_install_invocation(
     record 116): `once=d` overrides the boot device for the VERY FIRST
     boot of this QEMU process's life only - every *subsequent* boot
     within the same still-running process (including the auto
-    installer's own guest-triggered `reboot` after a successful
+    installer's own VM-triggered `reboot` after a successful
     install, confirmed live via a real screendump reading "INFO:
     Rebooting system after successful installation") falls back to the
     **base** `order=` value. The code previously used `order=d,once=d`
@@ -256,7 +256,7 @@ def build_sparse_install_invocation(
     114): the answer file's own `filter.ID_SERIAL_SHORT` asks
     Proxmox's installer to target the disk by its real hardware
     serial - but plain `-drive file=<real device>,if=virtio` never
-    exposes that serial to the guest at all. The guest's own udev sees
+    exposes that serial to the VM at all. The VM's own udev sees
     a blank/absent serial on the virtio-blk device regardless of what
     the *host* device's real serial is, so the filter genuinely
     matches nothing - confirmed live, "Installation failed: filter did
@@ -272,7 +272,7 @@ def build_sparse_install_invocation(
     10.2.1). An interim fix moved `serial=` onto a separate `-device
     virtio-blk-pci,drive=...,serial=...` instead - that launched, but
     the real install still failed with the exact same filter error.
-    Live diagnosis on the guest's own already-booted, already-failed
+    Live diagnosis on the VM's own already-booted, already-failed
     shell (`udevadm info --query=property`, real HMP `sendkey`
     keystrokes typed in and read back via screendump, never guessed)
     proved why: `virtio-blk-pci` devices only ever populate udev's

@@ -9,7 +9,7 @@ docs/design/decision-records/57-vm-scripts-pinned-community-helper-scripts.md).
 unified, read before assuming either "fully separate" or "fully
 merged."** Those two modules are Baseline-native, Runner-tested,
 minimal `pct create`/`qm create` primitives with no opinion about what
-runs inside the guest. This module's *creation* step is still a
+runs inside the VM or container. This module's *creation* step is still a
 different, parallel path: it fetches and runs an upstream Helper-Script
 that calls `pct create`/`qm create` *itself*, internally, with
 upstream's own opinionated defaults - Baseline never sees or controls
@@ -22,7 +22,7 @@ reusing these scripts.
 What *is* unified: `run_script_and_adopt()` captures the VMID Proxmox
 will assign immediately before invoking the script
 (`vm_provision.next_free_vmid` - the exact same call `pct_provision.py`
-already imports for the same reason), then returns an `AdoptedGuest`
+already imports for the same reason), then returns an `AdoptedMachine`
 the caller feeds into `start_adopted`/`stop_adopted`/`destroy_adopted`,
 which dispatch to `pct_provision.py`'s or `vm_provision.py`'s own
 tested functions by the script's `kind`. So creation stays on this
@@ -362,7 +362,7 @@ def run_script(runner: Runner, script_id: str, *, timeout: int = DEFAULT_EXECUTI
 # ---------------------------------------------------------------------------
 
 @dataclass
-class AdoptedGuest:
+class AdoptedMachine:
     outcome: str  # "applied" | "refused"
     vmid: int | None
     kind: str | None  # "lxc" | "vm"
@@ -370,7 +370,7 @@ class AdoptedGuest:
 
 
 def run_script_and_adopt(runner: Runner, script_id: str, *,
-                          timeout: int = DEFAULT_EXECUTION_TIMEOUT_S) -> AdoptedGuest:
+                          timeout: int = DEFAULT_EXECUTION_TIMEOUT_S) -> AdoptedMachine:
     """Captures the VMID Proxmox will assign *before* running the
     script, via `vm_provision.next_free_vmid` - the exact same call
     `pct_provision.py` already imports for the same reason (VMIDs are
@@ -380,61 +380,61 @@ def run_script_and_adopt(runner: Runner, script_id: str, *,
     `/cluster/nextid` does not reserve it - there is no lock between
     this read and the Helper-Script's own internal call to the same
     endpoint. In this project's established single-operator, sequential
-    -use context (nothing else is concurrently creating guests), the
+    -use context (nothing else is concurrently creating VMs or containers), the
     two reads land on the same VMID in practice; this is not a
     guarantee under concurrent/clustered use, and this function does
     not pretend otherwise. If that ever matters, the real fix is
     upstream Helper-Script cooperation (e.g. an `--on-first-boot` hook
     reporting its own VMID back), not a client-side guess.
 
-    Returns an `AdoptedGuest` the caller feeds into `start_adopted`/
+    Returns an `AdoptedMachine` the caller feeds into `start_adopted`/
     `stop_adopted`/`destroy_adopted` for every operation after creation."""
     script = SCRIPT_MANIFEST.get(script_id)
     if script is None:
-        return AdoptedGuest("refused", None, None,
+        return AdoptedMachine("refused", None, None,
                              f"{script_id!r} is not on the known-script allow-list; known ids: {sorted(SCRIPT_MANIFEST)}")
 
     try:
         expected_vmid = next_free_vmid(runner)
     except Exception as exc:  # pragma: no cover - exact upstream error text varies
-        return AdoptedGuest("refused", None, None,
+        return AdoptedMachine("refused", None, None,
                              f"could not determine the next free VMID before running the script: {exc}")
 
     outcome = run_script(runner, script_id, timeout=timeout)
     if outcome.outcome != "applied":
-        return AdoptedGuest("refused", None, None, outcome.detail)
+        return AdoptedMachine("refused", None, None, outcome.detail)
 
-    return AdoptedGuest(
+    return AdoptedMachine(
         "applied", expected_vmid, script.kind,
         f"{script_id!r} created VMID {expected_vmid} (kind={script.kind}) - "
         f"use start_adopted/stop_adopted/destroy_adopted for lifecycle from here",
     )
 
 
-def start_adopted(runner: Runner, guest: AdoptedGuest) -> CommandResult:
-    if guest.kind == "lxc":
-        return pct_provision.start_ct(runner, guest.vmid)
-    if guest.kind == "vm":
-        return vm_provision.start_vm(runner, guest.vmid)
-    raise ValueError(f"unknown adopted-guest kind {guest.kind!r}")
+def start_adopted(runner: Runner, machine: AdoptedMachine) -> CommandResult:
+    if machine.kind == "lxc":
+        return pct_provision.start_ct(runner, machine.vmid)
+    if machine.kind == "vm":
+        return vm_provision.start_vm(runner, machine.vmid)
+    raise ValueError(f"unknown adopted-machine kind {machine.kind!r}")
 
 
-def stop_adopted(runner: Runner, guest: AdoptedGuest) -> CommandResult:
-    if guest.kind == "lxc":
-        return pct_provision.stop_ct(runner, guest.vmid)
-    if guest.kind == "vm":
-        return vm_provision.stop_vm(runner, guest.vmid)
-    raise ValueError(f"unknown adopted-guest kind {guest.kind!r}")
+def stop_adopted(runner: Runner, machine: AdoptedMachine) -> CommandResult:
+    if machine.kind == "lxc":
+        return pct_provision.stop_ct(runner, machine.vmid)
+    if machine.kind == "vm":
+        return vm_provision.stop_vm(runner, machine.vmid)
+    raise ValueError(f"unknown adopted-machine kind {machine.kind!r}")
 
 
-def destroy_adopted(runner: Runner, guest: AdoptedGuest, *, purge: bool = True) -> CommandResult:
+def destroy_adopted(runner: Runner, machine: AdoptedMachine, *, purge: bool = True) -> CommandResult:
     """Plain destroy, not `vm_provision.retire_vm_preserving_persistence` -
-    these app-installer guests have no persistence disk attached by
+    these app-installer VMs and containers have no persistence disk attached by
     this module, so there is nothing to reassign first. If a future
-    caller attaches persistence to an adopted guest, use the
+    caller attaches persistence to an adopted VM or container, use the
     persistence-preserving retire path instead of this one."""
-    if guest.kind == "lxc":
-        return pct_provision.destroy_ct(runner, guest.vmid, purge=purge)
-    if guest.kind == "vm":
-        return vm_provision.destroy_vm(runner, guest.vmid, purge=purge)
-    raise ValueError(f"unknown adopted-guest kind {guest.kind!r}")
+    if machine.kind == "lxc":
+        return pct_provision.destroy_ct(runner, machine.vmid, purge=purge)
+    if machine.kind == "vm":
+        return vm_provision.destroy_vm(runner, machine.vmid, purge=purge)
+    raise ValueError(f"unknown adopted-machine kind {machine.kind!r}")

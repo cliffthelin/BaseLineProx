@@ -63,11 +63,11 @@ CLUSTERS = {
 
 # F/A/S were specified directly (Flatpak, AppImage, Snap) and I (ISO)
 # was kept from review; D/C/L/V/N cover the media the codebase already
-# installs today (deb packages, OCI images, LXC guests, VMs) and Nix.
+# installs today (deb packages, OCI images, LXC containers, VMs) and Nix.
 MEDIA = {
     "D": "deb package",
     "C": "OCI container",
-    "L": "LXC guest",
+    "L": "LXC container",
     "V": "VM",
     "F": "Flatpak",
     "A": "AppImage",

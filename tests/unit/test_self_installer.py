@@ -225,7 +225,7 @@ def test_build_and_write_self_installer_forwards_disk_serial_to_qemu_invocation(
     """Real bug found live, 2026-09-29 (decision record 114): the
     answer file's own `filter.ID_SERIAL_SHORT` already carries the
     real detected serial (decision record 112) - but the QEMU
-    invocation itself never exposed that same serial to the guest, so
+    invocation itself never exposed that same serial to the VM, so
     Proxmox's installer could never actually match its own filter.
     Confirmed live with decision record 112's fix already applied and
     correct: "Installation failed: filter did not match any device"
@@ -353,7 +353,7 @@ def test_stops_a_previous_answer_server_before_starting_a_new_one(tmp_path, monk
     before a new one tried to bind the same port. Confirmed live via a
     real retry that got a real `OSError: [Errno 98] Address already in
     use` - and, on an earlier retry where the bind happened to still
-    succeed, a real answer-file-fetch timeout where the guest's
+    succeed, a real answer-file-fetch timeout where the VM's
     request silently reached a *stale* server from an even older run
     whose session token didn't match. The fix tracks the single
     currently-active server at module level (mirroring decision record

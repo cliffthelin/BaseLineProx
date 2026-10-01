@@ -96,7 +96,7 @@ def test_sparse_install_invocation_boots_cdrom_first_once_then_falls_back_to_dis
     """Real bug found live, 2026-09-29 (decision record 116): `once=d`
     only overrides the VERY FIRST boot of this QEMU process's life -
     every later boot within the same still-running process (including
-    the auto installer's own guest-triggered reboot after a successful
+    the auto installer's own VM-triggered reboot after a successful
     install) falls back to the *base* `order=` value. The previous
     `order=d,once=d` used `d` as both, so every reboot re-selected the
     CD-ROM and re-entered the installer against the now-already-
@@ -144,7 +144,7 @@ def test_sparse_install_invocation_threads_target_serial_via_scsi_device_form():
     answer file's own `filter.ID_SERIAL_SHORT` asks Proxmox's installer
     to target the disk by its real hardware serial, but plain
     `-drive file=<dev>,if=virtio` never exposes any serial to the
-    guest - confirmed live, a real install reached "Installation
+    VM - confirmed live, a real install reached "Installation
     failed: filter did not match any device" even with decision record
     112's variable-shadowing fix already applied and correct.
 
@@ -154,7 +154,7 @@ def test_sparse_install_invocation_threads_target_serial_via_scsi_device_form():
     shorthand failed immediately with a real QEMU error). A second,
     separate `-device virtio-blk-pci,...,serial=...` form then
     launched cleanly but still failed the *same* filter error - live
-    `udevadm` inspection on the guest's own already-booted shell proved
+    `udevadm` inspection on the VM's own already-booted shell proved
     `virtio-blk-pci` only ever populates udev's `ID_SERIAL`, never
     `ID_SERIAL_SHORT`; a disposable hot-attached `virtio-scsi-pci` +
     `scsi-hd` test disk confirmed `ID_SERIAL_SHORT` *is* populated
@@ -201,7 +201,7 @@ def test_sparse_install_invocation_network_is_slirp_restricted_by_default():
 def test_sparse_install_invocation_uses_guestfwd_when_given():
     """Real bug found live, 2026-09-29 (a regression from decision
     record 03's own already-proven fix): plain `-nic user,restrict=on`
-    blocks the guest from reaching *any* real host-bound TCP service -
+    blocks the VM from reaching *any* real host-bound TCP service -
     confirmed directly, twice, with a real `Connection refused` (the
     installer's own answer-file POST, and an independent bash
     `/dev/tcp` probe). `guestfwd` punches the one real exception

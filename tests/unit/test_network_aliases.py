@@ -33,8 +33,8 @@ def test_save_alias_with_empty_string_on_a_never_set_interface_is_a_no_op():
 
 def test_multiple_interface_aliases_coexist_independently():
     network.save_alias("eth0", "Office Uplink")
-    network.save_alias("wlan0", "Guest Wi-Fi")
-    assert network.load_aliases() == {"eth0": "Office Uplink", "wlan0": "Guest Wi-Fi"}
+    network.save_alias("wlan0", "Visitor Wi-Fi")
+    assert network.load_aliases() == {"eth0": "Office Uplink", "wlan0": "Visitor Wi-Fi"}
 
 
 def test_friendly_name_uses_a_real_saved_alias_over_the_driver_default():

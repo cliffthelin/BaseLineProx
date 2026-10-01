@@ -19,7 +19,7 @@ notice later.
 a volume actually present, which is currently active) and needs no
 credential *of its own*. The web layer will not call it until the caller
 has logged in and then proven this machine's root password or passphrase
-(`recovery_tiers.RECOVERY_ACTIONS`); there is no guest access to it.
+(`recovery_tiers.RECOVERY_ACTIONS`); there is no unauthenticated access to it.
 
 **Hard exit condition**: `can_exit`/`attempt_exit` refuse to consider
 the machine able to leave recovery mode until at least one real

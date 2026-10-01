@@ -2,9 +2,9 @@
 reattach vertical slice (docs/design/testpersistence-prd.md).
 
 Runs entirely against file-backed QEMU images validated by
-tools/qemu_harness_safety.py. Boots a Debian 13 genericcloud guest
+tools/qemu_harness_safety.py. Boots a Debian 13 genericcloud VM
 (never the downloaded cache file itself - always an independent copy),
-with no network device at all, so nothing in the guest can depend on
+with no network device at all, so nothing in the VM can depend on
 live internet access. Two explicit, non-default, non-timeout-bounded
 authorization gates (authorize()) model the PRD's attachment state
 machine requirement that detection never auto-unlocks or auto-imports.
@@ -12,7 +12,7 @@ machine requirement that detection never auto-unlocks or auto-imports.
 Evidence is bounded and sanitized (tools/qemu_harness_safety.
 sanitize_evidence_text) before being written to
 <experiment_root>/evidence.json - never an absolute host path, the
-guest login credential, or the LUKS passphrase.
+VM login credential, or the LUKS passphrase.
 """
 import json
 import os
@@ -35,7 +35,7 @@ BASE_IMAGE = os.path.join(
     DOWNLOAD_CACHE, "debian-13-genericcloud-amd64-20260914-2601.qcow2")
 
 SYNTH_LOGIN_USER = "testoperator"
-GUEST_LOGIN_PROMPT = "TestSystem"  # the hostname prefixes the getty login prompt
+VM_LOGIN_PROMPT = "TestSystem"  # the hostname prefixes the getty login prompt
 
 
 class StepFailed(Exception):
@@ -142,12 +142,12 @@ def login(con: console.SerialConsole, user: str, password: str):
     # default. This matches the project's own established discipline
     # elsewhere (keysource.py etc.) of never letting a secret land in shell
     # history. It does NOT close the separate, narrower window where a
-    # secret is briefly visible in the guest's own process list (`ps aux`)
+    # secret is briefly visible in the VM's own process list (`ps aux`)
     # while e.g. `printf`/`python3` is running with it as an argv element -
     # closing that fully would need passing secrets via stdin/a file
     # descriptor instead of argv, not implemented here because the actual
     # exposure window is a fraction of a second inside a single-operator,
-    # disposable guest that gets deleted after every run.
+    # disposable VM that gets deleted after every run.
     con.send_line("unset HISTFILE; set +o history")
     con.drain(quiet_for=1, max_wait=5)
     out = run_cmd(con, "true", "LOGIN_CONFIRMED", timeout=20)
@@ -158,7 +158,7 @@ def login(con: console.SerialConsole, user: str, password: str):
 def run_cmd(con: console.SerialConsole, cmd: str, marker: str, timeout=60) -> str:
     """Sends `cmd`, then a distinctive marker, and reads until that
     marker appears in the output. Relies on `stty -echo` having been
-    set on the guest tty right after login (see login()) - with tty
+    set on the VM tty right after login (see login()) - with tty
     echo disabled, the only way the marker text can appear in the
     stream at all is as genuine command output, so a single
     read_until is reliable. (An earlier version of this function tried
@@ -182,7 +182,7 @@ def clean_shutdown(con: console.SerialConsole, proc: subprocess.Popen, timeout=6
     if proc.poll() is None:
         proc.terminate()
         raise StepFailed(
-            "guest did not shut down cleanly within timeout - process terminated. "
+            "VM did not shut down cleanly within timeout - process terminated. "
             f"console output seen while waiting: {seen[-2000:]!r}")
 
 
@@ -336,7 +336,7 @@ package_upgrade: false
         out = run_cmd(con,
                        # --pbkdf-memory bounds Argon2id's memory cost to something this
                        # small experiment VM can actually satisfy quickly - the default
-                       # (~1GiB) would thrash badly on a constrained guest. This is a
+                       # (~1GiB) would thrash badly on a constrained VM. This is a
                        # test-experiment tuning parameter only, not a security posture
                        # claim about any production configuration.
                        "sudo cryptsetup luksFormat --type luks2 --batch-mode "
@@ -385,7 +385,7 @@ package_upgrade: false
 
         # Step 7 (shutdown, part of "clean shutdown")
         clean_shutdown(con, proc_a, timeout=200)
-        ev.record("step7_clean_shutdown_TestSystem-A", True, "guest reported shutdown, process exited")
+        ev.record("step7_clean_shutdown_TestSystem-A", True, "VM reported shutdown, process exited")
     finally:
         con.close()
         if proc_a.poll() is None:
@@ -518,7 +518,7 @@ package_upgrade: false
         con_b.send_line("sudo umount /mnt/persistence && sudo cryptsetup close testpersistence001")
         con_b.drain(quiet_for=2)
         clean_shutdown(con_b, proc_b, timeout=150)
-        ev.record("clean_shutdown_TestSystem-B", True, "guest reported shutdown, process exited")
+        ev.record("clean_shutdown_TestSystem-B", True, "VM reported shutdown, process exited")
     finally:
         con_b.close()
         if proc_b.poll() is None:

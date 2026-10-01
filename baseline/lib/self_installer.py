@@ -56,7 +56,7 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 # tried to bind the same port - confirmed live via a real
 # `OSError: [Errno 98] Address already in use` on a retry, and (on an
 # earlier retry where the bind happened to still succeed) a real
-# `Fetching answer file via HTTP failed: timeout` where the guest's
+# `Fetching answer file via HTTP failed: timeout` where the VM's
 # request silently reached a *stale* server from an even older run
 # whose session token didn't match. `EphemeralAnswerServer` is a
 # real, process-wide OS resource (one process, one port) - like

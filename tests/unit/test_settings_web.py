@@ -376,7 +376,7 @@ def test_admin_edit_hands_off_an_unknown_setting_without_a_ticket_bypass():
 
 # --------------------------------------------------------------------------
 # Recovery mode's userless discovery view (work-queue item 26, decision
-# record 81) - no session/token anywhere here, guest-tier by construction.
+# record 81) - no session/token anywhere here, gated by login and the recovery credential.
 # --------------------------------------------------------------------------
 
 def test_recovery_view_hands_off_when_no_runner_is_configured():

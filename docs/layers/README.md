@@ -73,7 +73,7 @@ still only proven in a test harness:
 
 ## Access rule
 
-There is no guest user. Nothing is reachable beyond the login screen without a
+There is no unauthenticated access. Nothing is reachable beyond the login screen without a
 credential, and recovery mode needs a validated login like everything else.
 No setting and no admin can change that; the only way past is the credential or
 the passphrase. This is enforced deny-by-default in `baseline_web.py` and

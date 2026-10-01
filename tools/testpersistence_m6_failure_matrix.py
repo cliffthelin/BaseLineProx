@@ -3,7 +3,7 @@ testpersistence-prd.md §13) exercised for real against the QEMU
 harness, not just unit-tested (baseline/lib/testpersistence/
 failures.py already covers these as pure-code Outcome objects -
 Milestone 2 - this module proves the underlying OS-level *signals*
-those outcomes are built on are genuinely observable in a live guest).
+those outcomes are built on are genuinely observable in a live VM).
 
 Three boots, reusing Phase B's proven helpers:
 
@@ -160,7 +160,7 @@ def main():
                    "No such file" in out and "/dev/vda" in out, out)
 
         clean_shutdown(con, proc, timeout=120)
-        ev.record("bootA_clean_shutdown", True, "guest exited")
+        ev.record("bootA_clean_shutdown", True, "VM exited")
     finally:
         con.close()
         if proc.poll() is None:
@@ -296,7 +296,7 @@ def main():
         ev.record("bootB_pre_shutdown_cleanup", "CLEANUPDONE" in out, out)
 
         clean_shutdown(con, proc, timeout=150)
-        ev.record("bootB_clean_shutdown", True, "guest exited")
+        ev.record("bootB_clean_shutdown", True, "VM exited")
     finally:
         con.close()
         if proc.poll() is None:
@@ -335,7 +335,7 @@ def main():
                    out)
 
         clean_shutdown(con, proc, timeout=120)
-        ev.record("bootC_clean_shutdown", True, "guest exited")
+        ev.record("bootC_clean_shutdown", True, "VM exited")
     finally:
         con.close()
         if proc.poll() is None:

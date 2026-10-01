@@ -1,5 +1,5 @@
 """Nothing beyond the login screen without a credential (direct instruction,
-2026-09-30): no guest user exists, and no setting can grant one access. Every
+2026-09-30): no unauthenticated access exists, and no setting can grant one access. Every
 route except the login routes needs a valid session - GET and POST alike,
 state-changing or read-only, and including recovery mode."""
 import http.client

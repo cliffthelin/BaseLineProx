@@ -17,7 +17,7 @@ class _FakeEvidence:
 
 def test_sanitized_failure_message_redacts_a_known_secret():
     secret = "synthetic-luks-passphrase-abc123"
-    exc = m.StepFailed(f"guest did not respond, last buffer: ...{secret}...")
+    exc = m.StepFailed(f"VM did not respond, last buffer: ...{secret}...")
     ev = _FakeEvidence(deny_substrings=(secret,))
     message = m.sanitized_failure_message(exc, ev)
     assert secret not in message

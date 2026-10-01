@@ -13,7 +13,7 @@ import proxmox_vm_metrics as pvm
 # list_vms
 # --------------------------------------------------------------------------
 
-def test_list_vms_empty_when_no_guests_exist():
+def test_list_vms_empty_when_no_vms_exist():
     runner = FakeRunner()
     runner.command_responses = [
         (lambda a: a[:3] == ["pvesh", "get", "/nodes/localhost/qemu"], FakeProc(0, "[]", "")),

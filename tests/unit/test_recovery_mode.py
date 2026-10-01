@@ -18,7 +18,7 @@ def test_should_enter_false_when_cascade_succeeded():
     assert rm.should_enter(cascade_applied=True) is False
 
 
-# -- discover (guest-tier, no credential needed) -----------------------------
+# -- discover (reads mount state only) -----------------------------
 
 def test_discover_reports_a_found_persona():
     mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"

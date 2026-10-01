@@ -1,6 +1,6 @@
 """Live per-VM resource metrics via Proxmox's own `pvesh` CLI (Track A5,
 the sensors + per-VM dashboard). Queries only - never creates, modifies,
-or destroys any guest.
+or destroys any VM or container.
 
 Deliberately reuses Proxmox's own already-running metrics collection and
 its own retained RRD history rather than sampling independently - see
@@ -51,7 +51,7 @@ class VmStatus:
     uptime: int = 0
 
 
-def _list_guests(runner: Runner, node: str, kind: str) -> list:
+def _list_machines(runner: Runner, node: str, kind: str) -> list:
     proc = runner.run(["pvesh", "get", f"/nodes/{node}/{kind}", "--output-format", "json"], timeout=10)
     if proc.returncode != 0:
         return []
@@ -62,11 +62,11 @@ def _list_guests(runner: Runner, node: str, kind: str) -> list:
 def list_vms(runner: Runner, node: str = "localhost") -> list:
     """Every QEMU VM and LXC container's current live status on `node`.
     Returns [] (never raises) if pvesh is unavailable or the node has
-    zero guests - both normal, expected outcomes on a machine that
+    zero VMs or containers - both normal, expected outcomes on a machine that
     hasn't created any VMs yet, not errors."""
     results = []
     for kind, type_name in (("qemu", "qemu"), ("lxc", "lxc")):
-        for entry in _list_guests(runner, node, kind):
+        for entry in _list_machines(runner, node, kind):
             results.append(VmStatus(
                 vmid=entry.get("vmid", 0),
                 name=entry.get("name", "") or "",

@@ -526,7 +526,7 @@ class SettingsHandler(http.server.BaseHTTPRequestHandler):
         pass  # quiet by default; caller can override via subclassing
 
     def _refuse_unauthenticated(self, deps, now, json_mode: bool) -> bool:
-        """Nothing beyond the login screen without a credential - no guest
+        """Nothing beyond the login screen without a credential - no unauthenticated
         user exists and recovery mode needs a validated login too (direct
         instruction, 2026-09-30). True (after answering) when there is no
         valid session. Unknown routes are refused the same way so the

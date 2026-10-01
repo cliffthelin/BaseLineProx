@@ -383,7 +383,7 @@ package_upgrade: false
         ev.record("pre_shutdown_cleanup", "CLEANUPDONE" in out, out)
 
         clean_shutdown(con, proc, timeout=150)
-        ev.record("clean_shutdown", True, "guest reported shutdown, process exited")
+        ev.record("clean_shutdown", True, "VM reported shutdown, process exited")
     finally:
         con.close()
         if proc.poll() is None:

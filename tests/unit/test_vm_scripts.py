@@ -207,35 +207,35 @@ def test_run_script_and_adopt_refuses_when_nextid_query_fails():
 
 def test_start_adopted_dispatches_to_pct_provision_for_lxc():
     runner = FakeRunner()
-    guest = vm_scripts.AdoptedGuest("applied", 105, "lxc", "")
-    result = vm_scripts.start_adopted(runner, guest)
+    machine = vm_scripts.AdoptedMachine("applied", 105, "lxc", "")
+    result = vm_scripts.start_adopted(runner, machine)
     assert result.ok is True
     assert runner.calls == [["pct", "start", "105"]]
 
 
 def test_start_adopted_dispatches_to_vm_provision_for_vm():
     runner = FakeRunner()
-    guest = vm_scripts.AdoptedGuest("applied", 105, "vm", "")
-    result = vm_scripts.start_adopted(runner, guest)
+    machine = vm_scripts.AdoptedMachine("applied", 105, "vm", "")
+    result = vm_scripts.start_adopted(runner, machine)
     assert result.ok is True
     assert runner.calls == [["qm", "start", "105"]]
 
 
 def test_stop_adopted_dispatches_by_kind():
     runner = FakeRunner()
-    vm_scripts.stop_adopted(runner, vm_scripts.AdoptedGuest("applied", 105, "lxc", ""))
-    vm_scripts.stop_adopted(runner, vm_scripts.AdoptedGuest("applied", 106, "vm", ""))
+    vm_scripts.stop_adopted(runner, vm_scripts.AdoptedMachine("applied", 105, "lxc", ""))
+    vm_scripts.stop_adopted(runner, vm_scripts.AdoptedMachine("applied", 106, "vm", ""))
     assert runner.calls == [["pct", "stop", "105"], ["qm", "stop", "106"]]
 
 
 def test_destroy_adopted_dispatches_by_kind():
     runner = FakeRunner()
-    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedGuest("applied", 105, "lxc", ""))
-    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedGuest("applied", 106, "vm", ""))
+    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedMachine("applied", 105, "lxc", ""))
+    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedMachine("applied", 106, "vm", ""))
     assert runner.calls == [["pct", "destroy", "105", "--purge"], ["qm", "destroy", "106", "--purge"]]
 
 
 def test_destroy_adopted_respects_no_purge():
     runner = FakeRunner()
-    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedGuest("applied", 105, "lxc", ""), purge=False)
+    vm_scripts.destroy_adopted(runner, vm_scripts.AdoptedMachine("applied", 105, "lxc", ""), purge=False)
     assert runner.calls == [["pct", "destroy", "105"]]

@@ -17,7 +17,7 @@ app, VM and LXC state may need to run things stored here.
 
 Baseline supports app, VM and LXC state. **VMs and LXCs live on
 [INSTALLER_CACHE](04-installer-cache.md)**, and Proxmox does not care where
-they are as long as it can reach them. There is no guest user anywhere in the
+they are as long as it can reach them. There is no unauthenticated access anywhere in the
 system (`recovery_tiers`: only the login screen is credential-free).
 
 BASELINE holds Baseline's own install-wide records: the registry and markers.

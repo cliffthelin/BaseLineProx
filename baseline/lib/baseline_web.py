@@ -1246,7 +1246,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
 
     def _refuse_unauthenticated(self, deps, now, path: str) -> bool:
         """Nothing beyond the login screen without a credential. There is
-        no guest user and no setting that grants one; recovery mode
+        no unauthenticated access and no setting that grants one; recovery mode
         needs a validated login like everything else. Returns True (after
         answering) when the request has no valid session. Applies to every
         route except `_PUBLIC_PATHS`, unknown routes included, so the set
