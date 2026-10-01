@@ -177,7 +177,7 @@ def test_relabel_uses_the_nvme_partition_naming():
 def test_apply_refuses_a_drive_with_data_and_no_installer_uuid_and_runs_nothing(monkeypatch):
     monkeypatch.setattr(dg, "_default_run", lambda argv: (0, f"sdd disk  {GUID} \nsdd1 part ntfs  TV\n"))
     cmd = Cmd()
-    with pytest.raises(cl.LayoutError, match="installer"):
+    with pytest.raises(cl.LayoutError, match="not the Baseline drive"):
         cl.apply(cmd, DEV, validate=ok_validator)
     assert cmd.calls == []
 
@@ -188,3 +188,11 @@ def test_apply_lays_out_a_drive_with_data_that_the_installer_created(monkeypatch
     cmd = Cmd()
     assert cl.apply(cmd, DEV, validate=ok_validator)
     assert cmd.calls and cmd.calls[0][0] == "wipefs"
+
+
+def test_apply_refuses_baseline_labelled_data_without_an_installer_uuid(monkeypatch):
+    monkeypatch.setattr(dg, "_default_run", lambda argv: (0, f"sdd disk  {GUID} \nsdd1 part ext4  BASELINE\n"))
+    cmd = Cmd()
+    with pytest.raises(cl.LayoutError, match="installer"):
+        cl.apply(cmd, DEV, validate=ok_validator)
+    assert cmd.calls == []

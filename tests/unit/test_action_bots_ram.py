@@ -67,6 +67,8 @@ def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
             assert ram.calls == []                      # an operation never runs a drive action
         elif action == "build_self_installer":
             assert ram.installs == 1
+        elif action == "lay_out_baseline_drive":
+            assert getattr(ram, "layouts", 0) == 1 and not ram.intact()
         elif action in ("mount_volume", "unmount_volume"):
             assert ram.calls == [] and ram.installs == 0
         else:

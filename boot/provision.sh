@@ -270,6 +270,7 @@ cp "$SRC/baseline/lib/operations.py" /opt/baseline/lib/operations.py
 cp "$SRC/baseline/lib/operations_page.py" /opt/baseline/lib/operations_page.py
 cp "$SRC/baseline/lib/operator_accounts.py" /opt/baseline/lib/operator_accounts.py
 cp "$SRC/baseline/lib/audit_view.py" /opt/baseline/lib/audit_view.py
+cp "$SRC/baseline/lib/baseline_drive_layout.py" /opt/baseline/lib/baseline_drive_layout.py
 # The merged Baseline web app (decision record 83) - direct
 # instruction: "merge those two together and add a Drive
 # administration tab... this application will never get off the
@@ -388,7 +389,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/backup_recurring.py \
          /opt/baseline/lib/offdrive_backup.py \
          /opt/baseline/lib/web_security.py /opt/baseline/lib/hitl.py /opt/baseline/lib/drive_guard.py /opt/baseline/lib/web_gate.py \
-         /opt/baseline/lib/operations.py /opt/baseline/lib/operations_page.py /opt/baseline/lib/operator_accounts.py /opt/baseline/lib/audit_view.py \
+         /opt/baseline/lib/operations.py /opt/baseline/lib/operations_page.py /opt/baseline/lib/operator_accounts.py /opt/baseline/lib/audit_view.py /opt/baseline/lib/baseline_drive_layout.py \
          /opt/baseline/lib/recovery_mode.py /opt/baseline/bin/baseline-recovery-mode \
          /opt/baseline/lib/drive_admin.py /opt/baseline/lib/baseline_web.py /opt/baseline/bin/baseline-web \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \

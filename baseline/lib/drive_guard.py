@@ -41,6 +41,7 @@ class DriveState:
     has_data: bool
     ptuuid: str | None = None
     labels: tuple = field(default_factory=tuple)      # partition labels, for deciding whether a drive is Baseline's own
+    fstypes: tuple = field(default_factory=tuple)     # partition filesystem types (an LVM2_member means Proxmox or similar)
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,27 @@ def read_drive_state(device_path: str, *, run=None) -> DriveState:
     ptuuid = disk[3].strip() or None
     has_data = bool(disk[2].strip()) or bool(others)
     labels = tuple(r[4].strip() for r in others if r[1] == "part")
-    return DriveState(known=True, has_data=has_data, ptuuid=ptuuid, labels=labels)
+    fstypes = tuple(r[2].strip() for r in others if r[1] == "part")
+    return DriveState(known=True, has_data=has_data, ptuuid=ptuuid, labels=labels, fstypes=fstypes)
+
+
+def is_baseline_only(state: DriveState) -> bool:
+    """True for a drive that is empty or whose every partition is one of Baseline's own volumes."""
+    if not state.known:
+        return False
+    if not state.has_data:
+        return True
+    return bool(state.labels) and all(_OWN_LABEL_RE.match(label or "") for label in state.labels)
+
+
+def require_baseline_drive(device_path: str, *, run=None) -> None:
+    """The Baseline drive layout may only be written to a drive that is empty or already Baseline's own: never the
+    Proxmox install drive or anything holding someone else's data, whatever its disk identifier says."""
+    state = read_drive_state(device_path, run=run)
+    if not is_baseline_only(state):
+        raise DataProtectionError(
+            f"{device_path} is not the Baseline drive: it holds partitions that are not Baseline's own volumes, "
+            "or it could not be read, so the Baseline layout will not be written to it")
 
 
 def _ensure_type() -> None:

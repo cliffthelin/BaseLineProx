@@ -47,9 +47,10 @@ VERBS = {
     "unmount_volume": "UNMOUNT",
     "update_selected": "UPDATE",
     "stamp_installer_identity": "STAMP",
+    "lay_out_baseline_drive": "LAYOUT",
 }
 CONFIRMED_ACTIONS = frozenset(VERBS)
-NEVER_PRE_APPROVED = frozenset({"build_self_installer"})
+NEVER_PRE_APPROVED = frozenset({"build_self_installer", "lay_out_baseline_drive"})
 
 _SECRET = secrets.token_bytes(32)
 

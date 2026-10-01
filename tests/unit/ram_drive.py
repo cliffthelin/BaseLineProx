@@ -54,6 +54,14 @@ class RamDrive:
                 return da.ActionResult(True, f"{action_id} ran against the RAM drive")
             return fake
 
+        def fake_layout(runner, device_path, **p):
+            self.layouts = getattr(self, "layouts", 0) + 1
+            if self.marker.exists():
+                self.marker.unlink()
+            return da.ActionResult(True, "laid out the RAM drive")
+
+        monkeypatch.setitem(da.ACTIONS, "lay_out_baseline_drive", da.ActionSpec(
+            "lay_out_baseline_drive", "RAM-drive stand-in for lay_out_baseline_drive", fake_layout, requires_device=True))
         for action_id in ("repair", "update_selected", "stamp_installer_identity"):
             monkeypatch.setitem(da.ACTIONS, action_id, da.ActionSpec(
                 action_id, f"RAM-drive stand-in for {action_id}", recorder(action_id),
