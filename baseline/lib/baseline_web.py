@@ -44,6 +44,7 @@ import drive_admin as da
 import drive_installer
 import physical_device_safety as pds
 import settings_web as sw
+import hitl
 import web_security as ws
 
 try:
@@ -470,6 +471,62 @@ async function pollJobLog(jobId, consoleEl) {{
   }}
 }}
 
+// A drive action never runs on request: a person must confirm that exact request, each time, by typing the
+// phrase shown and entering this machine's root password or passphrase. Everything is added with textContent.
+function askForConfirmation(challenge) {{
+  return new Promise((resolve) => {{
+    const modal = document.getElementById("driveAdminModal");
+    const box = document.createElement("div");
+    box.id = "hitlBox";
+    const summary = document.createElement("pre");
+    summary.textContent = challenge.summary;
+    const lead = document.createElement("p");
+    lead.textContent = "A person must confirm this. Type exactly: " + challenge.phrase;
+    const typed = document.createElement("input");
+    typed.id = "hitlTyped";
+    typed.autocomplete = "off";
+    typed.placeholder = challenge.phrase;
+    const secret = document.createElement("input");
+    secret.id = "hitlSecret";
+    secret.type = "password";
+    secret.autocomplete = "off";
+    secret.placeholder = "This machine's root password or passphrase";
+    const msg = document.createElement("p");
+    msg.id = "hitlMsg";
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.disabled = true;
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    let wait = challenge.min_wait;
+    ok.textContent = "Confirm (" + wait + ")";
+    const timer = setInterval(() => {{
+      wait -= 1;
+      if (wait <= 0) {{ clearInterval(timer); ok.disabled = false; ok.textContent = "Confirm"; }}
+      else {{ ok.textContent = "Confirm (" + wait + ")"; }}
+    }}, 1000);
+    ok.addEventListener("click", async () => {{
+      ok.disabled = true;
+      const res = await fetch("/drive-admin/confirm", {{
+        method: "POST", headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{challenge_id: challenge.id, typed: typed.value, secret: secret.value}}),
+      }});
+      const body = await res.json();
+      secret.value = "";
+      if (body.job_id) {{ clearInterval(timer); box.remove(); resolve(body); }}
+      else {{ msg.textContent = body.detail || "Not confirmed."; ok.disabled = false; }}
+    }});
+    cancel.addEventListener("click", () => {{
+      clearInterval(timer);
+      box.remove();
+      resolve({{detail: "Cancelled: nothing was run."}});
+    }});
+    box.append(summary, lead, typed, secret, msg, ok, cancel);
+    (modal.querySelector(".modal-body") || modal).appendChild(box);
+  }});
+}}
+
 document.getElementById("driveAdminModalConfirm").addEventListener("click", async () => {{
   const params = {{}};
   const devicePath = document.getElementById("paramDevicePath");
@@ -497,8 +554,11 @@ document.getElementById("driveAdminModalConfirm").addEventListener("click", asyn
     method: "POST", headers: {{"Content-Type": "application/json"}},
     body: JSON.stringify({{action_id: pendingActionId, params}}),
   }});
-  const startBody = await startRes.json();
-  if (!startRes.ok || !startBody.job_id) {{
+  let startBody = await startRes.json();
+  if (startBody.outcome === "confirmation_required") {{
+    startBody = await askForConfirmation(startBody.challenge);
+  }}
+  if (!startBody.job_id) {{
     document.getElementById("driveAdminModalConfirm").disabled = false;
     document.getElementById("driveAdminModal").classList.remove("open");
     const text = startBody.detail || startBody.error || startBody.reason || "done";
@@ -1157,13 +1217,26 @@ _JOBS_LOCK = threading.Lock()
 _JOBS: dict = {}
 
 
-def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict, pds_runner=None) -> None:
+def _hitl_store(deps: dict):
+    """The one confirmation store for this server. A confirmation needs this machine's root password or
+    passphrase (`recovery_verify_fn`); with none configured nobody can confirm, so no drive action can run."""
+    store = deps.get("hitl")
+    if store is None:
+        audit = hitl.AuditFile(deps["hitl_audit_path"]) if deps.get("hitl_audit_path") else None
+        store = deps["hitl"] = hitl.ConfirmationStore(
+            verify_secret=deps.get("recovery_verify_fn") or (lambda secret: False), clock=deps["clock"], audit=audit)
+    return store
+
+
+def _run_action_job(job_id: str, sudo_runner, action_id: str, params: dict, pds_runner=None,
+                    authorization=None, hitl_store=None) -> None:
     def on_progress(line: str) -> None:
         with _JOBS_LOCK:
             _JOBS[job_id]["lines"].append(line)
 
     try:
-        result = da.perform_action(sudo_runner, action_id, params, on_progress=on_progress, pds_runner=pds_runner)
+        result = da.perform_action(sudo_runner, action_id, params, on_progress=on_progress, pds_runner=pds_runner,
+                                   authorization=authorization, hitl_store=hitl_store)
         with _JOBS_LOCK:
             _JOBS[job_id].update(done=True, outcome="applied" if result.ok else "refused", detail=result.detail)
     except Exception as exc:  # a real, unexpected crash must still reach the operator, not hang the poll forever
@@ -1237,6 +1310,17 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         post real JSON - both are real, live request shapes this
         merged handler must accept, not just one of them."""
         return self._read_json_body() if self._is_json_request() else self._read_form_body()
+
+    def _start_drive_job(self, deps: dict, action_id: str, params: dict, authorization, store) -> None:
+        # No password field, no `verify_sudo_password` preflight: `PkexecRunner` authenticates per real privileged call
+        # via PolicyKit's native agent (direct instruction, 2026-09-29). The human confirmation above is separate.
+        pkexec_runner = da.PkexecRunner(executor=deps.get("pkexec_executor"))   # None in a real deployment -> subprocess.run
+        job_id = uuid.uuid4().hex
+        with _JOBS_LOCK:
+            _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
+        threading.Thread(target=_run_action_job, args=(job_id, pkexec_runner, action_id, params, deps.get("pds_runner"),
+                                                       authorization, store), daemon=True).start()
+        return self._json(200, {"outcome": "started", "job_id": job_id})
 
     def _cookie_token(self) -> str:
         raw = self.headers.get("Cookie", "")
@@ -1388,6 +1472,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(502, {"error": f"screendump capture failed: {exc}"})
             return self._binary_response(200, png_bytes, "image/png")
 
+        if path == "/drive-admin/approvals":
+            return self._json(200, {"grants": _hitl_store(deps).list_grants(self._cookie_token())})
+
         if path.startswith("/drive-admin"):
             runner = deps.get("runner")
             drives = real_drive_state(runner, pds_runner=deps.get("pds_runner"))
@@ -1422,7 +1509,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
-        path = self.path
+        path = self.path.split("?", 1)[0]       # routes never depend on a query string
 
         # A POST must come from this site (SameSite=Strict on the cookie is the first line of defence).
         if not ws.origin_ok(self.headers, has_cookie=bool(self._cookie_token())):
@@ -1501,26 +1588,68 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._redirect(f"/recovery?notice={notice}")
 
         if path == "/drive-admin/action":
-            # Direct instruction, 2026-09-29: "Make the application ask
-            # for the sudo password through Ubuntu best practices...
-            # documented methods and policies from the OS provider."
-            # No password field, no `verify_sudo_password` preflight -
-            # `PkexecRunner` authenticates per real privileged call via
-            # PolicyKit's own native agent (confirmed live on this
-            # machine: GNOME Shell's built-in one), entirely outside
-            # this HTTP request. A cancelled/failed authentication
-            # surfaces as the underlying command's own non-zero exit,
-            # which the existing ActionResult/job machinery already
-            # reports as a clean refusal - no separate handling needed.
+            # A drive action never runs on request. It becomes a CHALLENGE that a person must confirm (hitl.py),
+            # unless a person has granted a standing approval for exactly this action and drive.
             action_id = body.get("action_id", "")
             params = body.get("params", {})
-            pkexec_executor = deps.get("pkexec_executor")  # None in real deployment -> real subprocess.run
-            pkexec_runner = da.PkexecRunner(executor=pkexec_executor)
-            job_id = uuid.uuid4().hex
-            with _JOBS_LOCK:
-                _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
-            threading.Thread(target=_run_action_job, args=(job_id, pkexec_runner, action_id, params, deps.get("pds_runner")), daemon=True).start()
-            return self._json(200, {"outcome": "started", "job_id": job_id})
+            if not isinstance(action_id, str) or not isinstance(params, dict):
+                return self._json(400, {"outcome": "refused", "detail": "refused: malformed request"})
+            try:
+                prepared = da.prepare_action(action_id, params, pds_runner=deps.get("pds_runner"))
+            except ValueError as exc:
+                return self._json(400, {"outcome": "refused", "detail": str(exc)})
+            store, session = _hitl_store(deps), self._cookie_token()
+            authorization = store.authorization_from_grant(session, action_id, prepared["params"], prepared["serial"])
+            if authorization is not None:
+                return self._start_drive_job(deps, action_id, prepared["params"], authorization, store)
+            try:
+                challenge = store.challenge(session, action_id, prepared["params"], prepared["serial"], prepared["summary"])
+            except ValueError as exc:
+                return self._json(429, {"outcome": "refused", "detail": f"refused: {exc}"})
+            return self._json(200, {"outcome": "confirmation_required", "challenge": challenge})
+
+        if path == "/drive-admin/confirm":
+            if self._throttled("confirm", now):
+                return
+            store, session = _hitl_store(deps), self._cookie_token()
+            challenge_id = body.get("challenge_id", "")
+            request = store.pending_request(challenge_id) if isinstance(challenge_id, str) else None
+            if request is None:
+                return self._json(404, {"outcome": "refused", "detail": "that confirmation is unknown, expired or already used"})
+            try:
+                authorization = store.confirm(session, challenge_id, body.get("typed", ""), body.get("secret", ""))
+            except hitl.ConfirmationError as exc:
+                if exc.reason in ("phrase", "credential"):
+                    self._record_attempt("confirm", now, ok=False)
+                return self._json(403, {"outcome": "refused", "detail": f"refused: {exc}", "reason": exc.reason})
+            self._record_attempt("confirm", now, ok=True)
+            action_id, params, _serial = request
+            return self._start_drive_job(deps, action_id, params, authorization, store)
+
+        if path == "/drive-admin/approvals":
+            if self._throttled("confirm", now):
+                return
+            store, session = _hitl_store(deps), self._cookie_token()
+            try:
+                prepared = da.prepare_action(body.get("action_id", ""), {"device_path": body.get("device_path", "")},
+                                             pds_runner=deps.get("pds_runner"))
+                grant = store.grant(session, action_id=body.get("action_id", ""), serial=prepared["serial"],
+                                    minutes=body.get("minutes"), max_uses=body.get("max_uses"),
+                                    typed=body.get("typed", ""), secret=body.get("secret", ""))
+            except hitl.ConfirmationError as exc:
+                if exc.reason in ("phrase", "credential"):
+                    self._record_attempt("confirm", now, ok=False)
+                return self._json(403, {"outcome": "refused", "detail": f"refused: {exc}", "reason": exc.reason})
+            except ValueError as exc:
+                return self._json(400, {"outcome": "refused", "detail": str(exc)})
+            self._record_attempt("confirm", now, ok=True)
+            return self._json(200, {"outcome": "applied", "grant": grant})
+
+        if path == "/drive-admin/approvals/revoke":
+            store = _hitl_store(deps)
+            mine = {g["id"] for g in store.list_grants(self._cookie_token())}
+            gid = body.get("id", "")
+            return self._json(200, {"outcome": "applied" if gid in mine and store.revoke(gid) else "refused"})
 
         if path == "/api/backup":
             result = cpw.handle_backup(deps["runner"], dest=body.get("dest", ""),

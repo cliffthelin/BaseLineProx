@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import drive_installer
+import hitl
 import persist_bind_mounts as pbm
 import physical_device_safety as pds
 import settings_store
@@ -1168,34 +1169,65 @@ def validate_action_params(action_id: str, params: dict) -> dict:
     return {name: _PARAM_CHECKS[name](value) for name, value in params.items()}
 
 
-def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None, pds_runner=None) -> ActionResult:
-    """`on_progress` (direct instruction, 2026-09-29 - "add a console
-    log of what is running and doing"): threaded through as a real
-    keyword argument, never required by any action's own signature -
-    only `build_self_installer` actually reports through it (the one
-    real, multi-minute action); every other action's own lambda simply
-    doesn't forward it, so it's silently unused there, never an
-    error."""
+def _prepare(action_id: str, params: dict, pds_runner=None) -> tuple:
+    """Validate a request without running it. Returns (spec, cleaned params with the validated device path,
+    serial). Raises ValueError with a refusal message for an unknown action, bad parameters, or a drive that
+    is not one of the allowed SK hynix drives."""
     spec = ACTIONS.get(action_id)
     if spec is None:
-        return ActionResult(False, f"unknown action {action_id!r}")
+        raise ValueError(f"unknown action {action_id!r}")
     try:
         call_params = validate_action_params(action_id, dict(params))
     except ValueError as exc:
-        return ActionResult(False, f"refused: invalid parameter: {exc}")
+        raise ValueError(f"refused: invalid parameter: {exc}") from exc
+    serial = "volumes"          # update_selected acts on Baseline's volumes, not on one drive
     if spec.requires_device and action_id != "update_selected":
         # The one gate every drive action passes through. Nothing runs against a drive
         # unless it is one of the allowed SK hynix drives, and the action is handed the
         # path that was actually validated, not the string the caller supplied.
         device_path = call_params.get("device_path")
         if not device_path:
-            return ActionResult(False, f"{action_id} needs a drive and none was given")
+            raise ValueError(f"{action_id} needs a drive and none was given")
         try:
             validated = resolve_target(device_path, pds_runner=pds_runner)
         except pds.PhysicalDeviceSafetyError:
-            return ActionResult(False, f"refused: Baseline acts only on the SK hynix drives it is set up with, "
-                                       f"and {device_path} is not one of the allowed drives")
+            raise ValueError(f"refused: Baseline acts only on the SK hynix drives it is set up with, "
+                             f"and {device_path} is not one of the allowed drives") from None
         call_params["device_path"] = validated["path"]
+        serial = validated["serial"]
+    return spec, call_params, serial
+
+
+def prepare_action(action_id: str, params: dict, *, pds_runner=None) -> dict:
+    """What a person is being asked to confirm: the cleaned request, the drive's serial, and a plain summary."""
+    spec, call_params, serial = _prepare(action_id, params, pds_runner)
+    where = f"drive {call_params['device_path']} (serial ending {serial[-6:]})" if "device_path" in call_params else "Baseline's volumes"
+    return {"action_id": action_id, "params": call_params, "serial": serial,
+            "summary": f"{spec.description}\nThis will run on {where}."}
+
+
+def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None, pds_runner=None,
+                   authorization=None, hitl_store=None) -> ActionResult:
+    """`on_progress` (direct instruction, 2026-09-29 - "add a console
+    log of what is running and doing"): threaded through as a real
+    keyword argument, never required by any action's own signature -
+    only `build_self_installer` actually reports through it (the one
+    real, multi-minute action); every other action's own lambda simply
+    doesn't forward it, so it's silently unused there, never an
+    error.
+
+    Every drive action needs a human confirmation, each time (hitl.py): `authorization` must be a valid,
+    unused authorization for exactly this request, otherwise nothing runs. There is no flag that skips this."""
+    try:
+        spec, call_params, serial = _prepare(action_id, params, pds_runner)
+    except ValueError as exc:
+        message = str(exc)
+        return ActionResult(False, message if message.startswith(("refused", "unknown action")) or "needs a drive" in message
+                            else f"refused: {message}")
+    try:
+        hitl.require(authorization, action_id, call_params, serial, store=hitl_store)
+    except hitl.ConfirmationRequired as exc:
+        return ActionResult(False, f"refused: this action needs a human confirmation ({exc})")
     if on_progress is not None:
         call_params["on_progress"] = on_progress
     return spec.run(runner, **call_params)

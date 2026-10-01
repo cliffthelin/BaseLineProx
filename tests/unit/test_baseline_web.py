@@ -388,6 +388,11 @@ class _RealServerCase:
         # Every route but the login screen needs a session, so the harness
         # logs in by default; test_baseline_web_auth_gate.py covers the
         # unauthenticated side by sending its own requests.
+        import hitl
+        if "hitl" not in deps:
+            # min_wait_s=0 here only so the many harness tests need not sleep; the real minimum wait is covered in
+            # test_hitl_web.py. The secret is the one a person would type.
+            deps["hitl"] = hitl.ConfirmationStore(verify_secret=lambda s: s == "test-secret", clock=deps["clock"], min_wait_s=0)
         sessions = deps["sessions"]
         if not sessions.sessions:
             sessions.create("root", now=deps["clock"]())
@@ -417,6 +422,16 @@ class _RealServerCase:
                 return resp.status, json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read())
+
+    def drive_action(self, action_id, params, secret="test-secret"):
+        """Request a drive action and confirm it the way a person must: the request only produces a challenge;
+        the confirm step (typed phrase + root password) is what starts it."""
+        status, body = self.post_json("/drive-admin/action", {"action_id": action_id, "params": params})
+        if body.get("outcome") != "confirmation_required":
+            return status, body
+        chal = body["challenge"]
+        return self.post_json("/drive-admin/confirm",
+                              {"challenge_id": chal["id"], "typed": chal["phrase"], "secret": secret})
 
     def close(self):
         self.server.shutdown()
@@ -486,8 +501,7 @@ def test_drive_admin_action_reports_a_real_refusal_when_pkexec_authentication_fa
     executor = FakeSudoExecutor(returncode=127, stderr=b"Not authorized\n")
     case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
-        status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "repair", "params": {"device_path": "/dev/sdz"}})
+        status, body = case.drive_action("repair", {"device_path": "/dev/sdb"})
         assert status == 200  # the job itself always starts - the outcome comes later
         job = _poll_job(case, body["job_id"])
         assert job["outcome"] == "refused"
@@ -502,8 +516,7 @@ def test_drive_admin_action_returns_a_job_id_immediately_instead_of_blocking():
     executor = FakeSudoExecutor(returncode=0)
     case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
-        status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "update_selected", "params": {"selected": []}})
+        status, body = case.drive_action("update_selected", {"selected": []})
         assert status == 200
         assert body["outcome"] == "started"
         assert body["job_id"]
@@ -515,8 +528,7 @@ def test_drive_admin_job_log_reports_real_completion_for_a_started_job():
     executor = FakeSudoExecutor(returncode=0)
     case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
-        status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "update_selected", "params": {"selected": []}})
+        status, body = case.drive_action("update_selected", {"selected": []})
         job = _poll_job(case, body["job_id"])
         assert job is not None and job["done"] is True
         assert job["outcome"] in ("applied", "refused")
@@ -596,8 +608,7 @@ def test_drive_admin_action_reaches_the_real_action_via_a_real_pkexec_runner():
     executor = FakeSudoExecutor(returncode=0, stdout="")
     case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
-        status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "repair", "params": {"device_path": "/dev/sdb"}})
+        status, body = case.drive_action("repair", {"device_path": "/dev/sdb"})
         assert status == 200
         job = _poll_job(case, body["job_id"])
         assert job["done"] is True
@@ -964,11 +975,8 @@ def test_a_drive_action_on_a_drive_outside_the_allowlist_never_reaches_pkexec():
     executor = FakeSudoExecutor(returncode=0, stdout="")
     case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
-        status, body = case.post_json("/drive-admin/action",
-                                       {"action_id": "repair", "params": {"device_path": "/dev/sdz"}})
-        assert status == 200
-        job = _poll_job(case, body["job_id"])
-        assert job["done"] is True and job["outcome"] == "refused"
+        status, body = case.drive_action("repair", {"device_path": "/dev/sdz"})
+        assert status == 400 and body["outcome"] == "refused" and "allowed drives" in body["detail"]
         assert executor.calls == []
     finally:
         case.close()

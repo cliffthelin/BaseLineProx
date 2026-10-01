@@ -5,6 +5,7 @@ import pytest
 from fake_runner import FakeProc, FakeRunner
 
 import drive_admin as da
+from hitl_helpers import authorize, perform_confirmed
 import drive_installer as di
 import physical_device_safety as pds
 
@@ -1015,7 +1016,7 @@ def test_perform_action_does_not_choke_on_on_progress_for_an_action_that_ignores
 
 def test_perform_action_dispatches_update_selected_with_its_params():
     runner = FakeRunner()
-    result = da.perform_action(runner, "update_selected", {"selected": ["INSTALLER_CACHE"], "device_path": "/dev/sdd"})
+    result = perform_confirmed(runner, "update_selected", {"selected": ["INSTALLER_CACHE"], "device_path": "/dev/sdd"})
     assert result.ok is False  # honest placeholder - see test_update_selected_is_an_honest_not_implemented_placeholder
     assert "not implemented" in result.detail
 
@@ -1042,8 +1043,7 @@ def test_an_action_on_a_drive_outside_the_allowlist_is_refused_and_runs_nothing(
 @pytest.mark.parametrize("action_id", ["repair", "mount_volume", "unmount_volume"])
 def test_an_action_on_an_allowed_drive_is_let_through(action_id):
     runner = FakeRunner()
-    da.perform_action(runner, action_id, {"device_path": "/dev/sdb"},
-                      pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
+    perform_confirmed(runner, action_id, {"device_path": "/dev/sdb"}, pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
     assert runner.calls, f"{action_id} should have reached the real action for an allowed drive"
 
 
@@ -1093,9 +1093,18 @@ def _runner_with_a_volume_group():
 
 
 def _act(action_id, **params):
+    """Valid requests are confirmed through the real flow; invalid ones cannot be (they never get a challenge),
+    so a refusal here must come from validation, never from a missing confirmation."""
     runner = _runner_with_a_volume_group()
-    result = da.perform_action(runner, action_id, {**ALLOWED_DEV, **params},
-                               pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
+    pds_runner = FakePdsRunner(serial="MD89N41071210AP4E")
+    request = {**ALLOWED_DEV, **params}
+    try:
+        auth, store = authorize(action_id, request, pds_runner=pds_runner)
+    except ValueError:
+        auth, store = None, None
+    result = da.perform_action(runner, action_id, request, pds_runner=pds_runner, authorization=auth, hitl_store=store)
+    if not result.ok and auth is None:
+        assert "human confirmation" not in result.detail, "refused for a missing confirmation, not for the bad value"
     return result, runner
 
 
@@ -1130,7 +1139,7 @@ def test_a_mountpoint_outside_a_safe_place_under_mnt_is_refused(action_id, bad):
 def test_a_valid_volume_name_and_mountpoint_still_work():
     runner = FakeRunner(command_responses=[(lambda a: a[:3] == ["sudo", "-n", "pvs"], FakeProc(0, "  /dev/sdb3 pve\n", ""))],
                         files={"/dev/pve/data-vol": ""})
-    result = da.perform_action(runner, "mount_volume",
+    result = perform_confirmed(runner, "mount_volume",
                                {"device_path": "/dev/sdb", "lv_name": "data-vol", "mountpoint": "/mnt/pve-inspect"},
                                pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
     assert result.ok is True and any(c[0] == "mount" for c in runner.calls)
@@ -1181,3 +1190,64 @@ def test_an_unsafe_value_would_have_reached_mount_if_it_were_not_refused():
 def test_expected_serial_must_be_one_of_the_allowed_drives(value):
     with pytest.raises(ValueError):
         da.validate_action_params("build_self_installer", {"device_path": "/dev/sdb", "expected_serial": value})
+
+
+
+# -- every drive action needs a human confirmation: the core function itself refuses ---------------
+
+@pytest.mark.parametrize("action_id,extra", [
+    ("repair", {}), ("mount_volume", {}), ("unmount_volume", {}), ("build_self_installer", {}),
+])
+def test_no_drive_action_runs_without_a_confirmation_and_no_command_is_issued(action_id, extra):
+    runner = _runner_with_a_volume_group()
+    result = da.perform_action(runner, action_id, {**ALLOWED_DEV, **extra}, pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"))
+    assert result.ok is False and "human confirmation" in result.detail
+    assert runner.calls == []
+
+
+def test_update_selected_also_needs_a_confirmation():
+    runner = FakeRunner()
+    result = da.perform_action(runner, "update_selected", {"selected": ["BASELINE"]})
+    assert result.ok is False and "human confirmation" in result.detail
+
+
+@pytest.mark.parametrize("bogus", ["yes", True, 1, "approved", {"ok": 1}, object()])
+def test_a_made_up_authorization_does_not_work(bogus):
+    runner = _runner_with_a_volume_group()
+    result = da.perform_action(runner, "repair", ALLOWED_DEV, pds_runner=FakePdsRunner(serial="MD89N41071210AP4E"),
+                               authorization=bogus)
+    assert result.ok is False and runner.calls == []
+
+
+def test_an_authorization_for_one_request_does_not_run_a_different_one():
+    pds_runner = FakePdsRunner(serial="MD89N41071210AP4E")
+    auth, store = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
+    runner = _runner_with_a_volume_group()
+    result = da.perform_action(runner, "mount_volume", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store)
+    assert result.ok is False and runner.calls == []
+
+
+def test_an_authorization_works_once_and_a_replay_is_refused():
+    pds_runner = FakePdsRunner(serial="MD89N41071210AP4E")
+    auth, store = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
+    first = _runner_with_a_volume_group()
+    assert da.perform_action(first, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store).ok is not None
+    assert first.calls, "the confirmed action should have run"
+    replay = _runner_with_a_volume_group()
+    result = da.perform_action(replay, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store)
+    assert result.ok is False and replay.calls == []
+
+
+def test_an_authorization_from_a_different_store_is_refused():
+    pds_runner = FakePdsRunner(serial="MD89N41071210AP4E")
+    auth, _ = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
+    other_store = __import__("hitl_helpers").new_store()
+    runner = _runner_with_a_volume_group()
+    result = da.perform_action(runner, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=other_store)
+    assert result.ok is False and runner.calls == []
+
+
+def test_the_confirmation_is_checked_after_validation_so_a_bad_drive_is_still_refused_for_the_right_reason():
+    result = da.perform_action(FakeRunner(), "repair", {"device_path": "/dev/sda"},
+                               pds_runner=FakePdsRunner(serial="ZCT2WCM2"))
+    assert "allowed drives" in result.detail
