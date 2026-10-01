@@ -153,10 +153,58 @@ def _ensure_types() -> None:
                            default_scope=SCOPE)
 
 
-def allocated() -> dict:
-    """Every identifier ever allocated, retired ones included."""
+def allocated(*, read_only: bool = False) -> dict:
+    """Every identifier ever allocated, retired ones included.
+    `read_only=True` never creates the registry - for page views."""
+    if read_only:
+        return registry.list_entries(REGISTRY_TYPE, scope=SCOPE, read_only=True)
     _ensure_types()
     return registry.list_entries(REGISTRY_TYPE, scope=SCOPE)
+
+
+@dataclass(frozen=True)
+class Assignment:
+    value: str
+    allocated: bool     # False = a preview of what allocation would assign; not reserved
+
+
+def preview(requests) -> dict:
+    """What `allocate_many(requests)` would return, computed without
+    writing anything. Already-allocated subjects come back with
+    allocated=True; the rest are numbered the way allocation would number
+    them right now, marked allocated=False because nothing reserves them -
+    a concurrent allocation could take the same code first.
+
+    `requests` is an iterable of (cluster, medium, subject)."""
+    existing = allocated(read_only=True)
+    counters = registry.list_entries(COUNTER_TYPE, scope=SCOPE, read_only=True)
+    by_subject = {(e["attributes"].get("cluster"), e["attributes"].get("medium"),
+                   e["attributes"].get("subject")): value for value, e in existing.items()}
+    taken: dict = {}
+    for value in existing:
+        taken.setdefault(value[0], set()).add(parse_id(value).code)
+    next_n = {c: max(int((counters.get(c) or {}).get("value") or 1), 1) for c in CLUSTERS}
+
+    out = {}
+    for cluster, medium, subject in requests:
+        hit = by_subject.get((cluster, medium, subject))
+        if hit:
+            out[subject] = Assignment(hit, True)
+            continue
+        codes = taken.setdefault(cluster, set())
+        n = next_n[cluster]
+        while numeric_code(n) in codes:
+            n += 1
+        codes.add(numeric_code(n))
+        next_n[cluster] = n + 1
+        out[subject] = Assignment(format_id(cluster, medium, numeric_code(n)), False)
+    return out
+
+
+def allocate_many(requests) -> dict:
+    """Allocate every request, returning subject -> identifier. Writes
+    the registry; call from an explicit provisioning step, never a view."""
+    return {subject: allocate(cluster, medium, subject) for cluster, medium, subject in requests}
 
 
 def find(cluster: str, medium: str, subject: str) -> str | None:

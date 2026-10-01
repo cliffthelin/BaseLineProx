@@ -270,12 +270,41 @@ def get_entry(type_id: str, entry_id: str, *, scope: str) -> dict | None:
     return {"attributes": json.loads(row[0]), "value": json.loads(row[1]) if row[1] is not None else None}
 
 
-def list_entries(type_id: str, *, scope: str) -> dict:
+def list_entries(type_id: str, *, scope: str, read_only: bool = False) -> dict:
     """Every entry of `type_id` currently stored at `scope` - a caller
     juggling entries split across both scopes calls this once per
     scope and merges, rather than this function guessing which
-    database to prefer."""
+    database to prefer.
+
+    `read_only=True` is for anything that only displays state (a page
+    view). `_connect` creates the directory and the database file, so an
+    ordinary call against an unmounted volume path writes a new database
+    onto the root disk - which the volume then hides when it mounts. A
+    read-only call returns {} when there is no database instead, and
+    opens an existing one in SQLite's read-only mode."""
     path = _path_for_scope(scope)
+    if read_only:
+        if path != ":memory:" and not os.path.exists(path):
+            return {}
+        # SQLite's mode=ro on a WAL database still CREATES -shm and -wal
+        # beside it (reproduced, not assumed). immutable=1 creates nothing,
+        # but ignores the WAL - safe only when there is no WAL to ignore.
+        # So: no -wal file -> immutable (nothing un-checkpointed to miss);
+        # a -wal already present -> mode=ro, which reads it and adds no
+        # new file. A writer starting mid-read can make an immutable read
+        # stale; for a display that is acceptable, for a decision it is not.
+        flags = "mode=ro" if os.path.exists(path + "-wal") else "mode=ro&immutable=1"
+        with closing(sqlite3.connect(f"file:{path}?{flags}", uri=True)) as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT entry_id, attributes, value FROM registry_entries WHERE type_id = ?", (type_id,)
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return {}
+        return {
+            r[0]: {"attributes": json.loads(r[1]), "value": json.loads(r[2]) if r[2] is not None else None}
+            for r in rows
+        }
     with closing(_connect(path)) as conn:
         rows = conn.execute(
             "SELECT entry_id, attributes, value FROM registry_entries WHERE type_id = ?", (type_id,)

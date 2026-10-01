@@ -1,0 +1,97 @@
+# Baseline layers, volumes and partitions
+
+One page per layer of the system, from the physical drive up to the
+applications running on it. Each page says what lives on that layer, what
+must never live there, how the workflow touches it, and the status of every
+notable package, application and decision on it.
+
+Written 2026-09-30 against commit `e629011`. Statuses are only as current as
+that; the code and the [v0.2 work queue](../design/v0.2-work-queue.md) are the
+live source of truth.
+
+## Status legend
+
+Every item carries exactly one status. They mean specific things, because a
+loose "done" is how this project previously ended up with claims nothing
+backed ([decision record 47](../design/decision-records/47-audit-found-contradicted-real-hardware-claims.md)).
+
+| Status | Means |
+|---|---|
+| **MVP completed** | Built, tested, and works end to end for its minimal scope. The *Verified* column says how far that proof reaches. |
+| **In progress** | Partly built. Some layer of it exists and is tested; a named piece is still missing. |
+| **On roadmap** | Decided and wanted, not yet built. The design is settled enough to start. |
+| **In discovery** | An open question. What to build, or whether to, is not decided yet. |
+
+**Verified** is separate from status, because something can be complete and
+still only proven in a test harness:
+
+| Verified | Means |
+|---|---|
+| real hardware | Exercised on a physical machine, with evidence recorded |
+| QEMU | Exercised in a disposable VM, with evidence recorded |
+| unit tests | Proven only by the test suite (`tests/unit/`, injected runners) |
+| registry read | A fact read from an external system, not exercised here |
+| none | Not yet proven at all |
+
+## The stack
+
+```
+  applications     apt packages · VM/LXC guests · containers (Caddy) · Flatpak/Snap/AppImage
+       |           each one isolated: own data, own registry.db, own owner, mode 0700
+       v
+  isolation layer  overlays (host apps) and bind mounts (containers) - 08
+       |           immutable base below, personal writable layer above
+       v
+  per-persona      USER_<PERSONA>  - the person's own settings/state   06
+  volumes          APPDATA_<PERSONA>           - every app's writable layer        07
+       |
+  shared volumes   BASELINE                - install-wide state, global registry   02
+                   SUBSTRATE   - recovery/substrate config             03
+                   INSTALLER_CACHE         - what a rebuild needs, never executed  04
+                   SESSION_TEMP            - ephemeral, quarantine                 05
+       |
+  substrate        Proxmox VE root (pve VG) + Baseline's own services              01
+       |
+  physical         drives, identified by serial - never by kernel letter           00
+```
+
+## Pages
+
+> Only 00 is written. Pages 01-08 are listed so the structure is fixed, but are **not written yet** (paused 2026-09-30 while naming settled). Their statuses below are the author's reading of the code, not yet checked page by page.
+
+| # | Layer | Status | One line |
+|---|---|---|---|
+| 00 | [Physical carrier](00-physical-carrier.md) | In progress | Drives by serial; the carrier's on-disk layout is now 2 partitions behind the plan |
+| 01 | [Substrate](01-substrate.md) | In progress | Proxmox install pipeline proven in QEMU; real-hardware end to end still pending |
+| 02 | [BASELINE](02-baseline.md) | In discovery | Holds app/VM/LXC state that the AppData rule says belongs elsewhere |
+| 03 | [SUBSTRATE](03-substrate-persistence.md) | In progress | Volume exists and mounts; nothing writes to it yet |
+| 04 | [INSTALLER_CACHE](04-installer-cache.md) | In progress | Catalog and tab built; on this machine it is not mounted and 25 of 26 artifacts are missing |
+| 05 | [SESSION_TEMP](05-session-temp.md) | MVP completed | Ephemeral state and recovery-mode working state |
+| 06 | [USER_PERSISTENCE](06-user-persistence.md) | MVP completed | Per-persona settings/state via bind redirects; label collision open |
+| 07 | [APPDATA](07-appdata.md) | In progress | Per-persona app data volume; planned and in the layout, not yet on any disk |
+| 08 | [Application isolation](08-application-isolation.md) | In progress | Overlays, formats, containers, the Caddy gateway |
+
+## Cross-cutting findings from writing these pages
+
+Documenting the volumes against the code turned up real defects. They are
+fixed and tested unless marked otherwise, and listed here because each one
+was invisible until something looked at the whole layout at once:
+
+| Finding | Status | Where |
+|---|---|---|
+| AppData mounted with bare `defaults` (no `nosuid,nodev`) | fixed, `86f86fc` | [07](07-appdata.md) |
+| AppData interleaved per persona, renumbering existing carrier partitions (`USER_PERSONAL` 6 → 7) | fixed, `e629011` | [00](00-physical-carrier.md) |
+| `carrier_layout._role()` raised `KeyError` for AppData | fixed, `e629011` | [00](00-physical-carrier.md) |
+| Rootless Quadlet units targeted `multi-user.target`, so they never started at boot | fixed, `4012834` | [08](08-application-isolation.md) |
+| Four LXC guests overlaid one path, silently sharing data | fixed, `5a11c35` | [08](08-application-isolation.md) |
+| ext4 16-char labels: `SUBSTRATE` truncates too, not only the persona volumes | **open** | [03](03-substrate-persistence.md), [06](06-user-persistence.md) |
+| `/mnt/INSTALLER_CACHE` is a plain directory on the root filesystem, not the volume | **open** | [04](04-installer-cache.md) |
+| SUBSTRATE is described as holding the encrypted admin passphrase; no code writes it | **open** | [03](03-substrate-persistence.md) |
+
+## Deeper reading
+
+- [Master PRD](../design/baseline-master-prd.md) - purpose, recipe-driven self-replication
+- [Hardened-appliance PRD](../design/hardened-appliance-prd.md) - gateway, measured boot, dual GPU
+- [v0.2 work queue](../design/v0.2-work-queue.md) - the live roadmap
+- [Decision records](../design/decision-records/) - why each piece is the way it is
+- [Docs-vs-code audit, 2026-09-30](../design/docs-vs-code-audit-2026-09-30.md)

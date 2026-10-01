@@ -208,3 +208,24 @@ def test_concurrent_readers_alongside_a_writer_never_crash_or_corrupt_state():
 
     assert all(writer_results)
     assert all(reader_results)  # every read saw *some* valid int, never a crash or garbage
+
+
+def test_read_only_listing_never_creates_a_missing_database(tmp_path, monkeypatch):
+    """A page view against an unmounted volume path must not create a
+    database on the root disk for the volume to hide later."""
+    path = tmp_path / "absent" / "foundation.db"
+    monkeypatch.setattr(reg, "GLOBAL_DB_PATH", str(path))
+    assert reg.list_entries("anything", scope=reg.GLOBAL, read_only=True) == {}
+    assert not path.parent.exists()
+
+
+def test_read_only_listing_creates_no_side_files(tmp_path, monkeypatch):
+    """SQLite's mode=ro on a WAL database creates -shm/-wal; read-only
+    must leave the directory exactly as it found it."""
+    path = tmp_path / "foundation.db"
+    monkeypatch.setattr(reg, "GLOBAL_DB_PATH", str(path))
+    reg.register_type("t", "test", default_scope=reg.GLOBAL)
+    reg.upsert_entry("t", "e1", attributes={"a": 1}, scope=reg.GLOBAL, value=1)
+    before = sorted(p.name for p in tmp_path.iterdir())
+    assert reg.list_entries("t", scope=reg.GLOBAL, read_only=True)["e1"]["value"] == 1
+    assert sorted(p.name for p in tmp_path.iterdir()) == before

@@ -43,7 +43,8 @@ def test_apps_are_derived_from_the_installer_catalog_so_they_cannot_drift():
 def test_both_vm_lxc_guests_and_packages_are_represented():
     kinds = {a.kind for a in appdata.installable_apps()}
     assert appdata.KIND_PACKAGE in kinds
-    assert appdata.KIND_GUEST in kinds
+    assert appdata.KIND_LXC in kinds
+    assert appdata.KIND_VM in kinds
 
 
 # -- Data: AppData volume and nowhere else -----------------------------
@@ -92,9 +93,9 @@ def test_an_apps_registry_lives_inside_its_own_tree():
 
 
 def test_registry_path_is_per_persona_and_per_app():
-    a = appdata.registry_path("admin", "chromium")
-    b = appdata.registry_path("personal", "chromium")
-    c = appdata.registry_path("personal", "podman")
+    a = appdata.registry_path("admin", "A_D_00001")
+    b = appdata.registry_path("personal", "A_D_00001")
+    c = appdata.registry_path("personal", "A_D_00002")
     assert a != b != c and a != c
 
 
@@ -129,7 +130,7 @@ def test_every_plan_satisfies_the_full_isolation_contract():
 def test_the_immutable_base_is_the_lowerdir_and_is_never_written_to():
     """NixOS-style: the installed base is read-only; every write goes to
     the upper layer on AppData."""
-    plan = appdata.plan_for("personal", _app("pihole-lxc"))
+    plan = _plan("pihole-lxc")
     overlay = plan.overlays[0]
     assert overlay.lowerdir == overlay.target
     assert not overlay.lowerdir.startswith(plan.home)
@@ -139,12 +140,12 @@ def test_the_immutable_base_is_the_lowerdir_and_is_never_written_to():
 def test_overlay_mounts_back_at_the_path_the_app_already_uses():
     """The app needs no cooperation - it writes where it always did.
     For a guest that is its own per-VMID disk, not the shared store."""
-    plan = appdata.plan_for("personal", _app("pihole-lxc"))
+    plan = _plan("pihole-lxc")
     assert plan.overlays[0].target == "/var/lib/vz/private/pihole-lxc"
 
 
 def test_mount_argv_is_a_real_overlay_invocation():
-    plan = appdata.plan_for("personal", _app("chromium"))
+    plan = _plan("chromium")
     argv = plan.overlays[0].mount_argv()
     assert argv[:4] == ["mount", "-t", "overlay", "overlay"]
     opts = argv[argv.index("-o") + 1]
@@ -153,7 +154,7 @@ def test_mount_argv_is_a_real_overlay_invocation():
 
 
 def test_each_data_target_gets_its_own_upper_and_work_pair():
-    plan = appdata.plan_for("personal", _app("chromium"))
+    plan = _plan("chromium")
     assert len(plan.overlays) == 2            # config and cache
     uppers = {o.upperdir for o in plan.overlays}
     works = {o.workdir for o in plan.overlays}
@@ -171,7 +172,7 @@ def test_workdir_shares_the_filesystem_with_upperdir_as_overlayfs_requires():
 def test_an_app_with_no_persistent_data_gets_no_overlay_and_says_so():
     """A library or one-shot tool genuinely has no personal data. That
     is recorded explicitly, never guessed into an overlay."""
-    plan = appdata.plan_for("personal", _app("python3-rich"))
+    plan = _plan("python3-rich")
     assert plan.overlays == []
     assert plan.app.has_persistent_data is False
 
@@ -181,7 +182,7 @@ def test_an_app_with_persistent_data_reports_that_it_has_some():
 
 
 def test_required_directories_cover_every_upper_and_work_path():
-    plan = appdata.plan_for("personal", _app("chromium"))
+    plan = _plan("chromium")
     dirs = appdata.required_directories(plan)
     for overlay in plan.overlays:
         assert overlay.upperdir in dirs
@@ -200,6 +201,15 @@ def _app(app_id):
     return next(a for a in appdata.installable_apps() if a.app_id == app_id)
 
 
+def _plan(app_id, persona="personal"):
+    return next(p for p in appdata.plan_all(persona) if p.app.app_id == app_id)
+
+
+def _assign(app, code="00099"):
+    import naming
+    return naming.Assignment(naming.format_id("A", app.medium.letter, code), False)
+
+
 def test_no_two_applications_overlay_the_same_target():
     """Real defect this caught: every LXC guest originally targeted
     /var/lib/vz/private, so four overlays would have contended for one
@@ -211,7 +221,7 @@ def test_no_two_applications_overlay_the_same_target():
 
 def test_each_guest_targets_its_own_disk_not_the_shared_proxmox_store():
     for plan in appdata.plan_all("personal"):
-        if plan.app.kind != appdata.KIND_GUEST:
+        if plan.app.kind not in (appdata.KIND_LXC, appdata.KIND_VM):
             continue
         for overlay in plan.overlays:
             assert overlay.target not in ("/var/lib/vz/private", "/var/lib/vz/images"), (
@@ -267,7 +277,7 @@ def test_a_formats_own_data_root_is_what_gets_overlaid():
     and the overlay captures nothing."""
     app = appdata.AppSpec("org.mozilla.firefox", "Firefox", appdata.KIND_FLATPAK,
                           source="flathub")
-    plan = appdata.plan_for("personal", app)
+    plan = appdata.plan_for("personal", app, _assign(app))
     assert len(plan.overlays) == 1
     assert plan.overlays[0].target == "~/.var/app/org.mozilla.firefox"
     assert plan.overlays[0].upperdir.startswith(plan.home)
@@ -276,7 +286,7 @@ def test_a_formats_own_data_root_is_what_gets_overlaid():
 def test_a_flatpak_app_still_gets_its_own_registry_and_owner():
     app = appdata.AppSpec("org.mozilla.firefox", "Firefox", appdata.KIND_FLATPAK,
                           source="flathub")
-    plan = appdata.plan_for("personal", app)
+    plan = appdata.plan_for("personal", app, _assign(app))
     assert plan.registry_db.startswith(plan.home)
     assert plan.mode == "0700"
     assert plan.isolated
@@ -300,27 +310,27 @@ def test_caddy_is_a_container_application():
 def test_a_container_gets_bind_mounts_not_host_overlays():
     """/data exists only inside the container's mount namespace - a host
     overlay at /data would capture nothing the container writes."""
-    plan = appdata.plan_for("personal", _app("caddy"))
+    plan = _plan("caddy")
     assert plan.overlays == []
     assert {b.container for b in plan.binds} == {"/data", "/config", "/etc/caddy"}
 
 
 def test_every_container_bind_comes_from_the_apps_own_appdata_home():
-    plan = appdata.plan_for("personal", _app("caddy"))
+    plan = _plan("caddy")
     for bind in plan.binds:
         assert bind.host.startswith(plan.home + "/binds/")
     assert plan.isolated
 
 
 def test_the_caddyfile_is_bound_read_only_so_caddy_cannot_rewrite_its_routing():
-    plan = appdata.plan_for("personal", _app("caddy"))
+    plan = _plan("caddy")
     etc = next(b for b in plan.binds if b.container == "/etc/caddy")
     assert etc.read_only is True
     assert etc.volume_arg().endswith(":/etc/caddy:ro")
 
 
 def test_container_spec_pulls_by_digest_runs_rootless_as_the_apps_own_user():
-    plan = appdata.plan_for("personal", _app("caddy"))
+    plan = _plan("caddy")
     spec = appdata.container_spec(plan)
     assert "@sha256:" in spec.image
     assert spec.rootless is True
@@ -333,18 +343,18 @@ def test_container_spec_refuses_an_unpinned_image_rather_than_using_a_tag():
     app = appdata.AppSpec("x", "x", appdata.KIND_CONTAINER, source="s",
                           image_ref="quay.io/x/y:latest")
     with pytest.raises(appdata.UnpinnedImage):
-        appdata.container_spec(appdata.plan_for("personal", app))
+        appdata.container_spec(appdata.plan_for("personal", app, _assign(app)))
 
 
 def test_caddys_admin_port_is_never_published():
-    plan = appdata.plan_for("personal", _app("caddy"))
+    plan = _plan("caddy")
     for port in appdata.CONTAINER_NEVER_PUBLISH["caddy"]:
         assert port not in appdata.published_ports(plan)
 
 
 def test_container_spec_renders_a_real_quadlet_unit():
     import quadlet
-    unit = quadlet.generate_unit(appdata.container_spec(appdata.plan_for("personal", _app("caddy"))))
+    unit = quadlet.generate_unit(appdata.container_spec(_plan("caddy")))
     assert "Image=quay.io/hummingbird/caddy@sha256:" in unit
     assert "PublishPort=8443:8443" in unit
     assert "2019" not in unit
@@ -360,7 +370,122 @@ def test_two_containers_may_share_an_internal_path_without_conflict():
 
 
 def test_container_bind_directories_are_created_with_the_plan():
-    plan = appdata.plan_for("personal", _app("caddy"))
+    plan = _plan("caddy")
     dirs = appdata.required_directories(plan)
     for bind in plan.binds:
         assert bind.host in dirs
+
+
+# -- Medium contracts --------------------------------------------------
+
+def test_every_app_medium_in_naming_has_a_contract():
+    """ISO is an operating-system image, not an application medium."""
+    import naming
+    letters = {m.letter for m in appdata.MEDIA.values()}
+    assert letters == set(naming.MEDIA) - {"I"}
+
+
+def test_every_contract_states_its_method_of_use_and_status():
+    statuses = {appdata.MVP_COMPLETED, appdata.IN_PROGRESS, appdata.ON_ROADMAP, appdata.IN_DISCOVERY}
+    for m in appdata.MEDIA.values():
+        assert m.method_of_use.strip(), m.name
+        assert m.status in statuses, m.name
+
+
+def test_every_named_helper_is_real_code():
+    """A contract may not cite a helper that does not exist."""
+    import importlib
+    for m in appdata.MEDIA.values():
+        for ref in m.helpers:
+            module, _, attr = ref.partition(".")
+            mod = importlib.import_module(module)
+            if attr:
+                assert getattr(mod, attr, None) is not None, f"{m.name}: {ref} does not exist"
+
+
+def test_a_medium_with_no_helper_does_not_claim_to_be_working():
+    for m in appdata.MEDIA.values():
+        if not m.helpers:
+            assert m.status in (appdata.ON_ROADMAP, appdata.IN_DISCOVERY), m.name
+
+
+def test_each_medium_stands_alone_one_letter_per_kind():
+    letters = [m.letter for m in appdata.MEDIA.values()]
+    assert len(letters) == len(set(letters))
+
+
+def test_lxc_and_vm_guests_are_separate_media():
+    assert _app("pihole-lxc").medium.letter == "L"
+    assert _app("haos-vm").medium.letter == "V"
+
+
+# -- Identifiers -------------------------------------------------------
+
+def test_every_home_is_keyed_by_its_identifier_not_its_name():
+    for plan in appdata.plan_all("personal"):
+        assert plan.home == f"/mnt/APPDATA_PERSONAL/{plan.baseline_id}"
+        assert plan.app.app_id not in plan.home
+
+
+def test_identifiers_match_the_apps_medium_and_the_app_cluster():
+    import naming
+    for plan in appdata.plan_all("personal"):
+        parsed = naming.parse_id(plan.baseline_id)
+        assert parsed.cluster == "A"
+        assert parsed.medium == plan.app.medium.letter
+
+
+def test_no_two_apps_share_an_identifier():
+    assert appdata.identifier_collisions(appdata.plan_all("personal")) == []
+
+
+def test_the_owner_uid_comes_from_the_identifier():
+    plan = _plan("caddy")
+    assert plan.owner_user == f"baseline-{plan.baseline_id.lower()}"
+
+
+def test_the_name_is_only_an_alias_under_by_name():
+    plan = _plan("caddy")
+    assert plan.alias.link == "/mnt/APPDATA_PERSONAL/by-name/caddy"
+    assert plan.alias.target == f"../{plan.baseline_id}"
+
+
+def test_no_mount_path_goes_through_an_alias():
+    import naming
+    for plan in appdata.plan_all("personal"):
+        for path in [plan.home] + [o.upperdir for o in plan.overlays] + [b.host for b in plan.binds]:
+            assert naming.ALIAS_DIRNAME not in path.split("/")
+
+
+def test_an_identifier_for_the_wrong_medium_is_refused():
+    import naming
+    import pytest
+    with pytest.raises(naming.NamingError):
+        appdata.plan_for("personal", _app("caddy"), naming.Assignment("A_D_00001", True))
+
+
+def test_without_allocations_identifiers_are_previews_and_say_so():
+    assert all(p.id_allocated is False for p in appdata.plan_all("personal"))
+
+
+def test_allocated_identifiers_are_used_and_marked_allocated():
+    import naming
+    naming.allocate_many(appdata.id_requests())
+    plans = appdata.plan_all("personal")
+    assert all(p.id_allocated for p in plans)
+    assert _plan("caddy").baseline_id == naming.find("A", "C", "caddy")
+
+
+def test_planning_never_creates_the_registry(tmp_path, monkeypatch):
+    """Viewing plans must not write a database onto an unmounted volume path."""
+    import registry
+    db = tmp_path / "none" / "foundation.db"
+    monkeypatch.setattr(registry, "GLOBAL_DB_PATH", str(db))
+    appdata.plan_all("personal")
+    assert not db.parent.exists()
+
+
+def test_the_same_app_has_the_same_identifier_in_every_persona():
+    admin = {p.app.app_id: p.baseline_id for p in appdata.plan_all("admin")}
+    personal = {p.app.app_id: p.baseline_id for p in appdata.plan_all("personal")}
+    assert admin == personal
