@@ -127,6 +127,9 @@ SCHEMA = (
                "recovery, no drive actions, and they can never confirm one). They sign in with that machine "
                "account's own password; Baseline creates no accounts and stores no passwords. Empty means none.",
                scope=registry.GLOBAL),
+    SettingDef("access", "operator_session_hours", 8,
+               "How long an operator login lasts before it must be repeated. Longer than an admin session so that "
+               "queued work can finish while you are away; it still ends by itself and can be logged out at any time."),
     SettingDef("startup", "auto_start_persona", "personal",
                "Which persona's USER volume mounts automatically on boot. GLOBAL "
                "scope (decision record 89) - recovery must be able to read this even when a "

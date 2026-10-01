@@ -164,7 +164,7 @@ def test_the_operator_role_comes_from_the_configured_machine_accounts(tmp_path):
             return password == "pw"
     clock = Clock()
     deps = _base_deps(sessions=sw.SessionStore(), clock=clock, verifier=Verifier(),
-                      operator_users=lambda: "claude, other")
+                      operator_users=lambda: "claude, other", operator_session_hours=lambda: 3)
     deps["sessions"].create("seed", NOW)
     case = _RealServerCase(deps)
     try:
@@ -179,9 +179,11 @@ def test_the_operator_role_comes_from_the_configured_machine_accounts(tmp_path):
         assert location == "/operations"
         token = cookie.split("session=")[1].split(";")[0]
         assert deps["sessions"].sessions[token].role == "operator"
+        assert deps["sessions"].sessions[token].ttl_s == 3 * 3600
         status, location, cookie = login("cane")
         assert location == "/settings"
         token = cookie.split("session=")[1].split(";")[0]
         assert deps["sessions"].sessions[token].role == "admin"
+        assert deps["sessions"].sessions[token].ttl_s == 1800.0
     finally:
         case.close()

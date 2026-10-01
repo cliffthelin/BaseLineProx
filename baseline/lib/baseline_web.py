@@ -1255,6 +1255,15 @@ def _operator_users(deps: dict) -> frozenset:
     return frozenset(n.strip() for n in (names.split(",") if isinstance(names, str) else names) if n.strip())
 
 
+def _operator_session_seconds(deps: dict) -> float:
+    getter = deps.get("operator_session_hours")
+    try:
+        hours = float(getter() if callable(getter) else (getter if getter is not None else 8))
+    except (TypeError, ValueError):
+        hours = 8.0
+    return min(max(hours, 0.25), 24.0) * 3600
+
+
 def _run_operation_job(job_id: str, op_id: str, params: dict, origin, deps: dict) -> None:
     def line(text: str) -> None:
         with _JOBS_LOCK:
@@ -1605,7 +1614,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                                       body.get("username", ""), body.get("password", ""), now,
                                       persona_provider=deps.get("persona_provider"))
             if result.outcome == "applied" and body.get("username", "") in _operator_users(deps):
-                deps["sessions"].sessions[result.body["token"]].role = "operator"
+                operator = deps["sessions"].sessions[result.body["token"]]
+                operator.role = "operator"
+                operator.ttl_s = _operator_session_seconds(deps)
             self._record_attempt("login", now, ok=result.outcome == "applied")
             if result.outcome == "applied":
                 role = deps["sessions"].sessions[result.body["token"]].role
@@ -1799,6 +1810,7 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
         lambda op, params, origin: _start_operation_job(deps, op, params, origin))
     import settings_store
     deps["operator_users"] = lambda: settings_store.get_setting("access", "operator_users")
+    deps["operator_session_hours"] = lambda: settings_store.get_setting("access", "operator_session_hours")
     deps["hitl_audit_path"] = audit_path
     deps["elevation_verify_fn"] = sw.SystemElevationVerifier(elevation_username)
     # Recovery mode: this machine's root password (or its passphrase), checked
