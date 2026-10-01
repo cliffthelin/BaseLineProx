@@ -23,6 +23,8 @@ operator's data.
 - **Passwords and passphrases are stored only as salted one-way hashes**: a candidate can be checked for a match, nothing stored can be decrypted.
 - Drives are identified by **serial number, never by `/dev/sdX`**, and every destructive step goes through `physical_device_safety.validate_target_device` (block device, minimum size, never the boot drive). Baseline acts only on the two SK hynix drives it is set up with: that allowlist is enforced (v0.2 row 55).
 
+- **Backups** go to a separate drive and are add-only: Baseline adds a new `baseline-backups/` folder and files inside it and never deletes, overwrites or replaces anything. It refuses a destination on either SK hynix drive.
+
 ## Salvage boundary
 
 This project has a precursor (`cliffthelin/baseline_os`, plus a physical precursor

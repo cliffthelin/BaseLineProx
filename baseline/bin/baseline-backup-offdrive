@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for baseline-backup-offdrive.service: add one verified backup set of everything on
+the SK hynix drives to the configured separate drive. See lib/offdrive_backup.py: it only ever ADDS files to a
+new baseline-backups folder and never deletes, overwrites or replaces anything.
+"""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import offdrive_backup  # noqa: E402
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    if args not in ([], ["--dry-run"]):
+        print("usage: baseline-backup-offdrive [--dry-run]", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(offdrive_backup.main(dry_run=bool(args)))

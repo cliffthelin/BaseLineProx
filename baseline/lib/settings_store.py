@@ -112,6 +112,15 @@ SCHEMA = (
     SettingDef("sessions", "admin_elevation_ttl_minutes", 15,
                "How long admin's cross-persona passphrase stays cached before it must be "
                "re-entered - sudo-like, deliberately much shorter than the base session."),
+    SettingDef("backups", "offdrive_destination", "",
+               "Folder on a SEPARATE local drive where Baseline adds backups of everything on the SK hynix "
+               "drives, for example /mnt/10TB/backup. Empty (the default) means no off-drive backup is made. "
+               "Baseline only ever ADDS a new baseline-backups folder and new files inside it: it never deletes, "
+               "overwrites or replaces anything there, and it refuses a destination on either SK hynix drive or "
+               "on the root filesystem."),
+    SettingDef("backups", "offdrive_min_interval_hours", 168,
+               "Minimum hours between off-drive backups. Nothing is ever deleted from the destination, so "
+               "backups are not made more often than this; the default is a week."),
     SettingDef("startup", "auto_start_persona", "personal",
                "Which persona's USER volume mounts automatically on boot. GLOBAL "
                "scope (decision record 89) - recovery must be able to read this even when a "

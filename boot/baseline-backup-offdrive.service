@@ -1,0 +1,16 @@
+[Unit]
+Description=Baseline off-drive backup: add a verified backup set of the SK hynix drives to a separate drive (v0.2 row 56)
+Requires=baseline-persist-bind-mounts.service
+After=baseline-persist-bind-mounts.service local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-backup-offdrive
+# The installed code is mounted read-only for the service, so nothing it runs can rewrite
+# the code that decides who gets privileges. (No NoNewPrivileges: Drive Administration needs pkexec.)
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
+# A big backup must not starve the machine.
+Nice=19
+IOSchedulingClass=idle
+RemainAfterExit=no

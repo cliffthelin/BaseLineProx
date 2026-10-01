@@ -262,6 +262,8 @@ cp "$SRC/baseline/lib/control_panel_web.py" /opt/baseline/lib/control_panel_web.
 # timer, one attempt per real persona.
 cp "$SRC/baseline/lib/backup_recurring.py" /opt/baseline/lib/backup_recurring.py
 cp "$SRC/baseline/bin/baseline-backup-recurring" /opt/baseline/bin/baseline-backup-recurring
+cp "$SRC/baseline/lib/offdrive_backup.py" /opt/baseline/lib/offdrive_backup.py
+cp "$SRC/baseline/bin/baseline-backup-offdrive" /opt/baseline/bin/baseline-backup-offdrive
 # The merged Baseline web app (decision record 83) - direct
 # instruction: "merge those two together and add a Drive
 # administration tab... this application will never get off the
@@ -295,7 +297,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check /opt/baseline/bin/baseline-backup-offdrive
 
 echo "=== Locking the installed code: root-owned, not writable by anyone else ==="
 # Nothing that runs this code may be able to rewrite it (an attacker in a service, or a bug,
@@ -322,6 +324,8 @@ cp "$SRC/boot/baseline-web.service" /etc/systemd/system/baseline-web.service
 cp "$SRC/boot/baseline-scripts-inbox.service" /etc/systemd/system/baseline-scripts-inbox.service
 cp "$SRC/boot/baseline-backup-recurring.service" /etc/systemd/system/baseline-backup-recurring.service
 cp "$SRC/boot/baseline-backup-recurring.timer" /etc/systemd/system/baseline-backup-recurring.timer
+cp "$SRC/boot/baseline-backup-offdrive.service" /etc/systemd/system/baseline-backup-offdrive.service
+cp "$SRC/boot/baseline-backup-offdrive.timer" /etc/systemd/system/baseline-backup-offdrive.timer
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
@@ -380,6 +384,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/scripts_inbox.py /opt/baseline/lib/scripts_inbox_web.py /opt/baseline/lib/scripts_inbox_gate.py \
          /opt/baseline/lib/sensors_interval_control.py \
          /opt/baseline/lib/backup_recurring.py /opt/baseline/bin/baseline-backup-recurring \
+         /opt/baseline/lib/offdrive_backup.py /opt/baseline/bin/baseline-backup-offdrive \
          /opt/baseline/lib/recovery_mode.py /opt/baseline/bin/baseline-recovery-mode \
          /opt/baseline/lib/drive_admin.py /opt/baseline/lib/baseline_web.py /opt/baseline/bin/baseline-web \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
@@ -395,6 +400,7 @@ for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstb
          baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
          baseline-web.service baseline-scripts-inbox.service \
          baseline-backup-recurring.service baseline-backup-recurring.timer \
+         baseline-backup-offdrive.service baseline-backup-offdrive.timer \
          baseline-dependency-check.service baseline-dependency-check.timer; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
@@ -408,6 +414,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso \
          /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate \
          /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-backup-recurring \
+         /opt/baseline/bin/baseline-backup-offdrive \
          /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web \
          /opt/baseline/bin/baseline-dependency-check; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
@@ -427,6 +434,7 @@ systemctl enable baseline-kiosk.service
 systemctl enable baseline-web.service
 systemctl enable baseline-scripts-inbox.service
 systemctl enable baseline-backup-recurring.timer
+systemctl enable baseline-backup-offdrive.timer
 systemctl enable baseline-dependency-check.timer
 
 for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-backup-recurring.timer baseline-dependency-check.timer; do
