@@ -888,3 +888,62 @@ def test_installer_cache_route_uses_pkexec_only_when_root_is_requested():
     finally:
         da.PkexecRunner = original
         case.close()
+
+
+# -- App Isolation tab (appdata.py surfaced) ---------------------------
+
+def test_app_isolation_tab_is_in_the_nav():
+    assert any(path == "/app-isolation" for path, _ in bw.NAV_TABS)
+
+
+def test_app_isolation_route_renders_for_a_real_persona():
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get("/app-isolation?persona=admin")
+        assert status == 200
+        assert b"APPDATA_ADMIN" in body
+        assert b"Isolation holds" in body
+    finally:
+        case.close()
+
+
+def test_app_isolation_route_falls_back_for_an_unknown_persona():
+    """A persona from a query string is untrusted input; it must not
+    reach a path on disk."""
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get("/app-isolation?persona=../../etc")
+        assert status == 200
+        assert b"APPDATA_PERSONAL" in body
+        assert b"etc" not in body.split(b"APPDATA_PERSONAL")[0][-80:]
+    finally:
+        case.close()
+
+
+def test_app_isolation_page_shows_the_package_format_matrix():
+    import appdata
+    plans = appdata.plan_all("personal")
+    body = bw.render_app_isolation_page(
+        "personal", plans, leaks=[], conflicts=[],
+        formats=appdata.supported_formats()).decode()
+    assert "Flatpak" in body and "AppImage" in body and "Snap" in body
+    assert "~/.var/app/{app}" in body
+
+
+def test_app_isolation_page_reports_a_violation_loudly():
+    import appdata
+    plans = appdata.plan_all("personal")
+    body = bw.render_app_isolation_page(
+        "personal", plans, leaks=[("a", "b", "/x")], conflicts=[],
+        formats=appdata.supported_formats()).decode()
+    assert "Isolation violated" in body
+    assert "ic-banner warn" in body
+
+
+def test_app_isolation_page_states_an_app_with_no_overlay_rather_than_blanking_it():
+    import appdata
+    plans = appdata.plan_all("personal")
+    body = bw.render_app_isolation_page(
+        "personal", plans, leaks=[], conflicts=[],
+        formats=appdata.supported_formats()).decode()
+    assert "no overlay (stated, not assumed)" in body

@@ -59,6 +59,7 @@ NAV_TABS = (
     ("/drive-admin", "Drive Administration"),
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
+    ("/app-isolation", "App Isolation"),
     ("/master-config", "Master Config"),
 )
 
@@ -622,6 +623,137 @@ def real_hardware_state(runner) -> dict:
             "smart": smart, "sysinfo": sysinfo, "inventory": inventory}
 
 
+def render_app_isolation_page(persona: str, plans: list, *,
+                              leaks: list, conflicts: list, formats: list) -> bytes:
+    """Per-application AppData isolation (appdata.py), shown rather than
+    asserted only in tests: every app's own data tree, registry, owner
+    and overlays, plus what each package format does and does not
+    provide on its own.
+
+    This page is read-only by construction - appdata.py plans, it never
+    mounts. Applying a plan is privileged and belongs behind an explicit
+    operator-authorized action, not a page view."""
+    import appdata
+
+    with_data = [p for p in plans if p.app.has_persistent_data or p.overlays]
+    total_overlays = sum(len(p.overlays) for p in plans)
+    guarantees_hold = not leaks and not conflicts and all(p.isolated for p in plans)
+
+    verdict = (
+        '<div class="ic-banner ok"><strong>Isolation holds.</strong> '
+        'No application\'s writable layer falls inside another\'s tree, no two '
+        'applications claim the same overlay target, and every plan keeps its '
+        'data, registry and owner inside its own AppData home.</div>'
+        if guarantees_hold else
+        f'<div class="ic-banner warn"><strong>Isolation violated.</strong> '
+        f'{len(leaks)} cross-app leak(s), {len(conflicts)} target conflict(s). '
+        f'This must be empty before any plan is applied.</div>'
+    )
+
+    stats = (
+        f'<div class="ic-stats">'
+        f'<div class="ic-stat"><span class="n">{len(plans)}</span><span class="l">applications</span></div>'
+        f'<div class="ic-stat"><span class="n ok">{len(with_data)}</span><span class="l">with personal data</span></div>'
+        f'<div class="ic-stat"><span class="n">{total_overlays}</span><span class="l">overlays</span></div>'
+        f'<div class="ic-stat"><span class="n {"ok" if not leaks else "warn"}">{len(leaks)}</span><span class="l">cross-app leaks</span></div>'
+        f'<div class="ic-stat"><span class="n {"ok" if not conflicts else "warn"}">{len(conflicts)}</span><span class="l">target conflicts</span></div>'
+        f'</div>'
+    )
+
+    app_rows = []
+    for plan in sorted(plans, key=lambda p: (not p.overlays, p.app.app_id)):
+        if plan.overlays:
+            overlay_html = "<br>".join(
+                f'<span class="ov-target">{o.target}</span>'
+                f'<span class="ov-arrow"> &rarr; </span>'
+                f'<span class="ov-upper">{o.upperdir}</span>'
+                for o in plan.overlays
+            )
+        else:
+            overlay_html = ('<span class="ov-none">no persistent data &mdash; '
+                            'no overlay (stated, not assumed)</span>')
+        app_rows.append(
+            "<tr>"
+            f"<td>{plan.app.app_id}</td>"
+            f"<td>{plan.app.kind}</td>"
+            f"<td>{overlay_html}</td>"
+            f"<td>{plan.registry_db}</td>"
+            f"<td>{plan.owner_user}<br><span class='ov-none'>mode {plan.mode}</span></td>"
+            "</tr>"
+        )
+
+    fmt_rows = "".join(
+        "<tr>"
+        f"<td>{f.name}</td>"
+        f'<td>{"<span class=\'drv-ok\'>yes</span>" if f.brings_own_sandbox else "<span class=\'drv-none\'>no</span>"}</td>'
+        f"<td>{f.isolation_mechanism}</td>"
+        f"<td>{f.data_root_template or '&mdash;'}</td>"
+        f"<td>{', '.join(f.baseline_must_supply)}</td>"
+        "</tr>"
+        for f in formats
+    )
+
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>App Isolation</title><style>{_DRIVE_ADMIN_CSS}
+.hw-table {{ width: 100%; border-collapse: collapse; margin: 0 0 1rem; font-size: .8rem;
+  background: #14151d; border: 1px solid #262838; border-radius: 8px; overflow: hidden; }}
+.hw-table th {{ text-align: left; padding: .5rem .7rem; color: #7d84a0; font-weight: 600;
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .05em;
+  background: #171923; border-bottom: 1px solid #262838; }}
+.hw-table td {{ padding: .5rem .7rem; border-bottom: 1px solid #1c1e29; color: #ccd0e0;
+  vertical-align: top; font-family: ui-monospace, monospace; }}
+.hw-table tr:last-child td {{ border-bottom: none; }}
+.hw-table tr:hover td {{ background: #171b26; }}
+.drv-ok {{ color: #6fc28a; font-weight: 600; }}
+.drv-none {{ color: #c8a24a; font-weight: 600; }}
+.ov-target {{ color: #e7e9f0; }} .ov-arrow {{ color: #5c6180; }}
+.ov-upper {{ color: #9db4ec; }} .ov-none {{ color: #7d84a0; font-style: italic; }}
+.ic-banner {{ padding: .8rem 1rem; border-radius: 10px; margin: 0 0 1.25rem; font-size: .88rem; line-height: 1.55; }}
+.ic-banner.ok {{ background: #14241a; border: 1px solid #2c5238; color: #b7e4c7; }}
+.ic-banner.warn {{ background: #2a1f14; border: 1px solid #6b4a1f; color: #f0d5a8; }}
+.ic-stats {{ display: flex; gap: 12px; margin: 0 0 1.5rem; flex-wrap: wrap; }}
+.ic-stat {{ background: #14151d; border: 1px solid #262838; border-radius: 10px; padding: 12px 18px; min-width: 110px; }}
+.ic-stat .n {{ display: block; font-size: 1.5rem; font-weight: 700; color: #e7e9f0; }}
+.ic-stat .n.ok {{ color: #6fc28a; }} .ic-stat .n.warn {{ color: #c8a24a; }}
+.ic-stat .l {{ display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: #7d84a0; margin-top: 2px; }}
+.ic-actions {{ display: flex; gap: 10px; margin: 0 0 1.5rem; }}
+.ic-btn {{ padding: .5rem 1rem; background: #23263a; color: #f2f3f8; border-radius: 6px;
+  text-decoration: none; font-size: .85rem; font-weight: 600; }}
+.ic-btn.active {{ background: #3f63b8; }}
+.hw-note {{ color: #8890a6; font-size: .82rem; margin: -.4rem 0 1rem; line-height: 1.55; }}
+</style></head>
+<body>
+<h1>App Isolation</h1>
+<p class="subtitle">Every installable application's own data, registry, access and
+overlays on {appdata.appdata_root(persona)}</p>
+
+<div class="ic-actions">
+  <a class="ic-btn {"active" if persona == "admin" else ""}" href="/app-isolation?persona=admin">admin</a>
+  <a class="ic-btn {"active" if persona == "personal" else ""}" href="/app-isolation?persona=personal">personal</a>
+</div>
+
+{verdict}
+{stats}
+
+<h2 class="section-title">Applications <span class="ic-count">{len(plans)}</span></h2>
+<p class="hw-note">Planned, not applied. Each overlay keeps the installed base
+immutable as its lower layer and sends every write to the app's own upper layer
+on AppData. Applying these mounts is privileged and is not done from this page.</p>
+<table class="hw-table"><thead><tr><th>Application</th><th>Kind</th>
+<th>Overlay (target &rarr; personal writable layer)</th><th>Own registry</th>
+<th>Owner / mode</th></tr></thead><tbody>{''.join(app_rows)}</tbody></table>
+
+<h2 class="section-title">Package formats</h2>
+<p class="hw-note">Baseline never duplicates a sandbox a format already provides &mdash;
+two permission models that can disagree is worse than one. Where a format brings its
+own confinement, only AppData placement is added; where it brings none, Baseline
+supplies the whole gap.</p>
+<table class="hw-table"><thead><tr><th>Format</th><th>Own sandbox</th>
+<th>Isolation mechanism</th><th>Per-app data convention</th>
+<th>Baseline must supply</th></tr></thead><tbody>{fmt_rows}</tbody></table>
+</body></html>""".encode()
+
+
 def render_installer_cache_page(report, *, elevated: bool = False) -> bytes:
     """INSTALLER_CACHE transparency report (direct instruction,
     2026-09-30): every artifact this application involves, its original
@@ -1139,6 +1271,18 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             if result.outcome != "applied":
                 return self._html_response(result.status, _with_nav(sw.render_recovery_page({}, result.body.get("reason", "")), path))
             return self._html_response(200, _with_nav(sw.render_recovery_page(result.body), path))
+
+        if path == "/app-isolation":
+            import appdata
+            persona = qs.get("persona", ["personal"])[0]
+            if persona not in drive_installer.DEFAULT_PERSONAS:
+                persona = "personal"
+            plans = appdata.plan_all(persona)
+            return self._html_response(200, _with_nav(render_app_isolation_page(
+                persona, plans,
+                leaks=appdata.cross_app_leaks(plans),
+                conflicts=appdata.target_conflicts(plans),
+                formats=appdata.supported_formats()), path))
 
         if path == "/installer-cache":
             # "Refresh with Root": the unprivileged scan can miss a

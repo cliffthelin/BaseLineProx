@@ -189,6 +189,9 @@ cp "$SRC/baseline/lib/hardware_inventory.py" /opt/baseline/lib/hardware_inventor
 # report every artifact a self-replicating build needs, its origin, and
 # whether it is actually on the INSTALLER_CACHE volume.
 cp "$SRC/baseline/lib/installer_cache.py" /opt/baseline/lib/installer_cache.py
+# appdata.py - baseline_web.py's App Isolation tab imports it to plan
+# per-application AppData (own data tree, registry, owner, overlays).
+cp "$SRC/baseline/lib/appdata.py" /opt/baseline/lib/appdata.py
 cp "$SRC/boot/baseline-dependency-check.timer" /etc/systemd/system/baseline-dependency-check.timer
 # Recovery mode itself (work-queue item 26, decision record 81) -
 # settings_web.py's guest-tier /recovery route reaches this directly;
@@ -346,6 +349,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/proxmox_vm_metrics.py /opt/baseline/lib/sensors_history.py /opt/baseline/lib/sensors_collect.py \
          /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/lib/hardware_inventory.py /opt/baseline/lib/installer_cache.py \
+         /opt/baseline/lib/appdata.py \
          /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
          /opt/baseline/lib/settings_store.py /opt/baseline/lib/admin_elevation.py \
          /opt/baseline/lib/recovery_mode.py \

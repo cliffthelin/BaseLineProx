@@ -49,6 +49,114 @@ from dataclasses import dataclass, field
 KIND_PACKAGE = "apt package"
 KIND_GUEST = "vm/lxc guest"
 KIND_CONTAINER = "container"
+KIND_FLATPAK = "flatpak"
+KIND_APPIMAGE = "appimage"
+KIND_SNAP = "snap"
+
+
+@dataclass(frozen=True)
+class PackageFormat:
+    """How one distribution format lays out per-app data, and how much
+    isolation it brings on its own.
+
+    The governing rule: **never duplicate a sandbox that already
+    exists.** Flatpak and Snap each confine their apps already; layering
+    Baseline's own confinement on top buys nothing and creates two
+    permission models that can disagree. For those, Baseline overlays
+    the format's own data root onto AppData and otherwise leaves the
+    format's isolation alone. AppImage brings nothing at all, so it is
+    the case where Baseline must supply confinement itself."""
+    format_id: str
+    name: str
+    data_root_template: str      # per-app data location; {app} substituted
+    brings_own_sandbox: bool
+    isolation_mechanism: str     # what enforces it, or why nothing does
+    requires: tuple              # what must be present for this format to work
+    baseline_must_supply: tuple  # the gap Baseline itself has to close
+    notes: str = ""
+
+    def data_root(self, app_id: str) -> str:
+        return self.data_root_template.format(app=app_id)
+
+
+FORMATS: dict = {
+    KIND_PACKAGE: PackageFormat(
+        KIND_PACKAGE, "apt package",
+        data_root_template="",            # no convention - per-app, see DATA_TARGETS
+        brings_own_sandbox=False,
+        isolation_mechanism="none - a .deb installs system-wide and writes wherever it likes",
+        requires=("apt",),
+        baseline_must_supply=("data isolation", "access control", "registry"),
+        notes="The base case this module was built for.",
+    ),
+    KIND_FLATPAK: PackageFormat(
+        KIND_FLATPAK, "Flatpak",
+        data_root_template="~/.var/app/{app}",
+        brings_own_sandbox=True,
+        isolation_mechanism="bubblewrap sandbox + per-app permissions, data already per-app under ~/.var/app/<app-id>",
+        requires=("flatpak", "xdg-desktop-portal"),
+        baseline_must_supply=("AppData placement only",),
+        notes=(
+            "Closest existing system to this module's own model: OSTree gives an "
+            "immutable deduplicated store (the NixOS half) and ~/.var/app/<id> is "
+            "already per-app data (the phone-OS half). Integration is therefore to "
+            "overlay its data root onto AppData and leave its sandbox alone. "
+            "Open conflict: Flatpak's permission model depends on "
+            "xdg-desktop-portal, which milestone-2-gui-plan.md deliberately "
+            "declined on trust-model grounds (Baseline's own code mediates, not a "
+            "generic OS service). Adopting Flatpak reopens that decision - it is "
+            "not a free addition."
+        ),
+    ),
+    KIND_APPIMAGE: PackageFormat(
+        KIND_APPIMAGE, "AppImage",
+        data_root_template="~/.config/{app}",
+        brings_own_sandbox=False,
+        isolation_mechanism="none - a single executable file, no install step, no manifest, no confinement",
+        requires=("fuse",),
+        baseline_must_supply=("sandbox", "app identity", "data isolation",
+                              "access control", "registry"),
+        notes=(
+            "The hardest format and the one where this module earns the most. "
+            "An AppImage declares no app id, so one must be assigned (its own "
+            "filename is not a stable identity across versions), and it writes to "
+            "arbitrary paths, so the overlay cannot be derived from a convention "
+            "the way Flatpak's can. It also brings no sandbox, so confinement has "
+            "to come from Baseline (bubblewrap) rather than from the format."
+        ),
+    ),
+    KIND_SNAP: PackageFormat(
+        KIND_SNAP, "Snap",
+        data_root_template="~/snap/{app}/current",
+        brings_own_sandbox=True,
+        isolation_mechanism="AppArmor + seccomp confinement, data per-app under ~/snap/<name>/<revision>",
+        requires=("snapd",),
+        baseline_must_supply=("AppData placement only",),
+        notes=(
+            "Confines apps already, so Baseline overlays the data root and stops "
+            "there. Two real frictions: snapd is an additional always-running "
+            "daemon on a Debian/Proxmox substrate rather than a native one, and "
+            "snap data is revision-numbered (~/snap/<name>/<rev>) with `current` a "
+            "symlink - so an overlay must target `current` and survive it being "
+            "repointed on every refresh."
+        ),
+    ),
+}
+
+
+def format_for(kind: str) -> PackageFormat | None:
+    return FORMATS.get(kind)
+
+
+def confinement_gap(kind: str) -> tuple:
+    """What Baseline itself must provide for this format, given what the
+    format already does. Empty-ish for Flatpak/Snap, large for AppImage."""
+    fmt = FORMATS.get(kind)
+    return fmt.baseline_must_supply if fmt else ("unknown format",)
+
+
+def supported_formats() -> list:
+    return [FORMATS[k] for k in (KIND_PACKAGE, KIND_FLATPAK, KIND_SNAP, KIND_APPIMAGE)]
 
 # Persistent-data targets per application, by app id. A path here is a
 # real location that application writes to and that must therefore be
@@ -206,6 +314,20 @@ def installable_apps() -> list:
     return apps
 
 
+def effective_targets(app: AppSpec) -> tuple:
+    """The real paths to overlay for one app.
+
+    A format that already has a per-app data convention (Flatpak's
+    `~/.var/app/<id>`, Snap's `~/snap/<name>/current`) supplies its own
+    root, and that root is what gets overlaid - Baseline follows the
+    format's layout rather than imposing a second one next to it, which
+    would leave the format still writing to its original location."""
+    fmt = FORMATS.get(app.kind)
+    if fmt is not None and fmt.data_root_template:
+        return (fmt.data_root(app.app_id),)
+    return app.data_targets
+
+
 def plan_for(persona: str, app: AppSpec) -> AppPlan:
     """The full isolation plan for one app: its own data tree, its own
     registry, its own owner, and one overlay per real data target."""
@@ -218,7 +340,7 @@ def plan_for(persona: str, app: AppSpec) -> AppPlan:
             upperdir=f"{home}/upper/{_escape_target(target)}",
             workdir=f"{home}/work/{_escape_target(target)}",
         )
-        for target in app.data_targets
+        for target in effective_targets(app)
     ]
     return AppPlan(app=app, home=home, registry_db=f"{home}/registry.db",
                    owner_user=user, owner_group=group, mode=APPDATA_MODE,

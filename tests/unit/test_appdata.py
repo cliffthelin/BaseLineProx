@@ -217,3 +217,75 @@ def test_each_guest_targets_its_own_disk_not_the_shared_proxmox_store():
             assert overlay.target not in ("/var/lib/vz/private", "/var/lib/vz/images"), (
                 f"{plan.app.app_id} targets the shared Proxmox store")
             assert plan.app.app_id in overlay.target
+
+
+# -- Package formats (Flatpak / Snap / AppImage) -----------------------
+
+def test_every_supported_format_declares_its_isolation_honestly():
+    for fmt in appdata.supported_formats():
+        assert fmt.isolation_mechanism.strip()
+        assert fmt.baseline_must_supply, f"{fmt.format_id} claims nothing is needed"
+
+
+def test_formats_that_already_sandbox_are_not_sandboxed_again():
+    """The governing rule: never duplicate a sandbox that exists.
+    Two permission models that can disagree is worse than one."""
+    for kind in (appdata.KIND_FLATPAK, appdata.KIND_SNAP):
+        fmt = appdata.format_for(kind)
+        assert fmt.brings_own_sandbox is True
+        assert "sandbox" not in " ".join(fmt.baseline_must_supply).lower()
+
+
+def test_appimage_is_flagged_as_bringing_no_isolation_at_all():
+    """AppImage has no manifest, no install step and no confinement, so
+    Baseline must supply all of it - the format where this module
+    carries the most weight."""
+    fmt = appdata.format_for(appdata.KIND_APPIMAGE)
+    assert fmt.brings_own_sandbox is False
+    assert "sandbox" in " ".join(fmt.baseline_must_supply).lower()
+    assert "app identity" in fmt.baseline_must_supply
+
+
+def test_confinement_gap_is_smaller_for_a_sandboxed_format():
+    assert len(appdata.confinement_gap(appdata.KIND_FLATPAK)) < \
+           len(appdata.confinement_gap(appdata.KIND_APPIMAGE))
+
+
+def test_flatpak_uses_its_own_per_app_data_convention():
+    fmt = appdata.format_for(appdata.KIND_FLATPAK)
+    assert fmt.data_root("org.mozilla.firefox") == "~/.var/app/org.mozilla.firefox"
+
+
+def test_snap_targets_current_so_it_survives_a_revision_bump():
+    """Snap data is revision-numbered; `current` is the stable symlink."""
+    assert appdata.format_for(appdata.KIND_SNAP).data_root("firefox").endswith("/current")
+
+
+def test_a_formats_own_data_root_is_what_gets_overlaid():
+    """Baseline follows the format's layout instead of imposing a second
+    one beside it - otherwise the app keeps writing where it always did
+    and the overlay captures nothing."""
+    app = appdata.AppSpec("org.mozilla.firefox", "Firefox", appdata.KIND_FLATPAK,
+                          source="flathub")
+    plan = appdata.plan_for("personal", app)
+    assert len(plan.overlays) == 1
+    assert plan.overlays[0].target == "~/.var/app/org.mozilla.firefox"
+    assert plan.overlays[0].upperdir.startswith(plan.home)
+
+
+def test_a_flatpak_app_still_gets_its_own_registry_and_owner():
+    app = appdata.AppSpec("org.mozilla.firefox", "Firefox", appdata.KIND_FLATPAK,
+                          source="flathub")
+    plan = appdata.plan_for("personal", app)
+    assert plan.registry_db.startswith(plan.home)
+    assert plan.mode == "0700"
+    assert plan.isolated
+
+
+def test_flatpak_records_its_conflict_with_the_declined_portal_decision():
+    """milestone-2-gui-plan.md declined xdg-desktop-portal on trust-model
+    grounds. Flatpak's permissions depend on it, so adopting Flatpak
+    reopens that decision - recorded, not silently assumed away."""
+    fmt = appdata.format_for(appdata.KIND_FLATPAK)
+    assert "xdg-desktop-portal" in fmt.requires
+    assert "portal" in fmt.notes.lower()
