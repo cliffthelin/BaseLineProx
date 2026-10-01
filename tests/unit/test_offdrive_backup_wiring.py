@@ -29,8 +29,24 @@ def test_sources_cover_the_baseline_volumes_but_not_the_ephemeral_one(monkeypatc
     srcs = ob.build_sources(is_mount=lambda p: True, exists=lambda p: True)
     vols = srcs["baseline-volumes"]
     assert "/mnt/SESSION_TEMP" not in vols            # non-persistent by design
-    for needed in ("/mnt/BASELINE", "/mnt/INSTALLER_CACHE", "/mnt/SUBSTRATE", "/mnt/USER_ADMIN", "/mnt/USER_PERSONAL"):
+    for needed in ("/mnt/BASELINE", "/mnt/SUBSTRATE", "/mnt/USER_ADMIN", "/mnt/USER_PERSONAL"):
         assert needed in vols
+
+
+def test_the_installer_cache_has_its_own_changes_only_archive():
+    srcs = ob.build_sources(is_mount=lambda p: True, exists=lambda p: True)
+    assert srcs["installer-cache"] == ["/mnt/INSTALLER_CACHE"]
+    assert "/mnt/INSTALLER_CACHE" not in srcs["baseline-volumes"]
+    assert "installer-cache" in ob.CHANGES_ONLY_LABELS and "baseline-volumes" not in ob.CHANGES_ONLY_LABELS
+
+
+def test_main_asks_for_the_cache_to_be_changes_only(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(ob, "run_backup", lambda **kw: seen.update(kw) or ob.BackupResult(None, False, True, 0, "skipped"))
+    monkeypatch.setattr(ob, "build_sources", lambda **k: {"installer-cache": ["/mnt/INSTALLER_CACHE"]})
+    monkeypatch.setattr(ob, "_boot_serial", lambda: None)
+    ob.main(get_setting=lambda g, k: S[(g, k)], now=lambda: 1.0, print_fn=lambda l: None)
+    assert seen["changes_only"] == frozenset({"installer-cache"})
 
 
 def test_a_volume_that_is_not_mounted_is_skipped_not_backed_up_as_an_empty_directory():

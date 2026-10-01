@@ -33,8 +33,10 @@ import os
 import re
 import shlex
 import socket
+import stat
 import subprocess
 import tarfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +51,11 @@ SET_RE = re.compile(r"^baseline-\d{8}T\d{6}Z(-\d+)?$")
 RESERVE_FRACTION = 0.03        # never leave the drive with less than 3% free
 HEADROOM = 1.10                # and require 10% more than the estimated size
 DEFAULT_MIN_INTERVAL_HOURS = 168
+# Backed up changes-only: unchanged installers are never copied twice. The first backup copies everything once;
+# every later set stores only files that are new or changed (size or modification time differs) and the manifest
+# says which earlier set already holds each unchanged file.
+CHANGES_ONLY_LABELS = frozenset({"installer-cache"})
+STRUCTURE_ESTIMATE = 16 * 1024
 _CHUNK = 1024 * 1024
 _NETWORK_FSTYPES = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "sshfs", "fuse.sshfs", "9p", "ceph", "glusterfs"}
 _INCOMPLETE_TEXT = (
@@ -226,13 +233,23 @@ def _sha256_file(path) -> str:
     return h.hexdigest()
 
 
-def _stream_tar(argv, out_file, timeout=None, max_bytes=None) -> tuple:
+def _stream_tar(argv, out_file, timeout=None, max_bytes=None, stdin_data=None) -> tuple:
     """Run tar writing to stdout and stream it into the new file. Returns (bytes, sha256, rc, stderr tail).
     Exit status 1 ("a file changed while being read") is normal on live volumes and is recorded, not fatal.
     `max_bytes` is a hard cap: the archive can never be larger than the data it is backing up (compression
     only shrinks it), so growing past that means something is being read that is not data (for example empty
     space). Stop at once instead of running on."""
-    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin_data is not None else None,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if stdin_data is not None:
+        def _feed():
+            try:
+                proc.stdin.write(stdin_data)
+            except OSError:
+                pass
+            finally:
+                proc.stdin.close()
+        threading.Thread(target=_feed, daemon=True).start()
     h, size = hashlib.sha256(), 0
     for chunk in iter(lambda: proc.stdout.read(_CHUNK), b""):
         out_file.write(chunk)
@@ -315,27 +332,181 @@ def _new_set_dir(backup_dir: Path, now: float) -> Path:
     raise BackupError("could not find a free name for the backup set")
 
 
-def create_backup_set(dest: Destination, sources: dict, *, now: float, budgets: dict | None = None) -> BackupSet:
+@dataclass
+class _Plan:
+    label: str
+    base_set: str | None
+    structural: list          # names (relative to /) of folders and links: always archived, they are tiny
+    changed: list             # names of regular files that are new or changed
+    table: dict               # absolute path -> entry for everything now in the tree
+    unchanged: int
+    changed_bytes: int
+
+
+def _scan_tree(paths) -> tuple:
+    """Walk the trees without crossing into another filesystem. Returns (entries, skipped) where entries are
+    (absolute path, kind, lstat result); kind is file, dir or link."""
+    entries, skipped = [], []
+    for root in paths:
+        root_dev = os.lstat(root).st_dev
+        stack = [root]
+        while stack:
+            current = stack.pop()
+            st = os.lstat(current)
+            if stat.S_ISDIR(st.st_mode):
+                entries.append((current, "dir", st))
+                if st.st_dev != root_dev:
+                    continue                       # another filesystem mounted here: the folder only, never its contents
+                try:
+                    with os.scandir(current) as it:
+                        stack.extend(e.path for e in it)
+                except OSError as exc:
+                    skipped.append(f"{current}: {exc}")
+            elif stat.S_ISLNK(st.st_mode):
+                entries.append((current, "link", st))
+            elif stat.S_ISREG(st.st_mode):
+                entries.append((current, "file", st))
+            else:
+                skipped.append(f"{current}: not a file, folder or link")
+    return entries, skipped
+
+
+def _prior_table(dest: Destination, label: str) -> tuple:
+    """The newest complete set's table for `label`, keeping only files whose data is still there. If an old set was
+    deleted by hand, those files simply count as changed and are copied again: nothing breaks."""
+    for candidate in list_sets(dest):
+        for entry in candidate.manifest.get("archives", []):
+            if entry.get("name") == f"{label}.tar.gz" and entry.get("mode") == "changes-only":
+                alive, checked = {}, {}
+                for path, info in entry.get("files", {}).items():
+                    if info.get("kind") != "file":
+                        continue
+                    where = info.get("stored_in", {})
+                    key = (where.get("set"), where.get("archive"))
+                    if key not in checked:
+                        checked[key] = bool(key[0] and key[1] and "/" not in key[0] + key[1]
+                                            and (dest.backup_dir / key[0] / MANIFEST_NAME).is_file()
+                                            and (dest.backup_dir / key[0] / key[1]).is_file())
+                    if checked[key]:
+                        alive[path] = info
+                return candidate.name, alive
+        # a newer set without this label does not hide an older one that has it
+    return None, {}
+
+
+def plan_label(dest: Destination, label: str, paths) -> _Plan:
+    entries, _skipped = _scan_tree(paths)
+    base_set, prior = _prior_table(dest, label)
+    structural, changed, table, unchanged, changed_bytes = [], [], {}, 0, 0
+    for path, kind, st in sorted(entries):
+        name = path.lstrip("/")
+        if kind == "dir":
+            structural.append(name)
+            table[path] = {"kind": "dir"}
+        elif kind == "link":
+            structural.append(name)
+            table[path] = {"kind": "link", "target": os.readlink(path)}
+        else:
+            old = prior.get(path)
+            if old and old.get("size") == st.st_size and old.get("mtime_ns") == st.st_mtime_ns:
+                table[path] = old
+                unchanged += 1
+            else:
+                changed.append(name)
+                changed_bytes += st.st_blocks * 512
+                table[path] = {"kind": "file", "size": st.st_size, "mtime_ns": st.st_mtime_ns}
+    return _Plan(label, base_set, structural, changed, table, unchanged, changed_bytes)
+
+
+def verify_chain(dest: Destination, set_name: str, *, deep: bool = False) -> bool:
+    """Read-only. A changes-only set points at earlier sets for its unchanged files: check that each of those is
+    still there (and with `deep`, still matches its checksum)."""
+    set_path = dest.backup_dir / set_name
+    manifest = _read_manifest(set_path)
+    for entry in manifest.get("archives", []):
+        needed = {(i["stored_in"]["set"], i["stored_in"]["archive"])
+                  for i in entry.get("files", {}).values() if i.get("kind") == "file" and i.get("stored_in", {}).get("set") != set_name}
+        for dep_set, dep_archive in sorted(needed):
+            if "/" in dep_set + dep_archive or not (dest.backup_dir / dep_set / MANIFEST_NAME).is_file():
+                raise BackupError(f"{set_name} depends on {dep_set}, which is missing")
+            recorded = next((a for a in _read_manifest(dest.backup_dir / dep_set)["archives"] if a["name"] == dep_archive), None)
+            path = dest.backup_dir / dep_set / dep_archive
+            if recorded is None or not path.is_file() or path.stat().st_size != recorded["bytes"]:
+                raise BackupError(f"{set_name} depends on {dep_set}/{dep_archive}, which is missing or changed")
+            if deep and _sha256_file(path) != recorded["sha256"]:
+                raise BackupError(f"{set_name} depends on {dep_set}/{dep_archive}, whose checksum no longer matches")
+    return True
+
+
+def _extract_members(archive_path, names, out_dir) -> None:
+    with tarfile.open(archive_path, "r:gz") as tf:
+        wanted = [tf.getmember(n) for n in names] if names is not None else tf.getmembers()
+        for member in wanted:
+            if member.name.startswith("/") or ".." in Path(member.name).parts:
+                raise BackupError(f"unsafe entry name in backup archive: {member.name!r}")
+        try:
+            tf.extractall(out_dir, members=wanted, filter="data")
+        except tarfile.TarError as exc:
+            raise BackupError(f"unsafe or corrupt entry in backup archive: {exc}") from exc
+
+
+def restore_label(dest: Destination, set_name: str, label: str, out_dir) -> None:
+    """Rebuild what one archive label looked like at `set_name` into `out_dir`, a folder OUTSIDE the backup
+    drive. Reads the backup, never writes to it."""
+    out = os.path.realpath(str(out_dir))
+    backup_root = os.path.realpath(dest.path)
+    if out == backup_root or out.startswith(backup_root + os.sep):
+        raise BackupError("restore target must not be on the backup drive")
+    if not os.path.isdir(out):
+        raise BackupError(f"restore target {out_dir} is not an existing folder")
+    set_path = dest.backup_dir / set_name
+    verify_chain(dest, set_name)
+    manifest = _read_manifest(set_path)
+    entry = next((a for a in manifest["archives"] if a["name"] == f"{label}.tar.gz"), None)
+    if entry is None:
+        raise BackupError(f"{set_name} has no archive {label!r}")
+    _extract_members(set_path / entry["name"], None, out)          # this set's own archive, including structure
+    if entry.get("mode") == "changes-only":
+        older = {}
+        for path, info in entry["files"].items():
+            where = info.get("stored_in") if info.get("kind") == "file" else None
+            if where and where["set"] != set_name:
+                older.setdefault((where["set"], where["archive"]), []).append(path.lstrip("/"))
+        for (dep_set, dep_archive), names in sorted(older.items()):
+            _extract_members(dest.backup_dir / dep_set / dep_archive, names, out)
+
+
+def create_backup_set(dest: Destination, sources: dict, *, now: float, budgets: dict | None = None,
+                      changes_only=frozenset(), plans: dict | None = None) -> BackupSet:
     """Add one new, verified backup set. `sources` maps an archive label to a list of absolute paths.
-    `budgets` optionally maps a label to the most bytes its archive may take (see `_stream_tar`)."""
+    `budgets` optionally maps a label to the most bytes its archive may take (see `_stream_tar`).
+    A label in `changes_only` stores only files that are new or changed since the previous set."""
     for label, paths in sources.items():
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", label):
             raise BackupError(f"unsafe archive label {label!r}")
         for path in paths:
             if not os.path.isabs(path) or not os.path.exists(path):
                 raise BackupError(f"source {path} does not exist; nothing was written")
+    label_plans = {label: (plans or {}).get(label) or plan_label(dest, label, paths)
+                   for label, paths in sources.items() if label in changes_only}
     set_dir = _new_set_dir(dest.backup_dir, now)
     _write_new_text(set_dir / INCOMPLETE_NAME, _INCOMPLETE_TEXT)
-    entries = []
+    entries, depends = [], set()
     for label, paths in sources.items():
         archive = set_dir / f"{label}.tar.gz"
         # Files, not blocks: free space is never read. --sparse skips the holes in sparse files (VM disk images),
         # --one-file-system never wanders into another mounted drive, and -z compresses.
         argv = ["tar", "-czf", "-", "--sparse", "--one-file-system", "--numeric-owner", "-C", "/"] \
             + [p.lstrip("/") for p in paths]
+        plan = label_plans.get(label)
+        stdin_data = None
+        if plan is not None:
+            argv = ["tar", "-czf", "-", "--sparse", "--numeric-owner", "--no-recursion", "--null", "-C", "/", "-T", "-"]
+            stdin_data = b"\0".join(n.encode() for n in plan.structural + plan.changed) + b"\0"
         out = _create_new_file(archive)
         try:
-            size, streamed_sha, rc, stderr = _stream_tar(argv, out, max_bytes=(budgets or {}).get(label))
+            size, streamed_sha, rc, stderr = _stream_tar(argv, out, max_bytes=(budgets or {}).get(label),
+                                                         stdin_data=stdin_data)
             out.fsync()
         finally:
             out.close()
@@ -343,13 +514,23 @@ def create_backup_set(dest: Destination, sources: dict, *, now: float, budgets: 
             raise BackupError(f"checksum mismatch reading back {archive.name}: the archive did not write correctly")
         _check_readable(archive)
         entry = {"name": archive.name, "bytes": size, "sha256": streamed_sha, "sources": list(paths)}
+        if plan is not None:
+            files = {}
+            for path, info in plan.table.items():
+                if info["kind"] == "file" and "stored_in" not in info:
+                    info = {**info, "stored_in": {"set": set_dir.name, "archive": archive.name}}
+                elif info["kind"] == "file":
+                    depends.add(info["stored_in"]["set"])
+                files[path] = info
+            entry.update({"mode": "changes-only", "base_set": plan.base_set, "changed": len(plan.changed),
+                          "unchanged": plan.unchanged, "files": files})
         if rc == 1:
             entry["warning"] = "some files changed while being archived: " + stderr
         entries.append(entry)
     manifest = {
         "kind": MANIFEST_KIND, "version": 1, "tool": "offdrive_backup",
         "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), "created_epoch": now,
-        "host": socket.gethostname(), "archives": entries,
+        "host": socket.gethostname(), "archives": entries, "depends_on": sorted(depends - {set_dir.name}),
     }
     _write_new_text(set_dir / MANIFEST_NAME, json.dumps(manifest, indent=2))
     try:
@@ -393,7 +574,8 @@ def is_due(dest: Destination, *, now: float, min_interval_hours: float = DEFAULT
 
 def run_backup(*, destination: str, run, sources: dict, now: float, allowed_serials,
                boot_serial: str | None = None, min_interval_hours: float = DEFAULT_MIN_INTERVAL_HOURS,
-               record_success=None, force: bool = False, dry_run: bool = False) -> BackupResult:
+               record_success=None, force: bool = False, dry_run: bool = False,
+               changes_only=frozenset()) -> BackupResult:
     """Validate the destination, skip if a recent set exists, check space, add a verified set, and only
     then record freshness. Raises BackupError (leaving whatever it wrote untouched) on any failure."""
     if not destination:
@@ -401,15 +583,21 @@ def run_backup(*, destination: str, run, sources: dict, now: float, allowed_seri
     dest = resolve_destination(destination, run=run, allowed_serials=allowed_serials, boot_serial=boot_serial)
     if not force and not is_due(dest, now=now, min_interval_hours=min_interval_hours):
         return BackupResult(None, False, True, 0, f"skipped: a backup newer than {min_interval_hours:g}h already exists")
-    estimates = {label: estimate_bytes({label: paths}, run=run) for label, paths in sources.items()}
+    plans = {label: plan_label(dest, label, paths) for label, paths in sources.items() if label in changes_only}
+    estimates = {label: (plans[label].changed_bytes + STRUCTURE_ESTIMATE if label in plans
+                         else estimate_bytes({label: paths}, run=run))
+                 for label, paths in sources.items()}
     needed = sum(estimates.values())
     check_space(dest, needed_bytes=needed)
     if dry_run:
+        skipped_files = sum(p.unchanged for p in plans.values())
+        note = f" ({skipped_files} unchanged files in changes-only archives are not copied again)" if plans else ""
         return BackupResult(None, False, False, needed,
                             f"dry run: would add a backup set of at most {needed / 2**30:.1f} GiB of data, compressed, "
-                            f"to {dest.backup_dir}; empty space is never copied; nothing was written")
+                            f"to {dest.backup_dir}{note}; empty space is never copied; {skipped_files} unchanged; "
+                            "nothing was written")
     budgets = {label: int(est * 1.02) + 64 * 2**20 for label, est in estimates.items()}
-    made = create_backup_set(dest, sources, now=now, budgets=budgets)
+    made = create_backup_set(dest, sources, now=now, budgets=budgets, changes_only=changes_only, plans=plans)
     if record_success is not None:
         record_success([p for paths in sources.values() for p in paths], now)
     written = sum(a["bytes"] for a in made.manifest["archives"])
@@ -431,11 +619,15 @@ def build_sources(*, is_mount=os.path.ismount, exists=os.path.exists) -> dict:
     """Archive label -> absolute paths. A Baseline volume that is not actually mounted is skipped: backing
     up the empty directory that sits under a missing mount would be a false sense of safety."""
     import drive_installer
-    volumes = [mp for *_rest, mp in drive_installer.BASELINE_VOLUMES if mp not in _NOT_BACKED_UP and is_mount(mp)]
+    mounted = [mp for *_rest, mp in drive_installer.BASELINE_VOLUMES if mp not in _NOT_BACKED_UP and is_mount(mp)]
+    cache = [mp for mp in mounted if mp == "/mnt/INSTALLER_CACHE"]
+    volumes = [mp for mp in mounted if mp != "/mnt/INSTALLER_CACHE"]
     config = [p for p in _PROXMOX_CONFIG_PATHS if exists(p)]
     sources = {}
     if volumes:
         sources["baseline-volumes"] = volumes
+    if cache:
+        sources["installer-cache"] = cache
     if config:
         sources["proxmox-config"] = config
     return sources
@@ -478,7 +670,8 @@ def main(*, get_setting=None, now=time.time, print_fn=print, run=_default_run, d
         result = run_backup(destination=destination, run=run, sources=sources, now=now(),
                             allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS, boot_serial=_boot_serial(),
                             min_interval_hours=get_setting("backups", "offdrive_min_interval_hours"),
-                            record_success=_record_freshness, dry_run=dry_run)
+                            record_success=_record_freshness, dry_run=dry_run,
+                            changes_only=CHANGES_ONLY_LABELS)
     except BackupError as exc:
         print_fn(f"[FAILED] {exc}")
         return 1

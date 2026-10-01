@@ -535,7 +535,7 @@ def test_the_job_budgets_each_archive_from_the_real_data_and_reports_it(dest_roo
     monkeypatch.setattr(ob, "_free_and_total", lambda path: (2 * 2**40, 9 * 2**40))
     seen = {}
     real = ob.create_backup_set
-    monkeypatch.setattr(ob, "create_backup_set", lambda dest, sources, now, budgets=None: seen.update(b=budgets) or real(dest, sources, now=now, budgets=budgets))
+    monkeypatch.setattr(ob, "create_backup_set", lambda dest, sources, now, budgets=None, **kw: seen.update(b=budgets) or real(dest, sources, now=now, budgets=budgets, **kw))
     ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root), sources={"vol": [str(vol)]}, now=1_800_000_000.0,
                   allowed_serials=ALLOWED, min_interval_hours=0)
     assert set(seen["b"]) == {"vol"} and 1 * 2**20 <= seen["b"]["vol"] < 200 * 2**20
@@ -549,3 +549,223 @@ def test_the_dry_run_reports_the_real_data_size_and_that_empty_space_is_not_copi
     r = ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root), sources={"vol": [str(vol)]}, now=1.0,
                       allowed_serials=ALLOWED, min_interval_hours=0, dry_run=True)
     assert "empty space is never copied" in r.detail and r.bytes_written < 10 * 2**20
+
+
+
+# --- the installer cache is backed up changes-only ----------------------------
+
+import tarfile as _tarfile
+
+CHANGES = frozenset({"installer-cache"})
+
+
+@pytest.fixture
+def cache(tmp_path):
+    """A stand-in for INSTALLER_CACHE: a few big, unchanging installers, a subfolder, a symlink, an empty dir."""
+    root = tmp_path / "cache"
+    (root / "isos").mkdir(parents=True)
+    (root / "isos" / "proxmox.iso").write_bytes(os.urandom(300_000))
+    (root / "isos" / "debian.iso").write_bytes(os.urandom(200_000))
+    (root / "packages").mkdir()
+    (root / "packages" / "lm-sensors.deb").write_bytes(os.urandom(50_000))
+    (root / "empty-dir").mkdir()
+    (root / "latest.iso").symlink_to("isos/proxmox.iso")
+    return root
+
+
+def _inc(d, cache, now):
+    return ob.create_backup_set(d, {"installer-cache": [str(cache)]}, now=now, changes_only=CHANGES)
+
+
+def _members(set_obj, archive="installer-cache.tar.gz"):
+    with _tarfile.open(set_obj.path / archive) as tf:
+        return {m.name: m for m in tf.getmembers()}
+
+
+def _files(members):
+    return {n for n, m in members.items() if m.isfile()}
+
+
+def test_the_first_backup_of_the_cache_copies_everything_once(dest_root, cache):
+    d = _dest(dest_root)
+    s = _inc(d, cache, 1_800_000_000.0)
+    names = _files(_members(s))
+    assert {n.rsplit("/", 1)[-1] for n in names} == {"proxmox.iso", "debian.iso", "lm-sensors.deb"}
+    entry = s.manifest["archives"][0]
+    assert entry["mode"] == "changes-only" and entry["base_set"] is None and entry["changed"] == 3
+
+
+def test_a_second_backup_with_nothing_changed_copies_no_file_data_at_all(dest_root, cache):
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    second = _inc(d, cache, 1_800_100_000.0)
+    assert _files(_members(second)) == set()
+    assert (second.path / "installer-cache.tar.gz").stat().st_size < 4096
+    entry = second.manifest["archives"][0]
+    assert entry["changed"] == 0 and entry["unchanged"] == 3 and entry["base_set"] == first.name
+    assert second.manifest["depends_on"] == [first.name]
+    files_only = [f for f in entry["files"].values() if f["kind"] == "file"]
+    assert len(files_only) == 3 and all(f["stored_in"]["set"] == first.name for f in files_only)
+
+
+def test_only_new_and_modified_files_are_copied(dest_root, cache):
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    (cache / "isos" / "new.iso").write_bytes(os.urandom(10_000))                       # new
+    (cache / "packages" / "lm-sensors.deb").write_bytes(os.urandom(60_000))            # changed size
+    second = _inc(d, cache, 1_800_100_000.0)
+    assert {n.rsplit("/", 1)[-1] for n in _files(_members(second))} == {"new.iso", "lm-sensors.deb"}
+    entry = second.manifest["archives"][0]
+    assert entry["changed"] == 2 and entry["unchanged"] == 2
+
+
+def test_a_file_with_a_new_modification_time_is_treated_as_changed(dest_root, cache):
+    d = _dest(dest_root)
+    _inc(d, cache, 1_800_000_000.0)
+    os.utime(cache / "isos" / "debian.iso", (1_700_000_000, 1_700_000_000))
+    second = _inc(d, cache, 1_800_100_000.0)
+    assert {n.rsplit("/", 1)[-1] for n in _files(_members(second))} == {"debian.iso"}
+
+
+def test_an_unchanged_installer_exists_in_exactly_one_set_across_many_backups(dest_root, cache):
+    d = _dest(dest_root)
+    for i in range(4):
+        _inc(d, cache, 1_800_000_000.0 + i * 100_000)
+    holders = 0
+    for s in ob.list_sets(d):
+        holders += sum(1 for n in _files(_members(s)) if n.endswith("proxmox.iso"))
+    assert holders == 1
+
+
+def test_a_file_deleted_from_the_cache_leaves_old_sets_alone_and_drops_out_of_the_new_table(dest_root, cache):
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    first_bytes = (first.path / "installer-cache.tar.gz").read_bytes()
+    (cache / "packages" / "lm-sensors.deb").unlink()
+    second = _inc(d, cache, 1_800_100_000.0)
+    assert not any(k.endswith("lm-sensors.deb") for k in second.manifest["archives"][0]["files"])
+    assert (first.path / "installer-cache.tar.gz").read_bytes() == first_bytes        # old set untouched
+
+
+def test_the_set_verifies_and_so_does_the_whole_chain(dest_root, cache):
+    d = _dest(dest_root)
+    _inc(d, cache, 1_800_000_000.0)
+    second = _inc(d, cache, 1_800_100_000.0)
+    assert ob.verify_set(second.path) is True
+    assert ob.verify_chain(d, second.name) is True
+
+
+def test_a_chain_with_a_missing_dependency_fails_verification(dest_root, cache):
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    second = _inc(d, cache, 1_800_100_000.0)
+    (first.path / "installer-cache.tar.gz").unlink()                                   # the TEST removes it, as a user might
+    with pytest.raises(ob.BackupError, match="depend"):
+        ob.verify_chain(d, second.name)
+
+
+def test_if_an_old_set_was_deleted_by_hand_the_next_backup_recopies_those_files(dest_root, cache):
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    shutil_rmtree = __import__("shutil").rmtree
+    shutil_rmtree(first.path)                                                          # the user clears an old set
+    second = _inc(d, cache, 1_800_100_000.0)
+    entry = second.manifest["archives"][0]
+    assert entry["changed"] == 3 and entry["unchanged"] == 0 and entry["base_set"] is None
+    assert second.manifest.get("depends_on", []) == []
+    assert ob.verify_chain(d, second.name) is True
+
+
+def test_the_cache_can_be_rebuilt_from_the_chain_exactly(dest_root, cache, tmp_path):
+    d = _dest(dest_root)
+    _inc(d, cache, 1_800_000_000.0)
+    (cache / "isos" / "new.iso").write_bytes(os.urandom(10_000))
+    (cache / "packages" / "lm-sensors.deb").write_bytes(os.urandom(60_000))
+    last = _inc(d, cache, 1_800_100_000.0)
+    out = tmp_path / "restored"
+    out.mkdir()
+    ob.restore_label(d, last.name, "installer-cache", out)
+    base = out / str(cache).lstrip("/")
+    for p in cache.rglob("*"):
+        q = base / p.relative_to(cache)
+        if p.is_symlink():
+            assert q.is_symlink() and os.readlink(q) == os.readlink(p)
+        elif p.is_file():
+            assert q.read_bytes() == p.read_bytes(), p.name
+        else:
+            assert q.is_dir()
+
+
+def test_restore_never_writes_into_the_backup_drive(dest_root, cache, tmp_path):
+    d = _dest(dest_root)
+    last = _inc(d, cache, 1_800_000_000.0)
+    before = _snapshot(dest_root, skip=())
+    with pytest.raises(ob.BackupError):
+        ob.restore_label(d, last.name, "installer-cache", dest_root / "movies")        # inside the backup drive: refused
+    assert _snapshot(dest_root, skip=()) == before
+
+
+def test_other_volumes_are_still_backed_up_in_full_each_time(dest_root, sources, cache):
+    d = _dest(dest_root)
+    srcs = {**sources, "installer-cache": [str(cache)]}
+    ob.create_backup_set(d, srcs, now=1_800_000_000.0, changes_only=CHANGES)
+    second = ob.create_backup_set(d, srcs, now=1_800_100_000.0, changes_only=CHANGES)
+    full = _files(_members(second, "baseline-volumes.tar.gz"))
+    assert {n.rsplit("/", 1)[-1] for n in full} == {"a.txt", "b.bin"}                  # full copy again
+    assert _files(_members(second)) == set()                                           # cache: changes only
+
+
+def test_the_job_estimates_only_the_changes_and_the_dry_run_says_so(dest_root, cache, monkeypatch):
+    monkeypatch.setattr(ob, "_free_and_total", lambda path: (2 * 2**40, 9 * 2**40))
+    kw = dict(destination=str(dest_root), run=ScriptedRun(dest_root), sources={"installer-cache": [str(cache)]},
+              allowed_serials=ALLOWED, min_interval_hours=0, changes_only=CHANGES)
+    ob.run_backup(now=1_800_000_000.0, **kw)
+    r = ob.run_backup(now=1_800_100_000.0, dry_run=True, **kw)
+    assert r.bytes_written < 64 * 1024 and "unchanged" in r.detail
+
+
+def test_the_size_cap_for_a_changes_only_archive_is_based_on_the_changes(dest_root, cache):
+    d = _dest(dest_root)
+    _inc(d, cache, 1_800_000_000.0)
+    (cache / "isos" / "new.iso").write_bytes(os.urandom(500_000))
+    with pytest.raises(ob.BackupError, match="larger than the data"):
+        ob.create_backup_set(d, {"installer-cache": [str(cache)]}, now=1_800_100_000.0, changes_only=CHANGES,
+                             budgets={"installer-cache": 1000})
+
+
+def test_a_newer_set_pointing_at_a_deleted_older_set_makes_the_next_backup_recopy_those_files(dest_root, cache):
+    """set1 holds the data, set2 only points at it, then the user deletes set1 by hand: set3 must not trust set2's
+    references (that would silently produce a backup with missing data)."""
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    second = _inc(d, cache, 1_800_100_000.0)
+    assert second.manifest["depends_on"] == [first.name]
+    __import__("shutil").rmtree(first.path)                                              # the TEST plays the user
+    third = _inc(d, cache, 1_800_200_000.0)
+    entry = third.manifest["archives"][0]
+    assert entry["changed"] == 3 and entry["unchanged"] == 0
+    assert third.manifest["depends_on"] == [] and ob.verify_chain(d, third.name) is True
+    assert {n.rsplit("/", 1)[-1] for n in _files(_members(third))} == {"proxmox.iso", "debian.iso", "lm-sensors.deb"}
+
+
+def test_verify_chain_fails_when_a_whole_dependency_set_is_gone(dest_root, cache):
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    second = _inc(d, cache, 1_800_100_000.0)
+    __import__("shutil").rmtree(first.path)
+    with pytest.raises(ob.BackupError, match="depends on"):
+        ob.verify_chain(d, second.name)
+
+
+def test_deep_chain_verification_detects_a_changed_dependency(dest_root, cache):
+    d = _dest(dest_root)
+    first = _inc(d, cache, 1_800_000_000.0)
+    second = _inc(d, cache, 1_800_100_000.0)
+    archive = first.path / "installer-cache.tar.gz"
+    data = archive.read_bytes()
+    with open(archive, "r+b") as fh:                                                      # the TEST tampers
+        fh.seek(len(data) - 10)
+        fh.write(b"Z" * 10)
+    assert ob.verify_chain(d, second.name) is True                                        # shallow: size unchanged
+    with pytest.raises(ob.BackupError, match="checksum"):
+        ob.verify_chain(d, second.name, deep=True)

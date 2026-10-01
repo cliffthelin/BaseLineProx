@@ -76,6 +76,15 @@ deleting, renaming or overwriting call is ever added.
   actually stored, not apparent size, and `--one-file-system` stops it wandering into any other mounted
   drive. Each archive has a hard cap of its estimated data plus 2% and 64 MiB; if it grows past that the run
   stops at once (compression can only shrink data, so growth means something that is not data is being read).
+- **The installer cache is backed up changes-only.** The first backup copies it once; every later set stores
+  only files that are new or changed (size or modification time differs) plus the folder and link structure,
+  and the set's manifest records, for every file, which earlier set already holds its data. An unchanged
+  installer therefore exists in exactly one set, however many backups are made. Nothing existing is touched,
+  so there are no in-place updates: this is add-only. If you delete an old set by hand, the next backup
+  notices the missing data and copies those files again, so a chain never silently loses data.
+  `verify_chain` checks that every set a set depends on is still there (`deep=True` re-hashes them), and
+  `restore_label` rebuilds the cache as of any set into a folder outside the backup drive, reading from the
+  chain and never writing to it. The other volumes are small and are backed up in full each time.
 - **Space and cadence:** nothing can be deleted to make room, so a backup is refused if it would not fit with
   10% headroom and leave at least 3% free, and a minimum interval (default one week) stops full backups piling
   up. Clearing old sets is your decision.
