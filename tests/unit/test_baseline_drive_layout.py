@@ -5,10 +5,18 @@ go through an injected runner and validation through an injected validator."""
 import pytest
 
 import baseline_drive_layout as cl
+import drive_guard as dg
 import drive_installer as di
 
 SIZE = 512_110_190_592
 DEV = "/dev/sdd"
+GUID = "8afe8468-ea73-4944-8842-0cbbe4a82d16"
+
+
+@pytest.fixture(autouse=True)
+def _blank_drive(monkeypatch):
+    """The drive being laid out is blank, so the data-protection check passes."""
+    monkeypatch.setattr(dg, "_default_run", lambda argv: (0, f"sdd disk  {GUID} \n"))
 
 
 def test_plan_uses_baselines_own_volumes_and_adaptive_sizes():
@@ -164,3 +172,19 @@ def test_legacy_relabel_plan_is_empty_for_a_current_drive():
 def test_relabel_uses_the_nvme_partition_naming():
     plan = cl.legacy_relabel_plan("/dev/nvme0n1", [(5, "USER_PERSISTENCE_ADMIN")])
     assert ["e2label", "/dev/nvme0n1p5", "USER_ADMIN"] in plan
+
+
+def test_apply_refuses_a_drive_with_data_and_no_installer_uuid_and_runs_nothing(monkeypatch):
+    monkeypatch.setattr(dg, "_default_run", lambda argv: (0, f"sdd disk  {GUID} \nsdd1 part ntfs  TV\n"))
+    cmd = Cmd()
+    with pytest.raises(cl.LayoutError, match="installer"):
+        cl.apply(cmd, DEV, validate=ok_validator)
+    assert cmd.calls == []
+
+
+def test_apply_lays_out_a_drive_with_data_that_the_installer_created(monkeypatch):
+    monkeypatch.setattr(dg, "_default_run", lambda argv: (0, f"sdd disk  {GUID} \nsdd1 part ext4  BASELINE\n"))
+    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
+    cmd = Cmd()
+    assert cl.apply(cmd, DEV, validate=ok_validator)
+    assert cmd.calls and cmd.calls[0][0] == "wipefs"

@@ -118,6 +118,11 @@ def legacy_relabel_plan(device: str, partitions: list) -> list[list[str]]:
 def apply(cmd, path: str, *, validate=validate_target_device, expected_serial=None,
           min_size_bytes: int = _MIN_DRIVE_BYTES, personas: tuple = di.DEFAULT_PERSONAS) -> list[dict]:
     validated = validate(path, expected_serial=expected_serial, min_size_bytes=min_size_bytes)
+    import drive_guard
+    try:
+        drive_guard.require_may_format(validated["path"])
+    except drive_guard.DataProtectionError as exc:
+        raise LayoutError(str(exc)) from None
     plan = plan_partitions(validated["size_bytes"], personas)
     steps = [["wipefs", "-a", validated["path"]], ["sgdisk", "-Z", validated["path"]],
              sgdisk_argv(validated["path"], plan)] + [mkfs_argv(validated["path"], p) for p in plan]

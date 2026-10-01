@@ -120,3 +120,7 @@ Not yet run against real hardware. Open items are in v0.2 rows 56-61.
 - [DR 46](../design/decision-records/46-sdb-partitioned-user-persistence-installer-cache-session-temp.md) - the first real partitioning
 - [DR 73](../design/decision-records/73-adaptive-volume-sizing.md) - adaptive sizing within each volume's min/max
 - [DR 98](../design/decision-records/98-substrate-persistence-and-real-sizing-defaults.md) - the sizing defaults
+
+## Data protection: no formatting a drive with data unless the installer made it
+
+A drive that holds data (any filesystem or partition) can only be formatted by Baseline when its GPT disk GUID is one the installer generated and registered (`drive_guard.py`). No parameter, human confirmation or standing approval overrides this; an unreadable drive counts as holding data. A drive that predates the rule is adopted with the `stamp_installer_identity` action, which is allowed only when every partition is one of Baseline's own volumes and changes nothing but the disk identifier.

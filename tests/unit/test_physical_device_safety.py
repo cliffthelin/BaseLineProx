@@ -23,7 +23,8 @@ class FakeRunner:
 
     def __init__(self, *, udevadm_by_path=None, findmnt_root="/dev/nvme0n1p2",
                  pkname_of_root="nvme0n1", sizes=None, lstat_mode=None,
-                 realpath_map=None, is_symlink=False):
+                 realpath_map=None, is_symlink=False, drive_table="sdb disk  11111111-2222-3333-4444-555555555555 \n"):
+        self.drive_table = drive_table
         self.udevadm_by_path = udevadm_by_path or {}
         self.findmnt_root = findmnt_root
         self.pkname_of_root = pkname_of_root
@@ -42,6 +43,8 @@ class FakeRunner:
             return f"ID_SERIAL_SHORT={serial}\n"
         if argv[0] == "findmnt":
             return self.findmnt_root + "\n"
+        if argv[0] == "lsblk" and "NAME,TYPE,FSTYPE,PTUUID,LABEL" in argv:
+            return self.drive_table          # what is ON the drive: blank unless a test says otherwise
         if argv[0] == "lsblk":
             return self.pkname_of_root + "\n"
         raise AssertionError(f"unexpected command: {argv}")

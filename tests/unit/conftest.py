@@ -196,3 +196,15 @@ def _hardware_safety_guard(monkeypatch):
 
     monkeypatch.setattr(builtins, "open", guarded_open)
     monkeypatch.setattr(os, "open", guarded_os_open)
+
+    # Reading what is ON a real drive (drive_guard's lsblk) is read-only, but a test must still never depend on
+    # the real machine's drives: every test that exercises it supplies a fake drive explicitly.
+    try:
+        import drive_guard
+
+        def _no_real_drive_reads(argv):
+            raise HardwareSafetyViolation(
+                f"a test tried to read a real drive's contents with {argv[0]!r}; pass a fake `run=` instead")
+        monkeypatch.setattr(drive_guard, "_default_run", _no_real_drive_reads)
+    except ImportError:
+        pass

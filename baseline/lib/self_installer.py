@@ -258,6 +258,16 @@ def build_and_write_self_installer(
         )
     except pds.PhysicalDeviceSafetyError as exc:
         return SelfInstallerResult("refused", f"device safety check failed: {exc}")
+    # A second, independent data-protection check (the web layer already made one): a drive that holds data and
+    # has no installer-generated UUID is never installed over. No option relaxes it.
+    import drive_guard
+    try:
+        drive_guard.require_may_format(
+            device_path, run=lambda argv: (0, pds_runner.run(argv)) if pds_runner is not None else drive_guard._default_run(argv))
+    except drive_guard.DataProtectionError as exc:
+        return SelfInstallerResult("refused", str(exc))
+    except Exception as exc:  # noqa: BLE001 - failing to look means "unknown", which protects the drive
+        return SelfInstallerResult("refused", f"refused: could not check whether {device_path} holds data: {exc}")
 
     # The real hardware serial of the *selected* drive - used to target
     # the unattended install at the right disk (filter.ID_SERIAL_SHORT).

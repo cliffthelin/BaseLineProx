@@ -42,7 +42,8 @@ def test_with_nav_returns_unchanged_when_no_body_tag_found():
 # -- real_drive_state / real_volume_state -------------------------------------
 
 class FakePdsRunner:
-    def __init__(self, serials_by_path=None):
+    def __init__(self, serials_by_path=None, drive_table="sdb disk  11111111-2222-3333-4444-555555555555 \n"):
+        self.drive_table = drive_table
         self.serials_by_path = serials_by_path or {
             "/dev/sdb": "MD89N41071210AP4E", "/dev/sdd": "FD01N6557110C271B",
         }
@@ -55,6 +56,8 @@ class FakePdsRunner:
             return f"ID_SERIAL_SHORT={serial}\n"
         if argv[0] == "findmnt":
             return "/dev/nvme0n1p2\n"
+        if argv[0] == "lsblk" and "NAME,TYPE,FSTYPE,PTUUID,LABEL" in argv:
+            return self.drive_table          # what is ON the drive: blank unless a test says otherwise
         if argv[0] == "lsblk":
             return "nvme0n1\n"
         raise AssertionError(f"unexpected: {argv}")

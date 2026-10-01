@@ -42,6 +42,7 @@ VERBS = {
     "mount_volume": "MOUNT",
     "unmount_volume": "UNMOUNT",
     "update_selected": "UPDATE",
+    "stamp_installer_identity": "STAMP",
 }
 CONFIRMED_ACTIONS = frozenset(VERBS)
 NEVER_PRE_APPROVED = frozenset({"build_self_installer"})
