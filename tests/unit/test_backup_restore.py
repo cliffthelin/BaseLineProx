@@ -1,3 +1,4 @@
+import pytest
 """Unit tests for backup_restore.py - real, tar-based backup/restore of
 the persistence volumes and/or the exported config, selectively.
 No real tar is ever invoked - the FakeRunner records every argv.
@@ -46,7 +47,7 @@ def test_create_backup_all_volume_targets():
     assert result.ok is True
     assert set(runner.calls[0][3:]) == {"/mnt/BASELINE", "/mnt/USER_ADMIN", "/mnt/USER_PERSONAL",
                                          "/mnt/APPDATA_ADMIN", "/mnt/APPDATA_PERSONAL",
-                                         "/mnt/INSTALLER_CACHE", "/mnt/SESSION_TEMP", "/mnt/SUBSTRATE"}
+                                         "/mnt/SUBSTRATE"}
 
 
 def test_create_backup_config_only_ignores_any_targets_passed():
@@ -298,3 +299,27 @@ def test_restore_of_non_user_volume_members_does_not_require_a_manifest():
     result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt",
                                 members=["BASELINE/some-app-state"], now=1700000000.0)
     assert result.ok is True
+
+
+def test_a_full_backup_never_includes_the_installer_cache_or_session_temp():
+    targets = br.all_volume_targets()
+    assert "/mnt/INSTALLER_CACHE" not in targets and "/mnt/SESSION_TEMP" not in targets
+    assert "/mnt/USER_ADMIN" in targets and "/mnt/BASELINE" in targets
+
+
+@pytest.mark.parametrize("member", ["mnt/USER_ADMIN/docs/a.txt", "mnt/USER_PERSONAL/", "/mnt/USER_ADMIN/x", "USER/docs/"])
+def test_restoring_a_current_user_volume_member_counts_as_touching_user_data(member):
+    assert br._restore_touches_user_volume([member]) is True
+
+
+@pytest.mark.parametrize("member", ["mnt/BASELINE/x", "etc/baseline/install-config.json", "mnt/APPDATA_ADMIN/a"])
+def test_restoring_other_members_does_not(member):
+    assert br._restore_touches_user_volume([member]) is False
+
+
+def test_the_restore_freshness_gate_accepts_proof_for_a_current_user_volume():
+    runner = FakeRunner()
+    br.record_backup_manifest(runner, target="/mnt/USER_ADMIN", ts=1700000000.0)
+    result = br.restore_backup(runner, archive_path="/tmp/x.tar.gz", dest_root="/mnt",
+                               members=["mnt/USER_ADMIN/docs/"], now=1700000000.0 + 60)
+    assert result.ok

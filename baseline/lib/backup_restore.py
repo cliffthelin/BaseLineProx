@@ -66,7 +66,10 @@ DEFAULT_CONFIG_PATHS = ("/etc/baseline/install-config.json", "/etc/smartd.conf")
 # project's own persistence philosophy (decision record 68).
 DEFAULT_MANIFESTS_DIR = "/mnt/INSTALLER_CACHE/backup_manifests"
 DEFAULT_MAX_BACKUP_AGE_S = 24 * 60 * 60
-USER_TARGET = "/mnt/USER"
+USER_TARGET = "/mnt/USER"          # the legacy single user volume; the current ones are the USER_* volumes
+# The volumes a "back up everything" covers do not include INSTALLER_CACHE (it holds the backups and their
+# manifests, so including it would make a backup contain earlier backups of itself) or SESSION_TEMP (ephemeral).
+_NOT_IN_A_FULL_BACKUP = ("/mnt/INSTALLER_CACHE", "/mnt/SESSION_TEMP")
 
 
 @dataclass
@@ -81,7 +84,16 @@ def backup_required(install_detection: dict) -> bool:
 
 def all_volume_targets() -> list:
     import drive_installer
-    return [mountpoint for _, _, _, _, mountpoint in drive_installer.BASELINE_VOLUMES]
+    return [mountpoint for *_rest, mountpoint in drive_installer.BASELINE_VOLUMES
+            if mountpoint not in _NOT_IN_A_FULL_BACKUP]
+
+
+def user_targets() -> list:
+    """The volumes whose backup freshness gates a restore over user data: the current USER_* volumes and the
+    legacy /mnt/USER."""
+    import drive_installer
+    current = [mp for *_rest, mp in drive_installer.BASELINE_VOLUMES if mp.startswith("/mnt/USER")]
+    return [USER_TARGET] + [mp for mp in current if mp != USER_TARGET]
 
 
 def create_backup_argv(dest_path: str, targets: list) -> list:
@@ -177,7 +189,12 @@ def _restore_touches_user_volume(members: list = None) -> bool:
     default."""
     if members is None:
         return True
-    return any(m.startswith("USER") for m in members)
+    for member in members:
+        parts = str(member).lstrip("/").split("/")
+        # tar stores paths without the leading "/", so /mnt/USER_ADMIN/x is "mnt/USER_ADMIN/x"
+        if any(part.startswith("USER") for part in parts[:2]):
+            return True
+    return False
 
 
 def restore_backup(runner: Runner, *, archive_path: str, dest_root: str = "/", members: list = None,
@@ -215,7 +232,7 @@ def restore_backup(runner: Runner, *, archive_path: str, dest_root: str = "/", m
             return CommandResult(
                 False, "refusing to restore into/over USER: `now` was not given, "
                        "so backup freshness cannot be verified")
-        targets_to_check = volume_targets or [USER_TARGET]
+        targets_to_check = volume_targets or user_targets()
         if not any(has_recent_successful_backup(runner, target=t, now=now,
                                                  max_age_s=max_age_s, manifests_dir=manifests_dir)
                    for t in targets_to_check):
