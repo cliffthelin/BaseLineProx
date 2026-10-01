@@ -43,6 +43,7 @@ won't have satisfied. Opt into rootless deliberately, per container,
 once that prerequisite is actually met."""
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 from dataclasses import dataclass, field
@@ -92,6 +93,49 @@ class ContainerSpec:
     auto_update: str | None = None                       # "registry" | "local" | None
 
 
+_NETWORK_NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
+
+
+@dataclass
+class NetworkSpec:
+    """A Quadlet `.network` unit: a named Podman network containers join by
+    putting `network_reference(name)` in `ContainerSpec.network`. Every
+    value is validated here, so nothing that reaches the generated INI can
+    carry a newline or an extra directive."""
+    name: str
+    subnet: str | None = None        # CIDR, e.g. "10.89.0.0/24" (must be a clean network address)
+    gateway: str | None = None       # an address inside `subnet`
+    internal: bool = False           # True: no route out of the network at all
+    dns_enabled: bool = True
+    rootless: bool = False
+    user: str | None = None          # required when rootless=True, as for ContainerSpec
+
+    def __post_init__(self):
+        if not isinstance(self.name, str) or not _NETWORK_NAME.match(self.name) or self.name.endswith(".network"):
+            raise ValueError(f"invalid network name {self.name!r}: lowercase letters, digits, '_', '.', '-'; "
+                             "at most 63 characters; must not start with a separator")
+        network = None
+        if self.subnet is not None:
+            try:
+                network = ipaddress.ip_network(self.subnet, strict=True)
+            except ValueError as exc:
+                raise ValueError(f"invalid subnet {self.subnet!r}: {exc}") from exc
+        if self.gateway is not None:
+            if network is None:
+                raise ValueError("a gateway needs a subnet")
+            try:
+                gateway = ipaddress.ip_address(self.gateway)
+            except ValueError as exc:
+                raise ValueError(f"invalid gateway {self.gateway!r}: {exc}") from exc
+            if gateway not in network:
+                raise ValueError(f"gateway {self.gateway} is not inside subnet {self.subnet}")
+
+
+def network_reference(name: str) -> str:
+    """The string a container puts in `Network=` to join a Quadlet network."""
+    return f"{name}.network"
+
+
 class RootlessUserRequired(ValueError):
     """Raised when `ContainerSpec.rootless=True` but `.user` is unset -
     there is no default user to fall back to; guessing one would be
@@ -110,6 +154,12 @@ def unit_path(name: str, *, rootless: bool = False, user_home: str | None = None
             raise RootlessUserRequired("unit_path(rootless=True) requires a real user_home - resolve it first, never guess it")
         return f"{user_home.rstrip('/')}/.config/containers/systemd/{name}.container"
     return f"{QUADLET_UNIT_DIR}/{name}.container"
+
+
+def network_unit_path(name: str, *, rootless: bool = False, user_home: str | None = None) -> str:
+    """Where a Quadlet `.network` unit lives - same directory rules as
+    `unit_path`, different extension."""
+    return unit_path(name, rootless=rootless, user_home=user_home)[: -len(".container")] + ".network"
 
 
 def _lookup_user_uid_and_home(runner: Runner, user: str) -> tuple[str, str]:
@@ -214,6 +264,20 @@ def generate_unit(spec: ContainerSpec) -> str:
     return "\n".join(lines) + "\n"
 
 
+def generate_network_unit(spec: NetworkSpec) -> str:
+    """Pure - Quadlet `.network` file content."""
+    lines = ["[Network]", f"NetworkName={spec.name}"]
+    if spec.subnet:
+        lines.append(f"Subnet={spec.subnet}")
+    if spec.gateway:
+        lines.append(f"Gateway={spec.gateway}")
+    if spec.internal:
+        lines.append("Internal=true")
+    if not spec.dns_enabled:
+        lines.append("DisableDNS=true")
+    return "\n".join(lines) + "\n"
+
+
 def is_podman_installed(runner: Runner) -> bool:
     proc = runner.run(["podman", "--version"], timeout=10)
     return proc.returncode == 0
@@ -274,6 +338,31 @@ def write_and_start(runner: Runner, spec: ContainerSpec) -> ApplyResult:
 
     mode = f"rootless (user={spec.user})" if spec.rootless else "root"
     return ApplyResult(True, f"{spec.name}.service written, reloaded, and started ({mode})")
+
+
+def write_network(runner: Runner, spec: NetworkSpec) -> ApplyResult:
+    """Write the `.network` unit and reload systemd. Deliberately no
+    `start`: Quadlet creates the network when the first container that
+    references it starts, so there is no service of its own to start."""
+    if not is_podman_installed(runner):
+        return ApplyResult(False, "podman is not installed on this host - install it before writing any Quadlet unit")
+
+    uid = user_home = None
+    if spec.rootless:
+        if not spec.user:
+            return ApplyResult(False, "NetworkSpec.rootless=True requires .user (the target unprivileged user) to be set")
+        try:
+            uid, user_home = _lookup_user_uid_and_home(runner, spec.user)
+        except RootlessUserRequired as exc:
+            return ApplyResult(False, str(exc))
+
+    runner.write_text_atomic(network_unit_path(spec.name, rootless=spec.rootless, user_home=user_home),
+                             generate_network_unit(spec))
+    reload_proc = runner.run(_systemctl_prefix(spec.rootless, spec.user, uid=uid) + ["daemon-reload"], timeout=30)
+    if reload_proc.returncode != 0:
+        return ApplyResult(False, f"systemctl daemon-reload failed: {reload_proc.stderr.strip()[:300]}")
+    mode = f"rootless (user={spec.user})" if spec.rootless else "root"
+    return ApplyResult(True, f"network {spec.name} written and reloaded ({mode}); it is created when a container using it starts")
 
 
 def stop_and_remove(runner: Runner, name: str, *, rootless: bool = False, user: str | None = None) -> ApplyResult:

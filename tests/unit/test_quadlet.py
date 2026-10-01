@@ -311,3 +311,93 @@ def test_write_and_start_refuses_a_non_persistent_volume_and_writes_nothing():
     assert "/opt/pihole:/etc/pihole" in result.detail
     assert runner.writes == []
     assert not any(call[0] == "systemctl" for call in runner.calls)
+
+
+# --- .network units (v0.2 row 20) ----------------------------------------
+
+import pytest
+
+
+def test_minimal_network_unit():
+    content = quadlet.generate_network_unit(quadlet.NetworkSpec(name="backend"))
+    assert "[Network]" in content
+    assert "NetworkName=backend" in content
+    assert "Subnet=" not in content and "Internal=" not in content
+
+
+def test_network_unit_with_subnet_gateway_and_internal():
+    spec = quadlet.NetworkSpec(name="backend", subnet="10.89.0.0/24", gateway="10.89.0.1", internal=True)
+    content = quadlet.generate_network_unit(spec)
+    assert "Subnet=10.89.0.0/24" in content
+    assert "Gateway=10.89.0.1" in content
+    assert "Internal=true" in content
+
+
+def test_network_unit_can_turn_dns_off():
+    content = quadlet.generate_network_unit(quadlet.NetworkSpec(name="n", dns_enabled=False))
+    assert "DisableDNS=true" in content
+
+
+def test_gateway_must_sit_inside_the_subnet():
+    with pytest.raises(ValueError):
+        quadlet.NetworkSpec(name="n", subnet="10.89.0.0/24", gateway="192.168.1.1")
+
+
+def test_a_gateway_without_a_subnet_is_rejected():
+    with pytest.raises(ValueError):
+        quadlet.NetworkSpec(name="n", gateway="10.89.0.1")
+
+
+@pytest.mark.parametrize("name", ["", "Up", "has space", "a/b", "a\nExec=evil", "-lead", "x" * 64, "a.network"])
+def test_network_names_are_validated(name):
+    with pytest.raises(ValueError):
+        quadlet.NetworkSpec(name=name)
+
+
+@pytest.mark.parametrize("subnet", ["10.89.0.0/24\nVolume=/:/host", "not-a-cidr", "10.89.0.5/24"])
+def test_subnet_must_be_a_clean_network_address(subnet):
+    with pytest.raises(ValueError):
+        quadlet.NetworkSpec(name="n", subnet=subnet)
+
+
+def test_network_reference_is_what_a_container_puts_in_Network():
+    assert quadlet.network_reference("backend") == "backend.network"
+    unit = quadlet.generate_unit(ContainerSpec(name="a", image="x@sha256:1",
+                                               network=quadlet.network_reference("backend")))
+    assert "Network=backend.network" in unit
+
+
+def test_network_unit_path_root_and_rootless():
+    assert quadlet.network_unit_path("backend") == "/etc/containers/systemd/backend.network"
+    assert quadlet.network_unit_path("backend", rootless=True, user_home="/home/svc/") == \
+        "/home/svc/.config/containers/systemd/backend.network"
+    with pytest.raises(quadlet.RootlessUserRequired):
+        quadlet.network_unit_path("backend", rootless=True)
+
+
+def test_write_network_writes_the_unit_and_reloads_without_starting_anything():
+    runner = FakeRunner()
+    runner.script_prefix("podman", returncode=0, stdout="podman version 5.7.0", stderr="")
+    runner.script_prefix("systemctl", returncode=0, stdout="", stderr="")
+    result = quadlet.write_network(runner, quadlet.NetworkSpec(name="backend", subnet="10.89.0.0/24"))
+    assert result.applied is True
+    assert "NetworkName=backend" in runner.files[quadlet.network_unit_path("backend")]
+    assert ["systemctl", "daemon-reload"] in runner.calls
+    assert not any(c[:2] == ["systemctl", "start"] for c in runner.calls)
+
+
+def test_write_network_refuses_when_podman_is_missing():
+    runner = FakeRunner()
+    runner.script_prefix("podman", returncode=127, stdout="", stderr="not found")
+    result = quadlet.write_network(runner, quadlet.NetworkSpec(name="backend"))
+    assert result.applied is False and "podman is not installed" in result.detail
+    assert runner.writes == []
+
+
+def test_write_network_reports_a_failed_reload():
+    from fake_runner import FakeProc
+    runner = FakeRunner()
+    runner.script_prefix("podman", returncode=0, stdout="podman version 5.7.0", stderr="")
+    runner.script(lambda a: a[:2] == ["systemctl", "daemon-reload"], FakeProc(1, "", "reload error"))
+    result = quadlet.write_network(runner, quadlet.NetworkSpec(name="backend"))
+    assert result.applied is False and "daemon-reload failed" in result.detail
