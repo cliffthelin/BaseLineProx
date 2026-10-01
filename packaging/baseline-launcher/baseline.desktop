@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Baseline
+GenericName=Baseline web application
+Comment=Open the Baseline web application (starts it first if needed)
+Exec=/opt/baseline/bin/baseline-launcher
+Icon=baseline
+Terminal=false
+Categories=System;Utility;
+StartupNotify=true

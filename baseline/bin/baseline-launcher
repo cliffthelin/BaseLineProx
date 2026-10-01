@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""The one Baseline launcher (desktop icon target): open the web application, starting its service if needed.
+Works from the repo (lib next to bin) and from /opt/baseline."""
+import os
+import sys
+
+here = os.path.dirname(os.path.realpath(__file__))
+for lib in (os.path.join(here, "..", "lib"), "/opt/baseline/lib"):
+    if os.path.isdir(lib):
+        sys.path.insert(0, os.path.realpath(lib))
+        break
+import launcher  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(launcher.launch())

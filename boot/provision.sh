@@ -270,6 +270,11 @@ cp "$SRC/baseline/lib/operations.py" /opt/baseline/lib/operations.py
 cp "$SRC/baseline/lib/operations_page.py" /opt/baseline/lib/operations_page.py
 cp "$SRC/baseline/lib/operator_accounts.py" /opt/baseline/lib/operator_accounts.py
 cp "$SRC/baseline/lib/audit_view.py" /opt/baseline/lib/audit_view.py
+cp "$SRC/baseline/lib/launcher.py" /opt/baseline/lib/launcher.py
+cp "$SRC/baseline/bin/baseline-launcher" /opt/baseline/bin/baseline-launcher
+chmod +x /opt/baseline/bin/baseline-launcher
+install -D -m 0644 "$SRC/packaging/baseline-launcher/baseline.desktop" /usr/share/applications/baseline.desktop
+install -D -m 0644 "$SRC/packaging/baseline-launcher/baseline.svg" /usr/share/icons/hicolor/scalable/apps/baseline.svg
 cp "$SRC/baseline/lib/remote_access.py" /opt/baseline/lib/remote_access.py
 cp "$SRC/baseline/lib/baseline_drive_layout.py" /opt/baseline/lib/baseline_drive_layout.py
 # The merged Baseline web app (decision record 83) - direct
@@ -390,7 +395,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/backup_recurring.py \
          /opt/baseline/lib/offdrive_backup.py \
          /opt/baseline/lib/web_security.py /opt/baseline/lib/hitl.py /opt/baseline/lib/drive_guard.py /opt/baseline/lib/web_gate.py \
-         /opt/baseline/lib/operations.py /opt/baseline/lib/operations_page.py /opt/baseline/lib/operator_accounts.py /opt/baseline/lib/audit_view.py /opt/baseline/lib/remote_access.py /opt/baseline/lib/baseline_drive_layout.py \
+         /opt/baseline/lib/operations.py /opt/baseline/lib/operations_page.py /opt/baseline/lib/operator_accounts.py /opt/baseline/lib/audit_view.py /opt/baseline/lib/launcher.py /opt/baseline/bin/baseline-launcher /opt/baseline/lib/remote_access.py /opt/baseline/lib/baseline_drive_layout.py \
          /opt/baseline/lib/recovery_mode.py /opt/baseline/bin/baseline-recovery-mode \
          /opt/baseline/lib/drive_admin.py /opt/baseline/lib/baseline_web.py /opt/baseline/bin/baseline-web \
          /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update \
