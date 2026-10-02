@@ -47,6 +47,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import naming
+import posixpath
 
 KIND_PACKAGE = "apt package"
 KIND_CONTAINER = "container"
@@ -375,10 +376,23 @@ def registry_path(persona: str, baseline_id: str) -> str:
     return f"{app_home(persona, baseline_id)}/registry.db"
 
 
+def _validate_target(target: str) -> str:
+    if (not isinstance(target,str) or not target.startswith(('/', '~/'))
+            or target in ('/', '~/', '~') or target.startswith('//')
+            or '..' in target.split('/')
+            or any(c in target for c in ',:')
+            or any(ord(c)<32 or ord(c)==127 for c in target)):
+        raise ValueError('unsafe application data target')
+    normalized = posixpath.normpath(target)
+    if normalized in ("/", "~") or len("target-" + normalized.encode("utf-8").hex()) > 255:
+        raise ValueError("unsafe or oversized application data target")
+    return normalized
+
+
 def _escape_target(target: str) -> str:
     """A filesystem-safe single directory name for one overlay target,
     so each target gets its own upper/work pair without nesting."""
-    return target.replace("~", "HOME").strip("/").replace("/", "-") or "root"
+    return "target-" + target.encode("utf-8").hex()
 
 
 def _skip_substrate_and_drivers(entry) -> bool:
@@ -456,7 +470,7 @@ def plan_for(persona: str, app: AppSpec, assignment: naming.Assignment) -> AppPl
             upperdir=naming.assert_canonical(f"{home}/upper/{_escape_target(target)}"),
             workdir=naming.assert_canonical(f"{home}/work/{_escape_target(target)}"),
         )
-        for target in effective_targets(app)
+        for target in map(_validate_target, effective_targets(app))
     ]
     return AppPlan(**common, overlays=overlays)
 
@@ -518,14 +532,23 @@ def required_directories(plan: AppPlan) -> list:
 
 
 def target_conflicts(plans: list) -> list:
-    """Any overlay target claimed by more than one application. Two
+    """Any equivalent or nested overlay targets, including within one app. Two
     overlays cannot both mount at one path - the second hides the first
     and the apps share exactly the data this module keeps apart."""
     seen: dict = {}
     for plan in plans:
         for overlay in plan.overlays:
-            seen.setdefault(overlay.target, []).append(plan.app.app_id)
-    return [(target, owners) for target, owners in sorted(seen.items()) if len(owners) > 1]
+            target=posixpath.normpath(overlay.target)
+            seen.setdefault(target, []).append(plan.app.app_id)
+    conflicts=[]
+    for target in sorted(seen):
+        owners=list(seen[target])
+        for child in sorted(seen):
+            if child.startswith(target.rstrip('/') + '/'):
+                owners.extend(seen[child])
+        if len(owners)>1:
+            conflicts.append((target,list(dict.fromkeys(owners))))
+    return conflicts
 
 
 def cross_app_leaks(plans: list) -> list:

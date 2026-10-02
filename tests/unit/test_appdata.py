@@ -494,3 +494,38 @@ def test_vms_and_lxcs_are_not_persona_appdata():
     assert vm_lxc_ids, "the catalog should still list VM/LXC installers"
     assert not (vm_lxc_ids & {a.app_id for a in appdata.installable_apps()})
     assert not hasattr(appdata, "KIND_LXC") and not hasattr(appdata, "KIND_VM")
+
+
+def test_distinct_declared_paths_have_distinct_overlay_state_directories():
+    app = appdata.AppSpec('sample', 'Sample', appdata.KIND_PACKAGE, 'test',
+                          data_targets=('~/a-b', '~/a/b'))
+    assignment = _assign(app)
+    plan = appdata.plan_for('personal', app, assignment)
+    assert len({o.upperdir for o in plan.overlays}) == 2
+    assert len({o.workdir for o in plan.overlays}) == 2
+
+
+def test_nested_and_lexically_equivalent_targets_report_conflicts():
+    a = appdata.AppSpec('first', 'First', appdata.KIND_PACKAGE, 'test',
+                        data_targets=('~/.config/sample',))
+    b = appdata.AppSpec('second', 'Second', appdata.KIND_PACKAGE, 'test',
+                        data_targets=('~/.config/sample/child', '~/.config/./sample'))
+    plans = [appdata.plan_for('personal', a, _assign(a, '00091')),
+             appdata.plan_for('personal', b, _assign(b, '00092'))]
+    assert appdata.target_conflicts(plans) == [('~/.config/sample', ['first', 'second'])]
+
+
+def test_unsafe_overlay_targets_are_refused_before_mount_arguments_exist():
+    import pytest
+    for target in ('relative/path', '~other/profile', '/', '~/../outside', '/var/a,b', '/var/a:b', '/var/a\noption'):
+        app = appdata.AppSpec('sample', 'Sample', appdata.KIND_PACKAGE, 'test', data_targets=(target,))
+        with pytest.raises(ValueError, match='target'):
+            appdata.plan_for('personal', app, _assign(app))
+
+
+def test_normalized_root_and_oversized_state_directory_are_refused():
+    import pytest
+    for target in ('/.', '~/./', '/var/' + 'x' * 200):
+        app = appdata.AppSpec('sample', 'Sample', appdata.KIND_PACKAGE, 'test', data_targets=(target,))
+        with pytest.raises(ValueError, match='target'):
+            appdata.plan_for('personal', app, _assign(app))
