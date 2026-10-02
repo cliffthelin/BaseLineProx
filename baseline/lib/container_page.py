@@ -15,6 +15,10 @@ def perform(host, action, params):
             return dict(host.create(name, template=params.get('template'), cache_storage=params.get('cache_storage'),
                                     os_storage=params.get('os_storage'), disk_gb=int(params.get('disk_gb', 8)),
                                     memory_mb=int(params.get('memory_mb', 512)), cpus=int(params.get('cpus', 1))), ok=True)
+        if action == 'recover':
+            if params.get('confirm') != 'yes':
+                raise vh.VmError('confirm explicit rebuild recovery; retained data will be kept')
+            return host.recover(name)
         if action == 'reset_login':
             if params.get('confirm') != 'yes':
                 raise vh.VmError('confirm login reset; the old password will stop working')
@@ -80,10 +84,22 @@ def render(host=None, unavailable=''):
             button = 'shutdown' if ct['running'] else 'start'
             rebuild = '' if ct['running'] else f'<button class="danger" onclick="act(\'rebuild\',{args},true)">Rebuild OS</button>'
             reset = f'<button onclick="act(\'reset_login\',{args},true)">Reset login</button>' if ct['running'] and ct['phase']=='ready' else ''
+            recovery = ct.get('recovery')
+            if recovery is not None:
+                button = ''
+                rebuild = (f'<button onclick="act(\'recover\',{args},true)">Recover rebuild</button>'
+                           if recovery.get('recoverable') else '')
+                state_label = recovery.get('native_state','unverified')
+                controls = rebuild
+                details = f'<p>{e(recovery.get("message",""))}</p>'
+            else:
+                state_label = 'running' if ct['running'] else 'stopped'
+                controls = f'<button onclick="act(\'{button}\',{args})">{button.title()}</button> {rebuild} {reset}'
+                details = ''
             cards.append(f'<div class="card"><strong>{e(name)}</strong> · CT {ct["vmid"]} · '
-                         f'{"running" if ct["running"] else "stopped"} · {e(ct["phase"])}'
+                         f'{e(state_label)} · {e(ct["phase"])}'
                          f'<p>{e(ct["template"])}<br>Retained data: {e(ct["data_path"])}</p>'
-                         f'<button onclick="act(\'{button}\',{args})">{button.title()}</button> {rebuild} {reset}</div>')
+                         f'{details}{controls}</div>')
         missing = '<p class="warn">No active LVM-thin/ZFS container storage supports this linked-clone recipe.</p>' if not stores['overlay'] else ''
         content = f'''<p>LXC distributions share the host kernel. Their OS is a native linked clone of an immutable template.</p>
 <p>Separate <code>/home</code>, <code>/root</code> and <code>/data</code> directories survive an OS rebuild.
@@ -114,7 +130,7 @@ separate backup/restore verification is still required. This is a Linux environm
 let busy=false;
 async function act(action,params,confirmReset){{
  if(busy)return;
- if(confirmReset && !confirm(action==='reset_login'?'Replace the container login? The old password stops working; data is kept.':'Rebuild the stopped OS? Packages and system settings reset; /home, /root and /data are kept.'))return;
+ if(confirmReset && !confirm(action==='recover'?'Finish the interrupted OS rebuild after ownership checks? Retained data is kept.':action==='reset_login'?'Replace the container login? The old password stops working; data is kept.':'Rebuild the stopped OS? Packages and system settings reset; /home, /root and /data are kept.'))return;
  busy=true;document.getElementById('status').textContent='Working… template preparation can take several minutes.';
  try{{
  const body=Object.assign({{action,request_id:crypto.randomUUID()}},params);if(confirmReset)body.confirm='yes';

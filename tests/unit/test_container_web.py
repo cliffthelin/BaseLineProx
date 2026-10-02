@@ -52,3 +52,25 @@ def test_limited_login_cannot_manage_distro_containers(tmp_path):
         assert c.post_json('/containers/action',{'action':'create','name':'x'})[0]==403
     finally:
         c.close()
+
+
+def test_missing_os_is_visible_and_explicit_recovery_runs_through_durable_web_job(tmp_path):
+    c,h=case(tmp_path)
+    try:
+        c.post_json('/containers/action',{'action':'create','name':'work','template':h.catalog()[0]['name'],
+                                        'cache_storage':'source-cache','os_storage':'os-thin'})
+        c.post_json('/containers/action',{'action':'shutdown','name':'work'})
+        original=h.run
+        def interrupted(args):
+            if args[:2]==['pct','clone']: return 1,'','injected failure'
+            return original(args)
+        h.run=interrupted
+        assert not c.post_json('/containers/action',{'action':'rebuild','name':'work','confirm':'yes'})[1]['ok']
+        h.run=original
+        status,page=c.get('/containers')
+        assert status==200 and b'Recover rebuild' in page and b'absent' in page
+        assert not c.post_json('/containers/action',{'action':'recover','name':'work'})[1]['ok']
+        result=c.post_json('/containers/action',{'action':'recover','name':'work','confirm':'yes'})[1]
+        assert result['ok'] and h.status('work')['running']
+    finally:
+        c.close()

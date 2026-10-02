@@ -1930,7 +1930,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     observation={'available':True,'message':'No named workload. Check native template/cache state before acknowledging.'}
                 else:
                     try:
-                        state=host.status(job['name'])
+                        state=(host.inspect_recovery(job['name']) if job['kind']=='container' and host.record(job['name']).get('phase')!='ready' else host.status(job['name']))
                         observation={'available':True,'message':json.dumps(state,default=str)}
                     except (vh.VmError,OSError,ValueError):
                         observation={'available':False,'message':'Workload inspection failed; no absence or successful recovery is inferred. Inspect Proxmox resources.'}
@@ -1955,7 +1955,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 result=container_page.save_data(deps.get('vm_config_path'),body.get('data_store')) if kind=='container' else \
                     vm_page.save_store(deps.get('vm_config_path'),body.get('store'),persistence_store=body.get('persistence_store'))
                 return self._json(200,result)
-            actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login'},
+            actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login','recover'},
                      'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_overlay','start','request_stop','force_stop',
                            'configure','eject_iso','rollback','freeze','delete_vm','delete_base'}}
             if action not in actions[kind]:

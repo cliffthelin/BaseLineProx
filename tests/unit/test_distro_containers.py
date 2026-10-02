@@ -51,9 +51,26 @@ class NativeRunner:
             self.states[args[2]] = 'stopped'
         if args[:2] == ['pct', 'status']:
             return 0, 'status: ' + self.states.get(args[2], 'stopped'), ''
+        if args[:2] == ['pct', 'create']:
+            self.configs[args[2]] = {'hostname': args[args.index('--hostname')+1], 'unprivileged':'1',
+                                     'rootfs':f'os-thin:vm-{args[2]}-disk-0,size=8G'}
+        if args[:2] == ['pct', 'template']:
+            self.configs[args[2]]['template']='1'
+            self.configs[args[2]]['rootfs']=self.configs[args[2]]['rootfs'].replace(':vm-', ':base-')
+        if args[:2] == ['pct', 'destroy']:
+            self.configs.pop(args[2], None)
+            self.states.pop(args[2], None)
+        if args[:3] == ['pvesh', 'get', '/cluster/resources']:
+            return 0, json.dumps([{'vmid':int(i),'type':'lxc','status':self.states.get(i,'stopped')} for i in self.configs]), ''
+        if args[0]=='pvesh' and args[2].endswith('/content'):
+            return 0, '[]', ''
         if args[:2] == ['pct', 'clone']:
-            self.configs[args[3]] = {'hostname': args[-1], 'unprivileged': '1',
+            self.configs[args[3]] = {'hostname': args[args.index('--hostname')+1], 'unprivileged': '1',
                                       'rootfs': f'os-thin:vm-{args[3]}-disk-0,size=8G'}
+            if '--description' in args:
+                self.configs[args[3]]['description']=args[args.index('--description')+1]+'%0A'
+        if args[:2] == ['pct', 'set'] and '--delete' in args:
+            for key in args[-1].split(','): self.configs[args[2]].pop(key,None)
         if args[:2] == ['pct', 'set'] and '--delete' not in args:
             self.configs[args[2]].update({args[i][2:]: args[i+1] for i in range(3, len(args), 2)})
         if args[:2] == ['pct', 'config']:
@@ -202,3 +219,73 @@ def test_login_recovery_rotates_a_running_managed_container_without_rebuilding_d
     assert saved.read_text()=='keep'
     assert not any(a[:2] in (['pct','clone'],['pct','destroy']) for a in native.calls[before:])
     assert not any('replacement-private' in ' '.join(a) for a in native.calls)
+
+
+def test_recovery_finishes_rebuild_after_os_deletion_without_losing_retained_data(tmp_path):
+    native = NativeRunner()
+    fail = False
+    def run(args):
+        if fail and args[:2] == ['pct', 'clone']:
+            return 1, '', 'injected clone failure after deletion'
+        return native(args)
+    h = dc.DistroContainers(tmp_path/'protected',run=run,run_input=native.input,
+                           password_factory=lambda:b'fresh',password_hasher=lambda _:'$6$salt$hash')
+    h.create('work',template=h.catalog()[0]['name'],cache_storage='source-cache',os_storage='os-thin')
+    h.shutdown('work')
+    saved=h.data_path('work','home')/'saved'; saved.write_text('keep')
+    fail=True
+    with pytest.raises(dc.vh.VmError,match='clone'):
+        h.rebuild('work')
+    fail=False
+    assert h.inspect_recovery('work')['recoverable']
+    h.recover('work')
+    assert h.status('work')['phase']=='ready' and h.status('work')['running']
+    assert saved.read_text()=='keep'
+    assert len([a for a in native.calls if a[:2]==['pct','destroy']])==1
+
+
+@pytest.mark.parametrize('changed', ['reused-id', 'base', 'orphan', 'inventory-error', 'extra-mount'])
+def test_recovery_refuses_changed_ownership_without_mutating_native_resources(tmp_path, changed):
+    native=NativeRunner()
+    fail=True
+    def run(args):
+        if fail and args[:2]==['pct','clone']:
+            return 1,'','injected clone failure'
+        if changed=='inventory-error' and args[:3]==['pvesh','get','/cluster/resources']:
+            return 1,'','inventory unavailable'
+        if changed=='orphan' and args[0]=='pvesh' and args[2].endswith('/content'):
+            return 0,'[{"volid":"orphan"}]',''
+        return native(args)
+    h=dc.DistroContainers(tmp_path/'protected',run=native,run_input=native.input,
+                         password_factory=lambda:b'fresh',password_hasher=lambda _:'$6$salt$hash')
+    h.create('work',template=h.catalog()[0]['name'],cache_storage='source-cache',os_storage='os-thin')
+    h.shutdown('work');h.run=run
+    with pytest.raises(dc.vh.VmError):h.rebuild('work')
+    fail=False
+    record=h.record('work');id=str(record['vmid'])
+    if changed=='reused-id':native.configs[id]={'hostname':'unrelated-openSUSE','template':'1'}
+    if changed=='base':native.configs[str(record['base_vmid'])]['hostname']='different-base'
+    if changed=='extra-mount':
+        native.configs[id]={'hostname':'work','unprivileged':'1','rootfs':f'os-thin:vm-{id}-disk-0',
+                            'description':'Baseline recovery '+record['recovery_token'],'mp3':'important,mp=/important'}
+    before=len(native.calls)
+    assert not h.inspect_recovery('work')['recoverable']
+    with pytest.raises(dc.vh.VmError):h.recover('work')
+    assert not any(a[:2] in (['pct','destroy'],['pct','clone'],['pct','set'],['pct','start']) for a in native.calls[before:])
+
+
+def test_recovery_finishes_only_its_owned_stopped_partial_clone(tmp_path):
+    native=NativeRunner();fail=False
+    def run(args):
+        if fail and args[:2]==['pct','set'] and '--memory' in args:return 1,'','injected configure failure'
+        return native(args)
+    h=dc.DistroContainers(tmp_path/'protected',run=run,run_input=native.input,
+                         password_factory=lambda:b'fresh',password_hasher=lambda _:'$6$salt$hash')
+    h.create('work',template=h.catalog()[0]['name'],cache_storage='source-cache',os_storage='os-thin')
+    h.shutdown('work');fail=True
+    with pytest.raises(dc.vh.VmError):h.rebuild('work')
+    fail=False
+    assert h.inspect_recovery('work')['native_state']=='partial-clone'
+    before=len(native.calls);h.recover('work')
+    assert h.status('work')['running']
+    assert not any(a[:2] in (['pct','clone'],['pct','destroy']) for a in native.calls[before:])

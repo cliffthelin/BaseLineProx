@@ -13,6 +13,8 @@ import re
 import secrets
 import socket
 import subprocess
+import uuid
+from urllib.parse import unquote
 from pathlib import Path
 
 import vm_host as vh
@@ -83,9 +85,18 @@ class DistroContainers:
     def _save(self, path, value):
         path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         fresh = path.with_suffix('.new')
-        fresh.write_text(json.dumps(value, indent=2))
+        with fresh.open('w') as stream:
+            os.chmod(fresh, 0o600)
+            stream.write(json.dumps(value, indent=2))
+            stream.flush()
+            os.fsync(stream.fileno())
         os.chmod(fresh, 0o600)
         os.replace(fresh, path)
+        fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def record(self, name):
         try:
@@ -174,7 +185,19 @@ class DistroContainers:
 
     def _clone(self, record):
         vmid = str(record['vmid'])
-        self.command(['pct', 'clone', str(record['base_vmid']), vmid, '--full', '0', '--hostname', record['name']])
+        args = ['pct', 'clone', str(record['base_vmid']), vmid, '--full', '0', '--hostname', record['name']]
+        if record.get('recovery_token'):
+            record['phase'] = 'cloning'
+            self._save(self._record_path(record['name']), record)
+            args += ['--description', 'Baseline recovery ' + record['recovery_token']]
+        self.command(args)
+        self._finish_clone(record)
+
+    def _finish_clone(self, record):
+        vmid = str(record['vmid'])
+        if record.get('recovery_token'):
+            record['phase'] = 'configuring'
+            self._save(self._record_path(record['name']), record)
         args = ['pct', 'set', vmid, '--memory', str(record['memory_mb']), '--cores', str(record['cpus']),
                 '--net0', 'name=eth0,bridge=vmbr0,ip=dhcp', '--cmode', 'console']
         for idx, kind in enumerate(('home', 'root', 'data')):
@@ -202,7 +225,22 @@ class DistroContainers:
 
     def list_containers(self):
         d = self.data_store / 'control' / 'containers'
-        return [self.status(p.stem) for p in sorted(d.glob('*.json'))] if d.is_dir() else []
+        result = []
+        for path in sorted(d.glob('*.json')) if d.is_dir() else []:
+            record = self.record(path.stem)
+            if record.get('phase') != 'ready':
+                state = {k:record[k] for k in ('name','vmid','base_vmid','template','os_storage','phase')}
+                state.update(running=False, data_path=str(self.data_path(path.stem,'home').parent),
+                             recovery=self.inspect_recovery(path.stem))
+            else:
+                try:
+                    state = self.status(path.stem)
+                except vh.VmError:
+                    state = {k:record[k] for k in ('name','vmid','base_vmid','template','os_storage','phase')}
+                    state.update(running=None, data_path=str(self.data_path(path.stem,'home').parent),
+                                 recovery={'recoverable':False,'message':'Native status unavailable; inspect Proxmox. No absence is inferred.'})
+            result.append(state)
+        return result
 
     def _managed(self, name):
         self._check_data()
@@ -249,6 +287,10 @@ class DistroContainers:
         record = self._managed(name)
         if self.status(name)['running']:
             raise vh.VmError('shut down cleanly before rebuilding the container OS')
+        base = self._config(record['base_vmid'])
+        self._validate_base(record, base)
+        record['recovery_base'] = base
+        record['recovery_token'] = uuid.uuid4().hex
         record['phase'] = 'rebuilding'
         self._save(self._record_path(name), record)
         self.command(['pct', 'set', str(record['vmid']), '--delete', 'mp0,mp1,mp2'])
@@ -269,3 +311,84 @@ class DistroContainers:
         self._save(self._record_path(name),record)
         return {'ok':True,'username':'root','password':password.decode('ascii'),
                 'message':'Fresh one-time container login. Retained data and OS were kept.'}
+
+
+    def _config(self, vmid):
+        return dict(line.split(': ', 1) for line in
+                    self.command(['pct', 'config', str(vmid)]).splitlines() if ': ' in line)
+
+    def _validate_base(self, record, config):
+        vmid = record['base_vmid']
+        root = config.get('rootfs', '').split(',')[0]
+        if (config.get('hostname') != f'bl-base-{vmid}' or config.get('template') != '1'
+                or config.get('unprivileged') != '1'
+                or root not in {f'{record["os_storage"]}:{prefix}-{vmid}-disk-0' for prefix in ('base', 'subvol')}
+                or any(re.fullmatch(r'(mp|unused)\d+', k) or k.startswith('lxc.idmap') or k=='lock' for k in config)):
+            raise vh.VmError('immutable base identity changed; recovery refused')
+
+    def _recovery_state(self, name):
+        self._check_data()
+        record = self.record(name)
+        if (record.get('phase') not in ('rebuilding', 'cloning', 'configuring')
+                or not re.fullmatch(r'[0-9a-f]{32}', record.get('recovery_token', ''))
+                or not isinstance(record.get('recovery_base'), dict)):
+            raise vh.VmError('no supported rebuild journal; automatic ownership is not inferred')
+        for kind in ('home', 'root', 'data'):
+            if not self.data_path(name, kind).is_dir():
+                raise vh.VmError('retained data is absent; recovery refused')
+        base = self._config(record['base_vmid'])
+        self._validate_base(record, base)
+        if base != record['recovery_base']:
+            raise vh.VmError('immutable base changed since rebuild; recovery refused')
+        entries = json.loads(self.command(['pvesh', 'get', '/cluster/resources', '--type', 'vm', '--output-format', 'json']))
+        if not isinstance(entries, list) or any(not isinstance(e, dict) or not isinstance(e.get('vmid'), int) for e in entries):
+            raise vh.VmError('native inventory is invalid; absence is not inferred')
+        owners = [e for e in entries if e['vmid'] == record['vmid']]
+        if not owners:
+            node = socket.gethostname().split('.')[0]
+            volumes = json.loads(self.command(['pvesh', 'get', f'/nodes/{node}/storage/{record["os_storage"]}/content',
+                                              '--vmid', str(record['vmid']), '--content', 'rootdir', '--output-format', 'json']))
+            if not isinstance(volumes, list) or volumes:
+                raise vh.VmError('unregistered OS volumes require inspection; refusing replacement')
+            return record, 'absent'
+        if len(owners)!=1 or owners[0].get('type')!='lxc' or owners[0].get('status')!='stopped':
+            raise vh.VmError('container ID is occupied or running; recovery refused')
+        config = self._config(record['vmid'])
+        if unquote(config.get('description','')).rstrip('\n') != 'Baseline recovery '+record['recovery_token']:
+            raise vh.VmError('container ID ownership is not proven; recovery refused')
+        if (config.get('hostname') != name or config.get('unprivileged') != '1'
+                or config.get('template') == '1' or config.get('lock')
+                or any(k.startswith('lxc.idmap') or re.fullmatch(r'unused\d+', k) for k in config)):
+            raise vh.VmError('partial clone identity or configuration changed; recovery refused')
+        root = config.get('rootfs', '').split(',')[0]
+        if root not in {f'{record["os_storage"]}:{prefix}-{record["vmid"]}-disk-0' for prefix in ('vm', 'subvol')}:
+            raise vh.VmError('partial clone root ownership changed; recovery refused')
+        for key, value in config.items():
+            if re.fullmatch(r'mp\d+', key):
+                if key not in ('mp0','mp1','mp2'):
+                    raise vh.VmError('additional mounts require inspection')
+                kind = ('home','root','data')[int(key[-1])]
+                fields = value.split(',')
+                if fields[0]!=str(self.data_path(name,kind)) or f'mp=/{kind}' not in fields:
+                    raise vh.VmError('partial clone retained mount changed; recovery refused')
+        return record, 'partial-clone'
+
+    def inspect_recovery(self, name):
+        record = self.record(name)
+        summary = {k:record[k] for k in ('name','vmid','base_vmid','phase')}
+        try:
+            _, state = self._recovery_state(name)
+            return dict(summary, recoverable=True, native_state=state,
+                        message='Explicit recovery can recreate the missing OS or finish this owned stopped clone; retained data is kept.')
+        except (vh.VmError, OSError, ValueError, TypeError) as exc:
+            return dict(summary, recoverable=False, message=str(exc))
+
+    def recover(self, name):
+        record, state = self._recovery_state(name)
+        # Revalidate immediately before each operation; native clone refuses an occupied ID.
+        # No recovery path deletes resources, unlocks tasks or deletes retained data.
+        if state == 'absent':
+            self._clone(record)
+        else:
+            self._finish_clone(record)
+        return {'ok':True, 'message':'Interrupted OS rebuild finished and started; retained data kept. Use Reset login if the original login was lost.'}
