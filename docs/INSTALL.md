@@ -31,7 +31,7 @@ separate retained `/home`, `/root`, `/data`. Eleven distro families booted and
 passed clean OS-rebuild/data checks in the disposable KVM Proxmox clone (DR118);
 this is not physical deployment. openEuler 25.03 failed setup and is disabled.
 These containers share the host kernel and have no preinstalled desktop/browser.
-Bind data is **not covered by vzdump**; backup/restore remains open.
+Bind data is **not covered by vzdump**. DR124 adds stopped retained-data backup and new-container restore, proved on Alpine in disposable Proxmox with separate virtual disks; physical off-drive proof and full VM recovery remain open.
 
 The nine requested desktop/NAS/mobile systems are visible on `/vms` with official
 sources and explicit uninstalled/unverified status. ISO UEFI selection and overlay
@@ -404,3 +404,20 @@ boot required restoring the earlier fixture's restricted-network apt proxy seed
 settings and rerunning bootstrap on the same OS. Ordinary-network firstboot,
 pending-rotation power loss and physical deployment remain unverified; see
 DR123 and verification/123. This qualification leaves queue72 open.
+
+## Stopped LXC retained-data backup and restore (DR124, 2026-10-02)
+
+Cleanly shut down a ready managed container, select **Back up retained data**,
+and supply a mounted separate local-disk folder. Open **Retained backup sets and
+restore**, select the same folder and restore a set into a new unused name.
+The original stays stopped and intact. Save the new container's one-time login.
+
+Coverage is /home, /root and /data, including numeric owners, modes, safe links,
+POSIX ACLs and user attributes. OS packages, /etc, native base and original login
+hash are excluded. Same-host unchanged-base restore only. Backup writes are
+add-only; unsupported metadata/nested mounts/special files are refused. Failed
+restores retain an incomplete reservation for inspection, with repair still open.
+Actual Alpine backup/boot/read/metadata checks passed in disposable KVM Proxmox
+with a separate virtual backup disk. Physical off-drive recovery, full VM backup,
+encryption/scheduling and app-level isolation remain unverified/open. See DR124
+and verification/124; rows59/60/73/75 remain partial.

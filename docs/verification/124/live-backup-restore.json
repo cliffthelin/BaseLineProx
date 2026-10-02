@@ -1,0 +1,233 @@
+{
+  "environment": "Actual disposable Proxmox-in-KVM; separate file-backed USB virtual backup disk; physical source read-only",
+  "checks": [
+    "Actual authenticated backup to separately mounted virtual disk and new-name restore: all three retained areas readable in running restored Alpine; numeric owner/mode/link preserved; OS customization excluded; original and existing backup-drive file unchanged",
+    "Fresh restored login retrieved once; no original hash in backup manifest",
+    "Restored environment shut down cleanly; completed backup/restore jobs survived actual web service restart",
+    "Final source native proof: second add-only backup after synthetic metadata change restored user xattr and POSIX ACL; first archive and existing destination file unchanged; restored native root hash fresh and matches new control record",
+    "Second restored environment stopped cleanly; final backup/restore outcomes persisted across web restart"
+  ],
+  "jobs": [
+    {
+      "id": "3d31ef6e68fa490a9c6311a4ce3da7fe",
+      "kind": "container",
+      "action": "start",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790963192.9543786,
+      "updated": 1790963195.1020284,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Container action completed."
+      }
+    },
+    {
+      "id": "47dd89c8a295441ebac2253f709a9db6",
+      "kind": "container",
+      "action": "shutdown",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790963195.9857194,
+      "updated": 1790963201.331916,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Container action completed."
+      }
+    },
+    {
+      "id": "c9e3c1fb495945bf9c273552985c05e8",
+      "kind": "container",
+      "action": "backup",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790963201.5076978,
+      "updated": 1790963203.783248,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "backup_id": "7c523e3e113642ad9fd78f1057ee666a",
+        "message": "Retained backup 7c523e3e113642ad9fd78f1057ee666a verified. OS/base excluded; original kept stopped."
+      }
+    },
+    {
+      "id": "597d6da569c1436a9d212dd2792bda74",
+      "kind": "container",
+      "action": "restore",
+      "name": "restored-alpine-proof124",
+      "state": "completed",
+      "created": 1790963204.0336287,
+      "updated": 1790963208.5740726,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "name": "restored-alpine-proof124",
+        "username": "root",
+        "message": "Restored retained state into a new running container; original kept. Save fresh one-time login.",
+        "login_available": true
+      }
+    },
+    {
+      "id": "6c4dc9098de940ee87f70a9e963c1ca4",
+      "kind": "container",
+      "action": "shutdown",
+      "name": "restored-alpine-proof124",
+      "state": "completed",
+      "created": 1790963210.6103086,
+      "updated": 1790963214.8067594,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Container action completed."
+      }
+    },
+    {
+      "id": "750dfc65951f41518d248c4f3c42abc7",
+      "kind": "container",
+      "action": "backup",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790963616.463093,
+      "updated": 1790963618.7815237,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "backup_id": "03374c10e56e4297957684757bdd8c79",
+        "message": "Retained backup 03374c10e56e4297957684757bdd8c79 verified. OS/base excluded; original kept stopped."
+      }
+    },
+    {
+      "id": "52f7d80aada9456fb0e1bd043781db9a",
+      "kind": "container",
+      "action": "restore",
+      "name": "restored-metadata-proof124",
+      "state": "completed",
+      "created": 1790963618.9797778,
+      "updated": 1790963623.5713198,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "name": "restored-metadata-proof124",
+        "username": "root",
+        "message": "Restored retained state into a new running container; original kept. Save fresh one-time login.",
+        "login_available": true
+      }
+    },
+    {
+      "id": "9d83cd417ada458db606fde157fd833c",
+      "kind": "container",
+      "action": "shutdown",
+      "name": "restored-metadata-proof124",
+      "state": "completed",
+      "created": 1790963624.5219846,
+      "updated": 1790963629.4991715,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Container action completed."
+      }
+    }
+  ],
+  "native_state": {
+    "original": {
+      "name": "durable-alpine-proof",
+      "vmid": 126,
+      "base_vmid": 102,
+      "template": "alpine-3.23-default_20260116_amd64.tar.xz",
+      "os_storage": "local-lvm",
+      "phase": "ready",
+      "running": false,
+      "data_path": "/var/lib/baseline-proof/ct-data/data/durable-alpine-proof"
+    },
+    "restored": {
+      "name": "restored-alpine-proof124",
+      "vmid": 127,
+      "base_vmid": 102,
+      "template": "alpine-3.23-default_20260116_amd64.tar.xz",
+      "os_storage": "local-lvm",
+      "phase": "ready",
+      "running": true,
+      "data_path": "/var/lib/baseline-proof/ct-data/data/restored-alpine-proof124"
+    },
+    "checks": "all three retained areas; numeric owner/mode/link; original and unrelated backup-drive file unchanged; customized /etc excluded"
+  },
+  "manifest": {
+    "kind": "baseline-container-retained",
+    "version": 1,
+    "created": 1790963203.7814124,
+    "backup_id": "7c523e3e113642ad9fd78f1057ee666a",
+    "destination_serial": "BASELINE_BACKUP124",
+    "source": {
+      "name": "durable-alpine-proof",
+      "vmid": 126,
+      "base_vmid": 102,
+      "template": "alpine-3.23-default_20260116_amd64.tar.xz",
+      "os_storage": "local-lvm",
+      "memory_mb": 256,
+      "cpus": 1
+    },
+    "base_config": {
+      "arch": "amd64",
+      "cores": "1",
+      "hostname": "bl-base-102",
+      "memory": "512",
+      "ostype": "alpine",
+      "rootfs": "local-lvm:base-102-disk-0,size=4G",
+      "swap": "512",
+      "template": "1",
+      "unprivileged": "1"
+    },
+    "archive": {
+      "name": "retained.tar.gz",
+      "sha256": "3638cb83752d400fa226172a411c98304ace6cb23c198f14299589b1eadbbfcf",
+      "bytes": 556
+    },
+    "coverage": {
+      "included": [
+        "/home",
+        "/root",
+        "/data"
+      ],
+      "excluded": [
+        "OS packages and /etc",
+        "immutable base disk and vanilla download",
+        "original login hash"
+      ],
+      "consistency": "container cleanly stopped",
+      "metadata": "numeric owners, modes, symlinks, hard links, ACLs, xattrs"
+    }
+  },
+  "metadata_checks": {
+    "user_xattr": "preserved",
+    "posix_acl": "preserved",
+    "first_archive": "unchanged and checksum valid",
+    "restored_native_login": "matches fresh retained hash; differs from original",
+    "virtual_backup_serial": "BASELINE_BACKUP124"
+  },
+  "final_source_disk_guard": "Actual native read-only findmnt/lsblk ancestry check passed: retained source and backup are separate virtual disks; no physical failure-domain proof"
+}

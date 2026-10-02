@@ -1285,3 +1285,15 @@ checks passed in disposable KVM. Post-rebuild boot needed the earlier restricted
 test-network apt proxy settings restored to the same OS seed; no ordinary-network
 or physical firstboot proof. Other VM types/backends and partial-state recovery
 remain queue75; backups59/60 and app lifecycle/isolation74 remain open. See DR123.
+
+## DR124 incremental handoff — 2026-10-02
+
+Stopped managed LXC retained backup and confirmed new-name restore now work
+through durable authenticated web jobs. Real Alpine native Proxmox-in-KVM proof
+retained home/root/data, ACLs/user xattrs and fresh login, preserved original and
+unrelated backup files, and survived service restart. Separate virtual backup
+disk only: no physical off-drive proof or physical writes. Coverage excludes OS,
+/etc, immutable base and original hash. Same-host unchanged-base restore only.
+See decision record124 and verification/124. Rows59/60/73/75 remain partial;
+full VM recovery, incomplete restore reconciliation and row74 applied application
+lifecycle/isolation remain open. No direction from the user is currently needed.
