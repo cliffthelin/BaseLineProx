@@ -30,6 +30,9 @@ def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir) -> dict:
     try:
         if action in _NEEDS_CONFIRM and params.get("confirm") != "yes":
             raise vh.VmError("this needs confirmation")
+        if action == "inspect_app":
+            import app_capture
+            return app_capture.inspect_vm(host,name,params.get("package"))
         if action == "reset_login":
             return ubuntu.reset_login(host,name)
         if action == "prepare_ubuntu":

@@ -194,6 +194,7 @@ cp "$SRC/baseline/lib/installer_cache.py" /opt/baseline/lib/installer_cache.py
 cp "$SRC/baseline/lib/appdata.py" /opt/baseline/lib/appdata.py
 cp "$SRC/baseline/lib/environment_recipes.py" /opt/baseline/lib/environment_recipes.py
 cp "$SRC/baseline/lib/recipe_page.py" /opt/baseline/lib/recipe_page.py
+cp "$SRC/baseline/lib/app_capture.py" /opt/baseline/lib/app_capture.py
 cp "$SRC/baseline/bin/baseline-recipes" /opt/baseline/bin/baseline-recipes
 chmod 755 /opt/baseline/bin/baseline-recipes
 # naming.py - appdata.py keys every AppData home by its constant identifier

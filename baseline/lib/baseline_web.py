@@ -1978,7 +1978,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(200,result)
             actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login','recover','backup','restore'},
                      'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_overlay','start','request_stop','force_stop',
-                           'configure','eject_iso','rollback','freeze','delete_vm','delete_base','reset_login'}}
+                           'configure','eject_iso','rollback','freeze','delete_vm','delete_base','reset_login','inspect_app'}}
             if action not in actions[kind]:
                 return self._json(400,{'ok':False,'message':'unknown workload action'})
             params={k:v for k,v in body.items() if k not in ('action','request_id')}

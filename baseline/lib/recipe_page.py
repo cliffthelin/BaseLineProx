@@ -30,6 +30,13 @@ def render():
     return b'''<!doctype html><html><head><meta charset="utf-8"><title>Environment recipes</title>
 <style>body{font-family:system-ui;max-width:960px;margin:2rem auto;padding:1rem;background:#10151e;color:#eee}textarea{display:block;width:100%;height:13rem;margin:1rem 0}button{padding:.6rem;margin:.4rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body>
 <h1>Environment recipes</h1>
+<h2>Inspect installed application</h2>
+<p>Read installed Debian package metadata in a running managed Ubuntu/Proxmox VM. Reports version, dependencies and configuration locations only. No profile or secrets are copied. Containers and other media are not supported yet. Inspection is not a deployable recipe or test-install proof.</p>
+<label for="capture_vm">Managed VM name</label><input id="capture_vm">
+<label for="capture_package">Installed Debian package name</label><input id="capture_package">
+<button onclick="inspectApp()">Inspect installed application</button>
+<p id="capture_status" role="status" aria-live="polite"></p><pre id="capture_result"></pre>
+<h2>Validate and compose recipes</h2>
 <p>Validate configuration-only templates or compose an OS recipe with an application recipe.</p>
 <p><strong>Recipes are not deployed. Sources have not been verified.</strong> This page does not install a VM, apply overlays or capture a user profile.</p>
 <p>Initial contract: Ubuntu 24.04 amd64 desktop/server and Chromium. OS locale and symbolic environment-console homepage only. Other settings and private runtime fields are refused. State declarations do not establish complete retention coverage.</p>
@@ -43,6 +50,20 @@ def render():
 <button id="download" disabled onclick="download()">Export validated JSON</button>
 <p id="status" role="status" aria-live="polite"></p><pre id="result"></pre>
 <script>
+async function inspectApp(){
+ const status=document.getElementById('capture_status'),output=document.getElementById('capture_result');output.textContent='';
+ try{const response=await fetch('/vms/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'inspect_app',name:document.getElementById('capture_vm').value,package:document.getElementById('capture_package').value,request_id:'inspect-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)})});
+ const submitted=await response.json();if(!response.ok)throw Error(submitted.message||'Inspection refused');
+ status.textContent='Inspection job '+submitted.job_id+'. You can reconnect through Workload jobs.';
+ for(;;){await new Promise(resolve=>setTimeout(resolve,1000));const response=await fetch('/workloads/job?job_id='+encodeURIComponent(submitted.job_id));const job=await response.json();
+ if(!response.ok)throw Error('Job inspection unavailable; open Workload jobs');
+ if(['queued','running'].includes(job.state))continue;
+ if(job.state==='interrupted')throw Error('Inspection interrupted. Open Workload jobs; no success inferred.');
+ const completed=await fetch('/workloads/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:submitted.job_id})});const result=await completed.json();
+ if(!completed.ok||!result.ok)throw Error(result.message||'Inspection failed');
+ output.textContent=JSON.stringify(result.capture_report,null,2);status.textContent=result.message;break;}
+ }catch(error){status.textContent=error.message;}
+}
 let validated=null;
 function clear(){validated=null;document.getElementById('download').disabled=true;document.getElementById('result').textContent='';}
 for(const id of ['document','app_document'])document.getElementById(id).addEventListener('input',clear);
