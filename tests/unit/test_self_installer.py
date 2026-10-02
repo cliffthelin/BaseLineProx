@@ -506,3 +506,7 @@ def test_server_host_defaults_to_the_guestfwd_forwarded_address():
     `Connection refused`). `10.0.2.100` is the distinct, guestfwd-
     forwarded address decision record 03 already proved working."""
     assert si.DEFAULT_SERVER_HOST == "10.0.2.100"
+
+
+def test_minimal_substrate_leaves_room_for_the_real_gui_browser_and_updates():
+    assert si.LVM_SIZE_PRESETS["minimal"]["lvm_maxroot"] >= 16

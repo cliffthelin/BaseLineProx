@@ -1,0 +1,15 @@
+Actual loopback HTTP requests to the web server inside the approved Proxmox clone:
+Anonymous GET /vms: redirected to /login.
+POST /login with deliberately wrong synthetic root password: HTTP 401.
+POST /login with fresh project-generated disposable root password: HTTP 200, /settings.
+Authenticated, same-origin POST /vms/action set_store: ok=true.
+Authenticated GET /vms: real Proxmox VM names, Ubuntu controls, no existing login leaked.
+Homepage input: https://10.0.2.15:8006 (host bridge, not browser's 127.0.0.1 tunnel).
+Page bytes: 11283.
+Authenticated POST /vms/action create_iso: allocated empty VM102 web-allocation-proof.
+Actual Proxmox status: VM102 standalone, stopped; disk under protected user store.
+Authenticated, confirmed POST /vms/action delete_vm: removed that empty test VM.
+Existing Ubuntu VM100 and its retained data were kept.
+
+These are HTTP/auth/backend checks, not an interactive click-through of every
+browser control or a physical firstboot deployment. No credential retained here.

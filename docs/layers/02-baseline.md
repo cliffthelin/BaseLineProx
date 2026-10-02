@@ -15,15 +15,23 @@ app, VM and LXC state may need to run things stored here.
 
 ## Decision (2026-09-30)
 
-Baseline supports app, VM and LXC state. **VMs and LXCs live on
-[INSTALLER_CACHE](04-installer-cache.md)**, and Proxmox does not care where
-they are as long as it can reach them. There is no unauthenticated access anywhere in the
-system (`recovery_tiers`: only the login screen is credential-free).
+Baseline manages the Proxmox substrate. The clarified storage decision
+(2026-10-01, [DR117](../design/decision-records/117-real-ubuntu-proxmox-environment.md))
+uses this volume for immutable prepared templates, disposable OS overlays and
+runtime metadata (`/mnt/BASELINE/vm-runtime`). A clean OS rebuild may replace
+these overlays; it must not discard a user's daily state.
 
-BASELINE holds Baseline's own install-wide records: the registry and markers.
-VMs and LXCs are not per-persona AppData, and `appdata.py` no longer plans them.
-The master PRD's storage table still lists "VM, LXC state" under BASELINE and
-needs updating to match.
+Ubuntu `/home` disks, recipe/account profiles and VMID/name records live on
+[USER_<PERSONA>](06-user-persistence.md), as do ordinary VM full writable disks.
+[INSTALLER_CACHE](04-installer-cache.md) keeps unchanged public sources. An
+ordinary VM needs no overlay. External storage is allowed; the current
+Proxmox adapter supports directory stores, not every Proxmox backend.
+VM/LXC state is separate from per-application `appdata.py` planning.
+There is no unauthenticated access beyond the login screen.
+
+The global registry and active-persona marker remain here in the current
+implementation. Recovery/migration of those records is a separate open
+architecture question; this increment does not silently move them.
 
 ## Known defect
 

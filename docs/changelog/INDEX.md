@@ -26,7 +26,7 @@ overwritten in place - it's a pointer, not a record.
 | [network](network/001.md) | network/001.md | 6 | 2026-09-20 | ConnectionModal: bridged identity, alias, enable/disable, lifeline position |
 | [ui](ui/002.md) | ui/002.md | 2 | 2026-09-29 | real, safe "live install screen" viewer |
 | [chat](chat/001.md) | chat/001.md | 11 | 2026-09-26 | OpenCode as the second HarnessAdapter, normalized through real ACP |
-| [proxmox](proxmox/003.md) | proxmox/003.md | 8 | 2026-09-29 | the install invocation's own base boot order never fell back to disk, so the auto-installer's own reboot re-entered itself |
+| [proxmox](proxmox/003.md) | proxmox/003.md | 9 | 2026-10-01 | Real Ubuntu/Proxmox GUI and split-disk increment; no bare-metal deployment (DR117) |
 | [containers](containers/001.md) | containers/001.md | 3 | 2026-09-27 | quadlet.py rootless mode implemented for real; default corrected |
 
 Categories are named after the part of the system a change touches, not
@@ -64,3 +64,9 @@ that emptied the Hardware tab was really a Textual/UI mechanics bug)
 gets a real entry in its primary category and a short pointer-only
 entry in the other, saying so explicitly rather than duplicating the
 full write-up.
+
+Latest Proxmox increment: DR118, native distro linked containers and honest
+requested-system status, recorded in `proxmox/003.md` and `../verification/118/`.
+
+DR119 application/whole-OS overlay audit and honest App Isolation page status:
+`proxmox/003.md`, `../design/application-layer-audit-2026-10-01.md`.

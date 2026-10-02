@@ -21,7 +21,7 @@ echo "=== Installing base packages ==="
 apt-get install -y inxi python3-rich python3-textual tmux gnupg
 
 echo "=== Installing kiosk GUI packages (Track A3 - cage + stock Chromium) ==="
-apt-get install -y cage chromium
+apt-get install -y cage chromium xorriso curl
 
 echo "=== Installing Podman (Track B4 - Quadlet service management) ==="
 apt-get install -y podman
@@ -289,6 +289,14 @@ cp "$SRC/baseline/lib/baseline_drive_layout.py" /opt/baseline/lib/baseline_drive
 # to the operator to run themselves.
 cp "$SRC/baseline/lib/drive_admin.py" /opt/baseline/lib/drive_admin.py
 cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
+# VM library: Proxmox owns lifecycle on the substrate; local QEMU is the
+# development backend. Ubuntu's seed builder needs xorriso above.
+cp "$SRC/baseline/lib/vm_host.py" /opt/baseline/lib/vm_host.py
+cp "$SRC/baseline/lib/vm_page.py" /opt/baseline/lib/vm_page.py
+cp "$SRC/baseline/lib/ubuntu_environment.py" /opt/baseline/lib/ubuntu_environment.py
+cp "$SRC/baseline/lib/proxmox_vm_host.py" /opt/baseline/lib/proxmox_vm_host.py
+cp "$SRC/baseline/lib/distro_containers.py" /opt/baseline/lib/distro_containers.py
+cp "$SRC/baseline/lib/container_page.py" /opt/baseline/lib/container_page.py
 # self_installer.py (decision record 85) and its own transitive
 # dependencies - test_check_provision_deploys_all_imports.py caught
 # these as a real staging gap, the same class of bug decision records

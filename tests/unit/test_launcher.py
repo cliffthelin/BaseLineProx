@@ -57,10 +57,10 @@ def test_it_gives_up_with_a_message_if_the_app_never_answers():
     assert env.t <= lc.WAIT_S + 5
 
 
-def test_if_baseline_is_not_installed_it_says_so_and_starts_nothing():
-    env = Env(up=(False,), installed=False)
-    assert go(env) == 1
-    assert env.started == 0 and env.opened == [] and "not installed" in env.messages[-1]
+def test_if_the_service_is_not_installed_the_app_is_still_started_and_opened():
+    env = Env(up=(False, True), installed=False)
+    assert go(env) == 0
+    assert env.started == 1 and env.opened == [lc.URL]
 
 
 def test_a_refused_start_is_reported():
@@ -90,3 +90,15 @@ def test_the_launcher_only_starts_the_service_and_opens_the_page():
     assert source.count("subprocess.run([pkexec") == 1 and 'systemctl", "start", SERVICE' in source
     for banned in ("stop", "restart", "enable", "mkfs", "wipefs", "rm "):
         assert f'"{banned}"' not in source
+
+
+def test_state_dir_falls_back_to_the_users_own_directory_when_the_system_one_is_not_writable(tmp_path):
+    import baseline_web as bw
+    system = tmp_path / "sys"
+    system.mkdir()
+    home_env = {"HOME": str(tmp_path / "home")}
+    assert bw.resolve_state_dir(home_env, system_dir=system, writable=lambda p: True) == system
+    got = bw.resolve_state_dir(home_env, system_dir=system, writable=lambda p: False)
+    assert got == tmp_path / "home" / ".local" / "share" / "baseline"
+    assert bw.resolve_state_dir({**home_env, "BASELINE_STATE_DIR": "/x/y"}, system_dir=system,
+                                writable=lambda p: True) == __import__("pathlib").Path("/x/y")

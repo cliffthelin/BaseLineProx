@@ -33,6 +33,7 @@ from __future__ import annotations
 import html
 import http.server
 import json
+import os
 import threading
 import time
 import uuid
@@ -50,6 +51,8 @@ import audit_view
 import operations_page
 import operator_accounts
 import remote_access
+import vm_host as vh
+import vm_page
 import web_gate as wg
 import web_security as ws
 
@@ -71,6 +74,8 @@ NAV_TABS = (
     ("/approvals", "Approvals"),
     ("/audit", "Audit"),
     ("/remote-access", "Remote access"),
+    ("/vms", "Virtual machines"),
+    ("/containers", "Distro containers"),
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -722,12 +727,12 @@ def render_app_isolation_page(persona: str, plans: list, *,
     guarantees_hold = not leaks and not conflicts and all(p.isolated for p in plans)
 
     verdict = (
-        '<div class="ic-banner ok"><strong>Isolation holds.</strong> '
+        '<div class="ic-banner ok"><strong>Plan checks passed.</strong> '
         'No application\'s writable layer falls inside another\'s tree, no two '
         'applications claim the same overlay target, and every plan keeps its '
         'data, registry and owner inside its own AppData home.</div>'
         if guarantees_hold else
-        f'<div class="ic-banner warn"><strong>Isolation violated.</strong> '
+        f'<div class="ic-banner warn"><strong>Plan checks failed.</strong> '
         f'{len(leaks)} cross-app leak(s), {len(conflicts)} target conflict(s). '
         f'This must be empty before any plan is applied.</div>'
     )
@@ -761,8 +766,8 @@ def render_app_isolation_page(persona: str, plans: list, *,
                 for o in plan.overlays
             )
         else:
-            overlay_html = ('<span class="ov-none">no persistent data &mdash; '
-                            'no overlay (stated, not assumed)</span>')
+            overlay_html = ('<span class="ov-none">no declared data targets &mdash; '
+                            'no overlay (stated, not assumed). Unlisted data paths are not audited.</span>')
         app_rows.append(
             "<tr>"
             f"<td>{plan.app.app_id}</td>"
@@ -824,12 +829,12 @@ overlays on {appdata.appdata_root(persona)}</p>
 </div>
 
 {verdict}
+<p class="hw-note"><strong>Runtime isolation has not been applied or verified.</strong> These checks compare declared paths only; overlays do not by themselves confine a running application.</p>
 {stats}
 
 <h2 class="section-title">Applications <span class="ic-count">{len(plans)}</span></h2>
-<p class="hw-note">Planned, not applied. Each overlay keeps the installed base
-immutable as its lower layer and sends every write to the app's own upper layer
-on AppData. Applying these mounts is privileged and is not done from this page.</p>
+<p class="hw-note">Planned, not applied. The intended overlay redirects writes at declared paths to AppData.
+The lower-layer snapshot, launch sandbox and live mount verification are not implemented. Applying these mounts is privileged and is not done from this page.</p>
 <table class="hw-table"><thead><tr><th>Application</th><th>Kind</th>
 <th>Overlay (target &rarr; personal writable layer)</th><th>Own registry</th>
 <th>Owner / mode</th></tr></thead><tbody>{''.join(app_rows)}</tbody></table>
@@ -1309,6 +1314,35 @@ DEFAULT_STATE_DIR = Path("/var/lib/baseline")     # audit log, signing key and s
 _PUBLIC_PATHS = frozenset({"/", "/login", "/logout"})
 
 
+def _vm_host_for(deps: dict) -> vh.VmHost:
+    """The VM library for this request; the store folder is a setting, so it is read each time."""
+    if deps.get("vm_host") is not None:
+        return deps["vm_host"]
+    cfg = deps.get("vm_config_path")
+    import shutil
+    import proxmox_vm_host
+    engine = proxmox_vm_host.ProxmoxVmHost if shutil.which("qm") and shutil.which("pvesh") else vh.VmHost
+    return engine(vm_page.load_store(cfg, default=str(vh.DEFAULT_STORE)) if cfg else vh.DEFAULT_STORE,
+                  persistence_store=vm_page.load_persistence_store(cfg, default=str(vh.DEFAULT_PERSISTENCE_STORE))
+                  if cfg else vh.DEFAULT_PERSISTENCE_STORE)
+
+
+def _kvm_ok(deps: dict) -> bool:
+    import os as _os
+    return bool(deps["kvm_ok"]()) if deps.get("kvm_ok") else _os.access("/dev/kvm", _os.R_OK | _os.W_OK)
+
+
+def _container_host_for(deps):
+    import shutil
+    import container_page
+    import distro_containers
+    if deps.get('container_host') is not None:
+        return deps['container_host']
+    if not all(shutil.which(tool) for tool in ('pct', 'pveam', 'pvesh')):
+        return None
+    return distro_containers.DistroContainers(container_page.load_data(deps.get('vm_config_path')))
+
+
 class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, default=str).encode()
@@ -1638,6 +1672,30 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                                          daily_ok=deps["sessions"].get(self._cookie_token(), now).role.startswith(wg.BOT_PREFIX)),
                 path))
 
+        if path == "/containers":
+            import container_page
+            try:
+                page = container_page.render(_container_host_for(deps))
+            except (vh.VmError, OSError, ValueError) as exc:
+                page = container_page.render(unavailable=str(exc))
+            return self._html_response(200, _with_nav(page, path))
+
+        if path == "/vms/status":
+            host = _vm_host_for(deps)
+            return self._json(200, vm_page.status_snapshot(host.list_vms(), host.list_bases()))
+
+        if path == "/vms":
+            host = _vm_host_for(deps)
+            iso_dir = deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR
+            notice_ok = {"1": True, "0": False}.get(qs.get("ok", [""])[0])
+            return self._html_response(200, _with_nav(vm_page.render_vms_page(
+                store=str(host.store), free_gb=round(host.free_bytes(host.store) / 2**30), kvm_ok=_kvm_ok(deps),
+                isos=vm_page.available_isos(host, iso_dir), bases=host.list_bases(), vms=host.list_vms(),
+                backend=getattr(host, "backend", "Local QEMU"), persistence_store=str(host.persistence_store),
+                homepage=host.guest_homepage() if hasattr(host, "guest_homepage") else "",
+                notice=qs.get("notice", [""])[0][:300], notice_ok=notice_ok,
+                default_display=vh.default_display(os.environ)), path))
+
         if path.startswith("/hardware"):
             runner = deps.get("runner")
             state = real_hardware_state(runner)
@@ -1831,6 +1889,35 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path.startswith("/operations/"):
             return self._post_operations(deps, path, body, now)
 
+        if path == "/containers/action":
+            import container_page
+            host = _container_host_for(deps)
+            action = str(body.get('action', ''))
+            if host is None:
+                result = {'ok': False, 'message': 'Proxmox LXC tools are unavailable on this host.'}
+            elif action == 'set_data':
+                result = container_page.save_data(deps.get('vm_config_path'), body.get('data_store'))
+            else:
+                result = container_page.perform(host, action, body)
+            audit = deps.get('audit')
+            if audit is not None:
+                audit({'event': 'container_action', 'action': action, 'name': str(body.get('name', '')), 'ok': result['ok']})
+            return self._json(200, result)
+
+        if path == "/vms/action":
+            action = str(body.get("action", ""))
+            if action == "set_store":
+                cfg = deps.get("vm_config_path")
+                result = vm_page.save_store(cfg, body.get("store"), persistence_store=body.get("persistence_store")) if cfg else \
+                    {"ok": False, "message": "no place to keep the setting on this server"}
+            else:
+                result = vm_page.perform(_vm_host_for(deps), action, body,
+                                         iso_dir=deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)
+            audit = deps.get("audit")
+            if audit is not None:
+                audit({"event": "vm_action", "action": action, "name": str(body.get("name", "")), "ok": result["ok"]})
+            return self._json(200, result)
+
         if path == "/approvals/daily/revoke":
             gone = _hitl_store(deps).revoke_daily(body.get("id", "")) if isinstance(body.get("id", ""), str) else False
             return self._json(200 if gone else 404, {"outcome": "applied" if gone else "refused"})
@@ -1910,6 +1997,7 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     deps["operator_accounts"] = operator_accounts.OperatorAccounts(
         state / "operators.json", mac_key=wg.derive_key(root_key, "operator-accounts"), on_tamper=on_tamper)
     deps["tamper_alerts"] = tamper_alerts
+    deps["vm_config_path"] = state / "vm-config.json"
     deps["scheduler"] = ops.Scheduler(
         gate, ops.ScheduleStore(state / "schedules.json"),
         lambda op, params, origin: _start_operation_job(deps, op, params, origin))
@@ -1930,12 +2018,24 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
     return make_server(deps=deps, host=host, port=port)
 
 
+def resolve_state_dir(env, system_dir: Path = DEFAULT_STATE_DIR, writable=None) -> Path:
+    """System state dir when this process may write it (installed service); otherwise the user's own directory, so
+    the app runs from a desktop launcher without elevation."""
+    import os
+    if env.get("BASELINE_STATE_DIR"):
+        return Path(env["BASELINE_STATE_DIR"])
+    writable = writable or (lambda p: os.access(p, os.W_OK) if p.exists() else os.access(p.parent, os.W_OK))
+    if writable(system_dir):
+        return system_dir
+    return Path(env.get("HOME") or os.path.expanduser("~")) / ".local" / "share" / "baseline"
+
+
 def main() -> int:
     import os
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8100
     data_path = sw.resolve_data_path(os.environ)
-    server = build_real_server(port=port, data_path=data_path)
+    server = build_real_server(port=port, data_path=data_path, state_dir=resolve_state_dir(os.environ))
     print(f"Baseline web app on http://0.0.0.0:{port}/  (login: this machine's account password)")
     print(f"Data store: {data_path}")
     server.deps["scheduler"].start()

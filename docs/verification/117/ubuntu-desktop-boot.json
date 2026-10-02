@@ -1,0 +1,5 @@
+{
+  "exitcode": 0,
+  "stdout": "6.8.0-142-generic\n/dev/vda ext4\nactive\nName     Version  Rev   Tracking       Publisher  Notes\nfirefox  157.0-1  8995  latest/stable  mozilla**  -\nbaseline-admin:x:1000:1000::/home/baseline-admin:/bin/bash\n{\"policies\": {\"Homepage\": {\"URL\": \"https://10.0.2.2:8006\", \"StartPage\": \"homepage\"}, \"DontCheckDefaultBrowser\": true}}",
+  "stderr": ""
+}

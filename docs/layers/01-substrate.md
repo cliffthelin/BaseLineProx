@@ -72,6 +72,24 @@ salted one-way hash is stored. The standalone `settings_web.py` server has its o
 first-run flow (`create_first_account`) that also creates the first account and the
 admin elevation passphrase (rows 44-48).
 
+## Running GUI/VM increment (2026-10-01)
+
+[DR117](../design/decision-records/117-real-ubuntu-proxmox-environment.md) shows
+an actual Proxmox 9.2.2 clone running kernel 7.0.2-6-pve. Cage/Chromium on its
+console displays the real Proxmox login at `https://localhost:8006`. Corrected
+TTY ownership and seat/runtime settings are in the shipped kiosk unit; the
+proof used a transient service and did not bypass or prove production
+firstboot-gated autostart. Its 5 GiB root filled during GUI installation,
+so the minimal new-install root preset is now 16 GiB (clone expanded to 24 GiB).
+
+Baseline's real web server authenticated using a fresh synthetic root
+credential, refused anonymous/wrong-password access and used Proxmox's
+lifecycle tools for Ubuntu split disks. No anonymous desktop/user was added.
+The physical source was opened read-only; all proof writes went into a
+`/tmp` overlay. The complete current provisioning/boot chain and actual
+named-volume isolation are still unverified on physical deployment.
+Harvester replacement remains future work requiring its real ACL adapter.
+
 ## Status
 
 | Item | Status | Verified | Evidence |

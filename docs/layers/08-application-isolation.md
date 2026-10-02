@@ -2,11 +2,12 @@
 
 **Status: In progress** · [index](README.md)
 
-How each application is kept to its own data. Host apps get an overlay: the
-installed base is the read-only `lowerdir` (never written), and the `upperdir`
-is on the persona's [AppData](07-appdata.md) volume, so the app sees an
-ordinary filesystem with no cooperation needed. Containers get bind mounts to
-their own app home instead.
+The intended model gives each application its own retained data. **Application
+overlays and launch boundaries are planned, not applied.** Generated lower/upper
+paths do not establish an immutable installed base or process confinement.
+Containers have planned app-private binds; their lifecycle remains unverified.
+See [the application/whole-OS audit](../design/application-layer-audit-2026-10-01.md)
+and DR119 before implementing or interpreting the App Isolation preview.
 
 ## Access policy for VMs, LXCs and containers (decided, not built)
 
@@ -16,9 +17,13 @@ registered and admin-approved. There is no unauthenticated access, so the policy
 workloads, not people. Nothing in the code implements the setting, the
 registration or the approval yet (v0.2 row 42).
 
-VMs and LXCs are out of scope for this layer's overlays: they live on
-[INSTALLER_CACHE](04-installer-cache.md), and Proxmox's own isolation (KVM,
-namespaces) is what separates them.
+VMs and LXCs are out of scope for per-application `appdata.py` overlays.
+Proxmox owns their isolation and lifecycle. The current Ubuntu VM recipe
+splits disposable OS state on [BASELINE](02-baseline.md) from protected home
+state on [USER_<PERSONA>](06-user-persistence.md); standard VM disks are
+protected in full. Cache is a vanilla build source, not mutable runtime
+storage. Native distro LXC data preservation is proved in disposable KVM (DR118);
+per-application guest and OCI adapters remain open.
 
 ## Mediums
 
@@ -45,3 +50,17 @@ it needs a real target user. The Caddy gateway is the first container.
 | Deny-unless-registered-and-approved option | On roadmap | none | v0.2 row 42; open: where the setting lives, who approves, what "accessible" covers |
 | Any plan applied on a host | On roadmap | none | planning only |
 | Caddy image verified | In discovery | registry read | digest pinned, signature not verified |
+
+
+### Native distro-container increment (DR118, 2026-10-01)
+
+`/containers` uses actual Proxmox templates and native LVM-thin/ZFS linked roots.
+Vanilla archives use selected separate cache storage; immutable templates and
+resettable roots use clone-capable OS storage; `/home`, `/root`, `/data` bind
+directories use protected storage, configurable outside this drive. Eleven
+families passed boot and clean rebuild/data checks in the disposable KVM
+Proxmox clone, not physical named-volume deployment. openEuler 25.03 failed
+setup and is disabled. Binds are excluded from vzdump: dedicated quiesced
+backup/restore remains unverified. Containers share the substrate kernel and
+do not supply a distro desktop/browser. The nine requested desktop/NAS/mobile
+systems remain explicitly uninstalled on `/vms`; see DR118 and v0.2 row73.

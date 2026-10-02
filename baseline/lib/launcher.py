@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -33,11 +34,28 @@ def _is_installed() -> bool:
     return os.path.exists(f"/etc/systemd/system/{SERVICE}") or os.path.exists(f"/usr/lib/systemd/system/{SERVICE}")
 
 
-def _start_service() -> bool:
-    pkexec = shutil.which("pkexec")
-    if pkexec is None:
+def _run_app_directly() -> bool:
+    """No service installed (dev machine): run the web app as its own detached process so it outlives the launcher."""
+    app = os.path.join(os.path.dirname(os.path.realpath(__file__)), "baseline_web.py")
+    if not os.path.exists(app):
         return False
-    return subprocess.run([pkexec, "systemctl", "start", SERVICE], timeout=120).returncode == 0
+    try:
+        subprocess.Popen([sys.executable, app], cwd=os.path.dirname(app), start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
+
+
+def _start_service() -> bool:
+    """Start the app via systemd if installed, otherwise run directly from Python."""
+    pkexec = shutil.which("pkexec")
+    if pkexec is not None and _is_installed():
+        # Try systemd first if pkexec is available
+        if subprocess.run([pkexec, "systemctl", "start", SERVICE], timeout=120, capture_output=True).returncode == 0:
+            return True
+    # Fallback: run the app directly (works on dev machines)
+    return _run_app_directly()
 
 
 def _open_page(url: str) -> None:
@@ -59,11 +77,9 @@ def launch(*, probe=_probe, is_installed=_is_installed, start_service=_start_ser
     if probe(url):
         open_page(url)
         return 0
-    if not is_installed():
-        notify("Baseline is not installed on this machine yet, so there is nothing to open.")
-        return 1
+    # Start the app (via systemd if installed, otherwise run directly from Python)
     if not start_service():
-        notify("Baseline could not be started (the start was not permitted or failed).")
+        notify("Baseline could not be started.")
         return 1
     deadline = clock() + WAIT_S
     while clock() < deadline:
@@ -71,5 +87,5 @@ def launch(*, probe=_probe, is_installed=_is_installed, start_service=_start_ser
             open_page(url)
             return 0
         sleep(POLL_S)
-    notify(f"Baseline did not start within {WAIT_S} seconds. Check: systemctl status {SERVICE}")
+    notify(f"Baseline did not start within {WAIT_S} seconds.")
     return 1

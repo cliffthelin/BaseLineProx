@@ -1,0 +1,8 @@
+Read-only guestfish inspection of the stopped retained home.qcow2 after the
+completed Ubuntu desktop OS rebuild (2026-10-01 local).
+
+/baseline-admin/Documents/baseline-proof.txt:
+keep-this-document
+
+/baseline-admin/snap/firefox/common/.mozilla/firefox/inb1ywrs.default/user.js:
+user_pref("browser.toolbars.bookmarks.visibility", "always");

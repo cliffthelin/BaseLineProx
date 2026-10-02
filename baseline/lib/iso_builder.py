@@ -169,6 +169,7 @@ def stage_baseline_source(runner: IsoBuilderRunner, *, repo_root: Path, staging_
     runner.makedirs(staging_dir)
     runner.copytree(repo_root / "boot", staging_dir / "boot")
     runner.copytree(repo_root / "baseline", staging_dir / "baseline")
+    runner.copytree(repo_root / "packaging", staging_dir / "packaging")
 
 
 def build_current_iso(runner: IsoBuilderRunner, *, source_iso: Path, repo_root: Path,

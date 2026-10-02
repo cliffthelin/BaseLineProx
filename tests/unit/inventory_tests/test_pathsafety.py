@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from inventory import pathsafety
@@ -43,7 +45,8 @@ def test_refuses_parent_symlink_into_forbidden_dir(tmp_path):
 
 
 def test_refuses_dotdot_traversal_into_forbidden_dir(tmp_path):
-    outside = str(tmp_path) + "/../../../../../../etc/out.json"
+    outside = str(tmp_path) + "/" + "../" * (len(tmp_path.parts) - 1) + "etc/out.json"
+    assert Path(outside).resolve() == Path("/etc/out.json")
     with pytest.raises(pathsafety.OutputPathError):
         pathsafety.validate_output_path(outside, str(tmp_path / "unrelated-repo"), overwrite=False)
 

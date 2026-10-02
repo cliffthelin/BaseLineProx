@@ -1,0 +1,12 @@
+Package: baseline-desktop
+Version: 0.2.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: python3, libnotify-bin, xdg-utils
+Maintainer: Baseline Project Maintainers <maintainers@baseline.invalid>
+Description: Baseline web application and launcher for every account on this machine
+ Installs the Baseline web application and its single launcher system-wide
+ (root-owned, read-only for users) so any account can open it from the
+ application menu. The launcher starts the app as the invoking user when no
+ baseline-web service is installed. No service is enabled by this package.

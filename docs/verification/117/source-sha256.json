@@ -1,0 +1,12 @@
+{
+  "baseline/lib/ubuntu_environment.py": "c2ac4acd40b21633124744d074d403488f44f43c6b45e8c30168da485e1ca27c",
+  "baseline/lib/proxmox_vm_host.py": "ca941852ba3003b6b33c4591151da7910821c62fbc03db3de778c481e7c9b8fb",
+  "baseline/lib/vm_host.py": "80b1b24b5701acfb0e3e1d9d65cbe061cbd715848c24185844c1a92b259c3ec4",
+  "baseline/lib/vm_page.py": "fe483bcb25a5fefcbf94410445ebd054a98db5990aaffd96fd75baac5e71f236",
+  "baseline/lib/baseline_web.py": "153265d64a62700e657a7defc199291534ef59926718c5b8d6edf29f2f047325",
+  "baseline/lib/settings_web.py": "8148bdddd2aaa4a98d75214bccacab63b60af75c535d4ff33bbd8724df6771bf",
+  "baseline/lib/iso_builder.py": "9c177d6434b8e9fd012c641d65bdbdb68c5a6f45c4631d5957864dd1588123de",
+  "baseline/lib/self_installer.py": "419ee08dcd328b64f04d9fbc908c485745fd564d25c50f86f9d451e3217068a1",
+  "boot/provision.sh": "009516a57dd4de3404a3b0955753fff0c0a0e89641694b61da2be7109a07697c",
+  "boot/baseline-kiosk.service": "7f74b064741872ec65d177f00a88834a1d7fda50ae6476d9834cd7188db06cfa"
+}

@@ -930,7 +930,7 @@ def test_app_isolation_route_renders_for_a_real_persona():
         status, body = case.get("/app-isolation?persona=admin")
         assert status == 200
         assert b"APPDATA_ADMIN" in body
-        assert b"Isolation holds" in body
+        assert b"Plan checks passed" in body
     finally:
         case.close()
 
@@ -964,7 +964,7 @@ def test_app_isolation_page_reports_a_violation_loudly():
     body = bw.render_app_isolation_page(
         "personal", plans, leaks=[("a", "b", "/x")], conflicts=[],
         formats=appdata.supported_formats()).decode()
-    assert "Isolation violated" in body
+    assert "Plan checks failed" in body
     assert "ic-banner warn" in body
 
 
@@ -987,3 +987,14 @@ def test_a_drive_action_on_a_drive_outside_the_allowlist_never_reaches_pkexec():
         assert executor.calls == []
     finally:
         case.close()
+
+
+def test_app_isolation_preview_never_claims_runtime_confinement():
+    import appdata
+    plans = appdata.plan_all('personal')
+    body = bw.render_app_isolation_page('personal', plans, leaks=[], conflicts=[],
+                                       formats=appdata.supported_formats()).decode()
+    assert 'Plan checks passed' in body
+    assert 'Runtime isolation has not been applied or verified' in body
+    assert 'Isolation holds' not in body
+    assert 'Unlisted data paths are not audited' in body

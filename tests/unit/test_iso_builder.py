@@ -83,6 +83,12 @@ def test_stage_baseline_source_copies_boot_and_baseline_as_siblings():
     assert ("/repo/baseline", "/ws/staging/baseline") in r.copied_trees
 
 
+def test_installer_carries_the_desktop_packaging_that_provision_requires():
+    r = FakeIsoBuilderRunner()
+    ib.stage_baseline_source(r, repo_root=Path("/repo"), staging_dir=Path("/ws/staging"))
+    assert ("/repo/packaging", "/ws/staging/packaging") in r.copied_trees
+
+
 def test_stage_baseline_source_removes_a_stale_staging_dir_before_copying():
     """Real bug found live, 2026-09-29: the workspace is a fixed,
     reused path across real retries (by design - the cached assistant

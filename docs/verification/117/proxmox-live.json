@@ -1,0 +1,98 @@
+{
+  "proxmox": {
+    "argv": [
+      "pveversion"
+    ],
+    "exitcode": 0,
+    "stdout": "pve-manager/9.2.2/b9984c6d90a4bd80 (running kernel: 7.0.2-6-pve)\n",
+    "stderr": ""
+  },
+  "kernel": {
+    "argv": [
+      "uname",
+      "-r"
+    ],
+    "exitcode": 0,
+    "stdout": "7.0.2-6-pve\n",
+    "stderr": ""
+  },
+  "guest_homepage": "https://10.0.2.15:8006",
+  "machines": [
+    {
+      "name": "standard-proof",
+      "vmid": 101,
+      "kind": "standalone",
+      "base": null,
+      "running": false,
+      "pid": null,
+      "vnc": null,
+      "memory_mb": 2048,
+      "cpus": 2,
+      "iso": "/var/lib/baseline-proof/os/template/iso/ubuntu-proxmox-proof-seed.iso",
+      "persistence_disk": null,
+      "persistence_gb": null,
+      "recipe": null
+    },
+    {
+      "name": "ubuntu-proxmox-proof",
+      "vmid": 100,
+      "kind": "overlay",
+      "base": "ubuntu-noble-20260926",
+      "running": true,
+      "pid": null,
+      "vnc": null,
+      "memory_mb": 2048,
+      "cpus": 2,
+      "iso": null,
+      "persistence_disk": "/var/lib/baseline-proof/user/images/100/vm-100-disk-1.qcow2",
+      "persistence_gb": 4,
+      "recipe": "ubuntu-server"
+    }
+  ],
+  "ubuntu_config": {
+    "argv": [
+      "qm",
+      "config",
+      "100"
+    ],
+    "exitcode": 0,
+    "stdout": "agent: enabled=1\nbios: ovmf\nboot: order=virtio0;ide2\ncores: 2\ncpu: host\nefidisk0: baseline-os:100/vm-100-disk-1.raw,efitype=4m,pre-enrolled-keys=0,size=528K\nide2: baseline-os:iso/ubuntu-proxmox-proof-seed.iso,media=cdrom,size=372K\nmachine: q35\nmemory: 2048\nmeta: creation-qemu=11.0.0,ctime=1790911524\nname: ubuntu-proxmox-proof\nnet0: virtio=BC:24:11:20:5A:92,bridge=vmbr0\nsmbios1: uuid=7c5b105e-447c-4282-bd03-3a3e0992a050\nvga: virtio\nvirtio0: baseline-os:100/vm-100-disk-0.qcow2,size=12G\nvirtio1: baseline-user:100/vm-100-disk-1.qcow2,serial=baseline-home,size=4G\nvmgenid: 53b13091-1e0f-4ad3-92ec-5f3b8a1daedc\n",
+    "stderr": ""
+  },
+  "standard_config": {
+    "argv": [
+      "qm",
+      "config",
+      "101"
+    ],
+    "exitcode": 0,
+    "stdout": "agent: enabled=1\nboot: order=ide2;virtio0\ncores: 2\ncpu: host\nide2: baseline-os:iso/standard-proof-installer.iso,media=cdrom,size=372K\nmachine: q35\nmemory: 2048\nmeta: creation-qemu=11.0.0,ctime=1790913087\nname: standard-proof\nnet0: virtio=BC:24:11:82:4D:0D,bridge=vmbr0\nsmbios1: uuid=8f6fc9b0-fa92-4ec4-8520-05eed2b313eb\nvga: virtio\nvirtio0: baseline-user:101/vm-101-disk-0.qcow2,size=12G\nvmgenid: 047d48f3-9bf4-4b9e-993a-c1c2a85cf1f7\n",
+    "stderr": ""
+  },
+  "standard_disk": {
+    "argv": [
+      "qemu-img",
+      "info",
+      "--output=json",
+      "/var/lib/baseline-proof/user/images/101/vm-101-disk-0.qcow2"
+    ],
+    "exitcode": 0,
+    "stdout": "{\n    \"children\": [\n        {\n            \"name\": \"file\",\n            \"info\": {\n                \"children\": [\n                ],\n                \"virtual-size\": 197120,\n                \"filename\": \"/var/lib/baseline-proof/user/images/101/vm-101-disk-0.qcow2\",\n                \"format\": \"file\",\n                \"actual-size\": 200704,\n                \"format-specific\": {\n                    \"type\": \"file\",\n                    \"data\": {\n                    }\n                },\n                \"dirty-flag\": false\n            }\n        }\n    ],\n    \"virtual-size\": 12884901888,\n    \"filename\": \"/var/lib/baseline-proof/user/images/101/vm-101-disk-0.qcow2\",\n    \"cluster-size\": 65536,\n    \"format\": \"qcow2\",\n    \"actual-size\": 200704,\n    \"format-specific\": {\n        \"type\": \"qcow2\",\n        \"data\": {\n            \"compat\": \"1.1\",\n            \"compression-type\": \"zlib\",\n            \"lazy-refcounts\": false,\n            \"refcount-bits\": 16,\n            \"corrupt\": false,\n            \"extended-l2\": false\n        }\n    },\n    \"dirty-flag\": false\n}\n",
+    "stderr": ""
+  },
+  "retained_after_clean_os_rebuild": {
+    "argv": [
+      "qm",
+      "guest",
+      "exec",
+      "100",
+      "--",
+      "python3",
+      "-c",
+      "import pathlib,urllib.request,ssl,subprocess\nprint(subprocess.check_output(['findmnt','-n','-o','SOURCE,FSTYPE','--mountpoint','/home'],text=True).strip())\nprint(pathlib.Path('/home/baseline-admin/Documents/proxmox-proof.txt').read_text().strip())\nresponse=urllib.request.urlopen('https://10.0.2.15:8006',context=ssl._create_unverified_context(),timeout=10)\nbody=response.read()\nassert response.status==200 and b'Proxmox' in body\nprint('Actual Proxmox endpoint reachable from nested Ubuntu:',response.status)\n"
+    ],
+    "exitcode": 0,
+    "stdout": "{\n   \"exitcode\" : 0,\n   \"exited\" : 1,\n   \"out-data\" : \"/dev/vdb ext4\\nproxmox-retained-document\\nActual Proxmox endpoint reachable from nested Ubuntu: 200\\n\"\n}\n",
+    "stderr": ""
+  }
+}

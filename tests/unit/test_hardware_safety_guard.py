@@ -14,6 +14,13 @@ import pytest
 from conftest import HardwareSafetyViolation
 
 
+@pytest.mark.parametrize('program', ['pct', 'qm', 'pvesm', 'pvesh', 'pveam'])
+def test_unit_guard_refuses_native_hypervisor_commands_without_launching_them(program):
+    from conftest import _check_argv
+    with pytest.raises(HardwareSafetyViolation):
+        _check_argv([program, 'destroy', '999999'])
+
+
 @pytest.mark.parametrize("argv", [
     ["qemu-system-x86_64", "-drive", "file=/dev/sdb,format=raw"], ["/usr/bin/qemu-system-x86_64"], ["qemu-img", "create"],
     ["wipefs", "-a", "/dev/sdb"], ["/usr/sbin/wipefs", "-a", "/dev/sdb"], ["sgdisk", "-Z", "/dev/sdb"],

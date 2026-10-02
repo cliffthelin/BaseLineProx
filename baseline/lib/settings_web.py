@@ -1709,11 +1709,11 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
                        data_path: Path | None = None, runner=None, store_mac_key: bytes | None = None,
                        store_mac_marker=None, on_tamper=None) -> SettingsWebServer:
     """A genuinely working, standalone deployment - one small SQLite
-    database, no real Proxmox install required. Login now verifies via
-    the machine's own real `sudo` (`SudoPasswordVerifier`, decision
-    record 2026-09-29 - "login... should [be] real now"), matching
-    Drive Administration's own self-elevation model - no root needed
-    by this process itself, and no separate fake/dev credential path.
+    database, no real Proxmox install required. An installed root
+    service checks the typed account against its real shadow hash;
+    a desktop process uses the machine's own sudo authentication.
+    Running sudo as root cannot prove knowledge of a password and
+    Proxmox does not install sudo by default (record 117).
 
     `runner` (optional, real-deployment only) wires a real
     `RunnerBackedActivePersonaProvider` so a session becomes stale if
@@ -1721,12 +1721,13 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
     omitted (the default) keeps this fully usable standalone with no
     Runner/persistence layer available at all, matching this
     function's own "no real hardware required" design."""
+    import os
     store = LocalAppStore(data_path or Path("/tmp/baseline-settings-web/store.db"), mac_key=store_mac_key,
                           mac_marker=store_mac_marker, on_tamper=on_tamper)
     persona_provider = RunnerBackedActivePersonaProvider(runner) if runner is not None else None
     return SettingsWebServer(
         bind_host, bind_port,
-        verifier=SudoPasswordVerifier(),
+        verifier=SystemPasswordVerifier() if os.geteuid() == 0 else SudoPasswordVerifier(),
         source=FileBackedSettingsSource(store),
         applier=FileBackedSectionApplier(store),
         eligibility=PathPrefixRebuildEligibility(),

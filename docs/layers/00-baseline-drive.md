@@ -89,8 +89,10 @@ deleting, renaming or overwriting call is ever added.
   10% headroom and leave at least 3% free, and a minimum interval (default one week) stops full backups piling
   up. Clearing old sets is your decision.
 - **What is covered:** the mounted Baseline volumes (not the ephemeral SESSION_TEMP; a volume that is not
-  actually mounted is skipped, not backed up as an empty directory) and the Proxmox configuration. VMs and LXCs
-  live on INSTALLER_CACHE, so they are included.
+  actually mounted is skipped, not backed up as an empty directory) and the Proxmox configuration.
+  VM placement no longer implies coverage: Ubuntu OS disks use BASELINE and home disks use USER_<PERSONA>;
+  ordinary VM disks use protected storage. Copying an active disk file is not a proved recoverable VM backup.
+  The new `baseline-os`/`baseline-user` stores still need quiesced backup/restore verification (v0.2 row60, DR117).
 - **Not encrypted, by decision** (2026-10-01): encryption can be added as an option later, but there is no
   reason for it in the short term. The sets therefore contain the same secrets as the volumes they copy
   (password-hash store, SSH keys, tokens), so keep the backup drive somewhere only you can reach. The

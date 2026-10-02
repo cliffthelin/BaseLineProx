@@ -6,6 +6,29 @@
 > `MD89N41071210AP4E` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
 > `ls -l /dev/disk/by-id/ | grep -E 'FD01N6557110C271B|MD89N41071210AP4E'` (v0.2 rows 27-29).
 
+## Current incremental handoff — 2026-10-01, DR117
+
+Read [INSTALL.md](INSTALL.md) and [DR117](design/decision-records/117-real-ubuntu-proxmox-environment.md)
+first. Current source has a real Proxmox lifecycle adapter and authenticated
+Ubuntu Desktop/Server web workflow. Actual KVM desktop OS rebuild retained a
+document and Firefox profile; actual Proxmox-clone Ubuntu server rebuild kept
+VMID/home/document. Real web login/refusal and empty standard VM create/delete
+worked; the console displayed Chromium's real Proxmox login. 2839 guarded unit
+tests passed. Evidence: [verification/117](verification/117/README.md).
+
+**No physical drive was modified and no bare-metal deployment was verified.**
+Source PC601 serial FD01N6557110C271B was read-only under a disposable /tmp
+QEMU overlay. The other SK hynix drive was untouched. Current clone root was
+expanded to 24 GiB; the minimal new-install preset is now 16 GiB, not 5 GiB.
+Full provisioning, physical mounts/bind redirects/reboot/production kiosk gate,
+backup of the new stores and other workload/Harvester adapters remain open
+(v0.2 row72; row60 reopened for split-store backup). Do not rerun the old
+INSTALL.md thin-pool wipe procedure; it has been removed as superseded.
+
+The older session narratives below remain historical, including their dated
+hardware/tool availability claims. A missing qm on the development OS does
+not establish lack of physical drive access.
+
 ## READ THIS FIRST - 2026-09-28 session summary (consolidates the 14 entries below)
 
 **Real hardware context, current as of this session** (see memory
@@ -1196,3 +1219,25 @@ file for what changed and why):
 - The original PRD context lives in this chat's history, not yet
   extracted into a repo doc - if the new Project needs it and doesn't
   have it, ask for it explicitly rather than assuming it's here.
+
+
+## 2026-10-01 — DR118 distro containers
+
+Read DR118 and verification/118 before continuing. Actual native Proxmox LXC
+create/boot/rebuild preserved home/root/data for 11 families; openEuler setup
+failed and is disabled. Its incomplete reservation once recorded ID119, now
+used by the valid openSUSE base: do not destroy119 for failed-template cleanup.
+Actual web Alpine CT125 create/shutdown/rebuild passed. Physical drives unchanged.
+Nine requested distro systems are listed truthfully but not installed; UEFI
+ISO selection and retained-disk size controls added. Remaining work row73,
+including OMV NAS disks, GrapheneOS emulator and requested Linux ISO installs.
+Bind-data backup/restore is still row60; full deploy/reboot remains row72.
+
+
+## 2026-10-01 — DR119 application/OS audit
+
+App Isolation runtime claim corrected to plan checks. Read
+`design/application-layer-audit-2026-10-01.md` and queue74 before applying plans.
+No runtime confinement or physical app mounts proved; existing OS overlay
+proofs remain valid but aren't per-app isolation. User authorized GitHub push
+to current origin/upstream branch. History DR117/118 preserved.

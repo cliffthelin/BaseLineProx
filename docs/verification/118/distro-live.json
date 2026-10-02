@@ -1,0 +1,140 @@
+[
+  {
+    "family": "almalinux",
+    "template": "almalinux-10-default_20250930_amd64.tar.xz",
+    "ok": true,
+    "vmid": 105,
+    "base_vmid": 104,
+    "os_release": "NAME=\"AlmaLinux\"\nVERSION=\"10.0 (Purple Lion)\"\nID=\"almalinux\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"10.0\"\nPLATFORM_ID=\"platform:el10\"\nPRETTY_NAME=\"AlmaLinux 10.0 (Purple Lion)\"\nANSI_COLOR=\"0;34\"\nLOGO=\"fedora-logo-icon\"\nCPE_NAME=\"cpe:/o:almalinux:almalinux:10::baseos\"\nHOME_URL=\"https://almalinux.org/\"\nDOCUMENTATION_URL=\"https://wiki.almalinux.org/\"\nVENDOR_NAME=\"AlmaLinux\"\nVENDOR_URL=\"https://almalinux.org/\"\nBUG_REPORT_URL=\"https://bugs.almalinux.org/\"\n\nALMALINUX_MANTISBT_PROJECT=\"AlmaLinux-10\"\nALMALINUX_MANTISBT_PROJECT_VERSION=\"10.0\"\nREDHAT_SUPPORT_PRODUCT=\"AlmaLinux\"\nREDHAT_SUPPORT_PRODUCT_VERSION=\"10.0\"\nSUPPORT_END=2035-06-01\n",
+    "linked_clone_origin": "base-104-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-almalinux\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-almalinux/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-almalinux/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-almalinux/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:79:C1:46,ip=dhcp,type=veth\nostype: centos\nrootfs: local-lvm:vm-105-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "alpine",
+    "template": "alpine-3.23-default_20260116_amd64.tar.xz",
+    "ok": true,
+    "vmid": 106,
+    "base_vmid": 102,
+    "os_release": "NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.23.2\nPRETTY_NAME=\"Alpine Linux v3.23\"\nHOME_URL=\"https://alpinelinux.org/\"\nBUG_REPORT_URL=\"https://gitlab.alpinelinux.org/alpine/aports/-/issues\"\n",
+    "linked_clone_origin": "base-102-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-alpine\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-alpine/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-alpine/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-alpine/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:EA:04:AF,ip=dhcp,type=veth\nostype: alpine\nrootfs: local-lvm:vm-106-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "archlinux",
+    "template": "archlinux-base_20260420-1_amd64.tar.zst",
+    "ok": true,
+    "vmid": 108,
+    "base_vmid": 107,
+    "os_release": "NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\nANSI_COLOR=\"38;2;23;147;209\"\nHOME_URL=\"https://archlinux.org/\"\nDOCUMENTATION_URL=\"https://wiki.archlinux.org/\"\nSUPPORT_URL=\"https://bbs.archlinux.org/\"\nBUG_REPORT_URL=\"https://gitlab.archlinux.org/groups/archlinux/-/issues\"\nPRIVACY_POLICY_URL=\"https://terms.archlinux.org/docs/privacy-policy/\"\nLOGO=archlinux-logo\n",
+    "linked_clone_origin": "base-107-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-archlinux\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-archlinux/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-archlinux/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-archlinux/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:EE:B2:51,ip=dhcp,type=veth\nostype: archlinux\nrootfs: local-lvm:vm-108-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "centos",
+    "template": "centos-9-stream-default_20240828_amd64.tar.xz",
+    "ok": true,
+    "vmid": 110,
+    "base_vmid": 109,
+    "os_release": "NAME=\"CentOS Stream\"\nVERSION=\"9\"\nID=\"centos\"\nID_LIKE=\"rhel fedora\"\nVERSION_ID=\"9\"\nPLATFORM_ID=\"platform:el9\"\nPRETTY_NAME=\"CentOS Stream 9\"\nANSI_COLOR=\"0;31\"\nLOGO=\"fedora-logo-icon\"\nCPE_NAME=\"cpe:/o:centos:centos:9\"\nHOME_URL=\"https://centos.org/\"\nBUG_REPORT_URL=\"https://issues.redhat.com/\"\nREDHAT_SUPPORT_PRODUCT=\"Red Hat Enterprise Linux 9\"\nREDHAT_SUPPORT_PRODUCT_VERSION=\"CentOS Stream\"\n",
+    "linked_clone_origin": "base-109-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-centos\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-centos/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-centos/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-centos/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:4D:02:C1,ip=dhcp,type=veth\nostype: centos\nrootfs: local-lvm:vm-110-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "debian",
+    "template": "debian-13-standard_13.1-2_amd64.tar.zst",
+    "ok": true,
+    "vmid": 112,
+    "base_vmid": 111,
+    "os_release": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.1\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+    "linked_clone_origin": "base-111-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-debian\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-debian/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-debian/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-debian/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:38:FC:C5,ip=dhcp,type=veth\nostype: debian\nrootfs: local-lvm:vm-112-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "devuan",
+    "template": "devuan-5.0-standard_5.0_amd64.tar.gz",
+    "ok": true,
+    "vmid": 114,
+    "base_vmid": 113,
+    "os_release": "PRETTY_NAME=\"Devuan GNU/Linux 5 (daedalus)\"\nNAME=\"Devuan GNU/Linux\"\nVERSION_ID=\"5\"\nVERSION=\"5 (daedalus)\"\nVERSION_CODENAME=\"daedalus\"\nID=devuan\nID_LIKE=debian\nHOME_URL=\"https://www.devuan.org/\"\nSUPPORT_URL=\"https://devuan.org/os/community\"\nBUG_REPORT_URL=\"https://bugs.devuan.org/\"\n",
+    "linked_clone_origin": "base-113-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-devuan\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-devuan/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-devuan/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-devuan/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:07:87:72,ip=dhcp,type=veth\nostype: devuan\nrootfs: local-lvm:vm-114-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "fedora",
+    "template": "fedora-43-default_20260115_amd64.tar.xz",
+    "ok": true,
+    "vmid": 116,
+    "base_vmid": 115,
+    "os_release": "NAME=\"Fedora Linux\"\nVERSION=\"43 (Container Image)\"\nRELEASE_TYPE=stable\nID=fedora\nVERSION_ID=43\nVERSION_CODENAME=\"\"\nPRETTY_NAME=\"Fedora Linux 43 (Container Image)\"\nANSI_COLOR=\"0;38;2;60;110;180\"\nLOGO=fedora-logo-icon\nCPE_NAME=\"cpe:/o:fedoraproject:fedora:43\"\nDEFAULT_HOSTNAME=\"fedora\"\nHOME_URL=\"https://fedoraproject.org/\"\nDOCUMENTATION_URL=\"https://docs.fedoraproject.org/en-US/fedora/f43/\"\nSUPPORT_URL=\"https://ask.fedoraproject.org/\"\nBUG_REPORT_URL=\"https://bugzilla.redhat.com/\"\nREDHAT_BUGZILLA_PRODUCT=\"Fedora\"\nREDHAT_BUGZILLA_PRODUCT_VERSION=43\nREDHAT_SUPPORT_PRODUCT=\"Fedora\"\nREDHAT_SUPPORT_PRODUCT_VERSION=43\nSUPPORT_END=2026-12-02\nVARIANT=\"Container Image\"\nVARIANT_ID=container\n",
+    "linked_clone_origin": "base-115-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-fedora\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-fedora/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-fedora/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-fedora/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:1D:CA:BC,ip=dhcp,type=veth\nostype: fedora\nrootfs: local-lvm:vm-116-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "gentoo",
+    "template": "gentoo-current-openrc_20250508_amd64.tar.xz",
+    "ok": true,
+    "vmid": 118,
+    "base_vmid": 117,
+    "os_release": "NAME=Gentoo\nID=gentoo\nPRETTY_NAME=\"Gentoo Linux\"\nANSI_COLOR=\"1;32\"\nHOME_URL=\"https://www.gentoo.org/\"\nSUPPORT_URL=\"https://www.gentoo.org/support/\"\nBUG_REPORT_URL=\"https://bugs.gentoo.org/\"\nVERSION_ID=\"2.17\"\n",
+    "linked_clone_origin": "base-117-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-gentoo\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-gentoo/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-gentoo/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-gentoo/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:7B:E7:2A,ip=dhcp,type=veth\nostype: gentoo\nrootfs: local-lvm:vm-118-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "openeuler",
+    "template": "openeuler-25.03-default_20250507_amd64.tar.xz",
+    "ok": false,
+    "error": "pct create failed: unable to create CT 119 - error in setup task PVE::LXC::Setup::post_create_hook"
+  },
+  {
+    "family": "opensuse",
+    "template": "opensuse-16.0-default_20260116_amd64.tar.xz",
+    "ok": true,
+    "vmid": 120,
+    "base_vmid": 119,
+    "os_release": "NAME=\"openSUSE Leap\"\nVERSION=\"16.0\"\nID=\"opensuse-leap\"\nID_LIKE=\"suse opensuse\"\nVERSION_ID=\"16.0\"\nPRETTY_NAME=\"openSUSE Leap 16.0\"\nANSI_COLOR=\"0;32\"\nCPE_NAME=\"cpe:/o:opensuse:leap:16.0\"\nBUG_REPORT_URL=\"https://bugs.opensuse.org\"\nHOME_URL=\"https://www.opensuse.org/\"\nDOCUMENTATION_URL=\"https://en.opensuse.org/Portal:Leap\"\nLOGO=\"distributor-logo-Leap\"\n",
+    "linked_clone_origin": "base-119-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-opensuse\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-opensuse/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-opensuse/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-opensuse/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:D5:33:F4,ip=dhcp,type=veth\nostype: opensuse\nrootfs: local-lvm:vm-120-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "rockylinux",
+    "template": "rockylinux-10-default_20251001_amd64.tar.xz",
+    "ok": true,
+    "vmid": 122,
+    "base_vmid": 121,
+    "os_release": "NAME=\"Rocky Linux\"\nVERSION=\"10.0 (Red Quartz)\"\nID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"10.0\"\nPLATFORM_ID=\"platform:el10\"\nPRETTY_NAME=\"Rocky Linux 10.0 (Red Quartz)\"\nANSI_COLOR=\"0;32\"\nLOGO=\"fedora-logo-icon\"\nCPE_NAME=\"cpe:/o:rocky:rocky:10::baseos\"\nHOME_URL=\"https://rockylinux.org/\"\nVENDOR_NAME=\"RESF\"\nVENDOR_URL=\"https://resf.org/\"\nBUG_REPORT_URL=\"https://bugs.rockylinux.org/\"\nSUPPORT_END=\"2035-05-31\"\nROCKY_SUPPORT_PRODUCT=\"Rocky-Linux-10\"\nROCKY_SUPPORT_PRODUCT_VERSION=\"10.0\"\nREDHAT_SUPPORT_PRODUCT=\"Rocky Linux\"\nREDHAT_SUPPORT_PRODUCT_VERSION=\"10.0\"\n",
+    "linked_clone_origin": "base-121-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-rockylinux\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-rockylinux/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-rockylinux/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-rockylinux/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:CB:21:47,ip=dhcp,type=veth\nostype: centos\nrootfs: local-lvm:vm-122-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  },
+  {
+    "family": "ubuntu",
+    "template": "ubuntu-26.04-standard_26.04-1_amd64.tar.zst",
+    "ok": true,
+    "vmid": 124,
+    "base_vmid": 123,
+    "os_release": "PRETTY_NAME=\"Ubuntu 26.04 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"26.04\"\nVERSION=\"26.04 (Resolute Raccoon)\"\nVERSION_CODENAME=resolute\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=resolute\nLOGO=ubuntu-logo\n",
+    "linked_clone_origin": "base-123-disk-0",
+    "config": "arch: amd64\ncmode: console\ncores: 1\nhostname: distro-proof-ubuntu\nmemory: 768\nmp0: /var/lib/baseline-proof/ct-data/data/distro-proof-ubuntu/home,mp=/home,backup=0\nmp1: /var/lib/baseline-proof/ct-data/data/distro-proof-ubuntu/root,mp=/root,backup=0\nmp2: /var/lib/baseline-proof/ct-data/data/distro-proof-ubuntu/data,mp=/data,backup=0\nnet0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:42:67:5F,ip=dhcp,type=veth\nostype: ubuntu\nrootfs: local-lvm:vm-124-disk-0,size=4G\nswap: 512\nunprivileged: 1\n",
+    "rebuild_result": "home/root/data retained; OS sentinel reset\n",
+    "credential_hash_matches_after_rebuild": true
+  }
+]

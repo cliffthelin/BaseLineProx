@@ -1060,3 +1060,13 @@ def test_a_new_store_file_is_private_to_its_owner(tmp_path):
     assert (tmp_path / "private").stat().st_mode & 0o777 == 0o700
     for extra in (tmp_path / "private").glob("store.db-*"):
         assert extra.stat().st_mode & 0o077 == 0, extra.name
+
+
+def test_root_server_checks_the_typed_account_password_without_sudo(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    server = sw.build_real_server(bind_host="127.0.0.1", bind_port=0, data_path=tmp_path / "store.db")
+    try:
+        assert isinstance(server.deps["verifier"], sw.SystemPasswordVerifier)
+    finally:
+        server.httpd.server_close()

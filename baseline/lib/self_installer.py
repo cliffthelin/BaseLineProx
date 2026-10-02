@@ -115,16 +115,11 @@ lvm.swapsize = {lvm_swapsize}
 # since none of them ever ran the real assistant binary's own
 # `validate-answer`/`prepare-iso` against the actual generated TOML.
 LVM_SIZE_PRESETS = {
-    # The real installer default (2026-09-29 sizing-defaults instruction:
-    # "ProxMox 5GB - Expandable to 50GB"): root starts small on purpose.
-    # "Expandable to 50GB" is a real, later `lvextend`+`resize2fs` action
-    # this project intends to make against a live install, not something
-    # enforced by this preset alone - it's only practical if `lvm_maxvz`
-    # doesn't consume the whole disk, which is why this preset keeps
-    # `lvm_maxvz`/`lvm_swapsize` at "small"'s own already-real values
-    # rather than guessing new ones for a figure the instruction didn't
-    # specify.
-    "minimal": dict(lvm_maxroot=5, lvm_maxvz=30, lvm_swapsize=2),
+    # The previous 5 GB root filled during a real Cage/Chromium install
+    # in the 2026-10-01 disposable Proxmox overlay proof (record 117).
+    # Leave room for the GUI, browser and package updates while keeping
+    # most space unallocated for later expansion and selected storage.
+    "minimal": dict(lvm_maxroot=16, lvm_maxvz=30, lvm_swapsize=2),
     "small": dict(lvm_maxroot=20, lvm_maxvz=30, lvm_swapsize=2),
     "medium": dict(lvm_maxroot=40, lvm_maxvz=60, lvm_swapsize=4),
     "large": dict(lvm_maxroot=80, lvm_maxvz=120, lvm_swapsize=8),
@@ -211,7 +206,7 @@ def build_and_write_self_installer(
     key_path: Path | None = None,
     server_port: int = 8443,
     fqdn: str = "baseline.local",
-    lvm_maxroot: int = 5,
+    lvm_maxroot: int = 16,
     lvm_maxvz: int = 30,
     lvm_swapsize: int = 2,
     target_mac: str | None = None,

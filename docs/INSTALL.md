@@ -12,19 +12,43 @@ newer scattered narrative.**
 
 ## Status of each step, stated honestly
 
-| Step | Code behind it | Verified against real hardware? |
+| Step | Code behind it | Current evidence and limits |
 |---|---|---|
-| 1. Acquire + verify the Proxmox installer | `drive_setup_acquire.py` | Yes - live, against the real `download.proxmox.com` (decision record 18) |
-| 2. Prepare the unattended-install answer ISO | `drive_setup_answer.py`, `baseline/bin/baseline-prepare-real-install-iso` (new) | Yes - re-verified 2026-09-27 (decision record 60): a fresh real `--fetch-from iso` QEMU disposable install ran to a genuine post-install Proxmox login prompt (not inferred - a literal screendump showing it), and a real `--fetch-from http` run of the new `baseline-prepare-real-install-iso` tool proved the full HTTPS answer-serve cycle end to end (hardware-mismatch refused, correct hardware served the real answer once, replay refused). Found and fixed a real bug in the same pass: `prepare_iso_defensively` didn't create `--tmp` itself (exit 0 but `Error: No such file or directory` - every FakeAnswerRunner test had passed regardless). **Still not run against real target hardware** - this machine has no physical access to the real drives in the table below |
-| 3. Validate the two target drives | `physical_device_safety.py` | Yes - real, live, on the actual two drives (serials below) |
-| 4. Install Proxmox onto the validated drive | `drive_setup_install.py`'s invocation builders, reused per this doc's own instructions below | **No** - every prior install this code has performed was a QEMU sparse file. The one real install (Dell Latitude 5290) used none of this code and left no reproducible record. This doc's Step 4 is the first time this exact procedure is written down; it has not been run end-to-end for real yet |
-| 5. Deploy the Baseline app (`provision.sh`) | `boot/provision.sh` | Yes - real, per Track A1 |
-| 6. First boot / CONFIRM gate | `firstboot_statemachine.py` | Yes, under QEMU (decision records 25-27); SESSION_HANDOFF.md claims Track A1 also proved this live, but no decision record documents that specific real-boot verification |
-| 7. Build the persistence pool on the second drive | `persistence_pool.py` (**new**, written 2026-09-26) | **No** - Track A2 did this once, for real, via ad hoc commands with nothing reusable left behind. This module is a reconstruction of the intended procedure, not a recovery of what was actually typed. Review before trusting it |
-| 8. Attach persistence to a VM | `vm_provision.py` | No - unit-tested against fakes only |
-| 9. Verify persistence survives a reboot | N/A | Proven for network config + installed packages only (Gates D/F, under QEMU) - not for the persistence pool itself, on any hardware |
+| 1. Acquire + verify the Proxmox installer | `drive_setup_acquire.py` | Live publisher download/signature chain, DR18. |
+| 2. Prepare the unattended-install answer ISO | `drive_setup_answer.py` | Real disposable QEMU install and single-use HTTPS answer tests, DR60. Physical drive access exists; absence of `qm` on the development OS does not mean otherwise. |
+| 3. Validate the target drives | `physical_device_safety.py` | Actual serial/device/size checks repeated 2026-10-01, DR117; physical source read-only during that proof. |
+| 4. Install Proxmox | `drive_setup_install.py`, self-installer | A real installed Proxmox drive exists (v0.1 row17). Which historical installer run created it remains unconfirmed. No physical reinstall in DR117. |
+| 5. Deploy the current Baseline app | `boot/provision.sh` | Imports, packaging and unit checks pass. DR117 copied current source into a disposable Proxmox clone and exercised its web/VM paths. **Full current provision.sh was not run end-to-end or deployed to the physical drive.** |
+| 6. First boot / CONFIRM / kiosk | firstboot state machine, kiosk unit | Earlier QEMU firstboot tests, DR25–27. DR117 shows a visible Chromium Proxmox login on an actual Proxmox VM using a transient service with the corrected terminal properties; production firstboot ordering/autostart remains unverified. |
+| 7. Mount named storage volumes | drive layout, persistence bind mounts | Existing physical drive has six plain GPT/ext4 volumes, not `baseline-persist` LVM-thin. They were unmounted during DR117; new VM integration uses separate directories inside a disposable clone, not physical volume isolation. |
+| 8. Create Ubuntu or ordinary VMs | `proxmox_vm_host.py`, `ubuntu_environment.py`, `/vms` | Actual Proxmox `qm`/`pvesh`/`pvesm` registration, nested Ubuntu boot, OS/home split and OS rebuild proved in DR117. Standard VM allocation without backing proved; a standard ISO OS install has not been proved. |
+| 9. Verify retained data | Ubuntu recipe + real guest agent | Document and actual Firefox profile survived a direct KVM desktop rebuild; document survived a clean Proxmox-managed Ubuntu server rebuild, DR117. Host power-cycle, physical deployment, active-VM backup/restore and other guest types remain open; DR118 adds clone-only LXC preservation evidence. |
 
-**Read this table before following the steps below.** Steps 1, 3, and 5 you can trust as written. Steps 2, 4, 6, 7, 8, and 9 are either unverified on real hardware or genuinely new - follow them, but expect to find and fix a real mistake, and **update this document when you do.**
+**Current increments: [DR117](design/decision-records/117-real-ubuntu-proxmox-environment.md) and [DR118](design/decision-records/118-real-distro-linked-containers.md).**
+
+Authenticated `/containers` now provides real native Proxmox linked LXC clones with
+separate retained `/home`, `/root`, `/data`. Eleven distro families booted and
+passed clean OS-rebuild/data checks in the disposable KVM Proxmox clone (DR118);
+this is not physical deployment. openEuler 25.03 failed setup and is disabled.
+These containers share the host kernel and have no preinstalled desktop/browser.
+Bind data is **not covered by vzdump**; backup/restore remains open.
+
+The nine requested desktop/NAS/mobile systems are visible on `/vms` with official
+sources and explicit uninstalled/unverified status. ISO UEFI selection and overlay
+retained-disk size controls are implemented and unit-tested; the named systems
+were not installed in DR118. Their retained disk needs actual guest filesystem/mount
+setup before an OS reset is dependable. OMV NAS disk controls, GrapheneOS development
+emulator integration and ChromeOS-specific deployment remain open (v0.2 row73).
+Baseline manages the Proxmox substrate; it is not a replacement kernel.
+Proxmox's kernel runs the host, Cage/Chromium provides its local GUI and
+opens `https://localhost:8006`. Ubuntu Desktop has its own kernel, GDM and
+Firefox; its homepage must be the host address reachable from that guest.
+The bootstrap marker alone is not evidence that a GUI is visible.
+
+The minimal Proxmox root preset is now **16 GiB**, superseding DR98's 5 GiB
+root default. The actual clone filled its 5 GiB root during GUI installation;
+the proof expanded only the clone's root to 24 GiB. The physical source was
+not resized. Root expansion still requires genuine free VG capacity.
 
 ## The two known real drives (Track A)
 
@@ -142,11 +166,12 @@ never cache or assume a prior result still holds.
 
 ## Step 4 - Write the ISO to real media and install (not yet run for real)
 
-1. Write the prepared ISO from Step 2 to a real USB stick:
-   `dd if=/root/baseline-real-install.iso of=/dev/sdX bs=4M status=progress oflag=sync`
-   (`/dev/sdX` here is the **USB stick**, not either target drive from
-   the table above - triple-check this before running `dd`, which is
-   silently destructive to whatever device you point it at).
+1. Prepare installation media only through a validated device operation:
+   resolve the selected media by serial and pass the current target through
+   `physical_device_safety.validate_target_device` before a write. The earlier
+   unguarded `dd ... of=/dev/sdX` example is removed. Current Baseline drive
+   installation belongs in the authenticated Drive Administration action,
+   including its data-protection and human-confirmation gates.
 2. Boot the target machine from that USB stick (UEFI boot menu).
 3. The unattended installer runs, targeting whichever disk the answer
    file specified - **the answer file's own target-disk selection is
@@ -173,18 +198,12 @@ On the freshly-booted Proxmox host, as root:
 bash boot/provision.sh
 ```
 
-Real, tested, reviewed - see `boot/provision.sh`'s own inline comments
-for exactly what it does (disables enterprise repos, installs
-packages, deploys `/opt/baseline`, stages and enables six systemd
-units, never touches this session's own tty). Then, separately and
-interactively:
-
-```bash
-baseline-auth-setup.sh
-```
-
-(needs a real login to complete Claude OAuth - cannot be scripted
-further than this).
+Provisioning deploys the modules, desktop assets and gated services. It now
+installs Cage, Chromium, xorriso and curl; the latter two are required for
+Ubuntu acquisition and cloud-init seed generation. Full execution of the
+current script on a fresh host is still open. Do not infer it from unit
+checks or the narrower clone proof. Provider OAuth is an optional interactive
+operator action; agents never handle an operator's real service credentials.
 
 ## Step 6 - Reboot; the first-boot CONFIRM gate
 
@@ -203,62 +222,103 @@ functionally verified, and only then does a durable completion marker
 get written and control pass to Baseline's normal console. A second
 reboot goes straight to that console, no re-prompt.
 
-## Step 7 - Build the persistence pool on the second drive (new, unverified)
+## Step 7 - Mount the existing named volumes
 
-```python
-import os
+The current Baseline drive uses plain GPT/ext4 partitions: BASELINE,
+INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE, USER_ADMIN and USER_PERSONAL.
+The former wipe-and-create `baseline-persist` thin-pool recipe is superseded;
+following it would erase the current layout. Resolve the physical disk by
+serial and inspect its current partitions before any storage action. Drive
+changes belong in the authenticated Drive Administration workflow, including
+its identity, data-protection and human-confirmation gates.
 
-import persistence_pool as pp
-import physical_device_safety as pds
-from repair import RealRunner
+Mount the actual volumes at their named `/mnt/<LABEL>` paths before enabling
+persistence-dependent services. A plain directory is not a mounted volume.
+The VM engine refuses missing named mounts rather than quietly writing to the
+host root. The bind-mount boot path on this physical layout still needs a
+real deployment check; DR117 does not claim it works after a host reboot.
 
-runner = RealRunner()
-validated = pds.validate_target_device(
-    os.path.realpath("/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E"),
-    expected_serial="MD89N41071210AP4E",
-    min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000,
-)
+| Data | Default location | Rebuild behavior |
+|---|---|---|
+| Unchanged public Ubuntu download | `/mnt/INSTALLER_CACHE/images/` | Source bytes stay vanilla, SHA256 checked. |
+| Prepared immutable templates, disposable OS overlay and VM runtime metadata | `/mnt/BASELINE/vm-runtime/` | Ubuntu OS overlay can be replaced while stopped. Templates must remain available to backing chains. |
+| Ubuntu home disk, account hash/profile and Proxmox VMID/name records | `/mnt/USER_ADMIN/vm-data/` | Kept across an OS rebuild; never formatted by a rebuild seed. |
+| Ordinary VM full writable disk | `/mnt/USER_ADMIN/vm-data/` | Protected state; no backing image or automatic OS reset. |
 
-# If a stale VG from a prior install shares a name with anything
-# currently active elsewhere (Track A2 hit exactly this with a
-# duplicate "pve" VG) - deactivate it by exact UUID first, never by
-# name alone. Skip this call if `vgs` shows nothing stale.
-pp.deactivate_stale_vgs(runner, name="pve", keep_uuid="<the OTHER drive's real pve VG UUID - check `vgs` yourself first>")
+Independent absolute directories on other storage are also supported. On
+Proxmox this increment registers directory stores `baseline-os` and
+`baseline-user`; a conflicting existing definition is refused. Changing the
+folders does not migrate existing VMs. Arbitrary LVM/ZFS destination adapters
+and adoption of existing Proxmox VMs are not implemented in this library.
 
-pds.wipe_signatures(validated)
-result = pp.create_thin_pool(runner, validated)
-assert result.ok, result.detail
-result = pp.register_with_proxmox(runner)
-assert result.ok, result.detail
-```
+## Step 8 - Build Ubuntu from the authenticated web application
 
-**This is a reconstruction, not a recovery of what Track A2 actually
-typed - review every command against your own `vgs`/`pvs` output
-before running it.** `pp.deactivate_stale_vgs`/`create_thin_pool` are
-destructive; there is no dry-run mode. Confirm with `pvesm status`
-that `baseline-persist` shows up afterward.
+Open Baseline's `/vms` page (default app port 8100), log in as an admin and
+set the disposable OS and protected disk folders. On Proxmox, Baseline uses
+`qm`, `pvesh` and `pvesm`; direct QEMU is the development backend.
 
-## Step 8 - Attach persistence to a VM
+1. Prepare Ubuntu. This downloads the pinned Canonical 24.04 image, checks
+   its pinned SHA256 and converts it into an immutable template. Publisher
+   signature verification and an offline package mirror are later increments.
+2. Choose Ubuntu Desktop or Server, name it, size the OS/home disks and set
+   the Proxmox homepage to an address reachable **inside the VM**. A browser
+   connected through localhost or an SSH tunnel does not establish a guest
+   address. The form prefers the host vmbr0 IPv4 address and leaves an unknown
+   loopback-only address empty; review it before creation.
+3. Save the fresh, one-time `baseline-admin` login displayed after creation.
+   Only its hash/profile is retained. There is no anonymous login, default
+   cloud `ubuntu` account or desktop autologin. Start the VM and use the
+   Proxmox console. Package installation needs network access and can take
+   several minutes; “started” means the VM is running, not that setup finished.
+4. Shut down cleanly before using Rebuild OS. It recreates the disposable OS,
+   remounts the same `/home` and installs the recipe again. Only `/home` is
+   retained: guest system-wide settings and packages on the OS disk are reset.
+   A missing/damaged home disk is a recovery error, never permission to format.
 
-```python
-import vm_provision as vp
-from repair import RealRunner
+The ordinary ISO path offers ISOs from existing enabled Proxmox ISO stores,
+not just INSTALLER_CACHE. Other OS installations use a full protected disk;
+the generic template/overlay controls are separate from Ubuntu's home recipe.
+Docker/LXC runtime/data adapters and Harvester's ACL integration remain open.
 
-runner = RealRunner()
-vp.attach_persistence_disk(runner, <vmid>, size_gb=<N>)
-```
+## Step 9 - Verify the actual deployment
 
-## Step 9 - Verify
+- Check `pvesm status`, actual `qm config <VMID>` disk references and sizes,
+  guest `/home` mount, authenticated GUI and browser homepage.
+- Save a document and real browser preference, shut down cleanly, rebuild the
+  OS and verify both through the guest. Force stop can lose recently written
+  data or damage a filesystem; DR117 observed this and repeated the test with
+  fsync and a clean shutdown.
+- Reboot the host and verify real named-volume mounts, bind redirects, VM
+  records, firstboot ordering and GUI autostart. This physical check is open.
+- Prove a quiesced backup and restore of the new split stores before relying
+  on them. Existing backup claims based on `local-lvm` or cache placement do
+  not establish recovery of `baseline-os`/`baseline-user` (v0.2 row60).
 
-- `pvesm status` shows `baseline-persist` active.
-- Create a test volume, write to it, reboot the host, confirm the
-  data is still there and `pvesm status` still shows the pool active
-  without manual re-intervention.
-- Update the status table at the top of this document with what you
-  actually found - pass or fail, with the date.
+## Credentials
+
+Agents never receive an operator's real account or service credentials.
+Project-generated disposable credentials are fresh one-time values from
+`drive_setup_answer.generate_one_time_password()`, hashed via stdin; never
+put cleartext in logs, argv, environment or installer ISOs. For unattended
+Proxmox deployment use the bounded HTTP answer server, never `--fetch-from iso`.
+DR117 used a fresh test-only SSH key and rotated only the clone's root password
+using the same factory. Current root-service web login validates the generated
+SHA512crypt machine hash directly; the non-root desktop path uses the existing
+sudo verifier. Other machine password hash schemes need a later adapter.
 
 ## If any step above turns out wrong
 
 Fix this file directly, in place - do not just narrate the fix in a
 decision record and leave this document stale. This file existing at
 all only helps if it stays the thing people actually follow.
+
+
+## Application isolation versus OS overlays (DR119)
+
+Per-app AppData is planning only: no applied app overlay, app launch boundary,
+update/reset or restore transaction has been verified. `/app-isolation` reports
+plan checks, explicitly not runtime isolation. DR117/118 prove guest OS/data
+rebuild mechanisms in disposable KVM; those do not isolate apps within guests,
+and the proof host's qcow2 layer is not a production bare-metal root overlay.
+Read `docs/design/application-layer-audit-2026-10-01.md`; implementation remains
+v0.2 row74 with deployment/backup gaps in rows60/72/73.

@@ -46,3 +46,13 @@ paths and identities. It never mounts, chowns or writes. Checks it provides:
 | App Isolation tab | MVP completed | unit tests | not re-checked in a browser after the ID rewrite |
 | Volumes on any disk | On roadmap | none | partitions 7-8 not created yet ([00](00-baseline-drive.md)) |
 | Applying a plan | On roadmap | none | needs an operator-authorized, destructive path like Drive Administration |
+
+
+## Audit correction (DR119, 2026-10-01)
+
+These are declared-path previews, not runtime isolation. Unknown data targets
+are not verified stateless applications. No live AppData overlay/owner/registry
+apply or launch transaction exists. Whole-guest OS overlays and retained home
+do not isolate apps inside the guest. Physical APPDATA volumes remain absent.
+See [audit and functional sequence](../design/application-layer-audit-2026-10-01.md),
+v0.2 row74; plan checks must never be used as an applied-confinement badge.

@@ -114,7 +114,7 @@ _FORBIDDEN_PROGRAMS = re.compile(
     r"partx|dd|shred|blkdiscard|pvcreate|pvremove|pvresize|pvmove|vgcreate|vgremove|vgextend|vgreduce|vgchange|lvcreate|"
     r"lvremove|lvchange|lvresize|lvextend|lvreduce|mount|umount|losetup|tune2fs|e2label|resize2fs|e2fsck|fsck(\..+)?|"
     r"cryptsetup|nvme|efibootmgr|grub-install|update-grub|reboot|poweroff|shutdown|halt|sudo|pkexec|su|systemctl|"
-    r"virsh|multipass|docker|podman)$"
+    r"virsh|multipass|docker|podman|pct|qm|pvesm|pvesh|pveam)$"
 )
 _SAFE_DEVICES = {"/dev/null", "/dev/zero", "/dev/urandom", "/dev/random", "/dev/stdin", "/dev/stdout", "/dev/stderr",
                  "/dev/tty", "/dev/fd"}

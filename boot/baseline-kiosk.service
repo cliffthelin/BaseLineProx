@@ -7,13 +7,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStartPre=/opt/baseline/bin/baseline-kiosk-gate
-ExecStartPre=/usr/bin/mkdir -p /run/cage-kiosk
+RuntimeDirectory=cage-kiosk
+RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/cage -s -- /usr/bin/chromium --kiosk --no-sandbox --disable-gpu --ozone-platform=wayland --ignore-certificate-errors https://localhost:8006
 Restart=on-failure
 RestartSec=5
 Environment=XDG_RUNTIME_DIR=/run/cage-kiosk
 Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
-StandardInput=tty
+Environment=LIBSEAT_BACKEND=builtin
+StandardInput=tty-force
 StandardOutput=journal
 StandardError=journal
 TTYPath=/dev/tty3

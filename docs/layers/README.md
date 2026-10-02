@@ -5,8 +5,8 @@ applications running on it. Each page says what lives on that layer, what
 must never live there, how the workflow touches it, and the status of every
 notable package, application and decision on it.
 
-Written 2026-09-30 against commit `e629011`. Statuses are only as current as
-that; the code and the [v0.2 work queue](../design/v0.2-work-queue.md) are the
+Originally written 2026-09-30 against commit `e629011`; VM placement and
+verification updated 2026-10-01 in DR117. The code and the [v0.2 work queue](../design/v0.2-work-queue.md) are the
 live source of truth.
 
 ## Status legend
@@ -57,17 +57,17 @@ still only proven in a test harness:
 
 ## Pages
 
-> All nine pages are written. Pages 01-08 were drafted 2026-09-30 from a read of the relevant modules; claims marked *unit tests* are not proven on hardware, and no page has been checked against a running system.
+> All nine pages are written. Pages 01-08 were drafted 2026-09-30 from a read of the relevant modules; claims marked *unit tests* are not proven on hardware. DR117 adds running KVM/Proxmox-clone evidence for the GUI and Ubuntu/VM workflow, not a physical deployment.
 
 | # | Layer | Status | One line |
 |---|---|---|---|
 | 00 | [Baseline drive](00-baseline-drive.md) | In progress | Drives by serial; the Baseline drive's on-disk layout is now 2 partitions behind the plan |
 | 01 | [Substrate](01-substrate.md) | In progress | Proxmox install pipeline proven in QEMU; real-hardware end to end still pending |
-| 02 | [BASELINE](02-baseline.md) | In progress | Install-wide state incl. app/VM/LXC (decided); VM/LXC placement in `appdata.py` still to reconcile |
+| 02 | [BASELINE](02-baseline.md) | In progress | Templates and disposable Ubuntu OS overlays; protected home/full VM disks live separately |
 | 03 | [SUBSTRATE](03-substrate-persistence.md) | In progress | Volume exists and mounts; nothing writes to it yet |
 | 04 | [INSTALLER_CACHE](04-installer-cache.md) | In progress | Catalog and tab built; on this machine it is not mounted and 25 of 26 artifacts are missing |
 | 05 | [SESSION_TEMP](05-session-temp.md) | MVP completed | Ephemeral state and recovery-mode working state |
-| 06 | [USER_PERSISTENCE](06-user-persistence.md) | MVP completed | Per-persona settings/state via bind redirects |
+| 06 | [USER_PERSISTENCE](06-user-persistence.md) | In progress | Per-persona redirects unit-tested; Ubuntu data retained in KVM/Proxmox-clone rebuilds, physical mounting open |
 | 07 | [APPDATA](07-appdata.md) | In progress | Per-persona app data volume; planned and in the layout, not yet on any disk |
 | 08 | [Application isolation](08-application-isolation.md) | In progress | Overlays, formats, containers, the Caddy gateway |
 
@@ -110,3 +110,28 @@ was invisible until something looked at the whole layout at once:
 - [v0.2 work queue](../design/v0.2-work-queue.md) - the live roadmap
 - [Decision records](../design/decision-records/) - why each piece is the way it is
 - [Docs-vs-code audit, 2026-09-30](../design/docs-vs-code-audit-2026-09-30.md)
+
+
+### Native distro-container increment (DR118, 2026-10-01)
+
+`/containers` uses actual Proxmox templates and native LVM-thin/ZFS linked roots.
+Vanilla archives use selected separate cache storage; immutable templates and
+resettable roots use clone-capable OS storage; `/home`, `/root`, `/data` bind
+directories use protected storage, configurable outside this drive. Eleven
+families passed boot and clean rebuild/data checks in the disposable KVM
+Proxmox clone, not physical named-volume deployment. openEuler 25.03 failed
+setup and is disabled. Binds are excluded from vzdump: dedicated quiesced
+backup/restore remains unverified. Containers share the substrate kernel and
+do not supply a distro desktop/browser. The nine requested desktop/NAS/mobile
+systems remain explicitly uninstalled on `/vms`; see DR118 and v0.2 row73.
+
+
+### Application/whole-OS audit (DR119)
+
+Application isolation remains a declared-plan preview. OS clone/reset and
+retained home do not confine applications inside a guest. The physical
+Proxmox host has no production whole-root overlay. See
+[the full audit](../design/application-layer-audit-2026-10-01.md) and queue74
+for apply/launch, AppData ownership/mounts, unknown data paths, collisions,
+per-app reset/update and verified restore. The preview no longer claims
+“Isolation holds.” No runtime app mounts were applied during this audit.
