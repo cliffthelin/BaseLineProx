@@ -1241,3 +1241,13 @@ App Isolation runtime claim corrected to plan checks. Read
 No runtime confinement or physical app mounts proved; existing OS overlay
 proofs remain valid but aren't per-app isolation. User authorized GitHub push
 to current origin/upstream branch. History DR117/118 preserved.
+
+
+## 2026-10-02 — DR120 functional coverage
+
+GitHub push completed and remote branch verified at6a806d8. User clarifies AI
+builds the software means; it must not act as the software during normal use.
+Read `design/functional-gap-audit-2026-10-02.md` F01–F12. Existing Operations
+schedules are software-owned; app lifecycle, durable workload jobs/recovery,
+retained guest restore and distro acquisition/install remain gaps. New row75
+for jobs/reconciliation; no new runtime or physical verification claimed.

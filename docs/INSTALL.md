@@ -322,3 +322,13 @@ rebuild mechanisms in disposable KVM; those do not isolate apps within guests,
 and the proof host's qcow2 layer is not a production bare-metal root overlay.
 Read `docs/design/application-layer-audit-2026-10-01.md`; implementation remains
 v0.2 row74 with deployment/backup gaps in rows60/72/73.
+
+
+## Software-owned workflows (DR120, 2026-10-02)
+
+Baseline must perform normal operations without AI acting as its runtime.
+`docs/design/functional-gap-audit-2026-10-02.md` identifies application coverage
+and missing deterministic workflows. VM/LXC long operations and partial-state
+recovery need durable jobs (row75); app lifecycle74, guest/bind restore59/60
+and distro installs73 remain open. Existing Operations scheduling works within
+the web service without AI. This audit adds no runtime/hardware proof.

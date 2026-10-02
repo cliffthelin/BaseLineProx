@@ -70,3 +70,6 @@ requested-system status, recorded in `proxmox/003.md` and `../verification/118/`
 
 DR119 application/whole-OS overlay audit and honest App Isolation page status:
 `proxmox/003.md`, `../design/application-layer-audit-2026-10-01.md`.
+
+DR120 software-owned functional workflow audit: `proxmox/003.md`,
+`../design/functional-gap-audit-2026-10-02.md`.
