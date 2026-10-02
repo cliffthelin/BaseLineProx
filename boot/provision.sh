@@ -192,6 +192,9 @@ cp "$SRC/baseline/lib/installer_cache.py" /opt/baseline/lib/installer_cache.py
 # appdata.py - baseline_web.py's App Isolation tab imports it to plan
 # per-application AppData (own data tree, registry, owner, overlays).
 cp "$SRC/baseline/lib/appdata.py" /opt/baseline/lib/appdata.py
+cp "$SRC/baseline/lib/environment_recipes.py" /opt/baseline/lib/environment_recipes.py
+cp "$SRC/baseline/bin/baseline-recipes" /opt/baseline/bin/baseline-recipes
+chmod 755 /opt/baseline/bin/baseline-recipes
 # naming.py - appdata.py keys every AppData home by its constant identifier
 # (<cluster>_<medium>_<code>); names exist only as by-name/ aliases.
 cp "$SRC/baseline/lib/naming.py" /opt/baseline/lib/naming.py

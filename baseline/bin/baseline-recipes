@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Validate recipes or compose a lock; never installs or mutates workloads."""
+import argparse
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'lib'))
+import environment_recipes as recipes
+
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('action',choices=['validate','compose','verify'])
+parser.add_argument('files',nargs='+')
+args=parser.parse_args()
+try:
+    documents=[]
+    for name in args.files:
+        with Path(name).open() as stream:
+            documents.append(recipes.read_document(stream.read(65537)))
+    if args.action=='compose':
+        result=recipes.compose(documents[0],documents[1:])
+    else:
+        if len(documents)!=1:raise recipes.RecipeError('one input document required')
+        result=(recipes.verify_stack(documents[0]) if args.action=='verify'
+                else {'digest':recipes.digest(documents[0]),'runtime_applied':False})
+    print(json.dumps(result,sort_keys=True,indent=2))
+except (recipes.RecipeError,OSError) as exc:
+    print('Refused: '+str(exc),file=sys.stderr)
+    sys.exit(1)
