@@ -329,6 +329,33 @@ v0.2 row74 with deployment/backup gaps in rows60/72/73.
 Baseline must perform normal operations without AI acting as its runtime.
 `docs/design/functional-gap-audit-2026-10-02.md` identifies application coverage
 and missing deterministic workflows. VM/LXC long operations and partial-state
-recovery need durable jobs (row75); app lifecycle74, guest/bind restore59/60
+recovery now have a first durable job increment (DR121; row75 remains partial);
+app lifecycle74, guest/bind restore59/60
 and distro installs73 remain open. Existing Operations scheduling works within
 the web service without AI. This audit adds no runtime/hardware proof.
+
+
+## Durable workload jobs (DR121, 2026-10-02)
+
+VM/LXC actions return a saved job ID immediately. Use **Workload jobs** for actual
+native stages, final outcomes and interrupted-job inspection. Repeated identical
+request IDs reuse the job. Only one workload mutation runs at a time. Service
+restart records interrupted work and never replays it. Inspect native state, then
+type the exact name to acknowledge; acknowledgement releases the reservation and
+**does not repair the workload or declare success**. After checking the native
+state, explicitly submit any next operation. Failed jobs are reviewable but do
+not hold the global reservation.
+
+One-time logins are retrieved by authenticated POST and disappear after retrieval
+or service restart. Running, ready managed containers support **Reset login**
+without resetting OS or retained data. VM login recovery remains unimplemented.
+Existing drive/Operations jobs have not been migrated to this durable store.
+
+2,874 guarded unit tests passed. Actual Alpine create/login rotation/rebuild and
+service restart handling passed in disposable Proxmox-in-KVM, with a retained
+/home document. The interrupted rebuild stopped during preflight, before
+replacement: mid-destruction and power-loss recovery remain unverified. No
+physical-drive write or production named-volume deployment was performed.
+The development host's BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE,
+USER_ADMIN and USER_PERSONAL volumes were observed mounted; this observation
+is not proof of runtime placement or isolation. See verification/121 and queue75.

@@ -72,3 +72,14 @@ NixOS, QubesOS, GrapheneOS and Red Hat Project Hummingbird guide the intended
 application model: versioned bases, separate workload boundaries, phone-style
 private app state/permissions, and minimal container bases. This records design
 intent; applied isolation remains open in queue74. See the DR119 audit.
+
+
+## 2026-10-02 — DR121 durable workload increment
+
+VM/LXC actions now use durable asynchronous jobs, authenticated status and
+inspection/acknowledgement after restart, request deduplication, and one-time
+login retrieval. Managed running containers support real login rotation.
+2,874 unit tests passed; actual Alpine creation/rebuild with retained document
+and service-restart handling passed in disposable Proxmox-in-KVM. Interruption
+was during preflight, not destruction; no physical write/deployment or app
+confinement proof. Queue75 remains partial; see DR121 and verification/121.

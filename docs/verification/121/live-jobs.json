@@ -1,0 +1,163 @@
+{
+  "environment": "Actual Proxmox in approved disposable KVM; physical backing explicitly read-only",
+  "checks": [
+    "HTTP202 promptly; responsive jobs page; request deduplicated; actual Alpine created; login retrieved once",
+    "Actual service restart retained completed native job outcome; no password survived",
+    "Actual native root login rotation through durable web job; retained document intact",
+    "Actual web service killed during native rebuild; persistent interrupted status; no automatic replay; conflicting work refused",
+    "Application-owned read-only inspection reported actual native state without declaring recovery success",
+    "Wrong acknowledgement refused; explicit inspection acknowledgement released reservation without claiming success; fresh native rebuild completed with retained document; stopped cleanly; history survived another real service restart"
+  ],
+  "jobs": [
+    {
+      "id": "e529fcd455bc461bbe2a407a961507ad",
+      "kind": "container",
+      "action": "create",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790956877.7831383,
+      "updated": 1790956882.5292487,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "name": "durable-alpine-proof",
+        "username": "root",
+        "message": "Container started. Save this one-time login. Home, root home and /data are retained.",
+        "ok": true,
+        "login_available": true
+      }
+    },
+    {
+      "id": "4f79b743562b431f95e494a79702be97",
+      "kind": "container",
+      "action": "reset_login",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790956986.4213364,
+      "updated": 1790956987.5563323,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "username": "root",
+        "message": "Fresh one-time container login. Retained data and OS were kept.",
+        "login_available": true
+      }
+    },
+    {
+      "id": "71a38ddba90542ab8e4284ea18ffc7d9",
+      "kind": "container",
+      "action": "shutdown",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790956988.442156,
+      "updated": 1790956992.5564995,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Container action completed."
+      }
+    },
+    {
+      "id": "a0c44651bf3446b197c1c25237c16554",
+      "kind": "container",
+      "action": "rebuild",
+      "name": "durable-alpine-proof",
+      "state": "interrupted",
+      "created": 1790956992.9612784,
+      "updated": 1790956993.1498961,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": false,
+        "message": "Service restarted during this operation. Inspect native state; nothing was replayed."
+      }
+    },
+    {
+      "id": "a0c44651bf3446b197c1c25237c16554",
+      "kind": "container",
+      "action": "rebuild",
+      "name": "durable-alpine-proof",
+      "state": "interrupted",
+      "created": 1790956992.9612784,
+      "updated": 1790956993.7643592,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": false,
+        "message": "Service restarted during this operation. Inspect native state; nothing was replayed.",
+        "inspection": {
+          "available": true,
+          "message": "{\"name\": \"durable-alpine-proof\", \"vmid\": 126, \"base_vmid\": 102, \"template\": \"alpine-3.23-default_20260116_amd64.tar.xz\", \"os_storage\": \"local-lvm\", \"phase\": \"ready\", \"running\": false, \"data_path\": \"/var/lib/baseline-proof/ct-data/data/durable-alpine-proof\"}"
+        }
+      }
+    },
+    {
+      "id": "a0c44651bf3446b197c1c25237c16554",
+      "kind": "container",
+      "action": "rebuild",
+      "name": "durable-alpine-proof",
+      "state": "reviewed",
+      "created": 1790956992.9612784,
+      "updated": 1790957128.9117029,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": false,
+        "message": "Service restarted during this operation. Inspect native state; nothing was replayed.",
+        "inspection": {
+          "available": true,
+          "message": "{\"name\": \"durable-alpine-proof\", \"vmid\": 126, \"base_vmid\": 102, \"template\": \"alpine-3.23-default_20260116_amd64.tar.xz\", \"os_storage\": \"local-lvm\", \"phase\": \"ready\", \"running\": false, \"data_path\": \"/var/lib/baseline-proof/ct-data/data/durable-alpine-proof\"}"
+        }
+      }
+    },
+    {
+      "id": "c573a09be9fa486fab66823f94db3d66",
+      "kind": "container",
+      "action": "rebuild",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790957128.9149535,
+      "updated": 1790957133.8642533,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "OS clone rebuilt and started; retained data kept."
+      }
+    },
+    {
+      "id": "45ea5e52921540db8a04f4da8f570c87",
+      "kind": "container",
+      "action": "shutdown",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790957134.4513264,
+      "updated": 1790957139.6653326,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Container action completed."
+      }
+    }
+  ],
+  "interruption_limit": "Interrupted during rebuild preflight: inspection found the original stopped CT126 ready; no mid-destruction or host power-loss recovery claim."
+}

@@ -1251,3 +1251,14 @@ Read `design/functional-gap-audit-2026-10-02.md` F01–F12. Existing Operations
 schedules are software-owned; app lifecycle, durable workload jobs/recovery,
 retained guest restore and distro acquisition/install remain gaps. New row75
 for jobs/reconciliation; no new runtime or physical verification claimed.
+
+
+## 2026-10-02 — DR121 durable workload increment
+
+VM/LXC actions now use durable asynchronous jobs, authenticated status and
+inspection/acknowledgement after restart, request deduplication, and one-time
+login retrieval. Managed running containers support real login rotation.
+2,874 unit tests passed; actual Alpine creation/rebuild with retained document
+and service-restart handling passed in disposable Proxmox-in-KVM. Interruption
+was during preflight, not destruction; no physical write/deployment or app
+confinement proof. Queue75 remains partial; see DR121 and verification/121.

@@ -135,3 +135,14 @@ Proxmox host has no production whole-root overlay. See
 for apply/launch, AppData ownership/mounts, unknown data paths, collisions,
 per-app reset/update and verified restore. The preview no longer claims
 “Isolation holds.” No runtime app mounts were applied during this audit.
+
+
+## 2026-10-02 — DR121 durable workload increment
+
+VM/LXC actions now use durable asynchronous jobs, authenticated status and
+inspection/acknowledgement after restart, request deduplication, and one-time
+login retrieval. Managed running containers support real login rotation.
+2,874 unit tests passed; actual Alpine creation/rebuild with retained document
+and service-restart handling passed in disposable Proxmox-in-KVM. Interruption
+was during preflight, not destruction; no physical write/deployment or app
+confinement proof. Queue75 remains partial; see DR121 and verification/121.
