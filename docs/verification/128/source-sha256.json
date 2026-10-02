@@ -1,0 +1,7 @@
+{
+  "baseline/lib/recipe_page.py": "76722d29d8663949d1f5eff667d40942e4b685a940b5a555375d6a41a30c849a",
+  "baseline/lib/baseline_web.py": "1f6e618a27075debafa6d4f00bb1eec1dc33ee300b1f2d2b6dd4d121cff0f599",
+  "baseline/lib/environment_recipes.py": "836ce4048cd5ea55cdb581f35769fba16930336f5c223015b53ebcdf9b1d8598",
+  "boot/provision.sh": "e7fe063b48364795363016d179ed2c7b161c032a5161e118c20cb9abc0e486ea",
+  "tests/unit/test_recipe_web.py": "5c035d8cbf17456c9d437ac5b83aba611605207441a72c8595ce941207b2c7c4"
+}

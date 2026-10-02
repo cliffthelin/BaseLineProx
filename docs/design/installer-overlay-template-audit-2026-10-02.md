@@ -184,3 +184,10 @@ Ubuntu/Chromium allowlists; unsupported/private/ambiguous inputs refuse. This
 narrows the proposed parser gap, not deployment or full coverage. Structured JSON
 Schema, source acquisition/package locks, web integration, capture and runtime
 adapters remain open. No new hardware or native runtime verification.
+
+## DR128 human-interface follow-up
+
+Authenticated admin /recipes provides JSON validation, OS/app compose, stack
+verification and validated export without a shell. Local HTTP tests passed;
+no runtime builder or complete retention/isolation proof. No recipe input is
+stored server-side. Source acquisition/trust and guest adapters remain open.

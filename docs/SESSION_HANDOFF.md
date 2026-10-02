@@ -1328,3 +1328,13 @@ no runtime apply, install or configuration capture. 11 focused tests use real
 parser/subprocess CLI. Queue76 remains partial; next wire provenance/package locks,
 web controls and Ubuntu guest reconciler. Queue74 app migration/isolation and
 rows59/60/75 broader backup/recovery still open. No hardware or credentials touched.
+
+## DR128 incremental handoff — 2026-10-02
+
+/recipes now exposes DR127 validation/compose/verify/export to authenticated
+admins, with local-file/text input and explicit undeployed/source-unverified
+results. Actual local HTTP and parser/CLI tests pass; no native guest, browser
+automation or hardware proof. No persistent input store or workload mutation.
+Next queue76 work: verified acquisition/package locks and Ubuntu guest adapter;
+queue74 runtime profile migration/isolation and earlier backup/recovery remain
+open. No direction needed from user for this increment. See DR128/verification128.

@@ -451,3 +451,12 @@ Initial support: Ubuntu24.04 amd64 and Chromium with allowlisted locale/symbolic
 homepage configuration. State declarations are limited, not complete coverage.
 No runtime profile/overlay capture or deployment exists. Source hashes are declared
 locks, not fetched/trust-verified images. See verification/127 and queue76.
+
+## Human recipe controls (DR128)
+
+Open Environment recipes in the authenticated admin navigation. Load/paste JSON,
+validate an individual recipe, compose OS plus optional application, or verify
+a locked stack. Export is enabled after successful validation and invalidated
+when inputs change. This performs configuration checks only; sources are not
+verified, no VM is deployed and retention coverage is not complete. No input is
+saved server-side. See verification/128; queue76 runtime builder remains open.
