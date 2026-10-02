@@ -1338,3 +1338,14 @@ automation or hardware proof. No persistent input store or workload mutation.
 Next queue76 work: verified acquisition/package locks and Ubuntu guest adapter;
 queue74 runtime profile migration/isolation and earlier backup/recovery remain
 open. No direction needed from user for this increment. See DR128/verification128.
+
+## DR129 incremental handoff — 2026-10-02
+
+User expanded requirements to existing-app extraction plus clean test-install and
+recipe apply, and replacement-device restoration with original storage absent.
+First implementation: durable inspect_app in managed Ubuntu/Proxmox VM via
+read-only dpkg-query, with human controls on /recipes. Reports metadata/locations
+only; recipe_ready/test_install_verified false. Other media/containers, content
+classification/export and clean install remain queue76. Replacement recovery row77
+added. Existing queue74 isolation and59/60/75 recovery still open. See DR129 and
+verification129; no physical writes or deployment claimed.

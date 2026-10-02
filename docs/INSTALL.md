@@ -460,3 +460,19 @@ a locked stack. Export is enabled after successful validation and invalidated
 when inputs change. This performs configuration checks only; sources are not
 verified, no VM is deployed and retention coverage is not complete. No input is
 saved server-side. See verification/128; queue76 runtime builder remains open.
+
+## Inspect an existing application (DR129)
+
+In Environment recipes, enter a running managed Ubuntu/Proxmox VM and Debian
+package name. Inspect installed application submits a durable job and reports
+version, declared dependencies and configuration-file locations. Reconnect through
+Workload jobs. No configuration contents/profiles/secrets are extracted; report
+is not a deployable or test-installed recipe. Source/dependency locking, reviewed
+settings export, container/media adapters and clean-target install/apply remain
+queue76. Replacement-device restore is now explicitly row77, not implemented.
+
+DR129 native verification: actual authenticated Bash metadata inspection in
+managed Ubuntu inside disposable KVM Proxmox passed and report survived service
+restart; guest confirmed stopped afterward. No config contents, recipe install/
+apply, isolation or physical deployment proof. See verification/129 for helper
+errors and evidence boundaries.

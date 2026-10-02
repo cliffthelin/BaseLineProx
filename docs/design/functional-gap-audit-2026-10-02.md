@@ -117,3 +117,13 @@ and design audit: installer-overlay-template-audit-2026-10-02.md, row76. One
 reusable builder plus guest reconciler is recommended. Export is declarative
 configuration only; fresh instantiate, retained rebuild and private restore are
 separate actions. This is an implementation specification, not shipped capability.
+
+## DR129 extraction/replacement recovery follow-up
+
+Human durable read-only installed deb metadata/location inspection now exists
+for managed Ubuntu VMs, proved with actual Bash query in disposable Proxmox.
+Inspection is not recipe export or clean-install verification. Queue76 still
+requires reviewed app-specific capture, source/dependency locks and clean-target
+install/apply/launch tests. Queue77 now tracks encrypted independent destination/
+key recovery and restoration with original storage unavailable. Earlier F01–F12
+findings retain their historical scope; no generic runtime app isolation claim.

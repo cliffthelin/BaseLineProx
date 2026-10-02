@@ -191,3 +191,14 @@ Authenticated admin /recipes provides JSON validation, OS/app compose, stack
 verification and validated export without a shell. Local HTTP tests passed;
 no runtime builder or complete retention/isolation proof. No recipe input is
 stored server-side. Source acquisition/trust and guest adapters remain open.
+
+## Existing-app and replacement-device requirements (DR129 follow-up)
+
+Extract from an existing VM/container through medium-specific inspection, classify
+configuration versus personal/secret/disposable state, preview approved export,
+lock actual sources/dependencies, then clean-target install/apply/launch and
+rebuild tests before marking a recipe tested. DR129 implements only read-only
+deb package metadata/location inspection for managed Ubuntu VMs. Other adapters
+and recipe promotion remain open. Replacement-device recovery additionally needs
+independent encrypted destinations/key recovery and original-storage-unavailable
+acceptance; row77 records that goal separately from same-host rebuild.

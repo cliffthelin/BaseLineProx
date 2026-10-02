@@ -1,0 +1,9 @@
+{
+  "baseline/lib/app_capture.py": "35bbcf82f6e14f689bdd6d4c9af4999c35a9616f1e7a55a592121559bbb3da93",
+  "baseline/lib/recipe_page.py": "a1dc12d5183f22f6169ec93307229df41c66e0630ea044e9baf2bafebff7d5ea",
+  "baseline/lib/vm_page.py": "abeff01f2f45779347d057e57d939e42885abc2e7a771ae72d59cd809663faba",
+  "baseline/lib/baseline_web.py": "6029456ef3d1ee4e87d47e3a96942e1479e44ae82cec767603fd4b59360b5c33",
+  "baseline/lib/workload_jobs.py": "25381ac126931e0fc5b77a9a653b786a6486b0277e17a5b315b5e3bc0ad00087",
+  "boot/provision.sh": "cdebfb439873452b549ea47633c90284ec8e7572e5d887fd339ec94bdf7656c0",
+  "tests/unit/test_app_capture.py": "2d4c3eaca79c95f4b7b9a151c24dd9e86e1478be8882a797be222bbb2b091eca"
+}

@@ -1,0 +1,36 @@
+{
+  "environment": "Actual managed Ubuntu guest inside disposable Proxmox-in-KVM; physical backing read-only",
+  "job_id": "cba47698a2fe4faba31c8db8c8f075b6",
+  "capture_report": {
+    "format": "baseline.app-inspection/v1",
+    "medium": "deb",
+    "package": "bash",
+    "version": "5.2.21-2ubuntu4",
+    "architecture": "amd64",
+    "dependencies_declared": "base-files (>= 2.1.12), debianutils (>= 5.6-0.1)",
+    "configuration_paths": [
+      "/etc/bash.bashrc",
+      "/etc/skel/.bash_logout",
+      "/etc/skel/.bashrc",
+      "/etc/skel/.profile"
+    ],
+    "contents_extracted": false,
+    "sources_verified": false,
+    "recipe_ready": false,
+    "test_install_verified": false,
+    "state_coverage": "unknown",
+    "remaining": [
+      "verify reacquirable installation source and dependency lock",
+      "app-specific settings exporter and state/permission declaration",
+      "review reusable configuration before recipe promotion",
+      "clean-target install/apply/launch and retention tests"
+    ]
+  },
+  "checks": [
+    "Authenticated web inspection returned HTTP202",
+    "Actual guest dpkg-query reported installed package",
+    "Report persisted across web restart",
+    "No configuration contents or profile extracted",
+    "Recipe promotion and clean-install/apply remain unverified"
+  ]
+}
