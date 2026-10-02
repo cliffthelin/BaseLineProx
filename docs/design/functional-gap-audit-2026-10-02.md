@@ -13,6 +13,20 @@ hardware validation. GitHub branch `local/physical-device-safety` was confirmed
 at `6a806d8366b57be875a84398e339f452200442d8` before this audit. Existing unit and
 KVM evidence is preserved as such. Reference: DR120; prior app audit DR119.
 
+## Implemented follow-ups (current, 2026-10-02)
+
+DR121 replaces synchronous VM/LXC actions with persisted asynchronous jobs,
+request deduplication, authenticated history, native stages, interruption review
+and real LXC login rotation. DR122 adds explicit web recovery of a missing OS
+or owned stopped partial clone after destructive rebuild boundaries, retaining
+data. Actual disposable Proxmox checks passed; 2,882 guarded unit tests passed.
+The historical F02/F03 findings below describe the audit baseline, not a claim
+these shipped controls are still absent. F02/F03 remain partial for unfinished
+initial allocations/templates, running partial clones, orphan/native-task repair,
+VM login recovery and power loss. F04 retained-state restore and F01 real app
+lifecycle remain the next distinct workflow gaps; no application isolation was
+proved by container recovery. No physical deployment in these follow-ups.
+
 ## Existing application means that should be retained
 
 - Authenticated web login, settings, drive administration and action/job logs

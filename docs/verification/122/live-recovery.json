@@ -1,0 +1,84 @@
+{
+  "environment": "Actual Proxmox in disposable KVM; physical backing read-only",
+  "checks": [
+    "before-clone: actual service interruption after deletion; absent inspected; automatic mutation blocked; explicit review and web recovery completed; retained document intact",
+    "after-clone: actual service interruption; owned partial-clone inspected; explicit web recovery completed without another clone or deletion; retained document intact",
+    "Actual stale CT119 reservation refused; legitimate openSUSE base119 configuration unchanged"
+  ],
+  "jobs": [
+    {
+      "id": "459fb4463f5e420e8843edfc05b1579e",
+      "kind": "container",
+      "action": "rebuild",
+      "name": "durable-alpine-proof",
+      "state": "interrupted",
+      "created": 1790960562.6228697,
+      "updated": 1790960567.4253697,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": false,
+        "message": "Service restarted during this operation. Inspect native state; nothing was replayed.",
+        "last_observed_stage": "Native command: pct clone",
+        "inspection": {
+          "available": true,
+          "message": "{\"name\": \"durable-alpine-proof\", \"vmid\": 126, \"base_vmid\": 102, \"phase\": \"cloning\", \"recoverable\": false, \"message\": \"container ID ownership is not proven; recovery refused\"}"
+        }
+      }
+    },
+    {
+      "id": "890ea3d2b94d4adaa4e7a55c49ac9094",
+      "kind": "container",
+      "action": "recover",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790960656.0877008,
+      "updated": 1790960659.9589486,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Interrupted OS rebuild finished and started; retained data kept. Use Reset login if the original login was lost."
+      }
+    },
+    {
+      "id": "f5ac91e9279240acb695dff6898c9120",
+      "kind": "container",
+      "action": "shutdown",
+      "name": "durable-alpine-proof",
+      "state": "completed",
+      "created": 1790960660.763999,
+      "updated": 1790960665.7543304,
+      "context": {
+        "data_store": "/var/lib/baseline-proof/ct-data",
+        "backend": "DistroContainers"
+      },
+      "result": {
+        "ok": true,
+        "message": "Container action completed."
+      }
+    }
+  ],
+  "partial_clone_inspection": {
+    "name": "durable-alpine-proof",
+    "vmid": 126,
+    "base_vmid": 102,
+    "phase": "cloning",
+    "recoverable": true,
+    "native_state": "partial-clone",
+    "message": "Explicit recovery can recreate the missing OS or finish this owned stopped clone; retained data is kept."
+  },
+  "diagnosis": "First partial-clone inspection correctly refused unrecognized ownership serialization. Native pct config appends escaped %0A to descriptions. Regression test confirmed RED, fix passed; same interrupted clone resumed without recreating it.",
+  "stale_reservation_inspection": {
+    "name": "stale-proof-119",
+    "vmid": 119,
+    "base_vmid": 102,
+    "phase": "cloning",
+    "recoverable": false,
+    "message": "container ID ownership is not proven; recovery refused"
+  }
+}

@@ -1262,3 +1262,14 @@ login retrieval. Managed running containers support real login rotation.
 and service-restart handling passed in disposable Proxmox-in-KVM. Interruption
 was during preflight, not destruction; no physical write/deployment or app
 confinement proof. Queue75 remains partial; see DR121 and verification/121.
+
+
+## 2026-10-02 — DR122 bounded rebuild recovery
+
+Recover rebuild is now application-owned for a proven absent OS or an owned
+stopped partial clone, preserving retained folders. Actual disposable Proxmox
+service interruptions after deletion and after cloning recovered with the
+document intact; reused CT119 refused, valid openSUSE base unchanged. 2,882
+guarded unit tests passed. No physical writes/deployment, running partial-clone
+or power-loss recovery proof, or application-confinement claim. Queue75 remains
+partial; backup59/60 and application lifecycle74 are still open. See DR122.

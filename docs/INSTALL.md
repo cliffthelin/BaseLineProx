@@ -354,8 +354,32 @@ Existing drive/Operations jobs have not been migrated to this durable store.
 2,874 guarded unit tests passed. Actual Alpine create/login rotation/rebuild and
 service restart handling passed in disposable Proxmox-in-KVM, with a retained
 /home document. The interrupted rebuild stopped during preflight, before
-replacement: mid-destruction and power-loss recovery remain unverified. No
+replacement: that DR121 run did not verify destructive-boundary recovery (DR122 below adds it);
+power-loss recovery remains unverified. No
 physical-drive write or production named-volume deployment was performed.
 The development host's BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE,
 USER_ADMIN and USER_PERSONAL volumes were observed mounted; this observation
 is not proof of runtime placement or isolation. See verification/121 and queue75.
+
+
+## Recover a partially rebuilt container (DR122, 2026-10-02)
+
+If a rebuild job is interrupted, open **Workload jobs**, inspect it, and acknowledge
+with the exact container name. Acknowledgement releases the job reservation and
+does not repair anything. Return to **Distro containers** and select **Recover
+rebuild** if the inspected state supports it. Confirm explicitly. Baseline checks
+the saved base, retained folders and current native ownership again before
+recreating a missing OS or configuring its owned stopped partial clone in place.
+The retained folders are kept. Use Reset login after readiness if needed.
+
+Recovery refuses reused IDs, changed bases/mounts, running partial clones,
+unknown native state and orphan volumes. Unsupported states remain explicit;
+there is no blanket cleanup or automatic replay. Initial create/template failures
+and interrupted detach before deletion still require further workflow software.
+
+2,882 guarded unit tests and actual disposable Proxmox-in-KVM checks passed.
+Service interruption after deletion and after linked cloning recovered through
+the app with the retained document intact. The legitimate openSUSE base119 was
+unchanged after a stale-reservation refusal. No physical writes or deployment;
+host power-loss and in-flight native task interruption remain unverified.
+See DR122 and verification/122; queue75 remains partial.
