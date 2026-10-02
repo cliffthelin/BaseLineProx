@@ -1307,3 +1307,15 @@ Queue74 remains open; next applied path is Chromium inside Ubuntu, selected
 mounted AppData, real identity/migration/launch and two-app separation evidence.
 Unknown/stateless declarations and Quadlet runtime mount checks remain open.
 No new direction required from the user. See decision record125.
+
+## DR126 installer/template audit handoff — 2026-10-02
+
+Current request: audit installer integration, durable-state rebuild and stackable
+content-free OS/app configurations. Audit recommends one app with reusable recipe
+engine and guest reconciler, preserving substrate installer boundaries. Distinct
+operations: retained rebuild, configuration export, fresh instantiate, private
+backup restore. Raw overlays cannot be automatically treated as settings-only.
+Detailed wiring/acceptance: design/installer-overlay-template-audit-2026-10-02.md.
+Row76 added; rows72–75 remain open. Design/source audit only, no runtime change.
+Next implementation: recipe contract/coverage and first Ubuntu/Chromium adapter;
+keep unsupported capabilities explicit and no AI runtime dependency.

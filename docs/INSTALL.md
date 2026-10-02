@@ -429,3 +429,15 @@ targets are reported as conflicts, and unsafe or oversized targets are refused.
 Verified with pure unit tests only; no app sandbox, mounts, profile migration or
 physical deployment was applied. Queue74 remains open for the real Chromium
 lifecycle inside Ubuntu and its selected mounted AppData storage.
+
+## Installer and portable recipe direction (DR126)
+
+The substrate self-installer and VM lifecycle are already separate. The proposed
+environment builder reuses them through durable jobs and a guest reconciler.
+No portable OS/app recipe import/export or stack builder exists yet (row76).
+Current retained-home rebuild does not preserve arbitrary /etc, package installs
+or service databases. The target contract retains all declared flushed durable
+state; only volatile state is expected lost after verified coverage and quiescence.
+See design/installer-overlay-template-audit-2026-10-02.md. Source audit only;
+no new runtime or hardware verification. Recipe-only export excludes user data
+and secrets; fresh instantiate and private data restore remain separate actions.

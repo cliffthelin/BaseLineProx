@@ -109,3 +109,11 @@ existing queues/evidence. No new application implementation or live hardware
 verification performed. No production success claim is added. Pure documentation
 checks and referenced symbol existence were checked; historical records stay
 append-only. Runtime gaps remain open, not fixed by writing this report.
+
+## DR126 installer/recipe follow-up
+
+Installer wiring and portable OS/app configuration composition now have a source
+and design audit: installer-overlay-template-audit-2026-10-02.md, row76. One
+reusable builder plus guest reconciler is recommended. Export is declarative
+configuration only; fresh instantiate, retained rebuild and private restore are
+separate actions. This is an implementation specification, not shipped capability.
