@@ -298,6 +298,7 @@ cp "$SRC/baseline/lib/workload_page.py" /opt/baseline/lib/workload_page.py
 cp "$SRC/baseline/lib/ubuntu_environment.py" /opt/baseline/lib/ubuntu_environment.py
 cp "$SRC/baseline/lib/proxmox_vm_host.py" /opt/baseline/lib/proxmox_vm_host.py
 cp "$SRC/baseline/lib/distro_containers.py" /opt/baseline/lib/distro_containers.py
+cp "$SRC/baseline/lib/container_backup.py" /opt/baseline/lib/container_backup.py
 cp "$SRC/baseline/lib/container_page.py" /opt/baseline/lib/container_page.py
 # self_installer.py (decision record 85) and its own transitive
 # dependencies - test_check_provision_deploys_all_imports.py caught

@@ -74,3 +74,27 @@ def test_missing_os_is_visible_and_explicit_recovery_runs_through_durable_web_jo
         assert result['ok'] and h.status('work')['running']
     finally:
         c.close()
+
+
+def test_retained_backup_and_new_name_restore_are_available_through_durable_jobs(tmp_path):
+    from test_container_backup import ScriptedRun
+    c,h=case(tmp_path)
+    dest=tmp_path/'separate';dest.mkdir()
+    c.server.deps['container_backup_run']=ScriptedRun(dest)
+    try:
+        c.post_json('/containers/action',{'action':'create','name':'work','template':h.catalog()[0]['name'],
+                                        'cache_storage':'source-cache','os_storage':'os-thin'})
+        c.post_json('/containers/action',{'action':'shutdown','name':'work'})
+        (h.data_path('work','data')/'saved').write_text('keep')
+        assert b'Back up retained data' in c.get('/containers')[1]
+        status,result=c.post_json('/containers/action',{'action':'backup','name':'work','destination':str(dest)})
+        assert result['ok'] and result['backup_id']
+        status,page=c.get('/containers/backups?destination='+str(dest))
+        assert status==200 and result['backup_id'].encode() in page and b'OS packages' in page
+        body={'action':'restore','name':'restored','destination':str(dest),'backup_id':result['backup_id']}
+        assert not c.post_json('/containers/action',body)[1]['ok']
+        body['confirm']='yes'
+        assert c.post_json('/containers/action',body)[1]['ok']
+        assert (h.data_path('restored','data')/'saved').read_text()=='keep'
+        assert (h.data_path('work','data')/'saved').read_text()=='keep'
+    finally:c.close()

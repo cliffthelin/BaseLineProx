@@ -55,7 +55,7 @@ class WorkloadJobs:
         if set(context)-{'backend','store','persistence_store','data_store'} or any(not isinstance(v,str) for v in context.values()):
             raise JobError('unsupported backend context')
         allowed = {'name','template','cache_storage','os_storage','disk_gb','memory_mb','cpus','recipe','homepage',
-                   'persistence_gb','iso','base','base_name','display','firmware','confirm'}
+                   'persistence_gb','iso','base','base_name','display','firmware','confirm','destination','backup_id'}
         if not isinstance(params, dict) or set(params) - allowed or any(not isinstance(v, (str,int,float,bool)) for v in params.values()):
             raise JobError('unsupported workload job parameter')
         request_id = request_id or uuid.uuid4().hex
@@ -94,7 +94,7 @@ class WorkloadJobs:
                 with self.lock:
                     self.secrets[job_id] = {'password': password, 'username': result.get('username')}
                 result['login_available'] = True
-            result = {k:v for k,v in result.items() if k in ('ok','message','username','name','login_available')}
+            result = {k:v for k,v in result.items() if k in ('ok','message','username','name','login_available','backup_id')}
             state = 'completed' if result.get('ok') else 'failed'
         except Exception:
             # Native exceptions can contain sensitive command output. Never persist it.

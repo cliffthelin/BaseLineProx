@@ -1688,6 +1688,15 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                                          daily_ok=deps["sessions"].get(self._cookie_token(), now).role.startswith(wg.BOT_PREFIX)),
                 path))
 
+        if path == "/containers/backups":
+            import container_page, container_backup
+            dest=parse_qs(urlparse(self.path).query).get('destination',[''])[0]
+            sets=[];error=''
+            if dest:
+                try:sets=container_backup.listing(dest,deps.get('container_backup_run'))
+                except (vh.VmError,OSError,ValueError,RuntimeError) as exc:error=str(exc)
+            return self._html_response(200,_with_nav(container_page.render_backups(dest,sets,error),path))
+
         if path == "/containers":
             import container_page
             try:
@@ -1955,12 +1964,19 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 result=container_page.save_data(deps.get('vm_config_path'),body.get('data_store')) if kind=='container' else \
                     vm_page.save_store(deps.get('vm_config_path'),body.get('store'),persistence_store=body.get('persistence_store'))
                 return self._json(200,result)
-            actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login','recover'},
+            actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login','recover','backup','restore'},
                      'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_overlay','start','request_stop','force_stop',
                            'configure','eject_iso','rollback','freeze','delete_vm','delete_base','reset_login'}}
             if action not in actions[kind]:
                 return self._json(400,{'ok':False,'message':'unknown workload action'})
             params={k:v for k,v in body.items() if k not in ('action','request_id')}
+            origin=None
+            if kind=='container' and action in ('backup','restore'):
+                gate=deps.get('web_gate')
+                if gate is None:return self._json(503,{'ok':False,'message':'web backup authorization unavailable'})
+                keys=('name','destination','backup_id') if action=='restore' else ('name','destination')
+                signed={key:str(params.get(key,'')) for key in keys}
+                origin=gate.origin_for_session(deps['sessions'],self._cookie_token(),'container_'+action,signed,now)
             def execute(report):
                 import container_page
                 original_run=host.run
@@ -1969,7 +1985,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     return original_run(args,*extra,**kw)
                 host.run=traced_run
                 try:
-                    result=container_page.perform(host,action,params) if kind=='container' else \
+                    result=container_page.perform(host,action,params,origin=origin,backup_run=deps.get('container_backup_run')) if kind=='container' else \
                         vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR)
                 finally:
                     host.run=original_run

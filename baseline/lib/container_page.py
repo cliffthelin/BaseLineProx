@@ -8,9 +8,16 @@ import vm_host as vh
 from vm_page import _CSS
 
 
-def perform(host, action, params):
+def perform(host, action, params, *, origin=None, backup_run=None):
     try:
         name = str(params.get('name', ''))
+        if action in ('backup','restore'):
+            import container_backup
+            if action=='restore' and params.get('confirm')!='yes':
+                raise vh.VmError('confirm restore into a new name; original will be kept')
+            args={'name':name,'destination':str(params.get('destination','')),'run':backup_run,'origin':origin}
+            if action=='restore':args['backup_id']=str(params.get('backup_id',''))
+            return getattr(container_backup,action)(host,**args)
         if action == 'create':
             return dict(host.create(name, template=params.get('template'), cache_storage=params.get('cache_storage'),
                                     os_storage=params.get('os_storage'), disk_gb=int(params.get('disk_gb', 8)),
@@ -96,6 +103,8 @@ def render(host=None, unavailable=''):
                 state_label = 'running' if ct['running'] else 'stopped'
                 controls = f'<button onclick="act(\'{button}\',{args})">{button.title()}</button> {rebuild} {reset}'
                 details = ''
+                if not ct['running'] and ct['phase']=='ready':
+                    controls += f'<button onclick="backupData({args})">Back up retained data</button>'
             cards.append(f'<div class="card"><strong>{e(name)}</strong> · CT {ct["vmid"]} · '
                          f'{e(state_label)} · {e(ct["phase"])}'
                          f'<p>{e(ct["template"])}<br>Retained data: {e(ct["data_path"])}</p>'
@@ -104,7 +113,8 @@ def render(host=None, unavailable=''):
         content = f'''<p>LXC distributions share the host kernel. Their OS is a native linked clone of an immutable template.</p>
 <p>Separate <code>/home</code>, <code>/root</code> and <code>/data</code> directories survive an OS rebuild.
 Packages and system settings on the root filesystem reset. These bind directories are <strong>not included in vzdump</strong>;
-separate backup/restore verification is still required. This is a Linux environment, not a preinstalled GUI/browser.</p>
+use the stopped-container retained backup and restore workflow below; physical off-drive proof remains open. This is a Linux environment, not a preinstalled GUI/browser.</p>
+<p><a href="/containers/backups">Retained backup sets and restore</a></p>
 <p><a href="/vms">Requested desktop, NAS and mobile systems: installer sources and VM status</a></p>
 <p>openEuler 25.03 is disabled: its native Proxmox setup failed; a verified fix is pending.</p>
 <button onclick="act('refresh',{{}})">Refresh Proxmox template catalog</button>
@@ -122,6 +132,10 @@ separate backup/restore verification is still required. This is a Linux environm
 <h2>Protected data folder</h2><form class="row" onsubmit="submit(event,'set_data')">
 <label>Folder<input name="data_store" value="{e(host.data_store)}" required></label><button>Save folder</button></form>
 <p>Changing folders does not migrate data. Default unprivileged UID mapping is used; custom mappings are refused.</p>'''
+    return _document(content)
+
+
+def _document(content):
     return f'''<!doctype html><html><head><meta charset="utf-8"><title>Distro containers</title><style>{_CSS}</style></head>
 <body><main><h1>Distro containers</h1><p><a href="/workloads">Workload jobs: return here after a disconnect</a></p><p id="status" role="status"></p>{content}
 <dialog id="login"><h3>Save this one-time container login</h3><p id="username"></p><p id="password"></p>
@@ -130,7 +144,7 @@ separate backup/restore verification is still required. This is a Linux environm
 let busy=false;
 async function act(action,params,confirmReset){{
  if(busy)return;
- if(confirmReset && !confirm(action==='recover'?'Finish the interrupted OS rebuild after ownership checks? Retained data is kept.':action==='reset_login'?'Replace the container login? The old password stops working; data is kept.':'Rebuild the stopped OS? Packages and system settings reset; /home, /root and /data are kept.'))return;
+ if(confirmReset && !confirm(action==='restore'?'Restore retained data into a new container? The original will be kept.':action==='recover'?'Finish the interrupted OS rebuild after ownership checks? Retained data is kept.':action==='reset_login'?'Replace the container login? The old password stops working; data is kept.':'Rebuild the stopped OS? Packages and system settings reset; /home, /root and /data are kept.'))return;
  busy=true;document.getElementById('status').textContent='Working… template preparation can take several minutes.';
  try{{
  const body=Object.assign({{action,request_id:crypto.randomUUID()}},params);if(confirmReset)body.confirm='yes';
@@ -154,5 +168,19 @@ async function act(action,params,confirmReset){{
  else location.reload();
  }}catch(error){{document.getElementById('status').textContent=error.message;busy=false;}}
 }}
-function submit(event,action){{event.preventDefault();act(action,Object.fromEntries(new FormData(event.target)));}}
+function submit(event,action){{event.preventDefault();act(action,Object.fromEntries(new FormData(event.target)),action==='restore');}}
+function backupData(params){{const destination=prompt('Mounted separate backup-drive folder (same destination rules as Operations):');if(destination)act('backup',Object.assign(params,{{destination}}));}}
 </script></body></html>'''.encode()
+
+
+
+def render_backups(destination='', sets=(), error=''):
+    e=lambda x:html.escape(str(x),quote=True)
+    content='<p><a href="/containers">Distro containers</a></p><h2>Retained backup sets</h2>'
+    content+='<p>Includes /home, /root and /data of a cleanly stopped container. OS packages, /etc, native base disks and original login hashes are excluded. Numeric owners, modes, links, POSIX ACLs and user xattrs are preserved; other extended-attribute namespaces, nested mounts and special files are refused. Restore currently requires the same unchanged base on this host and a new unused name; original data is kept. Incomplete restores need inspection.</p>'
+    content+=f'<form method="GET"><label>Separate backup-drive folder<input name="destination" value="{e(destination)}" required></label><button>List sets</button></form><p>{e(error)}</p>'
+    for item in sets:
+        source=item.get('source',{})
+        content+=f'<div class="card"><strong>{e(source.get("name",""))}</strong><p>{e(item.get("backup_id",""))}<br>{e(source.get("template",""))}</p>'
+        content+=f'<form class="row" onsubmit="submit(event,\'restore\')"><input type="hidden" name="destination" value="{e(destination)}"><input type="hidden" name="backup_id" value="{e(item.get("backup_id",""))}"><label>New container name<input name="name" required pattern="[a-z0-9][a-z0-9-]{{0,31}}"></label><button>Restore into new container</button></form></div>'
+    return _document(content)
