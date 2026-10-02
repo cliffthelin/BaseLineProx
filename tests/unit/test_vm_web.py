@@ -108,3 +108,28 @@ def test_installed_proxmox_uses_its_lifecycle_adapter(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda tool: "/usr/sbin/" + tool if tool in ("qm", "pvesh") else None)
     host = bw._vm_host_for({"vm_config_path": tmp_path / "vm.json"})
     assert isinstance(host, pv.ProxmoxVmHost)
+
+
+def test_managed_ubuntu_login_reset_is_confirmed_and_retrieved_once_through_web_jobs(tmp_path):
+    from test_proxmox_vm_host import host
+    import ubuntu_environment as ue
+    h,run=host(tmp_path)
+    ue.create(h,'work',base='ubuntu',desktop=False,password_factory=lambda:b'initial',
+              password_hasher=lambda _:'$6$salt$initial')
+    h.start('work')
+    h.run_input=lambda args,data:(0,json.dumps({'exited':1,'exitcode':0}),'')
+    sessions=sw.SessionStore();sessions.create('someone',NOW,role='admin')
+    case=_RealServerCase(_base_deps(sessions=sessions,vm_host=h,vm_config_path=tmp_path/'config.json',vm_iso_dir=tmp_path))
+    try:
+        assert b'Reset login' in case.get('/vms')[1]
+        status,result=case.post_json('/vms/action',{'action':'reset_login','name':'work'})
+        assert status==202
+        jobs=case.server.deps['workload_jobs'];jobs.wait(result['job_id'],3)
+        assert not case.post_json('/workloads/result',{'job_id':result['job_id']})[1]['ok']
+        status,result=case.post_json('/vms/action',{'action':'reset_login','name':'work','confirm':'yes'})
+        assert status==202;jobs.wait(result['job_id'],3)
+        _,login=case.post_json('/workloads/result',{'job_id':result['job_id']})
+        assert login['ok'] and login['password'] and login['username']=='baseline-admin'
+        assert 'password' not in case.post_json('/workloads/result',{'job_id':result['job_id']})[1]
+        assert login['password'].encode() not in (tmp_path/'workload-jobs.sqlite').read_bytes()
+    finally:case.close()

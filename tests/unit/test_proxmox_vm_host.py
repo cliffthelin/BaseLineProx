@@ -14,6 +14,7 @@ class ProxmoxRunner:
         self.running = False
         self.failed = None
         self.storages = []
+        self.config = {}
 
     def __call__(self, argv):
         self.calls.append(argv)
@@ -27,6 +28,12 @@ class ProxmoxRunner:
             Path(argv[-1] if argv[-1].startswith("/") else argv[-2]).write_bytes(b"qcow2")
         if argv[0] == "xorriso":
             Path(argv[argv.index("-o") + 1]).write_bytes(b"seed ISO")
+        if argv[:3] == ["pvesm", "add", "dir"]:
+            self.storages.append({"storage":argv[3],"type":"dir","path":argv[argv.index("--path")+1]})
+        if argv[:2] == ["qm", "create"]:
+            self.config = {argv[i][2:]:argv[i+1] for i in range(3,len(argv),2)}
+        if argv[:2] == ["qm", "config"]:
+            return 0,"\n".join(f"{k}: {v}" for k,v in self.config.items()),""
         if argv[:2] == ["qm", "start"]:
             self.running = True
         if argv[:2] == ["qm", "stop"]:
@@ -137,3 +144,75 @@ def test_standard_proxmox_vm_uses_user_storage_without_a_backing_image(tmp_path)
     create = next(a for a in run.calls if a[:2] == ["qm", "create"])
     assert create[create.index("--virtio0") + 1].startswith("baseline-user:")
     assert "--virtio1" not in create
+
+
+def test_ubuntu_login_reset_uses_guest_stdin_keeps_home_and_updates_rebuild_profile(tmp_path):
+    import ubuntu_environment as ue
+    h,run=host(tmp_path)
+    ue.create(h,'work',base='ubuntu',desktop=False,password_factory=lambda:b'initial',
+              password_hasher=lambda _:'$6$salt$initial')
+    h.start('work')
+    inputs=[]
+    def guest(args,data):
+        inputs.append((args,data))
+        return 0,json.dumps({'exited':1,'exitcode':0}),''
+    h.run_input=guest
+    data=h.persistence_path('work');data.write_bytes(b'retained-document')
+    result=ue.reset_login(h,'work',password_factory=lambda:b'fresh-private',
+                          password_hasher=lambda _:'$6$salt$new')
+    assert result['password']=='fresh-private' and result['username']=='baseline-admin'
+    assert data.read_bytes()==b'retained-document'
+    profile=json.loads((data.parent/'profile.json').read_text())
+    assert profile['password_hash']=='$6$salt$new' and 'login_rotation' not in profile
+    assert inputs[-1][1]==b'baseline-admin:$6$salt$new\n'
+    assert not any('fresh-private' in ' '.join(a) or '$6$' in ' '.join(a) for a,_ in inputs)
+    h.force_stop('work');ue.rebuild(h,'work')
+    assert '$6$salt$new' in (h.vm_dir('work')/'seed/user-data').read_text()
+    assert data.read_bytes()==b'retained-document'
+
+
+@pytest.mark.parametrize('outcome', [{'pid':123}, {'exited':1,'exitcode':1}, {'exited':0,'exitcode':0}, {'exited':1,'exitcode':True}])
+def test_guest_command_exit_zero_is_not_enough_to_claim_password_rotation(tmp_path,outcome):
+    import ubuntu_environment as ue
+    h,run=host(tmp_path)
+    ue.create(h,'work',base='ubuntu',desktop=False,password_factory=lambda:b'initial',password_hasher=lambda _:'$6$salt$old')
+    h.start('work');count=0
+    def guest(args,data):
+        nonlocal count
+        count+=1
+        return 0,json.dumps({'exited':1,'exitcode':0} if count==1 else outcome),''
+    h.run_input=guest
+    with pytest.raises(ue.UbuntuError,match='journal kept'):
+        ue.reset_login(h,'work',password_factory=lambda:b'new',password_hasher=lambda _:'$6$salt$new')
+    profile_path=h.persistence_path('work').parent/'profile.json'
+    profile=json.loads(profile_path.read_text())
+    assert profile['password_hash']=='$6$salt$old' and profile['login_rotation']['password_hash']=='$6$salt$new'
+    h.force_stop('work')
+    with pytest.raises(ue.UbuntuError,match='unfinished login'):ue.rebuild(h,'work')
+    h.start('work');h.run_input=lambda args,data:(0,json.dumps({'exited':1,'exitcode':0}),'')
+    ue.reset_login(h,'work',password_factory=lambda:b'retry',password_hasher=lambda _:'$6$salt$retry')
+    assert json.loads(profile_path.read_text())['password_hash']=='$6$salt$retry'
+
+
+@pytest.mark.parametrize('field,value', [('name','unrelated'),('virtio1','other:important'),('lock','backup')])
+def test_changed_native_vm_identity_refuses_login_recovery_before_generating_a_secret(tmp_path,field,value):
+    import ubuntu_environment as ue
+    h,run=host(tmp_path)
+    ue.create(h,'work',base='ubuntu',desktop=False,password_factory=lambda:b'initial',password_hasher=lambda _:'$6$salt$old')
+    h.start('work');run.config[field]=value
+    def forbidden(*args):raise AssertionError('secret generated or guest command invoked despite changed identity')
+    h.run_input=forbidden
+    with pytest.raises(ue.UbuntuError):ue.reset_login(h,'work',password_factory=forbidden)
+    assert 'login_rotation' not in json.loads((h.persistence_path('work').parent/'profile.json').read_text())
+
+
+def test_redirected_proxmox_storage_refuses_login_reset_before_guest_access(tmp_path):
+    import ubuntu_environment as ue
+    h,run=host(tmp_path)
+    ue.create(h,'work',base='ubuntu',desktop=False,password_factory=lambda:b'initial',password_hasher=lambda _:'$6$salt$old')
+    h.start('work')
+    run.storages=[{'storage':'baseline-os','type':'dir','path':str(tmp_path/'unrelated')},
+                  {'storage':'baseline-user','type':'dir','path':str(h.persistence_store)}]
+    def forbidden(*args):raise AssertionError('redirected storage reached guest or generated a secret')
+    h.run_input=forbidden
+    with pytest.raises(ue.UbuntuError,match='storage'):ue.reset_login(h,'work',password_factory=forbidden)

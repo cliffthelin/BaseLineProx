@@ -15,6 +15,7 @@ import json
 import ipaddress
 import shutil
 import socket
+import subprocess
 from pathlib import Path
 
 import vm_host as vh
@@ -23,8 +24,56 @@ OS_STORAGE = "baseline-os"
 USER_STORAGE = "baseline-user"
 
 
+def _input(argv, data):
+    result = subprocess.run(argv, input=data, capture_output=True, timeout=75)
+    return result.returncode, result.stdout.decode(errors='replace'), result.stderr.decode(errors='replace')
+
+
 class ProxmoxVmHost(vh.VmHost):
     backend = "Proxmox"
+
+    def __init__(self, *args, run_input=_input, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.run_input = run_input
+
+    def guest_exec(self, name, command, data=b''):
+        """Bounded synchronous guest command. Secrets are stdin only; no raw error output."""
+        self._check_store(self.store)
+        self._check_store(self.persistence_store)
+        spec, record = self._spec(name), self._record(name)
+        if not record['registered'] or not self.status(name)['running']:
+            raise vh.VmError('guest operation requires a running registered environment')
+        if (spec.get('recipe') not in ('ubuntu-desktop','ubuntu-server')
+                or Path(spec.get('persistence_disk','')) != self.persistence_path(name)
+                or not self.persistence_path(name).is_file() or self.persistence_path(name).is_symlink()):
+            raise vh.VmError('guest operation requires the managed Ubuntu retained-home recipe')
+        stores = json.loads(self._command(['pvesh','get','/storage','--output-format','json']))
+        for ident,path in ((OS_STORAGE,self.store),(USER_STORAGE,self.persistence_store)):
+            matches=[s for s in stores if s.get('storage')==ident]
+            if len(matches)!=1 or matches[0].get('type')!='dir' or Path(matches[0].get('path','')).resolve()!=path.resolve():
+                raise vh.VmError('native storage identity changed; guest operation refused')
+        config = dict(line.split(': ',1) for line in
+                      self._command(['qm','config',str(record['vmid'])]).splitlines() if ': ' in line)
+        vmid = record['vmid']
+        root = f'{OS_STORAGE}:{vmid}/{self.disk_path(name).name}'
+        home = f'{USER_STORAGE}:{vmid}/{self.persistence_path(name).name}'
+        if (config.get('name')!=name or config.get('lock')
+                or config.get('virtio0','').split(',')[0]!=root
+                or config.get('virtio1','').split(',')[0]!=home
+                or 'serial=baseline-home' not in config.get('virtio1','').split(',')):
+            raise vh.VmError('native VM identity or retained-home attachment changed; guest operation refused')
+        rc, out, _ = self.run_input(['qm','guest','exec',str(vmid),'--pass-stdin','1',
+                                    '--synchronous','1','--timeout','60','--',*command],data)
+        try:
+            result = json.loads(out)
+        except (ValueError,TypeError):
+            result = {}
+        if (rc or not isinstance(result,dict) or result.get('exited') not in (True,1)
+                or isinstance(result.get('exitcode'),bool) or result.get('exitcode')!=0
+                or result.get('signal')):
+            raise vh.VmError('guest command did not finish successfully; no success is inferred')
+        return result
+
 
     def guest_homepage(self):
         """Use the bridge shared with guests, independent of an SSH tunnel

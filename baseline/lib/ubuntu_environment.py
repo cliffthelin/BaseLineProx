@@ -215,8 +215,7 @@ def create(host, name: str, *, base: str = BASE_NAME, desktop: bool = True,
     # Retained metadata is separate from the home filesystem and contains
     # only the one-way hash, never the one-time cleartext value.
     profile_path = Path(spec["persistence_disk"]).parent / "profile.json"
-    profile_path.write_text(json.dumps(profile, indent=2))
-    os.chmod(profile_path, 0o600)
+    _save_profile(profile_path, profile)
     try:
         _run(host, ["qemu-img", "resize", str(host.disk_path(name)), f"{int(disk_gb)}G"])
         write_seed(host, name, profile, initialize_home=True)
@@ -238,9 +237,67 @@ def rebuild(host, name: str) -> None:
     if not data.is_file() or not profile_path.is_file():
         raise UbuntuError("retained data or its profile is missing; refusing rebuild")
     profile = json.loads(profile_path.read_text())
+    if profile.get('login_rotation'):
+        raise UbuntuError('unfinished login rotation; use Reset login before rebuilding the OS')
     # Build the safe seed before touching the OS overlay. The retained disk
     # can never be formatted by a rebuild, even if it becomes corrupt.
     write_seed(host, name, profile, initialize_home=False)
     host.rollback(name)
     _run(host, ["qemu-img", "resize", str(host.disk_path(name)), f'{profile["disk_gb"]}G'])
     host._write_spec(name, spec)
+
+
+
+def _save_profile(path, profile):
+    if path.is_symlink() or any(p.is_symlink() for p in path.parents):
+        raise UbuntuError('retained profile path is redirected')
+    fresh = path.with_suffix('.new')
+    with fresh.open('w') as stream:
+        os.chmod(fresh, 0o600)
+        stream.write(json.dumps(profile, indent=2))
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(fresh, path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def reset_login(host, name, *, password_factory=answer.generate_one_time_password, password_hasher=None):
+    spec = host._spec(name)
+    if spec.get('recipe') not in ('ubuntu-desktop','ubuntu-server') or not callable(getattr(host,'guest_exec',None)):
+        raise UbuntuError('login recovery currently supports managed Ubuntu environments on Proxmox with a guest agent')
+    data = Path(spec.get('persistence_disk',''))
+    path = data.parent/'profile.json'
+    if not data.is_file() or data.is_symlink() or not path.is_file() or path.is_symlink() or any(p.is_symlink() for p in path.parents):
+        raise UbuntuError('retained home or profile is absent or redirected')
+    profile = json.loads(path.read_text())
+    if profile.get('recipe')!=spec['recipe']:
+        raise UbuntuError('retained recipe identity changed')
+    # Verify actual readiness, account and mounted home before generating any credential.
+    check = ('test -f /var/lib/baseline-environment-ready && test -f /run/baseline-home-ready && '
+             'test "$(id -u baseline-admin)" = 1000 && '
+             'test "$(readlink -f "$(findmnt -n -o SOURCE --mountpoint /home)")" = '
+             '"$(readlink -f /dev/disk/by-id/virtio-baseline-home)"')
+    try:
+        host.guest_exec(name,['/bin/sh','-ec',check])
+    except vh.VmError as exc:
+        raise UbuntuError('Ubuntu readiness or native identity was not confirmed: '+str(exc)) from None
+    password = password_factory()
+    hashed = (password_hasher or (lambda p: answer.hash_password_sha512crypt(p,secrets.token_hex(8))))(password)
+    if not hashed.startswith('$6$') or any(c in hashed for c in '\n\r'):
+        raise UbuntuError('a salted generated password hash is required')
+    # A crash after applying the hash must not let rebuild silently use the old credential.
+    profile['login_rotation'] = {'phase':'applying','password_hash':hashed}
+    _save_profile(path,profile)
+    try:
+        host.guest_exec(name,['chpasswd','-e'],f'{USERNAME}:{hashed}\n'.encode())
+    except (vh.VmError,OSError,ValueError):
+        raise UbuntuError('login rotation did not finish; journal kept. Retry Reset login before any OS rebuild.') from None
+    profile['password_hash'] = hashed
+    profile.pop('login_rotation')
+    _save_profile(path,profile)
+    return {'ok':True,'name':name,'username':USERNAME,'password':password.decode('ascii'),
+            'message':'Fresh one-time Ubuntu login. OS and retained home were kept; future rebuilds use this login.'}

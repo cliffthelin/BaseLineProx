@@ -15,7 +15,7 @@ import vm_host as vh
 import ubuntu_environment as ubuntu
 
 _FORBIDDEN_PREFIXES = ("/dev", "/proc", "/sys", "/etc", "/boot", "/run/user", "/usr", "/bin", "/sbin", "/lib", "/var/lib/dpkg")
-_NEEDS_CONFIRM = {"delete_vm", "delete_base", "rollback", "freeze"}
+_NEEDS_CONFIRM = {"delete_vm", "delete_base", "rollback", "freeze", "reset_login"}
 
 
 def _int(params: dict, key: str, label: str) -> int:
@@ -30,6 +30,8 @@ def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir) -> dict:
     try:
         if action in _NEEDS_CONFIRM and params.get("confirm") != "yes":
             raise vh.VmError("this needs confirmation")
+        if action == "reset_login":
+            return ubuntu.reset_login(host,name)
         if action == "prepare_ubuntu":
             path = ubuntu.acquire_base(host, cache_dir=Path(iso_dir).parent / "images")
             return _ok(f"Ubuntu base ready: {path.name}. Choose Desktop or Server below.")
@@ -274,6 +276,8 @@ def _vm_card(v: dict, display_default: str, backend: str = "Local QEMU") -> str:
         elif not v.get("iso"):
             btns.append(f'<button onclick="var b=prompt(\'Name for the new read-only base image\');if(b)act(\'freeze\',{{name:\'{n}\',base_name:b}},\'Turn {n} into a base image? {n} is consumed; clone new VMs from the base.\')">Freeze as base</button>')
         btns.append(f'<button class="danger" onclick="act(\'delete_vm\',{{name:\'{n}\'}},\'Delete {n} and its disk?\')">Delete</button>')
+    if on and backend == "Proxmox" and v.get("recipe") in ("ubuntu-desktop","ubuntu-server"):
+        btns.append(f'<button onclick="act(\'reset_login\',{{name:\'{n}\'}},\'Replace the Ubuntu login? The old password stops working; OS and home are kept.\')">Reset login</button>')
     cfg = ""
     if backend == "Proxmox":
         btns.append('<a class="btn proxmox-link" href="#" target="_blank" rel="noopener">Open Proxmox</a>')
