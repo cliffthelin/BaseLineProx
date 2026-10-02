@@ -81,6 +81,7 @@ NAV_TABS = (
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
+    ("/recipes", "Environment recipes"),
     ("/workloads", "Workload jobs"),
     ("/master-config", "Master Config"),
 )
@@ -1570,6 +1571,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._html_response(result.status, _with_nav(sw.render_recovery_page({}, result.body.get("reason", "")), path))
             return self._html_response(200, _with_nav(sw.render_recovery_page(result.body), path))
 
+        if path == "/recipes":
+            import recipe_page
+            return self._html_response(200, _with_nav(recipe_page.render(), path))
+
         if path == "/app-isolation":
             import appdata
             persona = qs.get("persona", ["personal"])[0]
@@ -1946,6 +1951,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(200,jobs.inspect(jid,observation))
             except (workload_jobs.JobError,ValueError,TypeError) as exc:
                 return self._json(409,{'message':str(exc)})
+
+        if path == "/recipes/action":
+            import recipe_page, environment_recipes
+            try:
+                return self._json(200,recipe_page.perform(body))
+            except environment_recipes.RecipeError as exc:
+                return self._json(400,{'ok':False,'message':str(exc)})
 
         if path in ("/containers/action", "/vms/action"):
             jobs=deps.get('workload_jobs')
