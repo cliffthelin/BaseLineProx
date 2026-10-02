@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Virtual Machines</title><style>
+:root{--bg:#0f1316;--panel:#171d22;--line:#27313a;--ink:#e6ecef;--mute:#8a98a3;--acc:#5fd3a5;--warn:#f0b35c;--bad:#ef6f6f}
+@media (prefers-color-scheme: light){:root{--bg:#f4f1ea;--panel:#fffdf8;--line:#ddd6c8;--ink:#1d2327;--mute:#68737b;--acc:#0b7a5a;--warn:#a2650b;--bad:#b3261e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:26px;margin:6px 0 2px}h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin:30px 0 10px}
+.sub{color:var(--mute);margin:0 0 18px}.notice{padding:10px 14px;border-left:4px solid var(--acc);background:var(--panel);margin:12px 0}
+.notice.bad{border-color:var(--bad)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+.vm{display:grid;grid-template-columns:1fr auto;gap:10px 18px;align-items:center}
+.vm .name{font-size:18px;font-weight:600}.vm .meta{color:var(--mute);font-size:13px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--mute);margin-right:8px}.dot.on{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+.tag{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin-left:8px;color:var(--mute)}
+.btns{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+button,.btn{font:inherit;font-size:13px;padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+button:hover{border-color:var(--acc)}button.go{background:var(--acc);color:#07140f;border-color:var(--acc);font-weight:600}
+button.danger{color:var(--bad)}button.danger:hover{border-color:var(--bad)}
+form.row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}form.row label{display:flex;flex-direction:column;font-size:12px;color:var(--mute);gap:3px}
+input,select{font:inherit;padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--ink);min-width:90px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){.two,.vm{grid-template-columns:1fr}.btns{justify-content:flex-start}}
+.baseline-nav{display:flex;flex-wrap:wrap;gap:4px 16px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.baseline-nav a{color:var(--mute);text-decoration:none;font-size:14px}.baseline-nav a:hover{color:var(--ink)}.baseline-nav a.active{color:var(--acc);font-weight:600}
+.warn{color:var(--warn)}.empty{color:var(--mute);padding:6px 2px}
+</style></head><body><nav class="baseline-nav"><a href="/settings" class="">Settings</a><a href="/admin" class="">Admin</a><a href="/recovery" class="">Recovery</a><a href="/drive-admin" class="">Drive Administration</a><a href="/operations" class="">Operations</a><a href="/operators" class="">Operators</a><a href="/approvals" class="">Approvals</a><a href="/audit" class="">Audit</a><a href="/remote-access" class="">Remote access</a><a href="/vms" class="active">Virtual machines</a><a href="/containers" class="">Distro containers</a><a href="/hardware" class="">Hardware</a><a href="/installer-cache" class="">Installer Cache</a><a href="/app-isolation" class="">App Isolation</a><a href="/workloads" class="">Workload jobs</a><a href="/master-config" class="">Master Config</a> <a href="/logout">Log out</a></nav>
+<main>
+<h1>Virtual machines</h1>
+<p class="sub">Proxmox · OS library <code>/var/lib/baseline-proof/os</code> · 14 GB free<br>Retained user disks <code>/var/lib/baseline-proof/user</code></p>
+<a class="btn proxmox-link" href="#" target="_blank" rel="noopener">Open Proxmox</a>
+<p id="action-status" role="status"></p>
+<dialog id="one-time-login"><h3>Save your environment login</h3><p>This fresh admin login is shown once. Save it before continuing.</p>
+<p>Username: <code id="login-name"></code></p><p>Password: <code id="login-password"></code></p>
+<button onclick="location.href='/vms'">I saved the login</button></dialog>
+
+<h2>Ubuntu environment</h2><div class="card">
+<p>Ubuntu 24.04 with a rebuildable OS and a separate retained /home. First boot installs the selected desktop and browser and requires package-download access.</p>
+<button onclick="act('prepare_ubuntu',{})">Download verified Ubuntu base</button>
+<form class="row" onsubmit="submitForm(event,'create_ubuntu')">
+<label>Name<input name="name" required pattern="[a-z0-9][a-z0-9-]{0,31}" placeholder="ubuntu"></label>
+<label>Environment<select name="recipe"><option value="ubuntu-desktop">Ubuntu Desktop + Firefox</option><option value="ubuntu-server">Ubuntu Server</option></select></label>
+<label>Proxmox homepage<input name="homepage" required type="url" value="https://10.0.2.15:8006"></label>
+<label>OS GB<input name="disk_gb" type="number" min="8" value="40"></label>
+<label>User GB<input name="persistence_gb" type="number" min="1" value="32"></label>
+<label>Memory MB<input name="memory_mb" type="number" min="2048" value="4096"></label>
+<label>CPUs<input name="cpus" type="number" min="1" value="2"></label>
+<button class="go">Create Ubuntu</button></form></div>
+<h2>Requested systems</h2><div class="card"><p><strong>Not installed or boot-verified by Baseline</strong> in this increment. These vendor links lead to real installer sources, not container substitutes.</p><table><tr><td><a href="https://sparkylinux.org/download/" target="_blank" rel="noopener">SparkyLinux</a></td><td>Desktop ISO → VM; installed OS and retained-home recipe unverified.</td></tr><tr><td><a href="https://mxlinux.org/download-links/" target="_blank" rel="noopener">MX Linux</a></td><td>Desktop ISO → VM; installed OS and retained-home recipe unverified.</td></tr><tr><td><a href="https://zorin.com/os/download/" target="_blank" rel="noopener">Zorin OS</a></td><td>Desktop ISO → VM; choose the vendor edition; retained-home recipe unverified.</td></tr><tr><td><a href="https://bazzite.gg/#image-picker" target="_blank" rel="noopener">Bazzite</a></td><td>OS installer → VM; its OCI build image is not a ready LXC desktop. Graphics/gaming and retained /var/home need validation.</td></tr><tr><td><a href="https://cachyos.org/download/" target="_blank" rel="noopener">CachyOS</a></td><td>Desktop ISO → VM; its kernel and graphics need VM validation.</td></tr><tr><td><a href="https://omarchy.org/" target="_blank" rel="noopener">Omarchy</a></td><td>Official ISO → UEFI VM; desktop graphics, encrypted install and retained-home recipe need validation.</td></tr><tr><td><a href="https://www.openmediavault.org/download.html" target="_blank" rel="noopener">OpenMediaVault</a></td><td>NAS ISO → VM; NAS data disks must be separately retained. Disk attachment, ownership and recovery workflow not implemented here.</td></tr><tr><td><a href="https://support.google.com/chromeosflex/answer/11542901" target="_blank" rel="noopener">ChromeOS</a></td><td>Google ChromeOS is hardware-specific. ChromeOS Flex is a different product; no ChromeOS guest recipe implemented.</td></tr><tr><td><a href="https://grapheneos.org/build#emulator" target="_blank" rel="noopener">GrapheneOS</a></td><td>Supported-device releases or a source-built development emulator; not an LXC template. Emulator build/run integration remains open.</td></tr></table><p>For an ISO: download and verify the vendor image into the selected installer cache, create an ISO VM below, install using its console, shut down, eject the ISO, and freeze the clean installation as a base. New overlays get a separate blank retained disk; it is <strong>not automatically mounted</strong> by these distros. Configure and verify its filesystem and mount before trusting an OS reset. Ubuntu is the automated retained-home recipe.</p></div>
+<h2>Machines</h2><div class="card vm"><div><div class="name"><span class="dot "></span>standard-proof<span class="tag">stopped</span></div><div class="meta">2 CPU · 2048 MB · standalone disk · installer ISO attached</div></div><div class="btns"><button class="go" onclick="act('start',{name:'standard-proof',display:'vnc'})">Start</button><button onclick="act('eject_iso',{name:'standard-proof'})">Installed - eject ISO</button><button class="danger" onclick="act('delete_vm',{name:'standard-proof'},'Delete standard-proof and its disk?')">Delete</button><a class="btn proxmox-link" href="#" target="_blank" rel="noopener">Open Proxmox</a></div><form class="row" onsubmit="submitForm(event,'configure')" style="grid-column:1/-1"><input type="hidden" name="name" value="standard-proof"><label>Memory MB<input name="memory_mb" type="number" min="256" value="2048"></label><label>CPUs<input name="cpus" type="number" min="1" max="128" value="2"></label><button>Save settings</button></form></div><div class="card vm"><div><div class="name"><span class="dot "></span>ubuntu-proxmox-proof<span class="tag">stopped</span></div><div class="meta">2 CPU · 2048 MB · overlay on ubuntu-noble-20260926</div></div><div class="btns"><button class="go" onclick="act('start',{name:'ubuntu-proxmox-proof',display:'vnc'})">Start</button><button class="danger" onclick="act('rollback',{name:'ubuntu-proxmox-proof'},'Rebuild the OS of ubuntu-proxmox-proof? OS changes are lost; the separate user disk is retained.')">Rebuild OS</button><button class="danger" onclick="act('delete_vm',{name:'ubuntu-proxmox-proof'},'Delete ubuntu-proxmox-proof and its disk?')">Delete</button><a class="btn proxmox-link" href="#" target="_blank" rel="noopener">Open Proxmox</a></div><form class="row" onsubmit="submitForm(event,'configure')" style="grid-column:1/-1"><input type="hidden" name="name" value="ubuntu-proxmox-proof"><label>Memory MB<input name="memory_mb" type="number" min="256" value="2048"></label><label>CPUs<input name="cpus" type="number" min="1" max="128" value="2"></label><button>Save settings</button></form></div>
+<h2>Base images</h2><div class="card vm"><div><div class="name">ubuntu-noble-20260926<span class="tag">read-only base</span></div><div class="meta">1.8 GB on disk · used by ubuntu-proxmox-proof</div></div><div class="btns"><button class="danger" onclick="act('delete_base',{name:'ubuntu-noble-20260926'},'Delete base image ubuntu-noble-20260926?')">Delete</button></div></div>
+<div class="two">
+<div><h2>New VM from an installer ISO</h2><div class="card"><form class="row" onsubmit="submitForm(event,'create_iso')">
+<label>Name<input name="name" required pattern="[a-z0-9][a-z0-9-]{0,31}" placeholder="dev-box"></label>
+<label>Installer ISO<select name="iso"><option value="baseline-os:iso/standard-proof-installer.iso">baseline-os:iso/standard-proof-installer.iso (0 MB)</option><option value="baseline-os:iso/ubuntu-proxmox-proof-seed.iso">baseline-os:iso/ubuntu-proxmox-proof-seed.iso (0 MB)</option><option value="baseline-os:iso/web-allocation-proof-installer.iso">baseline-os:iso/web-allocation-proof-installer.iso (0 MB)</option></select></label>
+<label>Firmware<select name="firmware"><option value="bios">BIOS</option><option value="uefi">UEFI</option></select></label>
+<label>Disk GB<input name="disk_gb" type="number" min="1" value="40"></label>
+<label>Memory MB<input name="memory_mb" type="number" min="256" value="4096"></label>
+<label>CPUs<input name="cpus" type="number" min="1" value="4"></label>
+<button class="go">Create</button></form></div></div>
+<div><h2>New overlay from a base</h2><div class="card"><form class="row" onsubmit="submitForm(event,'create_overlay')">
+<label>Name<input name="name" required pattern="[a-z0-9][a-z0-9-]{0,31}" placeholder="scratch"></label>
+<label>Base image<select name="base"><option value="ubuntu-noble-20260926">ubuntu-noble-20260926</option></select></label>
+<label>Retained data GB<input name="persistence_gb" type="number" min="1" max="4096" value="32"></label>
+<label>Memory MB<input name="memory_mb" type="number" min="256" value="4096"></label>
+<label>CPUs<input name="cpus" type="number" min="1" value="4"></label>
+<button class="go">Create overlay</button></form></div></div>
+</div>
+<h2>Where the library lives</h2><div class="card"><form class="row" onsubmit="submitForm(event,'set_store')">
+<label style="flex:1">Folder for templates and disposable OS disks<input name="store" value="/var/lib/baseline-proof/os" style="width:100%"></label>
+<label style="flex:1">Folder for protected VM and home disks<input name="persistence_store" value="/var/lib/baseline-proof/user" style="width:100%"></label>
+<button>Change location</button></form>
+<p class="sub warn">Existing VMs stay where they are; the new folder starts as an empty library.</p></div>
+</main><script>window.__vmState = "{\"vms\":[[\"standard-proof\",false],[\"ubuntu-proxmox-proof\",false]],\"bases\":[\"ubuntu-noble-20260926\"]}";
+window.__vmBusy = false;
+window.__loginVisible = false;
+async function act(action, params, ask){
+  if (ask && !confirm(ask)) return;
+  if (window.__vmBusy) return;
+  window.__vmBusy = true;
+  document.getElementById('action-status').textContent = 'Working…';
+  const body = Object.assign({action: action, request_id: crypto.randomUUID()}, params || {});
+  if (ask) body.confirm = "yes";
+  let j;
+  try {
+    const r = await fetch("/vms/action", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    j = await r.json();
+    if (r.status === 202 && j.job_id) {
+      document.getElementById('action-status').textContent = 'Job recorded. You can close this page and return to Workload jobs.';
+      while (true) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const status = await fetch('/workloads/job?job_id=' + encodeURIComponent(j.job_id));
+        const job = await status.json();
+        if (!status.ok) throw new Error(job.error || 'Job status unavailable');
+        document.getElementById('action-status').textContent = job.state + ': ' + (job.result?.message || action);
+        if (['completed','failed','interrupted','reviewed'].includes(job.state)) {
+          const result = await fetch('/workloads/result', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:j.job_id})});
+          j = await result.json(); break;
+        }
+      }
+    }
+  } catch (e) {
+    window.__vmBusy = false;
+    document.getElementById('action-status').textContent = 'Connection lost. Check the machine list before retrying.';
+    return;
+  }
+  if (j.ok && j.password) {
+    window.__loginVisible = true;
+    document.getElementById('login-name').textContent = j.username;
+    document.getElementById('login-password').textContent = j.password;
+    document.getElementById('one-time-login').showModal();
+    return;
+  }
+  location.href = "/vms?ok=" + (j.ok ? 1 : 0) + "&notice=" + encodeURIComponent(j.message || "");
+}
+function submitForm(ev, action){
+  ev.preventDefault();
+  const f = ev.target, p = {};
+  for (const el of f.elements) if (el.name) p[el.name] = el.value;
+  act(action, p);
+}
+setInterval(function(){
+  if (window.__vmBusy || window.__loginVisible) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === "INPUT" || a.tagName === "SELECT")) return;
+  fetch("/vms/status").then(r => r.json()).then(function(s){
+    if (JSON.stringify(s) !== window.__vmState) location.reload();
+  }).catch(function(){});
+}, 4000);
+const homeField = document.querySelector('input[name="homepage"]');
+if (homeField && !homeField.value && !['localhost','127.0.0.1','[::1]'].includes(location.hostname))
+  homeField.value = 'https://' + location.hostname + ':8006';
+for (const link of document.querySelectorAll('.proxmox-link')) link.href = 'https://' + location.hostname + ':8006';
+</script></body></html>

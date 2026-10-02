@@ -26,7 +26,7 @@ overwritten in place - it's a pointer, not a record.
 | [network](network/001.md) | network/001.md | 6 | 2026-09-20 | ConnectionModal: bridged identity, alias, enable/disable, lifeline position |
 | [ui](ui/002.md) | ui/002.md | 2 | 2026-09-29 | real, safe "live install screen" viewer |
 | [chat](chat/001.md) | chat/001.md | 11 | 2026-09-26 | OpenCode as the second HarnessAdapter, normalized through real ACP |
-| [proxmox](proxmox/003.md) | proxmox/003.md | 11 | 2026-10-02 | Bounded partial rebuild recovery; actual disposable Proxmox proof (DR122) |
+| [proxmox](proxmox/003.md) | proxmox/003.md | 12 | 2026-10-02 | Managed Ubuntu login recovery with retained rotation journal (DR123) |
 | [containers](containers/001.md) | containers/001.md | 3 | 2026-09-27 | quadlet.py rootless mode implemented for real; default corrected |
 
 Categories are named after the part of the system a change touches, not

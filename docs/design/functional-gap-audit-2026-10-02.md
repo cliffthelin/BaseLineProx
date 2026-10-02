@@ -23,7 +23,10 @@ data. Actual disposable Proxmox checks passed; 2,882 guarded unit tests passed.
 The historical F02/F03 findings below describe the audit baseline, not a claim
 these shipped controls are still absent. F02/F03 remain partial for unfinished
 initial allocations/templates, running partial clones, orphan/native-task repair,
-VM login recovery and power loss. F04 retained-state restore and F01 real app
+non-Ubuntu/other-backend VM login recovery and power loss. DR123 adds managed
+Ubuntu/Proxmox reset, pending-rotation journal and safe rebuild guard; actual
+guest/hash/document checks passed with restricted-network test seed augmentation,
+2,892 guarded unit tests. Ordinary-network firstboot remains unverified. F04 retained-state restore and F01 real app
 lifecycle remain the next distinct workflow gaps; no application isolation was
 proved by container recovery. No physical deployment in these follow-ups.
 

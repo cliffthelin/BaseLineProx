@@ -1,0 +1,104 @@
+{
+  "environment": "Actual Proxmox and Ubuntu in approved disposable KVM; physical backing read-only",
+  "checks": [
+    "Initial real guest password verified against freshly generated one-time login; second retrieval had no password; original document unchanged; explicit web rebuild completed",
+    "Same rebuilt OS booted after restricted-network test fixture restored: ready guest has original retained document and exact rotated profile hash",
+    "Job outcome retained after service restart; one-time login absent from persisted public status"
+  ],
+  "jobs": [
+    {
+      "id": "47f14929e47743259833f44a8cb32405",
+      "kind": "vm",
+      "action": "reset_login",
+      "name": "ubuntu-proxmox-proof",
+      "state": "completed",
+      "created": 1790961402.6755662,
+      "updated": 1790961406.495479,
+      "context": {
+        "store": "/var/lib/baseline-proof/os",
+        "persistence_store": "/var/lib/baseline-proof/user",
+        "backend": "ProxmoxVmHost"
+      },
+      "result": {
+        "ok": true,
+        "name": "ubuntu-proxmox-proof",
+        "username": "baseline-admin",
+        "message": "Fresh one-time Ubuntu login. OS and retained home were kept; future rebuilds use this login.",
+        "login_available": true
+      }
+    },
+    {
+      "id": "cc862020d75645c3ba1e83d30b7a2cc7",
+      "kind": "vm",
+      "action": "rollback",
+      "name": "ubuntu-proxmox-proof",
+      "state": "completed",
+      "created": 1790961413.9306412,
+      "updated": 1790961415.857585,
+      "context": {
+        "store": "/var/lib/baseline-proof/os",
+        "persistence_store": "/var/lib/baseline-proof/user",
+        "backend": "ProxmoxVmHost"
+      },
+      "result": {
+        "ok": true,
+        "message": "Rebuilt ubuntu-proxmox-proof's OS. Its retained user disk was kept."
+      }
+    },
+    {
+      "id": "11fa0a7823f64dad9ff0fe41745fffe2",
+      "kind": "vm",
+      "action": "request_stop",
+      "name": "ubuntu-proxmox-proof",
+      "state": "completed",
+      "created": 1790961740.7580805,
+      "updated": 1790961745.6270113,
+      "context": {
+        "store": "/var/lib/baseline-proof/os",
+        "persistence_store": "/var/lib/baseline-proof/user",
+        "backend": "ProxmoxVmHost"
+      },
+      "result": {
+        "ok": true,
+        "message": "Asked ubuntu-proxmox-proof to shut down. If it does not stop, use Force stop."
+      }
+    },
+    {
+      "id": "30fa0b0212784df393793083f1b0d643",
+      "kind": "vm",
+      "action": "start",
+      "name": "ubuntu-proxmox-proof",
+      "state": "completed",
+      "created": 1790961747.7848458,
+      "updated": 1790961749.4919574,
+      "context": {
+        "store": "/var/lib/baseline-proof/os",
+        "persistence_store": "/var/lib/baseline-proof/user",
+        "backend": "ProxmoxVmHost"
+      },
+      "result": {
+        "ok": true,
+        "message": "Started ubuntu-proxmox-proof."
+      }
+    },
+    {
+      "id": "f02cbfb0ef54477b95c4b441d641db8c",
+      "kind": "vm",
+      "action": "request_stop",
+      "name": "ubuntu-proxmox-proof",
+      "state": "completed",
+      "created": 1790961786.1882496,
+      "updated": 1790961802.0232534,
+      "context": {
+        "store": "/var/lib/baseline-proof/os",
+        "persistence_store": "/var/lib/baseline-proof/user",
+        "backend": "ProxmoxVmHost"
+      },
+      "result": {
+        "ok": true,
+        "message": "Asked ubuntu-proxmox-proof to shut down. If it does not stop, use Force stop."
+      }
+    }
+  ],
+  "limits": "Production guest network/firstboot integration is not proved. Original rebuild seed lacked the existing test proxy; test-only apt proxy and a fresh synthetic instance ID were added to the same rebuilt OS, without another OS reset or home initialization. Host power-loss and real physical deployment unverified."
+}

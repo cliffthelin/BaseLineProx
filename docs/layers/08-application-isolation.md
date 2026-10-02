@@ -94,3 +94,15 @@ document intact; reused CT119 refused, valid openSUSE base unchanged. 2,882
 guarded unit tests passed. No physical writes/deployment, running partial-clone
 or power-loss recovery proof, or application-confinement claim. Queue75 remains
 partial; backup59/60 and application lifecycle74 are still open. See DR122.
+
+
+## 2026-10-02 — DR123 Ubuntu VM login workflow
+
+Managed Ubuntu/Proxmox Reset login is implemented as a confirmed durable job,
+with native stdin password hashing, one-time result and retained profile journal.
+Pending rotation blocks OS rebuild; explicit fresh reset resolves it when ready.
+2,892 unit tests; actual guest password verification and retained hash/document
+checks passed in disposable KVM. Post-rebuild boot needed the earlier restricted
+test-network apt proxy settings restored to the same OS seed; no ordinary-network
+or physical firstboot proof. Other VM types/backends and partial-state recovery
+remain queue75; backups59/60 and app lifecycle/isolation74 remain open. See DR123.

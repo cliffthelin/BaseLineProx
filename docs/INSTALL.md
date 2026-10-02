@@ -348,7 +348,7 @@ not hold the global reservation.
 
 One-time logins are retrieved by authenticated POST and disappear after retrieval
 or service restart. Running, ready managed containers support **Reset login**
-without resetting OS or retained data. VM login recovery remains unimplemented.
+without resetting OS or retained data. Managed Ubuntu/Proxmox login recovery is added in DR123 below; other guests/backends remain unsupported.
 Existing drive/Operations jobs have not been migrated to this durable store.
 
 2,874 guarded unit tests passed. Actual Alpine create/login rotation/rebuild and
@@ -383,3 +383,24 @@ the app with the retained document intact. The legitimate openSUSE base119 was
 unchanged after a stale-reservation refusal. No physical writes or deployment;
 host power-loss and in-flight native task interruption remain unverified.
 See DR122 and verification/122; queue75 remains partial.
+
+
+## Recover a managed Ubuntu VM login (DR123, 2026-10-02)
+
+Start the Ubuntu environment, wait for its guest agent/recipe readiness, and use
+**Reset login** on its VM card. Confirm replacement of the existing baseline-admin
+password. Save the returned login once. OS and home stay intact; the retained
+profile makes future clean OS rebuilds use the new hash. This supports managed
+Ubuntu Desktop/Server on Proxmox, not arbitrary ISOs or local-QEMU guests.
+
+A pending login rotation blocks OS rebuild. Once the guest is ready, confirm
+Reset login again to replace the ambiguous credential with a fresh value. Lost
+cleartext is never recovered from disk or shown by GET/status. Native identity,
+readiness and synchronous guest command completion are checked before success.
+
+2,892 guarded unit tests passed. Actual Ubuntu web login rotation and retained
+hash/document continuity passed in disposable Proxmox-in-KVM. The post-rebuild
+boot required restoring the earlier fixture's restricted-network apt proxy seed
+settings and rerunning bootstrap on the same OS. Ordinary-network firstboot,
+pending-rotation power loss and physical deployment remain unverified; see
+DR123 and verification/123. This qualification leaves queue72 open.

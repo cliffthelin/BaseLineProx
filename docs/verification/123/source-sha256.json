@@ -1,0 +1,8 @@
+{
+  "baseline/lib/baseline_web.py": "fc339de9e0087ce71886032d12faa859e8368c3f1c36448fd21b4cd39acbfcf5",
+  "baseline/lib/proxmox_vm_host.py": "0ee197064d8300e733442adafc47c49aa6a476490a1dbc894cfb3f203b2c84e0",
+  "baseline/lib/ubuntu_environment.py": "5a18e769877efba00a0903cddff4467dd7124a0bedbd66b2f7c1433514b47eac",
+  "baseline/lib/vm_page.py": "40a12311005c8f765c3b469b0a0e20af951f162d367ca8ffc74049b9befe9aad",
+  "tests/unit/test_proxmox_vm_host.py": "f1129480852396117336ef8b464cab872f4654043bfafdef4f3a56859d1f1f76",
+  "tests/unit/test_vm_web.py": "48f1583b5f570e6e59cf7944e11aa6645d781df6a60254732a6c9da8f8274c2b"
+}
