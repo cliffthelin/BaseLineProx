@@ -64,3 +64,11 @@ setup and is disabled. Binds are excluded from vzdump: dedicated quiesced
 backup/restore remains unverified. Containers share the substrate kernel and
 do not supply a distro desktop/browser. The nine requested desktop/NAS/mobile
 systems remain explicitly uninstalled on `/vms`; see DR118 and v0.2 row73.
+
+
+### Design influences (operator clarification, 2026-10-02)
+
+NixOS, QubesOS, GrapheneOS and Red Hat Project Hummingbird guide the intended
+application model: versioned bases, separate workload boundaries, phone-style
+private app state/permissions, and minimal container bases. This records design
+intent; applied isolation remains open in queue74. See the DR119 audit.

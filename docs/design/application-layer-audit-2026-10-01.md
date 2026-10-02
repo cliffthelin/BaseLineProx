@@ -2,6 +2,21 @@
 
 Scope: requested audit of each application's isolation/overlays and one overlay for the whole OS. Reviewed current source, layer plans, queues, service wiring and DR117–118 evidence. This is a source/plan audit with pure reproductions and guarded tests, **not a new live confinement or bare-metal verification**. Companion decision: DR119.
 
+## Operator-specified influences — 2026-10-02
+
+The operator names **NixOS, QubesOS, GrapheneOS and Red Hat Project
+Hummingbird** as the design influences. Baseline's intended interpretation:
+
+- NixOS: reproducible, versioned executable bases and deliberate generations.
+- QubesOS: separate workload boundaries and explicit sharing between them.
+- GrapheneOS: phone-style app identities, private state and explicit permissions.
+- Red Hat Project Hummingbird: minimal container application bases.
+
+These are design influences, not claims that Baseline implements these projects'
+mechanisms or guarantees. Use existing tools where practical; prove application
+launch isolation and retained state independently of the whole-OS overlay.
+The applied lifecycle remains queue74. No new runtime verification is implied.
+
 ## Finding
 
 Baseline has working guest OS clone/rebuild mechanisms, but **no applied per-application isolation lifecycle**. Fifteen catalog-derived app plans contain seven declared overlay mounts and three container binds. All report `AppPlan.isolated=True` and no exact target conflicts. That proves generated path conventions only. It does not establish ownership, mounts, confinement, application inventory completeness or recovery.
