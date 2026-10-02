@@ -1,0 +1,6 @@
+{
+  "baseline/lib/environment_recipes.py": "836ce4048cd5ea55cdb581f35769fba16930336f5c223015b53ebcdf9b1d8598",
+  "baseline/bin/baseline-recipes": "116be163bc58860a549ea1285c0996dcca8114c6a0f8deebaeb81042c8dfc9ea",
+  "tests/unit/test_environment_recipes.py": "d1ab74c748d7de1bc7abb8aca83424c4cc94ea3d5967d5688ce48ab8a506fd16",
+  "boot/provision.sh": "5f76db53a7f9bbec5f226ab3d7d93f56d13bfe7c89086b0d10b3c86c570915fb"
+}

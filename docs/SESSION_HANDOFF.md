@@ -1319,3 +1319,12 @@ Detailed wiring/acceptance: design/installer-overlay-template-audit-2026-10-02.m
 Row76 added; rows72–75 remain open. Design/source audit only, no runtime change.
 Next implementation: recipe contract/coverage and first Ubuntu/Chromium adapter;
 keep unsupported capabilities explicit and no AI runtime dependency.
+
+## DR127 incremental handoff — 2026-10-02
+
+Recipe validator/export/digest/stack compose+verify and baseline-recipes CLI now
+exist and are staged by provision. Strict initial Ubuntu/Chromium allowlists;
+no runtime apply, install or configuration capture. 11 focused tests use real
+parser/subprocess CLI. Queue76 remains partial; next wire provenance/package locks,
+web controls and Ubuntu guest reconciler. Queue74 app migration/isolation and
+rows59/60/75 broader backup/recovery still open. No hardware or credentials touched.

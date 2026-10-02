@@ -175,3 +175,12 @@ configuration informs the recipe/generation approach; adopting NixOS is not
 required or claimed.
 - [cloud-init instance data](https://cloudinit.readthedocs.io/en/latest/topics/instancedata.html):
 instance identity is runtime data, not a reusable user's identity template.
+
+## DR127 implementation follow-up
+
+Initial configuration-only JSON validation/export/digests and copied stack locks
+are implemented with baseline-recipes validate/compose/verify CLI. Strict initial
+Ubuntu/Chromium allowlists; unsupported/private/ambiguous inputs refuse. This
+narrows the proposed parser gap, not deployment or full coverage. Structured JSON
+Schema, source acquisition/package locks, web integration, capture and runtime
+adapters remain open. No new hardware or native runtime verification.

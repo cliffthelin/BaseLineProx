@@ -1,0 +1,58 @@
+{
+  "apps": [
+    {
+      "digest": "432a5190c354801f33cecff0eef9e2f84fd94b6556b673a1b9d00e6f0a6a193a",
+      "recipe": {
+        "configuration": {
+          "homepage_role": "environment_console"
+        },
+        "format": "baseline.recipe/v1",
+        "id": "chromium",
+        "kind": "app",
+        "platform": {
+          "arch": "amd64",
+          "os": "ubuntu",
+          "release": "24.04"
+        },
+        "source": {
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "state": [
+          {
+            "path": "~/.config/chromium",
+            "retention": "retained",
+            "role": "app_private"
+          }
+        ]
+      }
+    }
+  ],
+  "format": "baseline.stack/v1",
+  "os": {
+    "digest": "0e94323a752bdf47c5e2dc7d98cfde26969f89d3201d15dde0e6fdab17e59daa",
+    "recipe": {
+      "configuration": {
+        "locale": "en_US.UTF-8"
+      },
+      "format": "baseline.recipe/v1",
+      "id": "ubuntu-desktop",
+      "kind": "os",
+      "platform": {
+        "arch": "amd64",
+        "os": "ubuntu",
+        "release": "24.04"
+      },
+      "source": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "state": [
+        {
+          "path": "/home",
+          "retention": "retained",
+          "role": "documents"
+        }
+      ]
+    }
+  },
+  "runtime_applied": false
+}

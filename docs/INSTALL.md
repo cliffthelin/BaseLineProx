@@ -441,3 +441,13 @@ state; only volatile state is expected lost after verified coverage and quiescen
 See design/installer-overlay-template-audit-2026-10-02.md. Source audit only;
 no new runtime or hardware verification. Recipe-only export excludes user data
 and secrets; fresh instantiate and private data restore remain separate actions.
+
+## Initial portable recipe tool (DR127)
+
+baseline-recipes validate RECIPE.json checks the narrow configuration-only
+contract; compose OS.json APP.json emits a locked stack to stdout; verify STACK.json
+checks recipes and their digests. It never installs, launches or applies overlays.
+Initial support: Ubuntu24.04 amd64 and Chromium with allowlisted locale/symbolic
+homepage configuration. State declarations are limited, not complete coverage.
+No runtime profile/overlay capture or deployment exists. Source hashes are declared
+locks, not fetched/trust-verified images. See verification/127 and queue76.
