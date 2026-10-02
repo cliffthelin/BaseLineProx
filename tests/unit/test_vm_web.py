@@ -11,7 +11,7 @@ from test_vm_host import FakeHost
 NOW = 1_800_000_000.0
 
 
-def _case(tmp_path, role="admin"):
+def _case(tmp_path, role="admin", *, wait_jobs=True):
     f = FakeHost(tmp_path / "store")
     iso_dir = tmp_path / "isos"
     iso_dir.mkdir()
@@ -21,7 +21,17 @@ def _case(tmp_path, role="admin"):
     events = []
     deps = _base_deps(sessions=sessions, vm_host=f.host, vm_iso_dir=iso_dir, vm_config_path=tmp_path / "vm.json",
                       audit=events.append)
-    return _RealServerCase(deps), f, events
+    case = _RealServerCase(deps)
+    if wait_jobs:
+        post = case.post_json
+        def completed_post(path, body):
+            status, result = post(path, body)
+            if status == 202:
+                case.server.deps['workload_jobs'].wait(result['job_id'],3)
+                return post('/workloads/result', {'job_id':result['job_id']})
+            return status,result
+        case.post_json = completed_post
+    return case, f, events
 
 
 def test_the_page_renders_for_an_admin_with_the_isos_offered(tmp_path):

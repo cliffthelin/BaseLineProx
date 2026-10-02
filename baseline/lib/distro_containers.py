@@ -254,3 +254,18 @@ class DistroContainers:
         self.command(['pct', 'set', str(record['vmid']), '--delete', 'mp0,mp1,mp2'])
         self.command(['pct', 'destroy', str(record['vmid']), '--purge', '1'])
         self._clone(record)
+
+    def reset_login(self, name):
+        record=self._managed(name)
+        if record.get('phase')!='ready' or not self.status(name)['running']:
+            raise vh.VmError('login recovery requires a running, ready managed container')
+        password=self.password_factory()
+        hashed=self.password_hasher(password)
+        rc,_,_=self.run_input(['pct','exec',str(record['vmid']),'--','chpasswd','-e'],
+                              f'root:{hashed}\n'.encode())
+        if rc:
+            raise vh.VmError('native login reset failed; no success is inferred')
+        record['password_hash']=hashed
+        self._save(self._record_path(name),record)
+        return {'ok':True,'username':'root','password':password.decode('ascii'),
+                'message':'Fresh one-time container login. Retained data and OS were kept.'}

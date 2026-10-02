@@ -14,7 +14,16 @@ def case(tmp_path, role='admin'):
     sessions = sw.SessionStore()
     sessions.create('someone',1_800_000_000.0,role=role)
     deps = _base_deps(sessions=sessions,container_host=host,vm_config_path=tmp_path/'paths.json')
-    return _RealServerCase(deps),host
+    c = _RealServerCase(deps)
+    post = c.post_json
+    def completed_post(path,body):
+        status,result=post(path,body)
+        if status==202:
+            c.server.deps['workload_jobs'].wait(result['job_id'],3)
+            return post('/workloads/result',{'job_id':result['job_id']})
+        return status,result
+    c.post_json=completed_post
+    return c,host
 
 
 def test_admin_can_choose_host_distros_create_a_linked_container_and_rebuild_its_os(tmp_path):

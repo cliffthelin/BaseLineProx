@@ -186,3 +186,19 @@ def test_known_failed_openeuler_template_refuses_before_allocating(tmp_path):
     with pytest.raises(dc.vh.VmError, match='failed.*Proxmox'):
         h.prepare('openeuler-25.03-default_20250507_amd64.tar.xz', 'source-cache', 'os-thin')
     assert not native.calls
+
+
+def test_login_recovery_rotates_a_running_managed_container_without_rebuilding_data(tmp_path):
+    native=NativeRunner()
+    passwords=iter([b'initial-private',b'replacement-private'])
+    h=dc.DistroContainers(tmp_path/'protected',run=native,run_input=native.input,
+                         password_factory=lambda:next(passwords),password_hasher=lambda p:'$6$salt$'+p.decode())
+    h.create('work',template=h.catalog()[0]['name'],cache_storage='source-cache',os_storage='os-thin')
+    saved=h.data_path('work','home')/'saved';saved.write_text('keep')
+    before=len(native.calls)
+    recovered=h.reset_login('work')
+    assert recovered['password']=='replacement-private'
+    assert h.record('work')['password_hash']=='$6$salt$replacement-private'
+    assert saved.read_text()=='keep'
+    assert not any(a[:2] in (['pct','clone'],['pct','destroy']) for a in native.calls[before:])
+    assert not any('replacement-private' in ' '.join(a) for a in native.calls)

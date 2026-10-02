@@ -15,6 +15,10 @@ def perform(host, action, params):
             return dict(host.create(name, template=params.get('template'), cache_storage=params.get('cache_storage'),
                                     os_storage=params.get('os_storage'), disk_gb=int(params.get('disk_gb', 8)),
                                     memory_mb=int(params.get('memory_mb', 512)), cpus=int(params.get('cpus', 1))), ok=True)
+        if action == 'reset_login':
+            if params.get('confirm') != 'yes':
+                raise vh.VmError('confirm login reset; the old password will stop working')
+            return host.reset_login(name)
         if action == 'rebuild':
             if params.get('confirm') != 'yes':
                 raise vh.VmError('confirm OS rebuild; data directories will be kept')
@@ -75,10 +79,11 @@ def render(host=None, unavailable=''):
             args = e(json.dumps({'name': name}))
             button = 'shutdown' if ct['running'] else 'start'
             rebuild = '' if ct['running'] else f'<button class="danger" onclick="act(\'rebuild\',{args},true)">Rebuild OS</button>'
+            reset = f'<button onclick="act(\'reset_login\',{args},true)">Reset login</button>' if ct['running'] and ct['phase']=='ready' else ''
             cards.append(f'<div class="card"><strong>{e(name)}</strong> · CT {ct["vmid"]} · '
                          f'{"running" if ct["running"] else "stopped"} · {e(ct["phase"])}'
                          f'<p>{e(ct["template"])}<br>Retained data: {e(ct["data_path"])}</p>'
-                         f'<button onclick="act(\'{button}\',{args})">{button.title()}</button> {rebuild}</div>')
+                         f'<button onclick="act(\'{button}\',{args})">{button.title()}</button> {rebuild} {reset}</div>')
         missing = '<p class="warn">No active LVM-thin/ZFS container storage supports this linked-clone recipe.</p>' if not stores['overlay'] else ''
         content = f'''<p>LXC distributions share the host kernel. Their OS is a native linked clone of an immutable template.</p>
 <p>Separate <code>/home</code>, <code>/root</code> and <code>/data</code> directories survive an OS rebuild.
@@ -102,19 +107,32 @@ separate backup/restore verification is still required. This is a Linux environm
 <label>Folder<input name="data_store" value="{e(host.data_store)}" required></label><button>Save folder</button></form>
 <p>Changing folders does not migrate data. Default unprivileged UID mapping is used; custom mappings are refused.</p>'''
     return f'''<!doctype html><html><head><meta charset="utf-8"><title>Distro containers</title><style>{_CSS}</style></head>
-<body><main><h1>Distro containers</h1><p id="status" role="status"></p>{content}
+<body><main><h1>Distro containers</h1><p><a href="/workloads">Workload jobs: return here after a disconnect</a></p><p id="status" role="status"></p>{content}
 <dialog id="login"><h3>Save this one-time container login</h3><p id="username"></p><p id="password"></p>
 <button onclick="location.reload()">I saved the login</button></dialog></main>
 <script>
 let busy=false;
 async function act(action,params,confirmReset){{
  if(busy)return;
- if(confirmReset && !confirm('Rebuild the stopped OS? Packages and system settings reset; /home, /root and /data are kept.'))return;
+ if(confirmReset && !confirm(action==='reset_login'?'Replace the container login? The old password stops working; data is kept.':'Rebuild the stopped OS? Packages and system settings reset; /home, /root and /data are kept.'))return;
  busy=true;document.getElementById('status').textContent='Working… template preparation can take several minutes.';
  try{{
- const body=Object.assign({{action}},params);if(confirmReset)body.confirm='yes';
+ const body=Object.assign({{action,request_id:crypto.randomUUID()}},params);if(confirmReset)body.confirm='yes';
  const r=await fetch('/containers/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
- const result=await r.json();if(!r.ok || !result.ok)throw new Error(result.message || result.detail || 'Request failed');
+ let result=await r.json();
+ if(r.status===202 && result.job_id){{
+ const id=result.job_id;
+ while(true){{await new Promise(resolve=>setTimeout(resolve,1000));
+ const response=await fetch('/workloads/job?job_id='+encodeURIComponent(id));const job=await response.json();
+ if(!response.ok)throw new Error(job.error || 'Job status unavailable');
+ document.getElementById('status').textContent=job.state+': '+(job.result?.message || action);
+ if(['completed','failed','interrupted','reviewed'].includes(job.state)){{
+ const response=await fetch('/workloads/result',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{job_id:id}})}});
+ result=await response.json();break;
+ }}
+ }}
+ }}
+ if(!r.ok || !result.ok)throw new Error(result.message || result.detail || 'Request failed');
  if(result.password){{document.getElementById('username').textContent='Username: '+result.username;
  document.getElementById('password').textContent='Password: '+result.password;document.getElementById('login').showModal();}}
  else location.reload();

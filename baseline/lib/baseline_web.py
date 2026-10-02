@@ -53,6 +53,8 @@ import operator_accounts
 import remote_access
 import vm_host as vh
 import vm_page
+import workload_jobs
+import workload_page
 import web_gate as wg
 import web_security as ws
 
@@ -79,6 +81,7 @@ NAV_TABS = (
     ("/hardware", "Hardware"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
+    ("/workloads", "Workload jobs"),
     ("/master-config", "Master Config"),
 )
 
@@ -1618,6 +1621,19 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(
                 operations_page.render_operators_page(accounts.roles() if accounts else {}), path))
 
+        if path in ("/workloads", "/workloads/jobs", "/workloads/job"):
+            jobs = deps.get("workload_jobs")
+            if jobs is None:
+                return self._json(503, {"error":"durable workload storage is not configured"})
+            if path == "/workloads":
+                return self._html_response(200, _with_nav(workload_page.render(jobs.listing()),path))
+            if path == "/workloads/jobs":
+                return self._json(200,jobs.listing())
+            try:
+                return self._json(200,jobs.get(qs.get("job_id",[""])[0]))
+            except workload_jobs.JobError as exc:
+                return self._json(404,{"error":str(exc)})
+
         if path == "/operations":
             scheduler = deps.get("scheduler")
             return self._html_response(200, _with_nav(
@@ -1889,34 +1905,85 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path.startswith("/operations/"):
             return self._post_operations(deps, path, body, now)
 
-        if path == "/containers/action":
-            import container_page
-            host = _container_host_for(deps)
-            action = str(body.get('action', ''))
-            if host is None:
-                result = {'ok': False, 'message': 'Proxmox LXC tools are unavailable on this host.'}
-            elif action == 'set_data':
-                result = container_page.save_data(deps.get('vm_config_path'), body.get('data_store'))
-            else:
-                result = container_page.perform(host, action, body)
-            audit = deps.get('audit')
-            if audit is not None:
-                audit({'event': 'container_action', 'action': action, 'name': str(body.get('name', '')), 'ok': result['ok']})
-            return self._json(200, result)
+        if path in ("/workloads/result", "/workloads/inspect", "/workloads/acknowledge"):
+            jobs=deps.get("workload_jobs")
+            if jobs is None:
+                return self._json(503,{"message":"durable workload storage is unavailable"})
+            try:
+                jid=body.get("job_id","")
+                if path == "/workloads/result":
+                    return self._json(200,jobs.result(jid))
+                if path == "/workloads/acknowledge":
+                    return self._json(200,jobs.acknowledge(jid,body.get("name","")))
+                job=jobs.get(jid)
+                context=job.get('context',{})
+                if job['kind']=='container':
+                    import distro_containers
+                    host=deps.get('container_host') or (distro_containers.DistroContainers(context['data_store']) if context.get('data_store') else _container_host_for(deps))
+                else:
+                    import proxmox_vm_host
+                    engine=proxmox_vm_host.ProxmoxVmHost if context.get('backend')=='ProxmoxVmHost' else vh.VmHost
+                    host=deps.get('vm_host') or (engine(context['store'],persistence_store=context['persistence_store']) if context.get('store') else _vm_host_for(deps))
+                if host is None:
+                    raise workload_jobs.JobError('native backend unavailable; no inspection performed')
+                if not job['name']:
+                    observation={'available':True,'message':'No named workload. Check native template/cache state before acknowledging.'}
+                else:
+                    try:
+                        state=host.status(job['name'])
+                        observation={'available':True,'message':json.dumps(state,default=str)}
+                    except (vh.VmError,OSError,ValueError):
+                        observation={'available':False,'message':'Workload inspection failed; no absence or successful recovery is inferred. Inspect Proxmox resources.'}
+                return self._json(200,jobs.inspect(jid,observation))
+            except (workload_jobs.JobError,ValueError,TypeError) as exc:
+                return self._json(409,{'message':str(exc)})
 
-        if path == "/vms/action":
-            action = str(body.get("action", ""))
-            if action == "set_store":
-                cfg = deps.get("vm_config_path")
-                result = vm_page.save_store(cfg, body.get("store"), persistence_store=body.get("persistence_store")) if cfg else \
-                    {"ok": False, "message": "no place to keep the setting on this server"}
-            else:
-                result = vm_page.perform(_vm_host_for(deps), action, body,
-                                         iso_dir=deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)
-            audit = deps.get("audit")
-            if audit is not None:
-                audit({"event": "vm_action", "action": action, "name": str(body.get("name", "")), "ok": result["ok"]})
-            return self._json(200, result)
+        if path in ("/containers/action", "/vms/action"):
+            jobs=deps.get('workload_jobs')
+            if jobs is None:
+                return self._json(503,{'ok':False,'message':'durable workload storage is not configured'})
+            action=str(body.get('action',''))
+            kind='container' if path=='/containers/action' else 'vm'
+            # Capture the backend/storage at submission. Changing defaults is refused while work needs review.
+            host=_container_host_for(deps) if kind=='container' else _vm_host_for(deps)
+            if host is None:
+                return self._json(503,{'ok':False,'message':'native backend unavailable'})
+            if action in ('set_data','set_store'):
+                if any(j['state'] in ('queued','running','interrupted') for j in jobs.listing()):
+                    return self._json(409,{'ok':False,'message':'finish or inspect the workload job before changing storage'})
+                import container_page
+                result=container_page.save_data(deps.get('vm_config_path'),body.get('data_store')) if kind=='container' else \
+                    vm_page.save_store(deps.get('vm_config_path'),body.get('store'),persistence_store=body.get('persistence_store'))
+                return self._json(200,result)
+            actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login'},
+                     'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_overlay','start','request_stop','force_stop',
+                           'configure','eject_iso','rollback','freeze','delete_vm','delete_base'}}
+            if action not in actions[kind]:
+                return self._json(400,{'ok':False,'message':'unknown workload action'})
+            params={k:v for k,v in body.items() if k not in ('action','request_id')}
+            def execute(report):
+                import container_page
+                original_run=host.run
+                def traced_run(args,*extra,**kw):
+                    report('Native command: ' + ' '.join(str(a) for a in args[:2]))
+                    return original_run(args,*extra,**kw)
+                host.run=traced_run
+                try:
+                    result=container_page.perform(host,action,params) if kind=='container' else \
+                        vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR)
+                finally:
+                    host.run=original_run
+                audit=deps.get('audit')
+                if audit:
+                    audit({'event':kind+'_action','action':action,'name':str(params.get('name','')),'ok':result['ok']})
+                return result
+            try:
+                context={'data_store':str(host.data_store),'backend':type(host).__name__} if kind=='container' else \
+                    {'store':str(host.store),'persistence_store':str(host.persistence_store),'backend':type(host).__name__}
+                job=jobs.submit(kind,action,params,execute,request_id=body.get('request_id'),with_progress=True,context=context)
+            except workload_jobs.JobError as exc:
+                return self._json(409,{'ok':False,'message':str(exc)})
+            return self._json(202,{'ok':True,'job_id':job['id'],'message':'Operation recorded; follow its actual outcome in Workload jobs.'})
 
         if path == "/approvals/daily/revoke":
             gone = _hitl_store(deps).revoke_daily(body.get("id", "")) if isinstance(body.get("id", ""), str) else False
@@ -1940,8 +2007,16 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
 
 
 def make_server(*, deps: dict, host: str = "127.0.0.1", port: int = 8200) -> http.server.HTTPServer:
+    if deps.get('workload_jobs') is None and deps.get('vm_config_path'):
+        deps['workload_jobs']=workload_jobs.WorkloadJobs(Path(deps['vm_config_path']).parent/'workload-jobs.sqlite')
     server = http.server.HTTPServer((host, port), UnifiedHandler)
     server.deps = deps  # type: ignore[attr-defined]
+    original_close=server.server_close
+    def close():
+        original_close()
+        if deps.get('workload_jobs'):
+            deps['workload_jobs'].close()
+    server.server_close=close
     return server
 
 

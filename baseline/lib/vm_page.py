@@ -190,12 +190,26 @@ async function act(action, params, ask){
   if (window.__vmBusy) return;
   window.__vmBusy = true;
   document.getElementById('action-status').textContent = 'Working…';
-  const body = Object.assign({action: action}, params || {});
+  const body = Object.assign({action: action, request_id: crypto.randomUUID()}, params || {});
   if (ask) body.confirm = "yes";
   let j;
   try {
     const r = await fetch("/vms/action", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
     j = await r.json();
+    if (r.status === 202 && j.job_id) {
+      document.getElementById('action-status').textContent = 'Job recorded. You can close this page and return to Workload jobs.';
+      while (true) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const status = await fetch('/workloads/job?job_id=' + encodeURIComponent(j.job_id));
+        const job = await status.json();
+        if (!status.ok) throw new Error(job.error || 'Job status unavailable');
+        document.getElementById('action-status').textContent = job.state + ': ' + (job.result?.message || action);
+        if (['completed','failed','interrupted','reviewed'].includes(job.state)) {
+          const result = await fetch('/workloads/result', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:j.job_id})});
+          j = await result.json(); break;
+        }
+      }
+    }
   } catch (e) {
     window.__vmBusy = false;
     document.getElementById('action-status').textContent = 'Connection lost. Check the machine list before retrying.';

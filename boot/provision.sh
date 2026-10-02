@@ -293,6 +293,8 @@ cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 # development backend. Ubuntu's seed builder needs xorriso above.
 cp "$SRC/baseline/lib/vm_host.py" /opt/baseline/lib/vm_host.py
 cp "$SRC/baseline/lib/vm_page.py" /opt/baseline/lib/vm_page.py
+cp "$SRC/baseline/lib/workload_jobs.py" /opt/baseline/lib/workload_jobs.py
+cp "$SRC/baseline/lib/workload_page.py" /opt/baseline/lib/workload_page.py
 cp "$SRC/baseline/lib/ubuntu_environment.py" /opt/baseline/lib/ubuntu_environment.py
 cp "$SRC/baseline/lib/proxmox_vm_host.py" /opt/baseline/lib/proxmox_vm_host.py
 cp "$SRC/baseline/lib/distro_containers.py" /opt/baseline/lib/distro_containers.py
