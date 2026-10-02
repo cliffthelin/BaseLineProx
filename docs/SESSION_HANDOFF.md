@@ -1297,3 +1297,13 @@ disk only: no physical off-drive proof or physical writes. Coverage excludes OS,
 See decision record124 and verification/124. Rows59/60/73/75 remain partial;
 full VM recovery, incomplete restore reconciliation and row74 applied application
 lifecycle/isolation remain open. No direction from the user is currently needed.
+
+## DR125 incremental handoff — 2026-10-02
+
+AppData planner prerequisites fixed with RED/GREEN tests: collision-free encoded
+state-directory keys, lexical target validation and nested/equivalent conflict
+reporting. 67 focused planner tests passed. No runtime sandbox or hardware work.
+Queue74 remains open; next applied path is Chromium inside Ubuntu, selected
+mounted AppData, real identity/migration/launch and two-app separation evidence.
+Unknown/stateless declarations and Quadlet runtime mount checks remain open.
+No new direction required from the user. See decision record125.

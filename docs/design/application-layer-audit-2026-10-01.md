@@ -83,3 +83,12 @@ Queued as v0.2 row74; existing access approval row42, backup row60, deployment r
 - [Flatpak permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html): effective filesystem and service access depends on permissions.
 
 These support mechanism distinctions; findings about Baseline come from the current repository. Historical records remain history; current layer docs and INSTALL have been corrected to avoid claiming live application isolation.
+
+## DR125 follow-up — 2026-10-02
+
+Collision-free encoded target keys, lexical unsafe-target refusal and nested/
+equivalent conflict reporting are implemented and unit-tested. Earlier finding
+rows describe the audit baseline; those path-planner gaps are now narrowed.
+Unknown/stateless declarations, runtime canonical/symlink resolution, mounted
+storage and all applied app lifecycle/confinement remain open. No runtime or
+physical verification was performed by this follow-up.

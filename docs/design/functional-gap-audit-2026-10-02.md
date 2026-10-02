@@ -28,7 +28,7 @@ Ubuntu/Proxmox reset, pending-rotation journal and safe rebuild guard; actual
 guest/hash/document checks passed with restricted-network test seed augmentation,
 2,892 guarded unit tests. Ordinary-network firstboot remains unverified. DR124 adds F04 stopped LXC /home/root/data backup and new-name restore with actual Alpine boot/read/ACL/user-xattr proof on separate virtual disks. Full VM and physical off-drive restore remain open. F01 real app
 lifecycle remains a distinct workflow gap; no application isolation was
-proved by container recovery. No physical deployment in these follow-ups.
+proved by container recovery. No physical deployment in these follow-ups. DR125 narrows F01 planner prerequisites with collision-free keys and equivalent/nested/unsafe-target checks; applied app lifecycle remains open.
 
 ## Existing application means that should be retained
 

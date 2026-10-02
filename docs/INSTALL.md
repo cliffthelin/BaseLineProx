@@ -421,3 +421,11 @@ Actual Alpine backup/boot/read/metadata checks passed in disposable KVM Proxmox
 with a separate virtual backup disk. Physical off-drive recovery, full VM backup,
 encryption/scheduling and app-level isolation remain unverified/open. See DR124
 and verification/124; rows59/60/73/75 remain partial.
+
+## Application-plan prerequisites (DR125, 2026-10-02)
+
+Planner state paths now avoid separator/dash collisions, equivalent/nested
+targets are reported as conflicts, and unsafe or oversized targets are refused.
+Verified with pure unit tests only; no app sandbox, mounts, profile migration or
+physical deployment was applied. Queue74 remains open for the real Chromium
+lifecycle inside Ubuntu and its selected mounted AppData storage.
