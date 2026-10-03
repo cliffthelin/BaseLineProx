@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Lock, verify, download, and materialize a VS Code Linux x64 build."""
+import argparse
+import json
+import sys
+import tarfile
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))
+import environment_recipes as er
+import vscode_build as vb
+
+parser = argparse.ArgumentParser(description=__doc__)
+sub = parser.add_subparsers(dest='action', required=True)
+for action in ('lock', 'verify', 'fetch', 'install'):
+    command = sub.add_parser(action)
+    command.add_argument('input')
+    if action == 'fetch':
+        command.add_argument('target')
+    if action == 'install':
+        command.add_argument('archive')
+        command.add_argument('target')
+args = parser.parse_args()
+try:
+    with Path(args.input).open() as stream:
+        document = er.read_document(stream.read(65537))
+    if args.action == 'lock':
+        result = vb.resolve(document)
+    elif args.action == 'verify':
+        result = vb.validate(document)
+    elif args.action == 'fetch':
+        result = {'archive': str(vb.fetch(document, args.target)),
+                  'archive_verified': True, 'runtime_verified': False}
+    else:
+        result = vb.install(document, args.archive, args.target)
+    print(json.dumps(result, sort_keys=True, indent=2))
+except (er.RecipeError, OSError, tarfile.TarError, UnicodeError) as exc:
+    print('Refused: ' + str(exc), file=sys.stderr)
+    sys.exit(1)
