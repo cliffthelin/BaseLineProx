@@ -73,3 +73,6 @@ DR119 application/whole-OS overlay audit and honest App Isolation page status:
 
 DR120 software-owned functional workflow audit: `proxmox/003.md`,
 `../design/functional-gap-audit-2026-10-02.md`.
+
+DR133/DR134 five native apps, retained Debian rebuild and source-verified Ansible
+tasker/manual installer guidance: proxmox/004.md; verification/133 and134.

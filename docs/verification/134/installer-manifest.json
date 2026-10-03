@@ -1,0 +1,36 @@
+{
+  "artifact": "baseline-134.iso",
+  "boot_verified": {
+    "cpu": "host",
+    "execution": "actual isolated KVM",
+    "network": "none",
+    "observed": "Proxmox VE 9.2 install menu",
+    "ram_mib": 2048,
+    "smp": 1,
+    "target_disks": "none"
+  },
+  "bytes": 1710292992,
+  "critical_files_sha256": {
+    "automation/requirements-tasker.txt": "e096be98c76b239e8922120508b62b8d0f68c72c2c42daea926e4b9be0c15fec",
+    "baseline/bin/baseline-apps": "1b71274f28d4e9fca8cae5b04a519954d300f41389a82173cb3bb10c0818a505",
+    "baseline/bin/baseline-tasker": "f55eae41fa64721bbec84a4b85a3b89262d7b961d5cf153fec99c61e54a34778",
+    "baseline/lib/tasker.py": "7b8f8a0e170f733f1251de4cc27a22befe6d4930672f2ce6eeac47bae9785507",
+    "boot/provision.sh": "48044eb890f5cf421d2f5dd8507b75cddc64ccf80a3def15332226651237046f",
+    "docs/BASELINE_BUILD_WALKTHROUGH.md": "f04c1c5053a4f06e9a20f82aa8e4c83fbefc61399c82400f94a61e4b53f2162f"
+  },
+  "extracted_files_matched": 467,
+  "failed_boot_attempt": {
+    "cause": "not diagnosed",
+    "cpu": "QEMU default",
+    "observed": "black display; firmware registers; no success claim",
+    "smp": 2
+  },
+  "scope": "manual installer/source content; no unattended answer/password hash; full provisioning and physical installation unverified",
+  "sha256": "10870d321f3f068343f36b1660bd4973ec81ff75fdac136a23a0b8897b922159",
+  "source_implementation_commit": "ad5f759",
+  "source_publisher_iso_sha256": "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c",
+  "source_signatures_verified": [
+    "24B30F06ECC1836A4E5EFECBA7BCD1420BFE778E",
+    "F4E136C67CDCE41AE6DE6FC81140AF8F639E0C39"
+  ]
+}

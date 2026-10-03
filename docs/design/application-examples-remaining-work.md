@@ -16,7 +16,7 @@ installation or authenticated account/playback/chat verification.
 | Durable recovery (75) | Earlier VM/LXC jobs and scoped recovery; app launch locking and incomplete generations explicit | App durable jobs, candidate promote/rollback, incomplete initial/restore repair, graceful app checkpoints and power-loss proof |
 | Backup/restore (59/60) | Earlier stopped LXC restore on separate virtual disk; stopped app archives restored/tested on Ubuntu | Full split-VM coverage, encrypted recurring private app sets, authenticated/keyring restore, independent physical destination |
 | Replacement device (77) | Requirement and queue; Debian retained-home root replacement is a narrower same-device proof | Independent encrypted remote destination, original-device-independent keys/identity, manifest, fresh hardware/storage mapping and actual original-unavailable restoration |
-| Environment deployment (72/73) | Ubuntu/11 LXC-family virtual proofs; native apps on Ubuntu/Debian | Current installer/ISO app staging, full physical/ordinary-network firstboot, requested other OS installs, Harvester adapter |
+| Environment deployment (72/73) | Ubuntu/11 LXC-family virtual proofs; native apps on Ubuntu/Debian | Full physical/ordinary-network firstboot, requested other OS installs, Harvester adapter |
 
 The shared five-app lifecycle now exists as software. It does not mean every
 native preference or all planned environment features are complete. Three apps
@@ -29,3 +29,10 @@ and turn the current actual Debian/Ubuntu evidence into a user-operated walkthro
 Then wire durable guest reconciliation and richer native capture. The existing
 physical six-volume layout must be discovered by UUID/serial, not overwritten to
 match an imagined layout. No AI runtime is required for these software workflows.
+
+DR134 implements current app/tasker source and documentation staging, two
+registered Ansible roles, editable app-recipe autofill and revision-scoped
+compatibility observations. Actual tasker runs: Debian five apps, Ubuntu Chrome;
+both changed=0 repeats. This closes the absence of reusable app task execution,
+not the general OS/physical installer or durable guest reconciler. See the
+[walkthrough](../BASELINE_BUILD_WALKTHROUGH.md).

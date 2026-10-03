@@ -6,6 +6,15 @@
 > `MD89N41071210AP4E` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
 > `ls -l /dev/disk/by-id/ | grep -E 'FD01N6557110C271B|MD89N41071210AP4E'` (v0.2 rows 27-29).
 
+## Current application-task handoff — 2026-10-03, DR134
+
+Read INSTALL.md and BASELINE_BUILD_WALKTHROUGH.md. Five native apps/retained
+Debian rebuild are DR133. DR134 adds source-verified Ansible roles, app task
+autofill and expected/observed compatibility. Actual Debian-five and
+Ubuntu-Chrome repeated runs changed=0; 2993 unit tests pass. Private test keys,
+profiles and Runner artifacts remain untracked. Physical drives were not
+written. Hardware autofill, full provision/firstboot and recovery remain open.
+
 ## Current incremental handoff — 2026-10-01, DR117
 
 Read [INSTALL.md](INSTALL.md) and [DR117](design/decision-records/117-real-ubuntu-proxmox-environment.md)

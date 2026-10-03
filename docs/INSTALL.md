@@ -552,3 +552,24 @@ not `/dev/vdX`. Rows74/76 and installer/physical row72 remain open. No new
 physical deployment occurred. See [DR133](design/decision-records/133-native-five-apps-and-retained-debian-rebuild.md)
 and [verification/133](verification/133/README.md). Installer/ISO application
 staging, storage-class routing and the complete user walkthrough remain open.
+
+## Reusable application tasks and installer guidance (DR134)
+
+baseline-tasker now emits typed, registered Ansible playbooks with editable
+cache/generation/private-data paths. Real roles install prerequisites and build
+or inspect native suites; successful target-source-verified observations are
+separate from expected compatibility. Actual disposable Debian13 runs cover all
+five apps; Ubuntu24.04 tasker runs cover Chrome. Both repeated with changed=0.
+All-five GUI evidence remains DR133, not a tasker readiness claim. 2993 unit
+tests pass; no physical deployment is verified. provision.sh/ISO staging now
+includes app/tasker code, automation and docs, but full current provisioning
+remains open. See [walkthrough](BASELINE_BUILD_WALKTHROUGH.md),
+[contract](design/tasker-recipe-contract.md) and
+[DR134](design/decision-records/134-reusable-ansible-tasker-and-installer-guidance.md).
+The autofill is an application recipe, not complete hardware volume setup.
+
+A DR134 manual Proxmox9.2 installer ISO now carries the updated source, roles
+and walkthrough. Real isolated KVM boot reaches the Proxmox menu; extracted
+critical file hashes match staged source. It contains no unattended answer or
+password hash and does not automatically provision Baseline. This verifies
+packaging/boot only, not installation or physical readiness.
