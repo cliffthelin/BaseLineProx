@@ -1,0 +1,20 @@
+{
+  "format": "baseline.vscode-build/v1",
+  "platform": "linux-x64",
+  "settings": {
+    "format": "baseline.vscode-settings/v1",
+    "settings": {
+      "editor.fontSize": 18,
+      "editor.insertSpaces": false,
+      "editor.tabSize": 4,
+      "editor.wordWrap": "on",
+      "files.autoSave": "off"
+    }
+  },
+  "source": {
+    "commit": "07f806f999227108933c2e30515b26eecc1fda74",
+    "sha256": "d32031e9e213d59532af3cf32fcb8b357a1cdd10417967b4f5b5ba30436dc0dc",
+    "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/07f806f999227108933c2e30515b26eecc1fda74/code-stable-x64-1790759436.tar.gz",
+    "version": "1.140.0"
+  }
+}

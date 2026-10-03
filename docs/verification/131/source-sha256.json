@@ -1,0 +1,6 @@
+{
+  "baseline/lib/vscode_build.py": "686a211a1754fc25f177a21b41e620dc41cf89ffebe1caeedd97527ddf9e0df0",
+  "baseline/bin/baseline-vscode-build": "88be8026c3a22d8a05a44f75c8c523335f362641b89fa02b0cc54e00ddd04a6f",
+  "tests/unit/test_vscode_build.py": "6a28d84efb56732fe059648f88efdb2dcf51d74858c5f6d217017a5f54ce22e3",
+  "boot/provision.sh": "bf85ca6426943559b44fd49bfcdc8d11a02be1b79c939ac0316e4b59d9661caf"
+}

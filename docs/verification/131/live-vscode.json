@@ -1,0 +1,19 @@
+{
+  "environment": "Fresh publisher Linux archive installation, separate profile and Xvfb; not managed VM or isolation proof",
+  "version": [
+    "1.140.0",
+    "07f806f999227108933c2e30515b26eecc1fda74",
+    "x64"
+  ],
+  "effective_settings": {
+    "fontSize": 18,
+    "tabSize": 4,
+    "insertSpaces": false,
+    "wordWrap": "on",
+    "autoSave": "off"
+  },
+  "probe": "Temporary development extension read actual workspace configuration API and quit application",
+  "scope": "No original user profile read; no account login; Spotify/VM rebuild/isolation unverified",
+  "archive_sha256": "d32031e9e213d59532af3cf32fcb8b357a1cdd10417967b4f5b5ba30436dc0dc",
+  "source_identity_matches_runtime": true
+}

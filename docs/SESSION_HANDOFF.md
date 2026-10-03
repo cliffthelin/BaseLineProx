@@ -1360,3 +1360,20 @@ Planned/not-done table: design/application-examples-remaining-work.md. Next bind
 verified installation source and recipe to managed fresh target installation;
 keybindings/snippets/extensions and Spotify adapter still open. Queues74/76/77
 and broader59/60/75 recovery remain open. See DR130 and verification130.
+
+## VS Code locked fresh archive build (DR131 — 2026-10-02)
+
+`baseline-vscode-build lock SETTINGS` resolves publisher metadata into a Linux-x64
+version/commit/URL/SHA256 lock with the approved configuration. `verify BUILD`,
+`fetch BUILD NEW_ARCHIVE`, and `install BUILD ARCHIVE NEW_TARGET` validate, download
+and materialize exact bytes plus a new profile/extensions directory. Existing
+targets refuse; failed downloads/installations can retain explicitly incomplete
+files. HTTPS metadata plus hash verification is not a detached signature.
+
+Actual fresh VS Code1.140.0 archive launched under Xvfb and read all five settings;
+runtime version/commit matched the lock. No managed VM/container installation,
+physical deployment, OS rebuild or app confinement proof. CLI installation itself
+reports runtime_verified:false until independently tested. Evidence verification/131.
+Generic recipe-stack integration, durable guest install, dependency handling,
+persistence/isolation and Spotify remain open under74/76. No earlier runtime claim
+is invalidated; DR130 remains the historical installed-copy test.
