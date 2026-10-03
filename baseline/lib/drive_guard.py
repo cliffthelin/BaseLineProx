@@ -97,13 +97,18 @@ def read_drive_state(device_path: str, *, run=None) -> DriveState:
     return DriveState(known=True, has_data=has_data, ptuuid=ptuuid, labels=labels, fstypes=fstypes)
 
 
+def is_own_label(label) -> bool:
+    """A partition name Baseline itself creates, current or older."""
+    return bool(_OWN_LABEL_RE.match(label or ""))
+
+
 def is_baseline_only(state: DriveState) -> bool:
     """True for a drive that is empty or whose every partition is one of Baseline's own volumes."""
     if not state.known:
         return False
     if not state.has_data:
         return True
-    return bool(state.labels) and all(_OWN_LABEL_RE.match(label or "") for label in state.labels)
+    return bool(state.labels) and all(is_own_label(label) for label in state.labels)
 
 
 def require_baseline_drive(device_path: str, *, run=None) -> None:
@@ -159,7 +164,7 @@ def stamp_installer_identity(cmd, device_path: str, *, serial: str, read=None) -
         return StampResult(False, f"could not read {device_path}, so it was not stamped")
     if state.ptuuid and is_installer_uuid(state.ptuuid):
         return StampResult(True, f"{device_path} already carries an installer UUID")
-    if state.has_data and not (state.labels and all(_OWN_LABEL_RE.match(label or "") for label in state.labels)):
+    if state.has_data and not is_baseline_only(state):
         return StampResult(False, f"{device_path} holds data that is not Baseline's own volumes, so the installer cannot adopt it")
     guid = new_installer_uuid()
     result = cmd.run(["sgdisk", "-U", guid, device_path], timeout=60)

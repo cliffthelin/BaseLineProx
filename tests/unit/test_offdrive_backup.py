@@ -138,6 +138,14 @@ def test_a_destination_layered_on_an_sk_hynix_drive_is_refused(dest_root):
               serials={"sdc": "FD01N6557110C271B"})
 
 
+def test_a_destination_on_an_enrolled_drive_is_refused_like_an_sk_hynix_drive(dest_root):
+    """A drive enrolled for Baseline to manage (drive_enrollment.py) is never also its separate backup drive."""
+    import drive_enrollment
+    drive_enrollment.enroll("S6WRNS0TA12638A", size_bytes=1, model="m", now=0.0)
+    with pytest.raises(ob.BackupError, match="not separate"):
+        _dest(dest_root, serials={"sdj": "S6WRNS0TA12638A"})
+
+
 def test_a_drive_whose_identity_cannot_be_read_is_refused(dest_root):
     with pytest.raises(ob.BackupError, match="identity"):
         _dest(dest_root, serials={})

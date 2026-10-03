@@ -48,9 +48,10 @@ VERBS = {
     "update_selected": "UPDATE",
     "stamp_installer_identity": "STAMP",
     "lay_out_baseline_drive": "LAYOUT",
+    "enroll_drive": "ENROLL",
 }
 CONFIRMED_ACTIONS = frozenset(VERBS)
-NEVER_PRE_APPROVED = frozenset({"build_self_installer", "lay_out_baseline_drive"})
+NEVER_PRE_APPROVED = frozenset({"build_self_installer", "lay_out_baseline_drive", "enroll_drive"})
 
 _SECRET = secrets.token_bytes(32)
 

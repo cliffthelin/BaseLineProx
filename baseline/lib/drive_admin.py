@@ -23,17 +23,14 @@ duration of one HTTP request, never logged, never written to disk.
 
 Every destructive action validates its target device via
 `physical_device_safety.validate_target_device` first - never a
-bare, unvalidated operator-typed path. Per that module's own
-documented, direct-instruction design ("Expected serial doesn't seem
-like it should be forced... Default is not and I do not want it
-restricted"), the target device is **selectable**, not hardcoded to
-exactly two serials: `list_candidate_drives` enumerates every real,
-non-boot block device on the machine so an operator can pick any of
-them. `DEFAULT_TARGET_SERIALS` (this project's own two pre-authorized
-disposable drives) only marks which candidate is pre-selected by
-default in the picker - it is a suggestion, never a restriction; any
-other real, sufficiently large, non-boot device validates and runs
-identically.
+bare, unvalidated operator-typed path. The drives it may act on are
+**restricted** (v0.2 row 55, direct instruction 2026-10-01: "this
+can't have any effect outside of the SK hynix"): the SK hynix drives in
+`ALLOWED_TARGET_SERIALS`, plus any drive deliberately added with
+`enroll_drive` (direct instruction 2026-10-03; `drive_enrollment.py`),
+which needs the typed serial to match the drive and a human
+confirmation. This replaced an earlier "selectable, never restricted"
+design; `allowed_target_serials()` is the one source of the set.
 
 Each `ACTIONS` entry pairs one human-readable description with the
 exact callable that runs - the web page's modal renders the same
@@ -47,9 +44,11 @@ import os
 import re
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import drive_enrollment
 import drive_guard
 import drive_installer
 import hitl
@@ -87,6 +86,11 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
 # serial because two drives of one model would otherwise look identical.
 ALLOWED_TARGET_SERIALS = frozenset({"MD89N41071210AP4E", "FD01N6557110C271B"})
 DEFAULT_TARGET_SERIALS = ALLOWED_TARGET_SERIALS      # older name, same set
+
+
+def allowed_target_serials() -> frozenset:
+    """The SK hynix drives plus the drives deliberately enrolled since (drive_enrollment.py)."""
+    return ALLOWED_TARGET_SERIALS | drive_enrollment.enrolled_serials()
 
 
 # ---------------------------------------------------------------------------
@@ -487,14 +491,15 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
     tree_proc = runner.run(drive_partition_summary_argv(), timeout=15)
     tree_rows = parse_lsblk_pairs(tree_proc.stdout) if tree_proc.returncode == 0 else []
     boot_serial = pds.get_boot_device_serial(pds_runner)
+    allowed = allowed_target_serials()
     drives = []
     for row in parse_candidate_drives(proc.stdout):
         name = row.get("NAME", "")
         serial = row.get("SERIAL") or None
         if not name or (boot_serial is not None and serial == boot_serial):
             continue
-        if serial not in ALLOWED_TARGET_SERIALS:
-            continue      # never offered, and never probed: not one of the SK hynix drives
+        if serial not in allowed:
+            continue      # never offered, and never probed: not an SK hynix or enrolled drive
         path = f"/dev/{name}"
         tran = row.get("TRAN", "")
         # Only a USB-attached device can sit behind a bridge chip -
@@ -520,6 +525,28 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
     # among the rest (and among Baseline drives themselves) is
     # preserved, not scrambled.
     drives.sort(key=lambda d: 0 if d["is_baseline_drive"] else 1)
+    return drives
+
+
+def list_enrollable_drives(runner: Runner, *, pds_runner=None) -> list:
+    """The non-boot drives that are not yet allowed and report a serial - what an operator may enroll.
+
+    Only the one whole-system `lsblk -d` listing is read (the same listing `list_candidate_drives` already reads,
+    which includes these drives anyway); nothing else about them is probed - no partitions, no volume groups - until
+    a person enrolls one. A drive that reports no serial cannot be enrolled: the serial is its identity."""
+    pds_runner = pds_runner or pds.Runner()
+    proc = runner.run(list_candidate_drives_argv(), timeout=15)
+    if proc.returncode != 0:
+        return []
+    boot_serial = pds.get_boot_device_serial(pds_runner)
+    allowed = allowed_target_serials()
+    drives = []
+    for row in parse_candidate_drives(proc.stdout):
+        serial = row.get("SERIAL") or ""
+        if not row.get("NAME") or not serial or serial == boot_serial or serial in allowed:
+            continue
+        drives.append({"path": f"/dev/{row['NAME']}", "serial": serial,
+                       "model": row.get("MODEL") or "Unknown model", "size": row.get("SIZE") or "?"})
     return drives
 
 
@@ -577,9 +604,9 @@ def resolve_target(device_path: str, *, pds_runner=None) -> dict:
     PhysicalDeviceSafetyError) unless the real, currently-attached
     device at `device_path` is a genuine, non-boot block device of at
     least `MIN_TARGET_SIZE_BYTES` AND its serial is one of
-    `ALLOWED_TARGET_SERIALS`. Any other drive, however real and large, is
-    refused (direct instruction, 2026-10-01)."""
-    return pds.validate_target_device(device_path, expected_serial=sorted(ALLOWED_TARGET_SERIALS),
+    `allowed_target_serials()`. Any other drive, however real and large, is
+    refused (direct instruction, 2026-10-01) until it is enrolled."""
+    return pds.validate_target_device(device_path, expected_serial=sorted(allowed_target_serials()),
                                       min_size_bytes=MIN_TARGET_SIZE_BYTES, runner=pds_runner)
 
 
@@ -1125,6 +1152,36 @@ ACTIONS["lay_out_baseline_drive"] = ActionSpec(
 )
 
 
+def enroll_drive(runner: Runner, *, device_path: str, confirm_serial: str, pds_runner=None,
+                 now: float | None = None) -> ActionResult:
+    """Add one drive to the drives Baseline may act on. Writes nothing to the drive itself.
+
+    Validated again here, not only in `_prepare`: the drive at `device_path` must be a real, non-boot block device of
+    at least `MIN_TARGET_SIZE_BYTES` whose own serial is exactly the one the operator typed."""
+    try:
+        validated = pds.validate_target_device(device_path, expected_serial=drive_enrollment.check_serial(confirm_serial),
+                                               min_size_bytes=MIN_TARGET_SIZE_BYTES, runner=pds_runner)
+    except (pds.PhysicalDeviceSafetyError, ValueError) as exc:
+        return ActionResult(False, f"refused: {exc}")
+    serial = validated["serial"]
+    if serial in allowed_target_serials():
+        return ActionResult(True, f"drive with serial {serial} is already one Baseline may act on; nothing changed")
+    drive_enrollment.enroll(serial, size_bytes=validated["size_bytes"], model="",
+                            now=time.time() if now is None else now)
+    return ActionResult(True, f"enrolled drive with serial {serial}. Nothing was written to it; formatting it "
+                              "still needs it to be empty or to carry an installer identity")
+
+
+ACTIONS["enroll_drive"] = ActionSpec(
+    "enroll_drive",
+    "Add this drive to the drives Baseline may act on. Type the drive's serial exactly as it reports it; it must "
+    "match. This writes nothing to the drive: formatting it later still needs it to be empty or to carry an "
+    "installer identity. Confirmed by a person every time.",
+    lambda runner, device_path, **params: enroll_drive(runner, device_path=device_path, **params),
+    requires_device=True,
+)
+
+
 def describe_actions() -> list:
     return [{"action_id": spec.action_id, "description": spec.description,
               "requires_device": spec.requires_device} for spec in ACTIONS.values()]
@@ -1157,6 +1214,7 @@ ACTION_PARAMS = {
     "update_selected": frozenset({"selected", "device_path"}),     # the page sends device_path for every action
     "stamp_installer_identity": frozenset({"device_path"}),
     "lay_out_baseline_drive": frozenset({"device_path"}),
+    "enroll_drive": frozenset({"device_path", "confirm_serial"}),
 }
 
 # Actions that format or install over a drive. They can never run on a drive that holds data and does not carry a
@@ -1263,6 +1321,7 @@ _PARAM_CHECKS = {
     "mountpoint": _check_mountpoint,
     "selected": _check_selected,
     "expected_serial": _check_expected_serial,
+    "confirm_serial": drive_enrollment.check_serial,
     "proxmox_source_iso": lambda v: _check_safe_path("proxmox_source_iso", v),
     "cert_path": lambda v: _check_safe_path("cert_path", v),
     "key_path": lambda v: _check_safe_path("key_path", v),
@@ -1304,6 +1363,9 @@ def _prepare(action_id: str, params: dict, pds_runner=None) -> tuple:
         device_path = call_params.get("device_path")
         if not device_path:
             raise ValueError(f"{action_id} needs a drive and none was given")
+        if action_id == "enroll_drive":
+            call_params, serial = _prepare_enrollment(call_params, pds_runner)
+            return spec, call_params, serial
         try:
             validated = resolve_target(device_path, pds_runner=pds_runner)
         except pds.PhysicalDeviceSafetyError:
@@ -1323,6 +1385,22 @@ def _prepare(action_id: str, params: dict, pds_runner=None) -> tuple:
                 raise ValueError("refused: this drive holds Baseline's data and there is no proof of a successful "
                                  "backup in the last 24 hours. Run a backup first")
     return spec, call_params, serial
+
+
+def _prepare_enrollment(call_params: dict, pds_runner) -> tuple:
+    """Enrollment is the one action whose drive is, by definition, not yet allowed. Instead of the allowlist, the
+    drive must report exactly the serial the operator typed, and still be a real, non-boot, large enough device."""
+    typed = call_params.get("confirm_serial")
+    if not typed:
+        raise ValueError(f"refused: {call_params['device_path']} is not one of the allowed drives until it is "
+                         "enrolled, and enrolling it needs its serial typed")
+    try:
+        validated = pds.validate_target_device(call_params["device_path"], expected_serial=typed,
+                                               min_size_bytes=MIN_TARGET_SIZE_BYTES, runner=pds_runner)
+    except pds.PhysicalDeviceSafetyError as exc:
+        raise ValueError(f"refused: {exc}") from None
+    call_params["device_path"] = validated["path"]
+    return call_params, validated["serial"]
 
 
 def prepare_action(action_id: str, params: dict, *, pds_runner=None) -> dict:
@@ -1362,6 +1440,6 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
         return ActionResult(False, f"refused: this action needs a human confirmation ({exc})")
     if on_progress is not None:
         call_params["on_progress"] = on_progress
-    if action_id == "lay_out_baseline_drive":
+    if action_id in ("lay_out_baseline_drive", "enroll_drive"):
         call_params["pds_runner"] = pds_runner
     return spec.run(runner, **call_params)

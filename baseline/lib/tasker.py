@@ -53,11 +53,14 @@ def catalog():
     return {'format':'baseline.task-catalog/v1','components':components}
 
 
-def template(suite,*,cache,generation,data,run_as='baseline-admin',with_runtime=False):
-    suite=ab.validate_suite(suite)
-    literal=json.dumps([suite,cache,generation,data],sort_keys=True)
-    if any(token in literal for token in ('{{','{%','{#')):
+def _reject_templating(value):
+    if any(token in json.dumps(value,sort_keys=True) for token in ('{{','{%','{#')):
         raise er.RecipeError('recipe variables must be literal values; registered roles own templating')
+
+
+def validate_task_storage(*,cache,generation,data,run_as):
+    """The account and storage paths every application task runs with; shared with install_plan."""
+    _reject_templating([cache,generation,data,run_as])
     if not isinstance(run_as,str) or not re.fullmatch('[a-z_][a-z0-9_-]{0,31}',run_as) or run_as=='root':
         raise er.RecipeError('application tasks require a named non-root account')
     paths=[]
@@ -68,6 +71,12 @@ def template(suite,*,cache,generation,data,run_as='baseline-admin',with_runtime=
     for i,path in enumerate(paths):
         if any(path==other or path in other.parents or other in path.parents for other in paths[i+1:]):
             raise er.RecipeError('task cache, generation and data paths overlap')
+
+
+def template(suite,*,cache,generation,data,run_as='baseline-admin',with_runtime=False):
+    suite=ab.validate_suite(suite)
+    _reject_templating([suite,cache,generation,data])
+    validate_task_storage(cache=cache,generation=generation,data=data,run_as=run_as)
     if not isinstance(with_runtime,bool):raise er.RecipeError('runtime choice must be boolean')
     plays=[{'name':'Baseline locked native application build','hosts':'baseline_target',
              'gather_facts':False,'become':True,'become_user':run_as,

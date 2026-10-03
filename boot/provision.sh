@@ -286,6 +286,11 @@ cp "$SRC/baseline/lib/offdrive_backup.py" /opt/baseline/lib/offdrive_backup.py
 cp "$SRC/baseline/lib/web_security.py" /opt/baseline/lib/web_security.py
 cp "$SRC/baseline/lib/hitl.py" /opt/baseline/lib/hitl.py
 cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
+# Deliberate drive enrollment and the installer plan (discover/autofill/validate/compile), 2026-10-03.
+cp "$SRC/baseline/lib/drive_enrollment.py" /opt/baseline/lib/drive_enrollment.py
+cp "$SRC/baseline/lib/install_plan.py" /opt/baseline/lib/install_plan.py
+cp "$SRC/baseline/bin/baseline-install-plan" /opt/baseline/bin/baseline-install-plan
+chmod 755 /opt/baseline/bin/baseline-install-plan
 cp "$SRC/baseline/lib/web_gate.py" /opt/baseline/lib/web_gate.py
 cp "$SRC/baseline/lib/operations.py" /opt/baseline/lib/operations.py
 cp "$SRC/baseline/lib/operations_page.py" /opt/baseline/lib/operations_page.py
@@ -429,6 +434,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/backup_recurring.py \
          /opt/baseline/lib/offdrive_backup.py \
          /opt/baseline/lib/web_security.py /opt/baseline/lib/hitl.py /opt/baseline/lib/drive_guard.py /opt/baseline/lib/web_gate.py \
+         /opt/baseline/lib/drive_enrollment.py /opt/baseline/lib/install_plan.py /opt/baseline/bin/baseline-install-plan \
          /opt/baseline/lib/operations.py /opt/baseline/lib/operations_page.py /opt/baseline/lib/operator_accounts.py /opt/baseline/lib/audit_view.py /opt/baseline/lib/launcher.py /opt/baseline/bin/baseline-launcher /opt/baseline/lib/remote_access.py /opt/baseline/lib/baseline_drive_layout.py \
          /opt/baseline/lib/recovery_mode.py /opt/baseline/bin/baseline-recovery-mode \
          /opt/baseline/lib/drive_admin.py /opt/baseline/lib/baseline_web.py /opt/baseline/bin/baseline-web \
@@ -460,6 +466,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          \
          /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web \
          /opt/baseline/bin/baseline-apps /opt/baseline/bin/baseline-tasker \
+         /opt/baseline/bin/baseline-install-plan \
          /opt/baseline/bin/baseline-dependency-check; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done

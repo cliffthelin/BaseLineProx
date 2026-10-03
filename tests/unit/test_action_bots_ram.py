@@ -40,15 +40,21 @@ def bot_case(role, tmp_path):
     return _RealServerCase(deps)
 
 
+def params_for(action):
+    """What the Drive Administration page sends for `action`."""
+    if action == "update_selected":
+        return {"selected": ["BASELINE"]}
+    if action == "enroll_drive":
+        return {**PARAMS, "confirm_serial": "MD89N41071210AP4E"}     # the serial the RAM drive reports
+    return PARAMS
+
+
 def attempt(case, action):
     """Ask for `action` the way its page does. Returns the HTTP status, the body, and the job if one started."""
     if action in ops.OPERATIONS:
         status, body = _req(case, "POST", "/operations/run", {"op": action})
     else:
-        params = {} if action == "update_selected" else PARAMS
-        if action == "update_selected":
-            params = {"selected": ["BASELINE"]}
-        status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params})
+        status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
         if status == 200 and body.get("outcome") == "confirmation_required":
             chal = body["challenge"]
             status, body = _req(case, "POST", "/drive-admin/confirm",
@@ -82,8 +88,7 @@ def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
 def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
     case = bot_case(f"bot:{action}", tmp_path)
     try:
-        params = {"selected": ["BASELINE"]} if action == "update_selected" else PARAMS
-        status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params})
+        status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
         assert body["outcome"] == "confirmation_required" and "job_id" not in body
         assert ram.installs == 0 and ram.calls == [] and ram.intact()
     finally:

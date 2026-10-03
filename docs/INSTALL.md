@@ -573,3 +573,22 @@ and walkthrough. Real isolated KVM boot reaches the Proxmox menu; extracted
 critical file hashes match staged source. It contains no unattended answer or
 password hash and does not automatically provision Baseline. This verifies
 packaging/boot only, not installation or physical readiness.
+
+## Drive enrollment and the install plan (DR135)
+
+Baseline still acts only on the SK hynix drives, plus any drive a person
+deliberately enrolls with the `enroll_drive` Drive Administration action. That
+action takes the drive's serial typed exactly, must match what the drive
+reports, and needs a human confirmation every time. It writes nothing to the
+drive. `baseline/bin/baseline-install-plan discover | autofill | validate PLAN |
+compile PLAN` reads one `lsblk` listing. It autofills an editable JSON plan
+(drives by serial, Baseline volumes by PARTUUID, Ubuntu 24.04 desktop, five
+apps), checks every edit against fresh discovery, and prints the parameters
+the existing stages take. It runs none of them. Retained volumes compile to
+`PARTUUID=` mounts, because `LABEL=` is ambiguous once two drives carry
+Baseline's labels.
+Unit-tested against fakes only: real-drive discovery was not run (the
+development sandbox returns no `lsblk` output), and nothing has been enrolled
+or provisioned with it. Running the stages as one job, applying the mounts and
+a web editor remain open under rows 72/75/76.
+

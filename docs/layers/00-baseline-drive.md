@@ -30,7 +30,10 @@ the path is not a symlink, it is a real block device, it meets the minimum size,
 not the running boot drive. On top of that, **Baseline acts only on the two SK hynix drives it
 is set up with** (v0.2 row 55): `drive_admin.ALLOWED_TARGET_SERIALS` is enforced, the picker
 never offers any other drive, and `perform_action` refuses any other drive before running a
-single command. The media and other NVMe drives on this machine cannot be selected. The one
+single command. The media and other NVMe drives on this machine cannot be selected until a
+person deliberately enrolls one (`enroll_drive`, DR135: typed serial must match, human
+confirmation every time; enrollment writes nothing to the drive and drive_guard still decides
+formatting). The one
 deliberate exception, a backup destination on a separate drive, is designed but not built
 (row 56).
 

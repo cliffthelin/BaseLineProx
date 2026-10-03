@@ -41,6 +41,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import drive_enrollment
 import web_gate
 
 BACKUP_DIR_NAME = "baseline-backups"
@@ -149,9 +150,10 @@ def resolve_destination(path: str, *, run, allowed_serials, boot_serial: str | N
         if not serial:
             raise BackupError(f"cannot read the drive identity of /dev/{disk}, so it cannot be shown to be separate")
         serials[disk] = serial
+    managed = frozenset(allowed_serials) | drive_enrollment.enrolled_serials()   # enrolled drives are managed too
     for disk, serial in serials.items():
-        if serial in allowed_serials:
-            raise BackupError(f"destination is on /dev/{disk}, one of the SK hynix drives Baseline manages: "
+        if serial in managed:
+            raise BackupError(f"destination is on /dev/{disk}, one of the drives Baseline manages: "
                               "the destination is not separate from the data it protects")
         if boot_serial is not None and serial == boot_serial:
             raise BackupError(f"destination is on /dev/{disk}, the running boot drive")

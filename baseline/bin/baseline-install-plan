@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Discover drives, autofill an editable install plan, validate it and compile it into stage parameters.
+
+Read-only: it runs `lsblk` and reads Baseline's registry, and never writes to a drive or runs a stage.
+See baseline/lib/install_plan.py."""
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import drive_admin  # noqa: E402
+import install_plan  # noqa: E402
+import physical_device_safety as pds  # noqa: E402
+
+
+def read_listing() -> str:
+    proc = subprocess.run(install_plan.lsblk_argv(), capture_output=True, text=True, timeout=30)
+    if proc.returncode != 0:
+        raise install_plan.PlanError(f"lsblk failed: {proc.stderr.strip()[:200]}")
+    return proc.stdout
+
+
+if __name__ == "__main__":
+    sys.exit(install_plan.main(sys.argv[1:], read_listing=read_listing,
+                               boot_serial=pds.get_boot_device_serial(pds.Runner()),
+                               allowed_serials=drive_admin.allowed_target_serials()))
