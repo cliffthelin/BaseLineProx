@@ -10,7 +10,13 @@ def perform(body):
     keys={'action','document','app_document'} if action=='compose' else {'action','document'}
     if set(body)-keys or not {'action','document'}<=set(body):
         raise er.RecipeError('unsupported recipe action fields')
-    if action=='validate':
+    excluded_count=None
+    if action=='capture_vscode':
+        import vscode_capture
+        preview=vscode_capture.capture(body['document'])
+        document=preview['document'];serialized=vscode_capture.export(document)
+        excluded_count=preview['excluded_count']
+    elif action=='validate':
         document=er.load(body['document']);serialized=er.export(document)
     elif action=='verify':
         document=er.verify_stack(er.read_document(body['document']))
@@ -23,7 +29,7 @@ def perform(body):
     else:raise er.RecipeError('unsupported recipe action')
     return {'ok':True,'document':document,'export_json':serialized,
             'digest':hashlib.sha256(serialized.encode('ascii')).hexdigest(),
-            'runtime_applied':False,'sources_verified':False}
+            'runtime_applied':False,'sources_verified':False,'excluded_count':excluded_count}
 
 
 def render():
@@ -46,6 +52,8 @@ def render():
 <label for="app_document">Application recipe JSON (optional, used only when composing)</label>
 <input type="file" id="appfile" accept=".json,application/json" aria-label="Load app recipe JSON file">
 <textarea id="app_document" spellcheck="false"></textarea>
+<button onclick="run('capture_vscode')">Preview VS Code settings</button>
+<p>VS Code preview accepts a selected settings.json (JSON with comments). Only font size, tab size, spaces, word wrap and auto-save are included. Unknown settings are excluded; extensions, snippets, keybindings and Spotify capture remain unimplemented. Output is a settings artifact, not an installable recipe.</p>
 <button onclick="run('validate')">Validate recipe</button><button onclick="run('compose')">Compose stack</button><button onclick="run('verify')">Verify stack</button>
 <button id="download" disabled onclick="download()">Export validated JSON</button>
 <p id="status" role="status" aria-live="polite"></p><pre id="result"></pre>
@@ -81,7 +89,7 @@ async function run(action){
  if(snapshot[0]!==document.getElementById('document').value||snapshot[1]!==document.getElementById('app_document').value)throw Error('Input changed; validate again');
  validated=result.export_json;document.getElementById('download').disabled=false;
  document.getElementById('result').textContent=JSON.stringify(result.document,null,2);
- document.getElementById('status').textContent='Configuration validated. Not deployed; sources unverified. SHA256 '+result.digest;
+ document.getElementById('status').textContent='Configuration validated. Not deployed; sources unverified. '+(result.excluded_count===null?'':result.excluded_count+' unsupported setting(s) excluded. ')+'SHA256 '+result.digest;
  }catch(error){clear();document.getElementById('status').textContent=error.message;}
 }
 function download(){if(validated===null)return;const url=URL.createObjectURL(new Blob([validated],{type:'application/json'}));

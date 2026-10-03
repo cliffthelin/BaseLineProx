@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Preview selected VS Code settings or stage approved settings in a new profile."""
+import argparse
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'lib'))
+import vscode_capture as vc
+import environment_recipes as er
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('action',choices=['capture','stage'])
+parser.add_argument('input')
+parser.add_argument('target',nargs='?')
+args=parser.parse_args()
+try:
+    with Path(args.input).open() as stream:text=stream.read(65537)
+    if args.action=='capture':
+        if args.target:raise er.RecipeError('capture takes no destination')
+        result=vc.capture(text)
+    else:
+        if not args.target:raise er.RecipeError('stage requires a new user-data directory')
+        path=vc.stage_fresh(er.read_document(text),args.target)
+        result={'settings_path':str(path),'runtime_applied':False,'test_install_verified':False}
+    print(json.dumps(result,sort_keys=True,indent=2))
+except (er.RecipeError,OSError) as exc:
+    print('Refused: '+str(exc),file=sys.stderr);sys.exit(1)
