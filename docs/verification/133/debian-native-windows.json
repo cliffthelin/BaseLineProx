@@ -1,0 +1,37 @@
+{
+  "vscode": {
+    "app": "vscode",
+    "window_tree": "\nxwininfo: Window id: 0x21f (the root window) (has no name)\n\n  Root window id: 0x21f (the root window) (has no name)\n  Parent window id: 0x0 (none)\n     4 children:\n     0x200003 \"Welcome - Visual Studio Code\": (\"code\" \"code\")  1208x804+36+50  +36+50\n     0x200005 (has no name): ()  1x1+0+0  +0+0\n     0x400001 \"code\": (\"code\" \"Code\")  10x10+10+10  +10+10\n     0x200000 \"Chromium clipboard\": ()  10x10+-100+-100  +-100+-100\n\n",
+    "exit_before_stop": null,
+    "account_authenticated": false,
+    "scope": "actual native GUI on fresh Debian OS with retained profile; no account or cloud restore claim"
+  },
+  "spotify": {
+    "app": "spotify",
+    "window_tree": "\nxwininfo: Window id: 0x21f (the root window) (has no name)\n\n  Root window id: 0x21f (the root window) (has no name)\n  Parent window id: 0x0 (none)\n     4 children:\n     0x200003 \"Spotify\": (\"spotify\" \"Spotify\")  800x600+240+150  +240+150\n     0x200007 (has no name): ()  1x1+0+0  +0+0\n     0x400001 \"spotify\": (\"spotify\" \"Spotify\")  10x10+10+10  +10+10\n     0x200000 \"Chromium clipboard\": ()  10x10+-100+-100  +-100+-100\n\n",
+    "exit_before_stop": null,
+    "account_authenticated": false,
+    "scope": "actual native GUI on fresh Debian OS with retained profile; no account or cloud restore claim"
+  },
+  "chrome": {
+    "app": "chrome",
+    "window_tree": "\nxwininfo: Window id: 0x21f (the root window) (has no name)\n\n  Root window id: 0x21f (the root window) (has no name)\n  Parent window id: 0x0 (none)\n     4 children:\n     0x200002 \"New Tab - Google Chrome\": (\"google-chrome (/home/baseline/.config/google-chrome)\" \"Google-chrome\")  1050x900+10+0  +10+0\n     0x200004 (has no name): ()  1x1+0+0  +0+0\n     0x400001 \"chrome\": (\"chrome\" \"Chrome\")  10x10+10+10  +10+10\n     0x200000 \"Chromium clipboard\": ()  10x10+-100+-100  +-100+-100\n\n",
+    "exit_before_stop": null,
+    "account_authenticated": false,
+    "scope": "actual native GUI on fresh Debian OS with retained profile; no account or cloud restore claim"
+  },
+  "chatgpt": {
+    "app": "chatgpt",
+    "window_tree": "\nxwininfo: Window id: 0x21f (the root window) (has no name)\n\n  Root window id: 0x21f (the root window) (has no name)\n  Parent window id: 0x0 (none)\n     4 children:\n     0x200003 \"ChatGPT\": (\"chatgpt (/home/baseline/.config/Codex)\" \"Chatgpt\")  1090x760+95+70  +95+70\n     0x20000b (has no name): ()  1x1+0+0  +0+0\n     0x400001 \"ChatGPT\": (\"ChatGPT\" \"ChatGPT\")  10x10+10+10  +10+10\n     0x200000 \"Chromium clipboard\": ()  10x10+-100+-100  +-100+-100\n\n",
+    "exit_before_stop": null,
+    "account_authenticated": false,
+    "scope": "actual native GUI on fresh Debian OS with retained profile; no account or cloud restore claim"
+  },
+  "claude": {
+    "app": "claude",
+    "window_tree": "\nxwininfo: Window id: 0x21f (the root window) (has no name)\n\n  Root window id: 0x21f (the root window) (has no name)\n  Parent window id: 0x0 (none)\n     5 children:\n     0x200003 \"Claude\": (\"com.anthropic.claude\" \"com.anthropic.Claude\")  1208x804+36+100  +36+100\n     0x20000a (has no name): ()  1x1+0+0  +0+0\n     0x400002 \"claude-desktop\": (\"claude-desktop\" \"Claude-desktop\")  16x16+0+0  +0+0\n        1 child:\n        0x400003 (has no name): ()  1x1+-1+-1  +-1+-1\n     0x400001 \"claude-desktop\": (\"claude-desktop\" \"Claude-desktop\")  10x10+10+10  +10+10\n     0x200000 \"Chromium clipboard\": ()  10x10+-100+-100  +-100+-100\n\n",
+    "exit_before_stop": null,
+    "account_authenticated": false,
+    "scope": "actual native GUI on fresh Debian OS with retained profile; no account or cloud restore claim"
+  }
+}

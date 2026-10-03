@@ -512,3 +512,43 @@ shared discover/capture/lock/acquire/install/verify/rebuild phases, explicit nat
 capabilities and a test-first extension checklist. Current Ubuntu recipe and
 Linux-x64 VS Code limits remain; this document adds no cross-OS runtime support.
 Generic integration and managed reconciliation remain queue76; isolation remains74.
+
+## Native application workflow (DR133)
+
+The `baseline-apps` / `application_bundle.py` workflow now downloads
+and verifies exact publisher packages for VS Code, Spotify, Google Chrome,
+native ChatGPT Linux preview and native Claude Desktop Linux beta. All five
+have rendered actual windows in Ubuntu24.04.5 inside the disposable Proxmox
+clone and in a separate Debian13.7 KVM VM. Spotify required a private D-Bus
+session; earlier black-window captures are failed evidence, not readiness.
+The profile-switch and crash-recovery homepage fixes were checked on both guests;
+Chrome reaches the actual Proxmox endpoint but stops at its untrusted-certificate
+screen. Human certificate acceptance/login remains open.
+No operator account was authenticated and no physical drive was written.
+
+Stopped, unauthenticated Ubuntu private profiles were backed up, restored into
+new private targets and matched by file contents before fresh payload installs.
+Debian13.7 now completed a real disposable-KVM OS-root replacement and
+reinstalled all five locked native packages through the suite CLI. Before
+launching applications, all five private identities and30,827 retained regular
+files matched their stopped pre-rebuild inventory exactly. This is not proof
+of account login/playback/chat, encrypted recovery or physical deployment.
+All five rendered native windows after the rebuild. GDM is active and generated
+application menu entries exist; interactive human login/Wayland remain unverified. Native extraction/apply covers five VS Code settings and Chrome's
+homepage; Spotify/ChatGPT/Claude exports currently contain Baseline launch
+options only. Full native preferences are retained privately, never exported as
+a sharing recipe. The optional login-browser grant shares only Chrome code;
+its browser profile belongs to the requesting app. Actual Debian dispatch opened
+the public ChatGPT website and Claude native action; cross-app/file URIs refused.
+This is not authenticated OAuth proof.
+
+The disposable clone's root was expanded from24 to48GiB and Ubuntu VM100's
+root from12 to24GiB for old/new-generation testing. The physical Proxmox drive
+was not resized. A `/tmp` user-quota I/O failure required stopping the clone,
+moving its COW overlay to disk-backed workspace storage and restarting it.
+These are test capacity events, not physical-drive fixes. Debian's publisher
+cloud image required UEFI; retained home is addressed by its virtio serial,
+not `/dev/vdX`. Rows74/76 and installer/physical row72 remain open. No new
+physical deployment occurred. See [DR133](design/decision-records/133-native-five-apps-and-retained-debian-rebuild.md)
+and [verification/133](verification/133/README.md). Installer/ISO application
+staging, storage-class routing and the complete user walkthrough remain open.

@@ -1,0 +1,36 @@
+{
+  "applications": {
+    "vscode": {
+      "identity_preserved": true,
+      "checked_files": 124,
+      "missing_count": 0,
+      "changed_count": 0
+    },
+    "spotify": {
+      "identity_preserved": true,
+      "checked_files": 4,
+      "missing_count": 0,
+      "changed_count": 0
+    },
+    "chrome": {
+      "identity_preserved": true,
+      "checked_files": 307,
+      "missing_count": 0,
+      "changed_count": 0
+    },
+    "chatgpt": {
+      "identity_preserved": true,
+      "checked_files": 29734,
+      "missing_count": 0,
+      "changed_count": 0
+    },
+    "claude": {
+      "identity_preserved": true,
+      "checked_files": 658,
+      "missing_count": 0,
+      "changed_count": 0
+    }
+  },
+  "passed": true,
+  "scope": "stopped regular-file inventory before launching; actual disposable Debian KVM OS replacement"
+}

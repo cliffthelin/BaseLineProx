@@ -1,0 +1,37 @@
+{
+  "vscode": {
+    "medium": "tar.gz",
+    "package": "code",
+    "sha256": "d32031e9e213d59532af3cf32fcb8b357a1cdd10417967b4f5b5ba30436dc0dc",
+    "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/07f806f999227108933c2e30515b26eecc1fda74/code-stable-x64-1790759436.tar.gz",
+    "version": "1.140.0"
+  },
+  "spotify": {
+    "medium": "deb",
+    "package": "spotify-client",
+    "sha256": "256e2eb1ec96fbc0c51afab247298e4e6eabfabbafafd4617584f44cca2fb31f",
+    "url": "https://repository.spotify.com/pool/non-free/s/spotify-client/spotify-client_1.2.95.453.g0eeebbed_amd64.deb",
+    "version": "1:1.2.95.453.g0eeebbed"
+  },
+  "chrome": {
+    "medium": "deb",
+    "package": "google-chrome-stable",
+    "sha256": "a4edbe95e9b01db6c9b97d7a1323121eda18362b5620df06abac1b59bee80053",
+    "url": "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_154.0.8037.97-1_amd64.deb",
+    "version": "154.0.8037.97-1"
+  },
+  "chatgpt": {
+    "medium": "deb",
+    "package": "chatgpt",
+    "sha256": "e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16",
+    "url": "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb",
+    "version": "26.930.31730"
+  },
+  "claude": {
+    "medium": "deb",
+    "package": "claude-desktop",
+    "sha256": "3cfddb23bf2911e05e27b4ed3856b8e795df94643b2c35b59deb317cf995bca0",
+    "url": "https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_2.9939.4_amd64.deb",
+    "version": "2.9939.4"
+  }
+}

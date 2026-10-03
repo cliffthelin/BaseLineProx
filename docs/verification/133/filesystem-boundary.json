@@ -1,0 +1,19 @@
+{
+  "results": {
+    "no_grant": {
+      "own_file_visible": true,
+      "other_private_home_visible": false,
+      "exchange_visible": false,
+      "application_code_readonly": true,
+      "inherited_host_variable_visible": false
+    },
+    "explicit_exchange": {
+      "own_file_visible": true,
+      "other_private_home_visible": false,
+      "exchange_visible": true,
+      "application_code_readonly": true,
+      "inherited_host_variable_visible": false
+    }
+  },
+  "scope": "actual Debian namespace filesystem/explicit exchange proof; shared X11/audio/network and same host UID remain outside full phone-OS isolation"
+}
