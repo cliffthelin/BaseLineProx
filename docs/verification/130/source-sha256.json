@@ -1,0 +1,7 @@
+{
+  "baseline/lib/vscode_capture.py": "4e8a45c9663ab4ddcdc12afde037a77a785753b4acfc38c54fee7f4e524c323f",
+  "baseline/lib/recipe_page.py": "27e1748d059f8220529f6fdb0f3a35550dd43f8dca3c513d89b182e01cb0f0c5",
+  "baseline/bin/baseline-vscode-settings": "0f7984ee9abdc60170cdeb632670ee361913d2ca63d52f40fb248d1030d107e6",
+  "boot/provision.sh": "5a37f56b077dc7982f341d065a1ce344a15cd8bb474b88f1c189dbabe14bc30d",
+  "tests/unit/test_vscode_capture.py": "2233d0c5a5e74c335d4128e9cb9219e7d5b88266f893b20e885d4b05a01c29df"
+}

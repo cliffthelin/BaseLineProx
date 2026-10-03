@@ -1349,3 +1349,14 @@ only; recipe_ready/test_install_verified false. Other media/containers, content
 classification/export and clean install remain queue76. Replacement recovery row77
 added. Existing queue74 isolation and59/60/75 recovery still open. See DR129 and
 verification129; no physical writes or deployment claimed.
+
+## DR130 incremental handoff — 2026-10-02
+
+User examples: VS Code first, Spotify second. Implemented five-setting JSONC
+preview/export, CLI capture/new-profile stage. Actual installed Linux VS Code
+consumed staged settings under Xvfb; no original profile/accounts read. No new
+binary install or VM/container/isolation proof. 25 focused tests passed.
+Planned/not-done table: design/application-examples-remaining-work.md. Next bind
+verified installation source and recipe to managed fresh target installation;
+keybindings/snippets/extensions and Spotify adapter still open. Queues74/76/77
+and broader59/60/75 recovery remain open. See DR130 and verification130.

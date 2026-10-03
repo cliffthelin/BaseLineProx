@@ -476,3 +476,14 @@ managed Ubuntu inside disposable KVM Proxmox passed and report survived service
 restart; guest confirmed stopped afterward. No config contents, recipe install/
 apply, isolation or physical deployment proof. See verification/129 for helper
 errors and evidence boundaries.
+
+## VS Code settings preview and staging (DR130)
+
+On Environment recipes, load/paste a selected VS Code settings.json and choose
+Preview VS Code settings. Five approved portable editor settings are captured;
+unknown values are excluded and counted. Export is a settings artifact, not an
+installation recipe. baseline-vscode-settings capture INPUT previews; stage
+ARTIFACT NEW_USER_DATA_DIR writes native settings only to a new directory.
+Actual installed Linux VS Code read all five staged settings in a fresh profile.
+No fresh binary install, VM rebuild, cross-OS/isolation or Spotify proof. See
+verification/130 and design/application-examples-remaining-work.md.
