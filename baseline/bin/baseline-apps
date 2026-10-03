@@ -7,7 +7,7 @@ import application_bundle as ab
 import environment_recipes as er
 parser=argparse.ArgumentParser(description=__doc__)
 commands=parser.add_subparsers(dest='action',required=True)
-for action in ('capture','prepare','verify','acquire','install','launch','preflight','backup','restore','runtime-plan','install-runtime','capture-installed','apply','compose','retarget','build-suite','desktop-launchers'):
+for action in ('capture','prepare','verify','acquire','install','launch','preflight','backup','restore','runtime-plan','install-runtime','capture-installed','apply','compose','retarget','build-suite','desktop-launchers','verify-suite','inspect-suite'):
     command=commands.add_parser(action)
     if action in ('capture','prepare'):command.add_argument('app',choices=ab.APPS)
     if action not in ('runtime-plan','install-runtime'):command.add_argument('input')
@@ -22,6 +22,7 @@ for action in ('capture','prepare','verify','acquire','install','launch','prefli
     if action=='restore':command.add_argument('archive');command.add_argument('target')
     if action=='install-runtime':command.add_argument('--update',action='store_true')
     if action=='apply':command.add_argument('configuration')
+    if action=='inspect-suite':command.add_argument('generation');command.add_argument('data')
     if action=='build-suite':command.add_argument('generation');command.add_argument('data');command.add_argument('--cache',required=True)
     if action=='retarget':command.add_argument('--os',required=True,choices=['ubuntu','debian']);command.add_argument('--release',required=True)
 args=parser.parse_args()
@@ -42,7 +43,9 @@ try:
         result=ab.sandbox_preflight(args.input,args.data);print(json.dumps(result,indent=2));sys.exit(0 if result['usable'] else 1)
     if args.action=='launch':sys.exit(ab.launch(args.input,args.data,shared=args.share,proxy=args.proxy,login_browser=args.login_browser))
     with Path(args.input).open() as stream:text=stream.read(65537)
-    if args.action=='compose':result=ab.compose(er.read_document(text))
+    if args.action=='verify-suite':result=ab.validate_suite(er.read_document(text))
+    elif args.action=='inspect-suite':result=ab.inspect_suite(er.read_document(text),args.generation,args.data)
+    elif args.action=='compose':result=ab.compose(er.read_document(text))
     elif args.action=='retarget':result=ab.retarget_suite(er.read_document(text),{'os':args.os,'release':args.release,'arch':'amd64'})
     elif args.action=='build-suite':result=ab.build_suite(er.read_document(text),args.cache,args.generation,args.data)
     elif args.action=='capture':result=ab.capture(args.app,text)

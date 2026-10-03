@@ -1,0 +1,5 @@
+- name: Install the native runtime prerequisites
+  baseline.environment.native_runtime:
+    backend_sha256: "{{ baseline_backend_sha256 }}"
+    platform: "{{ baseline_platform }}"
+    update: "{{ baseline_runtime_update }}"

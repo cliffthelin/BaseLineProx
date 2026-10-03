@@ -1,0 +1,7 @@
+- name: Build or inspect the locked native application suite
+  baseline.environment.native_suite:
+    backend_sha256: "{{ baseline_backend_sha256 }}"
+    suite: "{{ baseline_suite }}"
+    cache: "{{ baseline_cache }}"
+    generation: "{{ baseline_generation }}"
+    data: "{{ baseline_data }}"

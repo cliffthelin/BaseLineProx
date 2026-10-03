@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Compose registered Ansible tasks and inspect expected/observed compatibility."""
+import argparse,json,sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'lib'))
+import tasker
+import environment_recipes as er
+parser=argparse.ArgumentParser(description=__doc__);commands=parser.add_subparsers(dest='action',required=True)
+commands.add_parser('catalog')
+compat=commands.add_parser('compatibility');compat.add_argument('registry')
+template=commands.add_parser('template');template.add_argument('suite')
+for option in ('cache','generation','data'):template.add_argument('--'+option)
+template.add_argument('--run-as',default='baseline-admin');template.add_argument('--with-runtime',action='store_true')
+run=commands.add_parser('run');run.add_argument('playbook');run.add_argument('--inventory',required=True);run.add_argument('--registry',required=True);run.add_argument('--workspace',required=True);run.add_argument('--check',action='store_true')
+args=parser.parse_args()
+try:
+    if args.action=='catalog':result=tasker.catalog()
+    elif args.action=='compatibility':result=tasker.compatibility(args.registry)
+    elif args.action=='template':
+        suite=er.read_document(Path(args.suite).read_text())
+        result=tasker.template(suite,cache=args.cache or '/var/lib/baseline-app-cache',
+            generation=args.generation or '/var/lib/baseline-apps/generations/build-'+suite['digest'][:16],
+            data=args.data or '/home/'+args.run_as+'/baseline-managed-apps',run_as=args.run_as,with_runtime=args.with_runtime)
+    else:result=tasker.execute(er.read_document(Path(args.playbook).read_text()),args.inventory,args.registry,args.workspace,check=args.check)
+    print(json.dumps(result,indent=2,sort_keys=True))
+    if args.action=='run' and result['status']!='successful':sys.exit(1)
+except (er.RecipeError,OSError,KeyError,ValueError) as exc:
+    print('Refused: '+str(exc),file=sys.stderr);sys.exit(1)

@@ -197,6 +197,16 @@ cp "$SRC/baseline/lib/recipe_page.py" /opt/baseline/lib/recipe_page.py
 cp "$SRC/baseline/lib/app_capture.py" /opt/baseline/lib/app_capture.py
 cp "$SRC/baseline/lib/vscode_capture.py" /opt/baseline/lib/vscode_capture.py
 cp "$SRC/baseline/lib/vscode_build.py" /opt/baseline/lib/vscode_build.py
+# Native application builder and registered Ansible components (DR133/134).
+cp "$SRC/baseline/lib/application_bundle.py" /opt/baseline/lib/application_bundle.py
+cp "$SRC/baseline/lib/tasker.py" /opt/baseline/lib/tasker.py
+cp "$SRC/baseline/bin/baseline-apps" /opt/baseline/bin/baseline-apps
+chmod 755 /opt/baseline/bin/baseline-apps
+cp "$SRC/baseline/bin/baseline-tasker" /opt/baseline/bin/baseline-tasker
+chmod 755 /opt/baseline/bin/baseline-tasker
+cp -R "$SRC/automation" /opt/baseline/automation
+cp -R "$SRC/docs" /opt/baseline/docs
+
 cp "$SRC/baseline/bin/baseline-vscode-settings" /opt/baseline/bin/baseline-vscode-settings
 chmod 755 /opt/baseline/bin/baseline-vscode-settings
 cp "$SRC/baseline/bin/baseline-vscode-build" /opt/baseline/bin/baseline-vscode-build
@@ -396,6 +406,8 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/proxmox_vm_metrics.py /opt/baseline/lib/sensors_history.py /opt/baseline/lib/sensors_collect.py \
          /opt/baseline/lib/kiosk_gate.py /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/lib/hardware_inventory.py /opt/baseline/lib/installer_cache.py \
+         /opt/baseline/lib/application_bundle.py /opt/baseline/lib/tasker.py \
+         /opt/baseline/bin/baseline-apps /opt/baseline/bin/baseline-tasker \
          /opt/baseline/lib/appdata.py /opt/baseline/lib/naming.py \
          /opt/baseline/lib/settings_web.py /opt/baseline/lib/settings_web_gate.py \
          /opt/baseline/lib/settings_store.py /opt/baseline/lib/admin_elevation.py \
@@ -447,6 +459,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-sensors-set-interval \
          \
          /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web \
+         /opt/baseline/bin/baseline-apps /opt/baseline/bin/baseline-tasker \
          /opt/baseline/bin/baseline-dependency-check; do
     [ -x "$f" ] || verify_fail "staged entry point not executable: $f"
 done

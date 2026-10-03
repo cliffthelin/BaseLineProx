@@ -1,0 +1,19 @@
+argument_specs:
+  main:
+    short_description: Materialize a locked native application suite with retained private homes
+    options:
+      baseline_backend_sha256:
+        type: dict
+        required: true
+      baseline_suite:
+        type: dict
+        required: true
+      baseline_cache:
+        type: path
+        required: true
+      baseline_generation:
+        type: path
+        required: true
+      baseline_data:
+        type: path
+        required: true

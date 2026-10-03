@@ -219,3 +219,10 @@ def test_real_iso_builder_runner_run_uses_real_subprocess():
     r = ib.RealIsoBuilderRunner()
     proc = r.run(["true"], timeout=5)
     assert proc.returncode == 0
+
+
+def test_installer_carries_registered_tasks_and_user_walkthrough_docs():
+    r=FakeIsoBuilderRunner()
+    ib.stage_baseline_source(r,repo_root=Path('/repo'),staging_dir=Path('/ws/staging'))
+    assert ('/repo/automation','/ws/staging/automation') in r.copied_trees
+    assert ('/repo/docs','/ws/staging/docs') in r.copied_trees

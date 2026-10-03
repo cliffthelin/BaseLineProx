@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 import environment_recipes as er
@@ -89,7 +90,9 @@ EXECUTABLES={'vscode':'VSCode-linux-x64/code','chrome':'opt/google/chrome/chrome
 
 
 def _path(path):
-    path=Path(path).absolute()
+    path=Path(path)
+    if '..' in path.parts:raise er.RecipeError('parent traversal in storage path refused')
+    path=path.absolute()
     if path.is_symlink() or any(p.is_symlink() for p in path.parents):raise er.RecipeError('redirected path refused')
     return path
 
@@ -189,7 +192,8 @@ def install(recipe,archive,generation,data,*,platform=None):
         os.chmod(generation/'DBUS-SESSION.conf',0o600);stream.write(PRIVATE_DBUS_CONFIG)
         stream.flush();os.fsync(stream.fileno())
     _write(generation/'BUILD.json',recipe)
-    receipt={'executable':str(executable),'generation':str(generation),'data':str(data),
+    with executable.open('rb') as stream:executable_sha256=hashlib.file_digest(stream,'sha256').hexdigest()
+    receipt={'executable_sha256':executable_sha256,'executable':str(executable),'generation':str(generation),'data':str(data),
              'retained_identity':identity['id'],'recipe_digest':digest(recipe),
              'archive_verified':True,'runtime_verified':False,'installation':'native payload extraction; system dependencies supplied by target OS'}
     _write(generation/'INSTALL.json',receipt)
@@ -504,7 +508,7 @@ profile baseline-app-runtime /opt/baseline/libexec/baseline-app-bwrap flags=(unc
   userns,
 }
 '''
-    return {'helper':RUNTIME_HELPER,'uri_helper':URI_HELPER,'packages':packages,'apparmor_profile':profile,
+    return {'platform':platform,'helper':RUNTIME_HELPER,'uri_helper':URI_HELPER,'packages':packages,'apparmor_profile':profile,
             'scope':'root-owned namespace helper; filesystem policy is enforced by Bubblewrap arguments; shared X11/audio/network remain outside a complete phone-OS isolation claim'}
 
 
@@ -512,8 +516,8 @@ def install_runtime(*,update=False):
     import shutil
     if os.geteuid()!=0:raise er.RecipeError('runtime prerequisites require the installer administrator; no credential accepted by this tool')
     plan=runtime_plan(target_platform())
-    subprocess.run(['apt-get','update'],check=True)
-    subprocess.run(['apt-get','install','-y','--no-install-recommends']+plan['packages'],check=True,
+    subprocess.run(['apt-get','update'],check=True,stdout=sys.stderr)
+    subprocess.run(['apt-get','install','-y','--no-install-recommends']+plan['packages'],check=True,stdout=sys.stderr,
                    env={**os.environ,'DEBIAN_FRONTEND':'noninteractive'})
     helper=_path(plan['helper']);helper.parent.mkdir(parents=True,exist_ok=True,mode=0o755)
     install_helper(helper,Path('/usr/bin/bwrap').read_bytes(),update=update)
@@ -524,7 +528,7 @@ def install_runtime(*,update=False):
             raise er.RecipeError('runtime AppArmor policy changed; separate policy review required')
         if not profile.exists():
             with profile.open('x') as stream:stream.write(plan['apparmor_profile'])
-        subprocess.run(['apparmor_parser','-r',str(profile)],check=True)
+        subprocess.run(['apparmor_parser','-r',str(profile)],check=True,stdout=sys.stderr)
     versions=subprocess.check_output(['dpkg-query','-W','-f=${Package}=${Version}\n']+plan['packages'],text=True)
     return {'helper':str(helper),'dependencies_installed':versions.splitlines(),'runtime_verified':False}
 
@@ -744,3 +748,34 @@ def desktop_launchers(generation,data,target,*,cli=None):
         with (target/('baseline-'+app+'.desktop')).open('x') as stream:
             os.chmod(stream.name,0o600);stream.write(text);stream.flush();os.fsync(stream.fileno())
     return {'entries':{app:str(target/('baseline-'+app+'.desktop')) for app in entries},'runtime_verified':False}
+
+
+def inspect_suite(document,generation,data):
+    """Check installed manifests, identities and main executable bytes; no GUI claim."""
+    suite=validate_suite(document);generation=_path(generation);data=_path(data)
+    if suite['platform']!=target_platform():raise er.RecipeError('suite target differs from current OS')
+    installed=validate_suite(er.read_document((generation/'SUITE.json').read_text()))
+    receipt=er.read_document((generation/'INSTALL.json').read_text())
+    if installed!=suite or receipt.get('suite_digest')!=suite['digest']:
+        raise er.RecipeError('suite installation differs from desired recipe')
+    results={}
+    if set(receipt.get('applications',{}))!={r['app'] for r in suite['applications']}:
+        raise er.RecipeError('incomplete suite installation')
+    for recipe in suite['applications']:
+        app=recipe['app'];child=_path(generation/app);private=_path(data/app)
+        build=validate(er.read_document((child/'BUILD.json').read_text()))
+        report=er.read_document((child/'INSTALL.json').read_text())
+        identity=er.read_document((private/'IDENTITY.json').read_text())
+        if (build!=recipe or report!=receipt['applications'][app] or report.get('recipe_digest')!=digest(recipe)
+                or identity.get('app')!=app or identity.get('id')!=report.get('retained_identity')
+                or not _path(private/'home').is_dir()):
+            raise er.RecipeError('application recipe or private identity mismatch')
+        executable=_path(child/'root'/EXECUTABLES[app])
+        if not executable.is_file() or not os.access(executable,os.X_OK):raise er.RecipeError('native executable missing')
+        with executable.open('rb') as stream:actual=hashlib.file_digest(stream,'sha256').hexdigest()
+        if actual!=report.get('executable_sha256'):raise er.RecipeError('native executable fingerprint missing or changed; rebuild required')
+        if (child/'DBUS-SESSION.conf').read_text()!=PRIVATE_DBUS_CONFIG:raise er.RecipeError('session policy changed')
+        results[app]={'version':recipe['source']['version'],'medium':recipe['source']['medium'],
+                      'source_sha256':recipe['source']['sha256'],'executable_sha256':actual}
+    return {'platform':suite['platform'],'suite_digest':suite['digest'],'applications':results,
+            'materialized':True,'runtime_verified':False,'coverage':'manifests, retained identities and main executables; not every payload/dependency file'}

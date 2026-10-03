@@ -105,3 +105,14 @@ def test_checker_catches_a_gap_in_a_directly_copied_lib_modules_own_dependency(t
     )
     missing = cpd.find_missing_lib_dependencies(tmp_path)
     assert missing == ["standalone_b"]
+
+
+def test_provision_stages_native_builder_tasker_and_registered_components():
+    text=(REPO_ROOT/'boot/provision.sh').read_text()
+    for name in ('application_bundle.py','tasker.py'):
+        assert f'cp "$SRC/baseline/lib/{name}" /opt/baseline/lib/{name}' in text
+    for name in ('baseline-apps','baseline-tasker'):
+        assert f'cp "$SRC/baseline/bin/{name}" /opt/baseline/bin/{name}' in text
+        assert f'chmod 755 /opt/baseline/bin/{name}' in text
+    assert '"$SRC/automation"' in text and '/opt/baseline/automation' in text
+    assert '"$SRC/docs"' in text and '/opt/baseline/docs' in text

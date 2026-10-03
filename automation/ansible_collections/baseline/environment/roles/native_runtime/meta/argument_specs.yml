@@ -1,0 +1,13 @@
+argument_specs:
+  main:
+    short_description: Install supported native runtime prerequisites as administrator
+    options:
+      baseline_backend_sha256:
+        type: dict
+        required: true
+      baseline_platform:
+        type: dict
+        required: true
+      baseline_runtime_update:
+        type: bool
+        default: false

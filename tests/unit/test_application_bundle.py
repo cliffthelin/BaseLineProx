@@ -322,6 +322,11 @@ def test_suite_rebuild_materializes_locked_apps_and_reattaches_private_data(tmp_
     note=tmp_path/'appdata/vscode/home/note';note.write_text('personal content')
     second=ab.build_suite(suite,cache,tmp_path/'generation2',tmp_path/'appdata')
     assert first['applications']['vscode']['archive_verified'] is True
+    inspected=ab.inspect_suite(suite,tmp_path/'generation1',tmp_path/'appdata')
+    assert inspected['materialized'] is True and inspected['runtime_verified'] is False
+    binary=Path(first['applications']['vscode']['executable']);original=binary.read_bytes();binary.write_bytes(b'changed')
+    with pytest.raises(er.RecipeError,match='executable'):ab.inspect_suite(suite,tmp_path/'generation1',tmp_path/'appdata')
+    binary.write_bytes(original)
     assert second['applications']['vscode']['retained_identity']==first['applications']['vscode']['retained_identity']
     assert second['runtime_verified'] is False and note.read_text()=='personal content'
     assert 'personal content' not in json.dumps(suite)
@@ -439,3 +444,29 @@ def test_desktop_launchers_quote_paths_and_do_not_grant_browser_by_default(tmp_p
     (malformed/'INSTALL.json').write_text(json.dumps({'suite_digest':'wrong','applications':{'chrome':{}}}))
     with pytest.raises(er.RecipeError):ab.desktop_launchers(malformed,data,tmp_path/'bad-entries',cli=cli)
     assert not (tmp_path/'bad-entries').exists()
+
+
+def test_runtime_install_keeps_package_output_out_of_machine_json(tmp_path,monkeypatch):
+    import application_bundle as ab
+    import subprocess,sys,shutil
+    monkeypatch.setattr('os.geteuid',lambda:0)
+    plan=ab.runtime_plan(ab.target_platform());plan['helper']=str(tmp_path/'bwrap');plan['uri_helper']=str(tmp_path/'uri')
+    monkeypatch.setattr(ab,'runtime_plan',lambda platform:plan)
+    monkeypatch.setattr(ab,'URI_HELPER',plan['uri_helper'])
+    monkeypatch.setattr(ab,'install_helper',lambda path,payload,**kw:Path(path).write_bytes(payload))
+    monkeypatch.setattr(shutil,'which',lambda value:None)
+    monkeypatch.setattr(subprocess,'check_output',lambda *args,**kw:'bubblewrap=synthetic\n')
+    calls=[]
+    def run(argv,**kwargs):
+        calls.append(argv)
+        assert kwargs['stdout'] is sys.stderr
+        return subprocess.CompletedProcess(argv,0)
+    monkeypatch.setattr(subprocess,'run',run)
+    result=ab.install_runtime()
+    assert len(calls)==2 and result['runtime_verified'] is False
+
+
+def test_storage_paths_refuse_parent_traversal_before_mutation(tmp_path):
+    import application_bundle as ab
+    with pytest.raises(er.RecipeError):ab._path(tmp_path/'cache/../private')
+    assert not (tmp_path/'cache').exists() and not (tmp_path/'private').exists()

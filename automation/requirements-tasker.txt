@@ -1,0 +1,4 @@
+# Controller environment used for DR134 native runs. Requires Python >=3.12.
+# Pins executor versions, not application/OS dependency bytes.
+ansible-core==2.21.4
+ansible-runner==2.4.3
