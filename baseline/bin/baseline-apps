@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Capture portable settings; prepare/verify/acquire/install/launch native app builds."""
+import argparse,json,sys,tarfile,subprocess
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'lib'))
+import application_bundle as ab
+import environment_recipes as er
+parser=argparse.ArgumentParser(description=__doc__)
+commands=parser.add_subparsers(dest='action',required=True)
+for action in ('capture','prepare','verify','acquire','install','launch','preflight','backup','restore','runtime-plan','install-runtime','capture-installed','apply','compose','retarget','build-suite','desktop-launchers'):
+    command=commands.add_parser(action)
+    if action in ('capture','prepare'):command.add_argument('app',choices=ab.APPS)
+    if action not in ('runtime-plan','install-runtime'):command.add_argument('input')
+    if action in ('prepare','acquire','backup'):command.add_argument('target')
+    if action=='prepare':
+        command.add_argument('--os',choices=['ubuntu','debian']);command.add_argument('--release')
+    if action=='install':
+        command.add_argument('archive');command.add_argument('generation');command.add_argument('data')
+    if action=='launch':command.add_argument('data');command.add_argument('--share');command.add_argument('--proxy');command.add_argument('--login-browser')
+    if action in ('preflight','capture-installed'):command.add_argument('data')
+    if action=='desktop-launchers':command.add_argument('data');command.add_argument('target')
+    if action=='restore':command.add_argument('archive');command.add_argument('target')
+    if action=='install-runtime':command.add_argument('--update',action='store_true')
+    if action=='apply':command.add_argument('configuration')
+    if action=='build-suite':command.add_argument('generation');command.add_argument('data');command.add_argument('--cache',required=True)
+    if action=='retarget':command.add_argument('--os',required=True,choices=['ubuntu','debian']);command.add_argument('--release',required=True)
+args=parser.parse_args()
+try:
+    if args.action=='runtime-plan':
+        print(json.dumps(ab.runtime_plan(ab.target_platform()),indent=2));sys.exit(0)
+    if args.action=='install-runtime':
+        print(json.dumps(ab.install_runtime(update=args.update),indent=2));sys.exit(0)
+    if args.action=='desktop-launchers':
+        print(json.dumps(ab.desktop_launchers(args.input,args.data,args.target),indent=2));sys.exit(0)
+    if args.action=='apply':
+        print(json.dumps(ab.apply_configuration(args.input,er.read_document(Path(args.configuration).read_text())),indent=2));sys.exit(0)
+    if args.action=='capture-installed':
+        print(json.dumps(ab.capture_installed(args.input,args.data),indent=2));sys.exit(0)
+    if args.action=='backup':
+        print(json.dumps(ab.backup_state(args.input,args.target),indent=2));sys.exit(0)
+    if args.action=='preflight':
+        result=ab.sandbox_preflight(args.input,args.data);print(json.dumps(result,indent=2));sys.exit(0 if result['usable'] else 1)
+    if args.action=='launch':sys.exit(ab.launch(args.input,args.data,shared=args.share,proxy=args.proxy,login_browser=args.login_browser))
+    with Path(args.input).open() as stream:text=stream.read(65537)
+    if args.action=='compose':result=ab.compose(er.read_document(text))
+    elif args.action=='retarget':result=ab.retarget_suite(er.read_document(text),{'os':args.os,'release':args.release,'arch':'amd64'})
+    elif args.action=='build-suite':result=ab.build_suite(er.read_document(text),args.cache,args.generation,args.data)
+    elif args.action=='capture':result=ab.capture(args.app,text)
+    elif args.action=='prepare':
+        if bool(args.os)!=bool(args.release):raise er.RecipeError('--os and --release must be supplied together')
+        platform={'os':args.os,'release':args.release,'arch':'amd64'} if args.os else None
+        result=ab.prepare(args.app,er.read_document(text),args.target,platform=platform)
+    elif args.action=='verify':result=ab.validate(er.read_document(text))
+    elif args.action=='restore':result=ab.restore_state(args.archive,er.read_document(text),args.target)
+    elif args.action=='acquire':result={'archive':ab.acquire(er.read_document(text),args.target),'runtime_verified':False}
+    else:result=ab.install(er.read_document(text),args.archive,args.generation,args.data)
+    print(json.dumps(result,sort_keys=True,indent=2))
+except (er.RecipeError,OSError,tarfile.TarError,subprocess.SubprocessError,UnicodeError) as exc:
+    print('Refused: '+str(exc),file=sys.stderr);sys.exit(1)
