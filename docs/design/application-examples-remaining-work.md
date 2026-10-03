@@ -18,3 +18,11 @@ job with actual launch checks; then richer capture
 and retained-state/isolation tests. Spotify requires its own version/platform
 adapter, not copying VS Code assumptions. Fresh-profile success is not fresh VM
 installation, total-device-loss recovery, or app confinement. No AI runtime needed.
+
+## Repeatable adapter direction (DR132)
+
+Use [the OS/application adapter pattern](repeatable-environment-adapter-pattern.md) for each new platform:
+shared discover/capture/lock/acquire/install/verify/rebuild phases, explicit native
+capabilities and a test-first extension checklist. Current Ubuntu recipe and
+Linux-x64 VS Code limits remain; this document adds no cross-OS runtime support.
+Generic integration and managed reconciliation remain queue76; isolation remains74.

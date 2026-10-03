@@ -504,3 +504,11 @@ reports runtime_verified:false until independently tested. Evidence verification
 Generic recipe-stack integration, durable guest install, dependency handling,
 persistence/isolation and Spotify remain open under74/76. No earlier runtime claim
 is invalidated; DR130 remains the historical installed-copy test.
+
+## Repeatable adapter direction (DR132)
+
+Use [the OS/application adapter pattern](design/repeatable-environment-adapter-pattern.md) for each new platform:
+shared discover/capture/lock/acquire/install/verify/rebuild phases, explicit native
+capabilities and a test-first extension checklist. Current Ubuntu recipe and
+Linux-x64 VS Code limits remain; this document adds no cross-OS runtime support.
+Generic integration and managed reconciliation remain queue76; isolation remains74.
