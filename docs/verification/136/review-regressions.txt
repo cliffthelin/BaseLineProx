@@ -1,0 +1,42 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+______ test_review_autofill_requires_choice_between_multiple_empty_disks _______
+tests/unit/test_peer_review_main_readiness.py:18: in test_review_autofill_requires_choice_between_multiple_empty_disks
+    assert plan["storage"]["baseline"]["serial"] is None
+E   AssertionError: assert 'S6WRNS0TA12638A' is None
+_ test_review_autofill_does_not_replace_ambiguous_existing_proxmox_with_empty_disk _
+tests/unit/test_peer_review_main_readiness.py:26: in test_review_autofill_does_not_replace_ambiguous_existing_proxmox_with_empty_disk
+    assert plan["storage"]["substrate"]["serial"] is None
+E   AssertionError: assert 'EMPTYREVIEW1' is None
+_________________ test_review_retain_refuses_missing_partuuid __________________
+tests/unit/test_peer_review_main_readiness.py:34: in test_review_retain_refuses_missing_partuuid
+    assert ip.validate(ip.autofill(found), found)
+E   AssertionError: assert []
+E    +  where [] = <function validate at 0x76e7897cc9e0>({'applications': {'apps': ['vscode', 'spotify', 'chrome', 'chatgpt', 'claude'], 'cache': '/var/lib/baseline-app-cache'...baseline-desktop', 'os': 'ubuntu-24.04', 'variant': 'desktop'}, 'format': 'baseline.install-plan/v1', 'notes': [], ...}, {'drives': [{'installer_made': False, 'model': 'PC601 NVMe SK hynix 512GB', 'mounted': False, 'path_now': '/dev/sda', ...el': 'PC401 NVMe SK hynix 512GB', 'mounted': False, 'path_now': '/dev/sdb', ...}], 'unenrolled': [], 'unidentified': 0})
+E    +    where <function validate at 0x76e7897cc9e0> = ip.validate
+E    +    and   {'applications': {'apps': ['vscode', 'spotify', 'chrome', 'chatgpt', 'claude'], 'cache': '/var/lib/baseline-app-cache'...baseline-desktop', 'os': 'ubuntu-24.04', 'variant': 'desktop'}, 'format': 'baseline.install-plan/v1', 'notes': [], ...} = <function autofill at 0x76e7897cba00>({'drives': [{'installer_made': False, 'model': 'PC601 NVMe SK hynix 512GB', 'mounted': False, 'path_now': '/dev/sda', ...el': 'PC401 NVMe SK hynix 512GB', 'mounted': False, 'path_now': '/dev/sdb', ...}], 'unenrolled': [], 'unidentified': 0})
+E    +      where <function autofill at 0x76e7897cba00> = ip.autofill
+____ test_review_retain_refuses_colliding_partuuids_on_other_enrolled_disk _____
+tests/unit/test_peer_review_main_readiness.py:40: in test_review_retain_refuses_colliding_partuuids_on_other_enrolled_disk
+    assert ip.validate(plan, found)
+E   AssertionError: assert []
+E    +  where [] = <function validate at 0x76e7897cc9e0>({'applications': {'apps': ['vscode', 'spotify', 'chrome', 'chatgpt', 'claude'], 'cache': '/var/lib/baseline-app-cache'...baseline-desktop', 'os': 'ubuntu-24.04', 'variant': 'desktop'}, 'format': 'baseline.install-plan/v1', 'notes': [], ...}, {'drives': [{'installer_made': False, 'model': 'PC601 NVMe SK hynix 512GB', 'mounted': False, 'path_now': '/dev/sda', ...el': 'PC401 NVMe SK hynix 512GB', 'mounted': False, 'path_now': '/dev/sdc', ...}], 'unenrolled': [], 'unidentified': 0})
+E    +    where <function validate at 0x76e7897cc9e0> = ip.validate
+_________ test_review_layout_refuses_serial_change_after_confirmation __________
+tests/unit/test_peer_review_main_readiness.py:59: in test_review_layout_refuses_serial_change_after_confirmation
+    assert not writes, f"confirmed drive was replaced; destructive fake commands still ran: {writes}"
+E   AssertionError: confirmed drive was replaced; destructive fake commands still ran: [['wipefs', '-a', '/dev/sdb'], ['sgdisk', '-Z', '/dev/sdb'], ['sgdisk', '-n', '1:2048:+18G', '-t', '1:8300', '-c', '1:BASELINE', '-n', '2:37750784:+95G', '-t', '2:8300', '-c', '2:INSTALLER_CACHE', '-n', '3:236980224:+18G', '-t', '3:8300', '-c', '3:SESSION_TEMP', '-n', '4:274728960:+1G', '-t', '4:8300', '-c', '4:SUBSTRATE', '-n', '5:276826112:+95G', '-t', '5:8300', '-c', '5:USER_ADMIN', '-n', '6:476055552:+95G', '-t', '6:8300', '-c', '6:USER_PERSONAL', '-n', '7:675284992:+74G', '-t', '7:8300', '-c', '7:APPDATA_ADMIN', '-n', '8:830474240:+74G', '-t', '8:8300', '-c', '8:APPDATA_PERSONAL', '/dev/sdb'], ['mkfs.ext4', '-F', '-q', '-L', 'BASELINE', '-E', 'offset=1048576', '/dev/sdb', '18874368k'], ['mkfs.ext4', '-F', '-q', '-L', 'INSTALLER_CACHE', '-E', 'offset=19328401408', '/dev/sdb', '99614720k'], ['mkfs.ext4', '-F', '-q', '-L', 'SESSION_TEMP', '-E', 'offset=121333874688', '/dev/sdb', '18874368k'], ['mkfs.ext4', '-F', '-q', '-L', 'SUBSTRATE', '-E', 'offset=140661227520', '/dev/sdb', '1048576k'], ['mkfs.ext4', '-F', '-q', '-L', 'USER_ADMIN', '-E', 'offset=141734969344', '/dev/sdb', '99614720k'], ['mkfs.ext4', '-F', '-q', '-L', 'USER_PERSONAL', '-E', 'offset=243740442624', '/dev/sdb', '99614720k'], ['mkfs.ext4', '-F', '-q', '-L', 'APPDATA_ADMIN', '-E', 'offset=345745915904', '/dev/sdb', '77594624k'], ['mkfs.ext4', '-F', '-q', '-L', 'APPDATA_PERSONAL', '-E', 'offset=425202810880', '/dev/sdb', '77594624k'], ['sgdisk', '-U', '7d2feda1-8572-4134-a013-f0b09d73ee24', '/dev/sdb']]
+E   assert not [['wipefs', '-a', '/dev/sdb'], ['sgdisk', '-Z', '/dev/sdb'], ['sgdisk', '-n', '1:2048:+18G', '-t', '1:8300', '-c', ......xt4', '-F', '-q', '-L', 'INSTALLER_CACHE', '-E', ...], ['mkfs.ext4', '-F', '-q', '-L', 'SESSION_TEMP', '-E', ...], ...]
+_________ test_review_enrollment_refuses_when_boot_identity_is_unknown _________
+tests/unit/test_peer_review_main_readiness.py:68: in test_review_enrollment_refuses_when_boot_identity_is_unknown
+    assert not result.ok
+E   AssertionError: assert not True
+E    +  where True = ActionResult(ok=True, detail='enrolled drive with serial UNKNOWNBOOTREVIEW1. Nothing was written to it; formatting it still needs it to be empty or to carry an installer identity').ok
+=========================== short test summary info ============================
+FAILED tests/unit/test_peer_review_main_readiness.py::test_review_autofill_requires_choice_between_multiple_empty_disks
+FAILED tests/unit/test_peer_review_main_readiness.py::test_review_autofill_does_not_replace_ambiguous_existing_proxmox_with_empty_disk
+FAILED tests/unit/test_peer_review_main_readiness.py::test_review_retain_refuses_missing_partuuid
+FAILED tests/unit/test_peer_review_main_readiness.py::test_review_retain_refuses_colliding_partuuids_on_other_enrolled_disk
+FAILED tests/unit/test_peer_review_main_readiness.py::test_review_layout_refuses_serial_change_after_confirmation
+FAILED tests/unit/test_peer_review_main_readiness.py::test_review_enrollment_refuses_when_boot_identity_is_unknown
+6 failed in 0.12s

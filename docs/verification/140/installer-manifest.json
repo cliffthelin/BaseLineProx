@@ -1,0 +1,28 @@
+{
+  "artifact": "baseline-140.iso",
+  "sha256": "cdec38deaa84db039884d6d8aa95d02445b829aa03b1aee81e04f03648b5f439",
+  "bytes": 1711341568,
+  "source_publisher_sha256": "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c",
+  "publisher_signatures_verified": [
+    "24B30F06ECC1836A4E5EFECBA7BCD1420BFE778E",
+    "F4E136C67CDCE41AE6DE6FC81140AF8F639E0C39"
+  ],
+  "extracted_files_matched": 497,
+  "critical_files": {
+    "baseline/lib/install_plan.py": "1502888a30fcbc02970a4bb2c3966b20472d36cef96baf4d8acae6edeebb442e",
+    "baseline/lib/install_plan_page.py": "63181cd5bbdac5fcb17c833f6b174915805c62982569ac354f59d1b3e3c6cb59",
+    "baseline/lib/physical_device_safety.py": "35fb040034616aca2f2a11578e5620f00da0666a3d6ac633f08fe2587876a936",
+    "docs/INSTALLER_PLAN_WALKTHROUGH.md": "06474eee1172b50f1132869cc630f215a3c3b878c8dd5e6d73fa8248f150ad91"
+  },
+  "scope": "manual Proxmox installer and Baseline source/doc package; no unattended answer; no provisioning or physical install verification",
+  "implementation_commit": "20c193f",
+  "boot_verified": {
+    "execution": "actual isolated KVM",
+    "cpu": "host",
+    "vcpus": 1,
+    "ram_mib": 2048,
+    "network": "none",
+    "target_disks": "none",
+    "observed": "Proxmox VE 9.2 install menu"
+  }
+}

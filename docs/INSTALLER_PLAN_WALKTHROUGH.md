@@ -40,3 +40,31 @@ The existing CLI remains baseline-install-plan autofill, validate and compile.
 Application-specific examples are in BASELINE_BUILD_WALKTHROUGH.md. Durable
 jobs, PARTUUID fstab application, cache/data routing, physical boot and encrypted
 independent restore remain open in queue72/75/76 and59/60/77.
+
+## Existing AppData on another enrolled drive (DR140)
+
+Main previously lacked this installer framework entirely. DR140 integrates it
+and adds explicit dedicated AppData mapping. After Discover and autofill, choose
+a discovered AppData target, then Apply mapping to plan. Repeat for each persona.
+Only existing ext4 APPDATA_<PERSONA> partitions on enrolled drives with unique
+PARTUUIDs are offered. Entering another user's volume, cache partition, unknown
+drive or cloned/replaced identity refuses. The picker fills persona/serial/GUID;
+the mapping is stored in storage.appdata, not as a bare /dev/sdX path.
+
+Example optional field (replace placeholders with discovered identities):
+
+```json
+{"appdata":{"admin":{"serial":"ENROLLED_DRIVE","partuuid":"DISCOVERED_GUID"}}}
+```
+
+This is the appdata field inside storage, alongside substrate and baseline.
+An explicit external mapping removes that persona's APPDATA requirement from
+the Baseline drive; all six core/user volumes still need real identities.
+Compiled appdata entries carry a separate PARTUUID mount and expected serial.
+No fstab entry is applied and no app profile is moved by this editor. Existing
+local AppData remains supported; explicit overrides do not emit duplicate mounts.
+
+The actual machine still lacks ready AppData volumes. The software will not
+create fictional targets or silently put AppData into USER/INSTALLER_CACHE.
+Creating a volume/container, migrating existing app data, joining host storage
+to guest mounts and executing the installer as a resumable job remain unfinished.

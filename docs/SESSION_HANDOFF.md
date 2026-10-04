@@ -1404,3 +1404,13 @@ and refused missing APPDATA_ADMIN/APPDATA_PERSONAL. No physical writes or
 provisioning. Read INSTALLER_PLAN_WALKTHROUGH.md and DR138. Existing concurrent
 safety/dependency work is preserved and not bundled into this increment.
 Stage jobs, PARTUUID mounts, storage mapping and full firstboot remain open.
+
+## 2026-10-03 — DR140 main integration
+
+GitHub main0391f34 lacked the installer framework and was232 commits behind
+3dd98f9. DR140 integrates that framework and scoped DR137 safety fixes, plus
+explicit external AppData mapping. The browser picks only ready dedicated ext4
+AppData volumes on enrolled drives; no user/cache fallback or actual formatting.
+Physical metadata discovery still refuses missing AppData targets. Read DR140
+and INSTALLER_PLAN_WALKTHROUGH.md; full mount/job/firstboot remains unfinished.
+Concurrent DR139 and other root working-tree edits were excluded and preserved.

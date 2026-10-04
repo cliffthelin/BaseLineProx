@@ -1,0 +1,21 @@
+{
+  "scope": "actual read-only physical metadata; no writes, mounts or AppData migration",
+  "selected_substrate": {
+    "serial": "FD01N6557110C271B",
+    "action": "keep"
+  },
+  "selected_baseline": "MD89N41071210AP4E",
+  "volumes": [
+    "BASELINE",
+    "INSTALLER_CACHE",
+    "SESSION_TEMP",
+    "SUBSTRATE",
+    "USER_ADMIN",
+    "USER_PERSONAL"
+  ],
+  "valid": false,
+  "errors": [
+    "Baseline drive MD89N41071210AP4E: missing volumes APPDATA_ADMIN, APPDATA_PERSONAL; run repair on it or lay it out"
+  ],
+  "executed": false
+}

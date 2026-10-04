@@ -1,0 +1,1 @@
+OK: every module transitively needed by a provisioned bin script is copied.

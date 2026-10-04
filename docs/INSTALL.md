@@ -607,3 +607,16 @@ still predates this editor. Full stage execution, PARTUUID mount application
 and provisioning/firstboot remain open under72/75/76. See
 [editor walkthrough](INSTALLER_PLAN_WALKTHROUGH.md) and
 [DR138](design/decision-records/138-authenticated-installer-plan-editor.md).
+
+## Main integration and external AppData mapping (DR140)
+
+Main was missing the installer framework; DR140 integrates the tested branch
+and the scoped DR137 safety fixes. The authenticated editor now lists existing
+unique ext4 AppData targets on enrolled drives and records explicit per-persona
+serial/PARTUUID mappings. A six-volume Baseline drive can be retained when real
+AppData volumes exist elsewhere. No user/cache-directory fallback, partitioning,
+mount application or data migration is performed. Actual physical discovery
+still refuses missing targets on this machine. Browser mapping/export tests use
+synthetic disks; physical writes and full provisioning/firstboot remain unverified.
+Other concurrent production audit work remains separate. See DR140,
+verification/140 and INSTALLER_PLAN_WALKTHROUGH.md. Rows72/75/76 stay open.

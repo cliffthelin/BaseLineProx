@@ -1,0 +1,9 @@
+{
+  "scope": "actual Chromium and loopback HTTP; all drives synthetic; no mounting or provisioning",
+  "six_volume_autofill": true,
+  "two_external_persona_mappings": true,
+  "preview_executed": false,
+  "export_roundtrip": true,
+  "unenrolled_target_refused": true,
+  "page_errors": []
+}

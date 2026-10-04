@@ -1,0 +1,91 @@
+FFFF.FF......FF                                                          [100%]
+=================================== FAILURES ===================================
+_____________ test_only_guests_with_a_disk_on_local_lvm_are_dumped _____________
+tests/unit/test_guest_backup.py:65: in test_only_guests_with_a_disk_on_local_lvm_are_dumped
+    result, fake = run_guests(dest_root)
+                   ^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_guest_backup.py:59: in run_guests
+    result = ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root), guest_run=fake, now=1_800_000_000.0,
+baseline/lib/offdrive_backup.py:731: in run_guest_backup
+    check_space(dest, needed_bytes=needed)
+baseline/lib/offdrive_backup.py:171: in check_space
+    raise BackupError(f"not enough free space on the backup drive: {free // 2**30} GiB free, "
+E   offdrive_backup.BackupError: not enough free space on the backup drive: 32 GiB free, about 44 GiB needed
+_____ test_the_set_is_new_verifiable_and_lists_every_dump_with_a_checksum ______
+tests/unit/test_guest_backup.py:73: in test_the_set_is_new_verifiable_and_lists_every_dump_with_a_checksum
+    result, _ = run_guests(dest_root)
+                ^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_guest_backup.py:59: in run_guests
+    result = ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root), guest_run=fake, now=1_800_000_000.0,
+baseline/lib/offdrive_backup.py:731: in run_guest_backup
+    check_space(dest, needed_bytes=needed)
+baseline/lib/offdrive_backup.py:171: in check_space
+    raise BackupError(f"not enough free space on the backup drive: {free // 2**30} GiB free, "
+E   offdrive_backup.BackupError: not enough free space on the backup drive: 32 GiB free, about 44 GiB needed
+____________________ test_the_users_own_files_are_untouched ____________________
+tests/unit/test_guest_backup.py:86: in test_the_users_own_files_are_untouched
+    run_guests(dest_root)
+tests/unit/test_guest_backup.py:59: in run_guests
+    result = ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root), guest_run=fake, now=1_800_000_000.0,
+baseline/lib/offdrive_backup.py:731: in run_guest_backup
+    check_space(dest, needed_bytes=needed)
+baseline/lib/offdrive_backup.py:171: in check_space
+    raise BackupError(f"not enough free space on the backup drive: {free // 2**30} GiB free, "
+E   offdrive_backup.BackupError: not enough free space on the backup drive: 32 GiB free, about 44 GiB needed
+_______________ test_a_dry_run_runs_no_vzdump_and_writes_nothing _______________
+tests/unit/test_guest_backup.py:91: in test_a_dry_run_runs_no_vzdump_and_writes_nothing
+    result, fake = run_guests(dest_root, dry_run=True)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_guest_backup.py:59: in run_guests
+    result = ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root), guest_run=fake, now=1_800_000_000.0,
+baseline/lib/offdrive_backup.py:731: in run_guest_backup
+    check_space(dest, needed_bytes=needed)
+baseline/lib/offdrive_backup.py:171: in check_space
+    raise BackupError(f"not enough free space on the backup drive: {free // 2**30} GiB free, "
+E   offdrive_backup.BackupError: not enough free space on the backup drive: 32 GiB free, about 44 GiB needed
+____________ test_a_failed_vzdump_raises_and_nothing_is_cleaned_up _____________
+tests/unit/test_guest_backup.py:108: in test_a_failed_vzdump_raises_and_nothing_is_cleaned_up
+    run_guests(dest_root, FakeProxmox(fail=True))
+tests/unit/test_guest_backup.py:59: in run_guests
+    result = ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root), guest_run=fake, now=1_800_000_000.0,
+baseline/lib/offdrive_backup.py:731: in run_guest_backup
+    check_space(dest, needed_bytes=needed)
+baseline/lib/offdrive_backup.py:171: in check_space
+    raise BackupError(f"not enough free space on the backup drive: {free // 2**30} GiB free, "
+E   offdrive_backup.BackupError: not enough free space on the backup drive: 32 GiB free, about 44 GiB needed
+
+During handling of the above exception, another exception occurred:
+tests/unit/test_guest_backup.py:107: in test_a_failed_vzdump_raises_and_nothing_is_cleaned_up
+    with pytest.raises(ob.BackupError, match="vzdump"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'vzdump'
+E     Actual message: 'not enough free space on the backup drive: 32 GiB free, about 44 GiB needed'
+_________ test_a_guest_set_does_not_make_the_volume_backup_look_recent _________
+tests/unit/test_guest_backup.py:115: in test_a_guest_set_does_not_make_the_volume_backup_look_recent
+    run_guests(dest_root)
+tests/unit/test_guest_backup.py:59: in run_guests
+    result = ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root), guest_run=fake, now=1_800_000_000.0,
+baseline/lib/offdrive_backup.py:731: in run_guest_backup
+    check_space(dest, needed_bytes=needed)
+baseline/lib/offdrive_backup.py:171: in check_space
+    raise BackupError(f"not enough free space on the backup drive: {free // 2**30} GiB free, "
+E   offdrive_backup.BackupError: not enough free space on the backup drive: 32 GiB free, about 44 GiB needed
+______ test_review_parent_layout_refuses_serial_change_after_confirmation ______
+tests/unit/test_review_inherited_safety.py:22: in test_review_parent_layout_refuses_serial_change_after_confirmation
+    assert not [c for c in runner.calls if c[0] in ("wipefs", "sgdisk", "mkfs.ext4")]
+E   AssertionError: assert not [['wipefs', '-a', '/dev/sdb'], ['sgdisk', '-Z', '/dev/sdb'], ['sgdisk', '-n', '1:2048:+18G', '-t', '1:8300', '-c', ......xt4', '-F', '-q', '-L', 'INSTALLER_CACHE', '-E', ...], ['mkfs.ext4', '-F', '-q', '-L', 'SESSION_TEMP', '-E', ...], ...]
+_________ test_review_parent_device_gate_refuses_unknown_boot_identity _________
+tests/unit/test_review_inherited_safety.py:34: in test_review_parent_device_gate_refuses_unknown_boot_identity
+    assert rejected
+E   assert False
+=========================== short test summary info ============================
+FAILED tests/unit/test_guest_backup.py::test_only_guests_with_a_disk_on_local_lvm_are_dumped
+FAILED tests/unit/test_guest_backup.py::test_the_set_is_new_verifiable_and_lists_every_dump_with_a_checksum
+FAILED tests/unit/test_guest_backup.py::test_the_users_own_files_are_untouched
+FAILED tests/unit/test_guest_backup.py::test_a_dry_run_runs_no_vzdump_and_writes_nothing
+FAILED tests/unit/test_guest_backup.py::test_a_failed_vzdump_raises_and_nothing_is_cleaned_up
+FAILED tests/unit/test_guest_backup.py::test_a_guest_set_does_not_make_the_volume_backup_look_recent
+FAILED tests/unit/test_review_inherited_safety.py::test_review_parent_layout_refuses_serial_change_after_confirmation
+FAILED tests/unit/test_review_inherited_safety.py::test_review_parent_device_gate_refuses_unknown_boot_identity
+8 failed, 7 passed in 0.32s

@@ -80,3 +80,5 @@ tasker/manual installer guidance: proxmox/004.md; verification/133 and134.
 DR138 authenticated installer editor and read-only physical discovery:
 proxmox/004.md, ../design/decision-records/138-authenticated-installer-plan-editor.md
 and ../verification/138/.
+
+DR140 main integration and AppData mapping: proxmox/004.md and verification/140.

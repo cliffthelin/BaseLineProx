@@ -1,0 +1,3 @@
+.claude/agents/BotEnrollDrive.md:3: trailing whitespace.
++description: Runs the Baseline web application action `enroll_drive` through the application's Drive Administration page, as a person would. Use only when the user asks for exactly this action. Add this drive to the drives Baseline may act on. Type the drive's serial exactly as it reports it; it must match. This writes nothing to the drive: formatting 
+docs/INSTALL.md:594: new blank line at EOF.
