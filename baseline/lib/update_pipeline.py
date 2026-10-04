@@ -33,12 +33,7 @@ from __future__ import annotations
 import config_apply
 import config_diff
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
+from repair import Runner
 
 
 _NOT_YET_WIRED = ("code", "applications", "os")

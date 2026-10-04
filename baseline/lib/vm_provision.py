@@ -28,12 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
+from repair import Runner
 
 
 DEFAULT_BRIDGE = "vmbr0"

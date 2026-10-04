@@ -42,14 +42,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    import drive_setup_acquire as dsa
-    import drive_setup_answer as dsan
-    import drive_setup_install as dsi
-    import iso_builder as ib
-    import physical_device_safety as pds
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    dsa = dsan = dsi = ib = pds = None
+import drive_setup_acquire as dsa
+import drive_setup_answer as dsan
+import drive_setup_install as dsi
+import iso_builder as ib
+import physical_device_safety as pds
 
 # Real bug found live, 2026-09-29 (decision record 115): the previous
 # run's own `EphemeralAnswerServer` was never stopped before a new one

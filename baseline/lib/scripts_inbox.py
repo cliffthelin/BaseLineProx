@@ -28,27 +28,7 @@ import posixpath
 import re
 from dataclasses import dataclass
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def makedirs(self, path):
-            raise NotImplementedError
-
-        def listdir(self, path):
-            raise NotImplementedError
-
-        def path_exists(self, path):
-            raise NotImplementedError
-
-        def read_text(self, path):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def remove(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 
 DEFAULT_INBOX_DIR = "/mnt/USER/scripts_inbox"

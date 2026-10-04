@@ -41,15 +41,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
+from repair import Runner
 
 
 SMARTD_CONF_PATH = "/etc/smartd.conf"
@@ -194,21 +186,21 @@ def apply_wifi_firmware(runner: Runner, package: str = "firmware-mediatek") -> C
 
 
 def apply_network_config(runner: Runner, config: dict) -> CommandResult:
-    """Apply network hostname and DHCP settings."""
+    """Apply hostname only; refuse unsupported link changes before any write."""
+    if set(config) - {"hostname"}:
+        return CommandResult(False, "network not applied: only hostname is supported here; link/DHCP changes require the repair transaction")
     hostname = config.get("hostname")
-    if hostname:
-        proc = runner.run(["hostnamectl", "set-hostname", hostname], timeout=10)
-        if proc.returncode != 0:
-            return CommandResult(False, f"hostname set failed: {proc.stderr.strip()}")
-    return CommandResult(True, "network config applied")
+    if not isinstance(hostname, str) or not hostname.strip() or hostname.startswith("-"):
+        return CommandResult(False, "network not applied: a nonempty hostname is required")
+    proc = runner.run(["hostnamectl", "set-hostname", hostname], timeout=10)
+    if proc.returncode != 0:
+        return CommandResult(False, f"hostname set failed: {proc.stderr.strip()}")
+    return CommandResult(True, "hostname applied")
 
 
 def apply_firewall_config(runner: Runner, config: dict) -> CommandResult:
-    """Apply firewall rules (LAN-only access)."""
-    allow_lan_only = config.get("allow_lan_only", True)
-    if allow_lan_only:
-        return CommandResult(True, "firewall: LAN-only mode enabled (configured)")
-    return CommandResult(True, "firewall: open mode enabled (configured)")
+    """Refuse until a transaction can enforce and verify the requested policy."""
+    return CommandResult(False, "firewall not applied: no enforcement transaction is connected")
 
 
 def apply_ssh_config(runner: Runner, config: dict) -> CommandResult:
@@ -221,31 +213,24 @@ def apply_ssh_config(runner: Runner, config: dict) -> CommandResult:
         new_lines = [l for l in lines if not l.strip().startswith("PasswordAuthentication")]
         new_lines.append(f"PasswordAuthentication {setting}")
         runner.write_text_atomic("/etc/ssh/sshd_config", "\n".join(new_lines))
-        runner.run(["systemctl", "restart", "ssh"], timeout=10)
+        proc = runner.run(["systemctl", "restart", "ssh"], timeout=10)
+        if proc.returncode != 0:
+            return CommandResult(False, f"SSH config written but service restart failed: {proc.stderr.strip()}")
         return CommandResult(True, f"SSH password auth: {setting}")
     except Exception as e:
         return CommandResult(False, f"SSH config failed: {e}")
 
 
 def apply_tether_config(runner: Runner, config: dict) -> CommandResult:
-    """Apply USB tether mode settings."""
-    enabled = config.get("enabled", False)
-    if enabled:
-        return CommandResult(True, "tether mode: enabled (requires USB device)")
-    return CommandResult(True, "tether mode: disabled")
+    """Do not report link configuration without an identified device and DHCP result."""
+    return CommandResult(False, "tether not applied: device discovery and DHCP are not connected to this configuration path")
 
 
 def apply_handoff_config(runner: Runner, config: dict) -> CommandResult:
-    """Apply handoff/restore settings."""
-    categories = config.get("restored_categories", [])
-    return CommandResult(True, f"handoff: {len(categories)} categories configured")
+    """Category names alone cannot establish that an archive was restored."""
+    return CommandResult(False, "handoff not applied: no verified archive or restore transaction supplied")
 
 
 def apply_iperf3_config(runner: Runner, config: dict) -> CommandResult:
-    """Apply iperf3 network test configuration."""
-    role = config.get("role", "client")
-    peer = config.get("peer_address", "")
-    port = config.get("port", 5201)
-    if peer:
-        return CommandResult(True, f"iperf3: {role} mode, peer {peer}:{port}")
-    return CommandResult(True, "iperf3: installed, ready for manual testing")
+    """Do not claim a test service or result without running one."""
+    return CommandResult(False, "iperf3 not applied: no bounded test or LAN-scoped service transaction connected")

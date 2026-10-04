@@ -135,30 +135,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:  # minimal shape match for standalone use/testing
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
+from repair import Runner
 
-try:
-    import pct_provision
-    import vm_provision
-    from vm_provision import CommandResult, next_free_vmid
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    pct_provision = None  # type: ignore
-    vm_provision = None  # type: ignore
-
-    @dataclass
-    class CommandResult:  # type: ignore
-        ok: bool
-        detail: str
-
-    def next_free_vmid(runner):  # type: ignore
-        raise NotImplementedError
-
-
+import pct_provision
+import vm_provision
+from vm_provision import CommandResult, next_free_vmid
 
 
 UPSTREAM_SCRIPTS_REPO = "community-scripts/ProxmoxVE"

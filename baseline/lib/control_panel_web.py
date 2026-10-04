@@ -39,24 +39,7 @@ import drive_installer
 import physical_device_safety as pds
 import update_pipeline
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def read_text(self, path):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def path_exists(self, path):
-            raise NotImplementedError
-
-        def remove(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 
 DEFAULT_CONFIG_PATH = "/etc/baseline/install-config.json"

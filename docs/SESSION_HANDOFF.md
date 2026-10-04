@@ -1404,3 +1404,19 @@ and refused missing APPDATA_ADMIN/APPDATA_PERSONAL. No physical writes or
 provisioning. Read INSTALLER_PLAN_WALKTHROUGH.md and DR138. Existing concurrent
 safety/dependency work is preserved and not bundled into this increment.
 Stage jobs, PARTUUID mounts, storage mapping and full firstboot remain open.
+
+## 2026-10-03 — main publication and isolated build (DR140)
+
+GitHub BaseLineProx main is verified at af5fdd251c63b108c5655d554402ed025dcfb7d1.
+The previously absent installer framework is integrated there, with explicit
+external AppData mappings and scoped DR137 drive guards. New code/docs live
+in the isolated worktree .runtime-proof138/main-integration (branch
+local/main-installer-integration); this root checkout remains on its existing
+branch with concurrent uncommitted changes preserved. Do not infer deployment
+from main publication or overwrite this dirty checkout to align it.
+3136 isolated tests passed. Updated manual ISO:
+.runtime-proof140/installer/baseline-140.iso;497 extracted files matched and
+actual isolated KVM boot reached the Proxmox menu. No physical writes. The real
+six-volume drive still lacks ready AppData targets. Applying mounts, migrating
+state, durable stage jobs and full firstboot remain open72/75/76. DR139 and
+other concurrent production audit edits remain separate, not published here.

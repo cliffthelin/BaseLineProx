@@ -46,7 +46,7 @@ def main(argv=None) -> int:
     summary = update_pipeline.apply_selective_update(
         RealRunner(), config, categories, network_interface=args.interface)
     print(json.dumps(summary, indent=2, sort_keys=True))
-    return 0 if not summary["failed"] else 1
+    return 1 if summary["failed"] or summary["not_available"] else 0
 
 
 if __name__ == "__main__":

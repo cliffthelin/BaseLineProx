@@ -129,6 +129,9 @@ def apply(cmd, path: str, *, validate=validate_target_device, expected_serial=No
     steps = [["wipefs", "-a", validated["path"]], ["sgdisk", "-Z", validated["path"]],
              sgdisk_argv(validated["path"], plan)] + [mkfs_argv(validated["path"], p) for p in plan]
     for argv in steps:
+        current = validate(validated["path"], expected_serial=validated["serial"], min_size_bytes=min_size_bytes)
+        if current != validated:
+            raise PhysicalDeviceSafetyError("drive identity, path or size changed during layout - refusing")
         rc, _out, err = cmd.run(argv)
         if rc != 0:
             raise LayoutError(f"{argv[0]} failed (rc={rc}): {err.strip()}")

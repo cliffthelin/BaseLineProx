@@ -1,31 +1,28 @@
-"""Notification broker (Track B3) - MVP scope per
-docs/design/milestone-2-gui-plan.md: durably logs the request (same JSONL
-event pattern network.py's EVENT_LOG already uses) and returns success. No
-visual notification UI yet - no notification daemon exists in this
-minimal cage session; a stub at "minimal, testable level," not a claim
-that visual notifications are solved.
+"""Deliver notifications through the session's real notification service.
+
+The audit log records delivery acceptance, not proof that a person saw it.
+A missing notify-send executable or session service is a delivery failure.
 """
 from __future__ import annotations
 
 import json
 import time
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def append_text(self, path, content):
-            raise NotImplementedError
+from repair import Runner
 
 NOTIFICATION_LOG = "/var/log/baseline/gui_notifications.jsonl"
 
 
 def notify(runner: Runner, *, app_id: str, summary: str, body: str, log_path: str = NOTIFICATION_LOG) -> bool:
+    proc = runner.run(["notify-send", "--app-name", app_id, "--", summary, body], timeout=5)
+    delivered = proc.returncode == 0
     rec = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "app_id": app_id,
         "summary": summary,
         "body": body,
+        "delivered": delivered,
+        "detail": proc.stderr.strip() if not delivered else "",
     }
     runner.append_text(log_path, json.dumps(rec) + "\n")
-    return True
+    return delivered

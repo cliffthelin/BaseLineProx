@@ -1,5 +1,29 @@
 # Installing BaselineOS on real hardware
 
+## Production operation audit — 2026-10-03 (DR139)
+
+The notification broker now delivers through the real desktop session service;
+acceptance was verified on this development desktop, **not on physical Proxmox
+or in the cage kiosk**. Provisioning installs its client. The settings server
+now calls existing live apply mechanisms and saves values only after successful
+operations. Those settings/provisioning changes are tested against fakes and
+local subprocess/HTTP boundaries only, **not applied to physical hardware**.
+
+Unfinished operations cannot report success: logged rebuild requests, cache
+checks without a verified source, firewall enforcement, tether configuration,
+handoff restore and iperf3 service/test configuration explicitly fail. Network
+configuration here supports hostname only; DHCP/link changes require a real
+repair transaction. SSH restart failures and unavailable update categories
+propagate failure. These runtime integrations remain open; changing their
+reports to failure does not implement them. Missing required execution modules
+fail import rather than install a fallback stub.
+
+See [DR139](design/decision-records/139-production-real-operation-audit.md) and
+the DR139 v0.2 queue entry. Installer stages, PARTUUID application and firstboot
+remain open under rows72/75/76. Main remains unchanged; nothing was pushed.
+Final validation: 3165 unit tests passed; deployment imports, provision shell
+syntax and diff whitespace checks passed. Unit results are not physical proof.
+
 This is the single, authoritative, step-by-step answer to "how do I
 build a working Baseline drive install" - written 2026-09-26 because
 no such document previously existed (an audit found the knowledge
@@ -16,7 +40,7 @@ newer scattered narrative.**
 |---|---|---|
 | 1. Acquire + verify the Proxmox installer | `drive_setup_acquire.py` | Live publisher download/signature chain, DR18. |
 | 2. Prepare the unattended-install answer ISO | `drive_setup_answer.py` | Real disposable QEMU install and single-use HTTPS answer tests, DR60. Physical drive access exists; absence of `qm` on the development OS does not mean otherwise. |
-| 3. Validate the target drives | `physical_device_safety.py` | Actual serial/device/size checks repeated 2026-10-01, DR117; physical source read-only during that proof. |
+| 3. Validate the target drives | `physical_device_safety.py` | Actual serial/device/size checks repeated 2026-10-01, DR117; physical source read-only during that proof. DR137's stricter boot-identity and serial-binding changes are verified against fakes only, not physical hardware. |
 | 4. Install Proxmox | `drive_setup_install.py`, self-installer | A real installed Proxmox drive exists (v0.1 row17). Which historical installer run created it remains unconfirmed. No physical reinstall in DR117. |
 | 5. Deploy the current Baseline app | `boot/provision.sh` | Imports, packaging and unit checks pass. DR117 copied current source into a disposable Proxmox clone and exercised its web/VM paths. **Full current provision.sh was not run end-to-end or deployed to the physical drive.** |
 | 6. First boot / CONFIRM / kiosk | firstboot state machine, kiosk unit | Earlier QEMU firstboot tests, DR25–27. DR117 shows a visible Chromium Proxmox login on an actual Proxmox VM using a transient service with the corrected terminal properties; production firstboot ordering/autostart remains unverified. |
@@ -576,7 +600,7 @@ packaging/boot only, not installation or physical readiness.
 
 ## Drive enrollment and the install plan (DR135)
 
-Baseline still acts only on the SK hynix drives, plus any drive a person
+Baseline's initial action gate admits the SK hynix drives, plus any drive a person
 deliberately enrolls with the `enroll_drive` Drive Administration action. That
 action takes the drive's serial typed exactly, must match what the drive
 reports, and needs a human confirmation every time. It writes nothing to the
@@ -592,6 +616,24 @@ development sandbox returns no `lsblk` output), and nothing has been enrolled
 or provisioned with it. Running the stages as one job, applying the mounts and
 a web editor remain open under rows 72/75/76.
 
+**2026-10-03 remediation: all five DR136 findings are fixed against fakes
+only, not verified on physical hardware** ([DR137](design/decision-records/137-main-readiness-review-fixes.md)).
+Layout retains the confirmed serial through dispatch and revalidates identity,
+path and size before each destructive command, then serial before stamping.
+The device gate refuses unknown boot identity; install-plan discovery also
+refuses it. This includes unsupported live/overlay or ambiguous root topology:
+it must be resolved before enrollment or planning, rather than bypassed.
+Autofill leaves ambiguous choices unset; even two empty disks require explicit
+role choices. Retention requires valid GPT PARTUUIDs and distinct volume names.
+PARTUUID uniqueness is checked across all partitions in the existing read-only
+listing, including boot, unenrolled and unidentified disks. Repeated sightings
+of the same named partition count once; GUID comparison ignores letter case.
+No extra per-device probes or writes are added to discovery.
+The inherited backup tests now use fake destination capacity; the production
+free-space gate is unchanged. DR136 remains the historical review. Rows
+55/65/67's reviewed guarantees are restored in guarded tests; physical proof
+and the existing rows 72/75/76 integration work remain open. No merge or push
+was performed.
 
 ## Installer plan web editor and physical discovery (DR138)
 

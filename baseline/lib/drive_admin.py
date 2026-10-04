@@ -68,12 +68,7 @@ import web_gate
 # a dev checkout at any other path, since it always finds itself.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
+from repair import Runner
 
 
 # The two SK hynix drives Baseline is set up with (decision records 45-47): the
@@ -732,26 +727,15 @@ def install_drive(runner, *, device_path, pds_runner=None, vg_name: str = PERSIS
 
 
 def check_cache_updates(runner) -> list:
-    """Real per-volume "is a newer compatible version available"
-    check - direct instruction, 2026-09-29. Honestly empty right now:
-    no real update source is wired up for any cached artifact yet (the
-    curated Helper-Scripts in vm_scripts.SCRIPT_MANIFEST are
-    deliberately manually-pinned/reviewed, never auto-checked or
-    auto-updated by design; the cached Proxmox source ISO and any
-    distro ISO have no real version-tracking built yet). Returning a
-    real empty list here, not a fabricated "nothing available" per
-    item - there is a real difference between "checked, found
-    nothing" and "never checked," and this module does not blur it."""
-    return []
+    """Refuse absent publisher/version verification instead of fabricating an empty check."""
+    raise RuntimeError("cache updates unavailable: no verified update source is configured")
 
 
 def update_selected(runner, *, selected: list, **params) -> ActionResult:
-    """The real "Update" action (direct instruction, 2026-09-29):
-    check each selected Baseline volume for a newer compatible version
-    of what it caches, and apply the ones chosen. Honest placeholder
-    for the actual apply step - `check_cache_updates` never returns
-    anything yet (see its own docstring for why), so there is nothing
-    real to apply. Refuses plainly rather than faking success."""
+    """Refuse cache updates until publisher/version verification is connected.
+
+    Manually pinned scripts must retain their explicit review requirement.
+    """
     if not selected:
         return ActionResult(False, "no volumes selected")
     return ActionResult(
@@ -1109,11 +1093,14 @@ class _LayoutCmd:
         return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
-def lay_out_baseline_drive(runner, *, device_path, pds_runner=None, on_progress=None, **params) -> ActionResult:
+def lay_out_baseline_drive(runner, *, device_path, expected_serial=None, pds_runner=None,
+                          on_progress=None, **params) -> ActionResult:
     """Erase and re-lay the Baseline drive's volumes (BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE, USER_*, ...).
     Destructive. Only runs against a drive that is empty or already Baseline's own, with nothing mounted, with an
     installer UUID (or blank), and, if it holds Baseline data, with a recent backup (all enforced before this runs)."""
     import baseline_drive_layout as bdl
+    if not expected_serial or expected_serial not in allowed_target_serials():
+        return ActionResult(False, "refused: layout needs the exact confirmed managed drive serial")
     say = on_progress or (lambda line: None)
     pds_runner = pds_runner or pds.Runner()
     mounted = runner.run(["lsblk", "-nr", "-o", "MOUNTPOINT", device_path], timeout=30)
@@ -1129,14 +1116,16 @@ def lay_out_baseline_drive(runner, *, device_path, pds_runner=None, on_progress=
     read = _lsblk_run(pds_runner)
     say(f"laying out the Baseline volumes on {device_path}")
     try:
-        plan = bdl.apply(_LayoutCmd(runner), device_path, validate=validate, read_drive=read)
+        plan = bdl.apply(_LayoutCmd(runner), device_path, validate=validate, read_drive=read,
+                         expected_serial=expected_serial)
     except (bdl.LayoutError, pds.PhysicalDeviceSafetyError, drive_guard.DataProtectionError) as exc:
         return ActionResult(False, f"refused: {exc}")
     say(f"created {len(plan)} volumes; giving the drive its installer identity")
     try:
-        serial = pds.get_device_serial(pds_runner, device_path) or "unknown"
-    except Exception:  # noqa: BLE001 - informational only
-        serial = "unknown"
+        validated = validate(device_path, expected_serial=expected_serial, min_size_bytes=MIN_TARGET_SIZE_BYTES)
+        serial = validated["serial"]
+    except pds.PhysicalDeviceSafetyError as exc:
+        return ActionResult(False, f"refused: {exc}")
     stamped = drive_guard.stamp_installer_identity(runner, device_path, serial=serial, read=read)
     return ActionResult(True, f"laid out {len(plan)} Baseline volumes on {device_path}. " + stamped.detail)
 
@@ -1442,4 +1431,8 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
         call_params["on_progress"] = on_progress
     if action_id in ("lay_out_baseline_drive", "enroll_drive"):
         call_params["pds_runner"] = pds_runner
+    if action_id == "lay_out_baseline_drive":
+        # Internal dispatch value, added only after the web and HITL proofs
+        # verify the original request and this exact device serial.
+        call_params["expected_serial"] = serial
     return spec.run(runner, **call_params)

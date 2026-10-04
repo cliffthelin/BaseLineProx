@@ -28,24 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def path_exists(self, path):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def remove(self, path):
-            raise NotImplementedError
-
-        def makedirs(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 
 DROPIN_DIR = "/etc/systemd/system/baseline-sensors-collect.timer.d"

@@ -53,6 +53,7 @@ _SUBSTRATE_KEYS = {"serial", "action"}
 _BASELINE_KEYS = {"serial", "action", "personas", "volumes", "erase_existing"}
 _PERSONA_RE = re.compile(r"^[a-z][a-z0-9]{0,7}$")     # APPDATA_<PERSONA> must fit an ext4 label (16 characters)
 _HOSTNAME_RE = re.compile(r"^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$")
+_PARTUUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 NOT_YET_CONNECTED = (
     "running the stages: each one is still started separately (Drive Administration, /vms, baseline-tasker)",
@@ -117,12 +118,28 @@ def _parse(lsblk_json: str) -> list:
     disks = value.get("blockdevices") if isinstance(value, dict) else None
     if not isinstance(disks, list) or not all(isinstance(d, dict) for d in disks):
         raise PlanError("the drive listing could not be read")
-    return [d for d in disks if d.get("type") == "disk"]
+    return disks
 
 
 def discover(lsblk_json: str, *, allowed_serials, boot_serial, is_installer_uuid=drive_guard.is_installer_uuid) -> dict:
+    if not isinstance(boot_serial, str) or not boot_serial.strip():
+        raise PlanError("could not establish the running boot drive identity; no install plan is offered")
     drives, unenrolled, unidentified = [], [], 0
-    for disk in _parse(lsblk_json):
+    listing = _parse(lsblk_json)
+    identities = {}
+    # Count identities from the listing already read, before filtering drives.
+    # Names deduplicate partitions repeated under multi-parent lsblk trees.
+    for root in listing:
+        for node in _walk(root):
+            identity = _partuuid(node.get("partuuid")) if node.get("type") == "part" else None
+            if identity is not None:
+                name = node.get("name")
+                if not isinstance(name, str) or not name:
+                    raise PlanError("a partition identity has no current device name; discover again")
+                identities.setdefault(identity, set()).add(name)
+    for disk in listing:
+        if disk.get("type") != "disk":
+            continue
         serial = (disk.get("serial") or "").strip()
         if serial and serial == boot_serial:
             continue
@@ -132,7 +149,8 @@ def discover(lsblk_json: str, *, allowed_serials, boot_serial, is_installer_uuid
             drives.append(_describe({**disk, "serial": serial}, is_installer_uuid))
         else:
             unenrolled.append({"serial": serial, "model": disk.get("model") or "", "size_bytes": disk.get("size")})
-    return {"drives": drives, "unenrolled": unenrolled, "unidentified": unidentified}
+    return {"drives": drives, "unenrolled": unenrolled, "unidentified": unidentified,
+            "partuuid_counts": {identity: len(names) for identity, names in identities.items()}}
 
 
 # --- autofill ----------------------------------------------------------------------------------
@@ -148,19 +166,25 @@ def _only(drives: list, label: str, notes: list):
 def autofill(discovery: dict, *, personas=di.DEFAULT_PERSONAS) -> dict:
     drives, notes = discovery["drives"], []
     empty = [d for d in drives if d["state"] == "empty" and not d["mounted"]]
-    pve = _only([d for d in drives if d["state"] == "proxmox"], "Proxmox drive", notes)
-    base = _only([d for d in drives if d["state"] == "baseline"], "Baseline drive", notes)
-    ambiguous_base = base is None and any(d["state"] == "baseline" for d in drives)
-    if base is None and not ambiguous_base and empty:
-        base = empty.pop()
-        notes.append(f"autofilled: lay out Baseline's volumes on empty drive {base['serial']}; edit if wrong")
-    if pve is None and empty:
-        pve = empty.pop(0)
-        notes.append(f"autofilled: install Proxmox on empty drive {pve['serial']}; edit if wrong")
-    if pve is None:
-        notes.append("choose the Proxmox drive: no drive holds Proxmox and no empty drive is free")
-    if base is None and not ambiguous_base:
-        notes.append("choose the Baseline drive: no drive holds Baseline volumes and no empty drive is free")
+    pve_candidates = [d for d in drives if d["state"] == "proxmox"]
+    base_candidates = [d for d in drives if d["state"] == "baseline"]
+    pve = _only(pve_candidates, "Proxmox drive", notes)
+    base = _only(base_candidates, "Baseline drive", notes)
+    # Absence can use a uniquely available empty drive. Ambiguity cannot:
+    # listing order must never assign disks to destructive roles.
+    needs_pve, needs_base = not pve_candidates, not base_candidates
+    if len(empty) == 1 and needs_base != needs_pve:
+        if needs_base:
+            base = empty[0]
+            notes.append(f"autofilled: lay out Baseline's volumes on empty drive {base['serial']}; edit if wrong")
+        else:
+            pve = empty[0]
+            notes.append(f"autofilled: install Proxmox on empty drive {pve['serial']}; edit if wrong")
+    for chosen, candidates, label in ((pve, pve_candidates, "Proxmox"), (base, base_candidates, "Baseline")):
+        if chosen is None and not candidates:
+            options = ', '.join(d['serial'] for d in empty) or 'none'
+            notes.append(f"choose the {label} drive explicitly: eligible empty drives {options}; "
+                         "each drive can fill only one role")
     if discovery["unenrolled"]:
         notes.append("drives not yet enrolled are not offered: " + ", ".join(d["serial"] for d in discovery["unenrolled"]))
     retain = base is not None and base["state"] == "baseline"
@@ -238,17 +262,32 @@ def _required_names(personas) -> list:
     return [volume[3] for volume in di.baseline_volumes_for(tuple(personas))]
 
 
-def _check_retain(spec: dict, drive: dict, personas_ok: bool, errors: list) -> None:
+def _partuuid(value):
+    return value.lower() if isinstance(value, str) and _PARTUUID_RE.fullmatch(value) else None
+
+
+def _check_retain(spec: dict, drive: dict, discovery: dict, personas_ok: bool, errors: list) -> None:
     if drive["state"] != "baseline":
         errors.append(f"Baseline drive {drive['serial']}: 'retain' needs a drive with Baseline volumes; it is {drive['state']}")
         return
     found = {v["name"]: v["partuuid"] for v in drive["volumes"]}
+    if len(found) != len(drive["volumes"]):
+        errors.append("Baseline drive: duplicate volume names make retention ambiguous")
     listed = spec["volumes"]
-    if not isinstance(listed, list) or not all(isinstance(v, dict) and set(v) == {"name", "partuuid"} for v in listed):
+    if not isinstance(listed, list) or not all(isinstance(v, dict) and set(v) == {"name", "partuuid"}
+                                              and isinstance(v["name"], str) for v in listed):
         errors.append("Baseline drive: volumes must be a list of {name, partuuid}")
         return
+    if len({v["name"] for v in listed}) != len(listed):
+        errors.append("Baseline drive: retained volume names must be distinct")
     for volume in listed:
-        if found.get(volume["name"]) != volume["partuuid"]:
+        identity = _partuuid(volume["partuuid"])
+        if identity is None:
+            errors.append(f"Baseline drive: volume {volume['name']} needs a valid GPT PARTUUID")
+        elif discovery.get("partuuid_counts", {}).get(identity) != 1:
+            errors.append(f"Baseline drive: PARTUUID {identity} must identify exactly one attached partition; "
+                          "missing or cloned identities cannot be mounted safely")
+        if volume["name"] not in found or identity is None or _partuuid(found[volume["name"]]) != identity:
             errors.append(f"Baseline drive {drive['serial']}: volume {volume['name']} with PARTUUID {volume['partuuid']} "
                           "is not on this drive now; discover again")
     if personas_ok:
@@ -293,7 +332,7 @@ def _check_baseline(spec: dict, discovery: dict, substrate, errors: list) -> Non
         errors.append(f"drive {drive['serial']} cannot be both the Proxmox drive and the Baseline drive")
         return
     if spec["action"] == "retain":
-        _check_retain(spec, drive, personas_ok, errors)
+        _check_retain(spec, drive, discovery, personas_ok, errors)
     elif spec["action"] == "lay_out":
         if personas_ok:
             _check_lay_out(spec, drive, errors)

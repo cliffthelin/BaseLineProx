@@ -164,16 +164,18 @@ def test_apply_stored_config_never_touches_anything_iso_shaped():
 def test_apply_stored_config_applies_network_hostname():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    config["network"] = {"hostname": "myhost"}
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
     assert "network" in summary["applied"]
     assert any(c == ["hostnamectl", "set-hostname", "myhost"] for c in runner.calls)
 
 
-def test_apply_stored_config_applies_firewall():
+def test_apply_stored_config_reports_unwired_firewall_as_failed():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "firewall" in summary["applied"]
+    assert "firewall" in summary["failed"]
+    assert "firewall" not in summary["applied"]
 
 
 def test_apply_stored_config_applies_ssh():
@@ -187,25 +189,28 @@ def test_apply_stored_config_applies_ssh():
     assert "/etc/ssh/sshd_config" in runner.writes
 
 
-def test_apply_stored_config_applies_tether():
+def test_apply_stored_config_reports_unwired_tether_as_failed():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "tether" in summary["applied"]
+    assert "tether" in summary["failed"]
+    assert "tether" not in summary["applied"]
 
 
-def test_apply_stored_config_applies_handoff():
+def test_apply_stored_config_reports_unwired_handoff_as_failed():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "handoff" in summary["applied"]
+    assert "handoff" in summary["failed"]
+    assert "handoff" not in summary["applied"]
 
 
-def test_apply_stored_config_applies_iperf3():
+def test_apply_stored_config_reports_unwired_iperf3_as_failed():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "iperf3" in summary["applied"]
+    assert "iperf3" in summary["failed"]
+    assert "iperf3" not in summary["applied"]
 
 
 def test_apply_stored_config_all_sections_accounted_for():

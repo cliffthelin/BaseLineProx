@@ -14,12 +14,7 @@ from __future__ import annotations
 
 import posixpath
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def listdir(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 DEFAULT_EXCHANGE_DIR = "/var/lib/baseline/gui-exchange"
 

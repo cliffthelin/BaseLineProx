@@ -24,18 +24,7 @@ import json
 
 import config_apply
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def read_text(self, path):
-            raise NotImplementedError
-
-        def path_exists(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 
 DEFAULT_CONFIG_PATH = "/etc/baseline/install-config.json"

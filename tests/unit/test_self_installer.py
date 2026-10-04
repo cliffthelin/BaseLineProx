@@ -11,7 +11,7 @@ import pytest
 
 import self_installer as si
 import drive_setup_answer as dsan
-from test_physical_device_safety import FakeRunner as FakePdsRunner
+from test_physical_device_safety import FakeRunner as FakePdsRunner, TEST_BOOT_SERIAL
 from test_drive_setup_acquire import FakeAcquireRunner
 from test_drive_setup_answer import FakeAnswerRunner
 from test_iso_builder import FakeIsoBuilderRunner
@@ -66,7 +66,7 @@ REAL_SERIAL = "FD01N6557110C271B"
 
 def _pds_runner_ok():
     return FakePdsRunner(
-        udevadm_by_path={"/dev/sdd": REAL_SERIAL},
+        udevadm_by_path={"/dev/sdd": REAL_SERIAL, "/dev/nvme0n1": TEST_BOOT_SERIAL},
         findmnt_root="/dev/nvme0n1p2", pkname_of_root="nvme0n1",
         sizes={"sdd": 1_000_000_000_000 // 512},  # sectors -> ~500GB
     )
@@ -432,6 +432,16 @@ def test_refuses_before_anything_else_on_device_safety_failure(tmp_path):
     assert "device safety check failed" in result.detail
 
 
+def test_self_installer_refuses_unknown_boot_identity_before_acquisition_or_install(tmp_path):
+    runner = _pds_runner_ok()
+    del runner.udevadm_by_path["/dev/nvme0n1"]
+    kwargs = _ready_kwargs(tmp_path, pds_runner=runner)
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "refused" and "boot device identity" in result.detail
+    assert kwargs["acquire_runner"].calls == []
+    assert kwargs["install_runner"].calls == []
+
+
 def test_skips_acquire_entirely_when_assistant_already_cached(tmp_path):
     kwargs = _ready_kwargs(tmp_path)
     kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached-binary"
@@ -472,7 +482,7 @@ def test_never_launches_qemu_when_any_earlier_stage_fails(tmp_path):
 # own, and refuse clearly (never crash) when it genuinely can't be. --
 
 def test_refuses_when_the_selected_device_reports_no_hardware_serial(tmp_path):
-    no_serial_pds = FakePdsRunner(udevadm_by_path={}, findmnt_root="/dev/nvme0n1p2",
+    no_serial_pds = FakePdsRunner(udevadm_by_path={"/dev/nvme0n1": TEST_BOOT_SERIAL}, findmnt_root="/dev/nvme0n1p2",
                                    pkname_of_root="nvme0n1", sizes={"sdd": 1_000_000_000_000 // 512})
     kwargs = _ready_kwargs(tmp_path, pds_runner=no_serial_pds, expected_serial=None)
     result = si.build_and_write_self_installer(**kwargs)

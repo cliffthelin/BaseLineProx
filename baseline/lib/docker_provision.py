@@ -22,12 +22,7 @@ from __future__ import annotations
 
 from vm_provision import CommandResult  # re-exported: same result shape, same convention
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
+from repair import Runner
 
 
 # ---------------------------------------------------------------------------

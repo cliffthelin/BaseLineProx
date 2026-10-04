@@ -13,10 +13,7 @@ import sys
 
 import persist_bind_mounts as pbm
 
-try:
-    from repair import RealRunner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    RealRunner = None
+from repair import RealRunner
 
 
 def check(runner) -> int:

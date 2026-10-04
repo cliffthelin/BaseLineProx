@@ -144,9 +144,15 @@ def test_autofill_keeps_the_proxmox_drive_and_retains_the_baseline_drive_volume_
     assert ip.validate(plan, discover(*STANDARD)) == []
 
 
-def test_autofill_on_empty_drives_installs_proxmox_on_one_and_lays_out_baseline_on_another():
+def test_empty_drives_require_explicit_role_choices_before_installing_or_laying_out():
     found = discover(disk("sda", PVE), disk("sdb", BASE))
     plan = ip.autofill(found)
+    assert plan["storage"]["substrate"] == {"serial": None, "action": None}
+    assert plan["storage"]["baseline"]["serial"] is None
+    with pytest.raises(ip.PlanError):
+        ip.compile_plan(plan, found)
+    plan["storage"]["substrate"] = {"serial": PVE, "action": "install"}
+    plan["storage"]["baseline"].update(serial=BASE, action="lay_out")
     assert plan["storage"]["substrate"] == {"serial": PVE, "action": "install"}
     assert plan["storage"]["baseline"]["serial"] == BASE and plan["storage"]["baseline"]["action"] == "lay_out"
     assert plan["storage"]["baseline"]["volumes"] == []
@@ -332,7 +338,7 @@ def test_installing_proxmox_compiles_to_the_existing_self_installer_action_bound
 
 
 def test_laying_out_compiles_to_the_existing_layout_action_and_defers_mounts_until_partuuids_exist():
-    found = discover(disk("sda", PVE), disk("sdb", BASE))
+    found = discover(proxmox_disk(), disk("sdb", BASE))
     stages = ip.compile_plan(ip.autofill(found), found)
     assert stages["baseline_drive"]["drive_action"] == "lay_out_baseline_drive"
     assert stages["baseline_drive"]["expected_serial"] == BASE
