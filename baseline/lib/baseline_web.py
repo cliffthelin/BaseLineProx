@@ -66,6 +66,7 @@ except ImportError:  # pragma: no cover - direct-script execution fallback
             raise NotImplementedError
 
 
+
 NAV_TABS = (
     ("/settings", "Settings"),
     ("/admin", "Admin"),
@@ -82,6 +83,7 @@ NAV_TABS = (
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
     ("/recipes", "Environment recipes"),
+    ("/install-plan", "Installer plan"),
     ("/workloads", "Workload jobs"),
     ("/master-config", "Master Config"),
 )
@@ -1571,6 +1573,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._html_response(result.status, _with_nav(sw.render_recovery_page({}, result.body.get("reason", "")), path))
             return self._html_response(200, _with_nav(sw.render_recovery_page(result.body), path))
 
+        if path == "/install-plan":
+            import install_plan_page
+            return self._html_response(200, _with_nav(install_plan_page.render(), path))
+
         if path == "/recipes":
             import recipe_page
             return self._html_response(200, _with_nav(recipe_page.render(), path))
@@ -1951,6 +1957,14 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(200,jobs.inspect(jid,observation))
             except (workload_jobs.JobError,ValueError,TypeError) as exc:
                 return self._json(409,{'message':str(exc)})
+
+        if path == "/install-plan/action":
+            import install_plan_page, install_plan
+            try:
+                provider=deps.get("install_plan_discovery",install_plan_page.discover_current)
+                return self._json(200,install_plan_page.perform(body,discovery_provider=provider))
+            except install_plan.PlanError as exc:
+                return self._json(400,{"ok":False,"executed":False,"message":str(exc),"errors":exc.errors})
 
         if path == "/recipes/action":
             import recipe_page, environment_recipes

@@ -57,7 +57,6 @@ _HOSTNAME_RE = re.compile(r"^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$")
 NOT_YET_CONNECTED = (
     "running the stages: each one is still started separately (Drive Administration, /vms, baseline-tasker)",
     "writing the compiled PARTUUID mounts into /etc/fstab (persist_bind_mounts still mounts by LABEL)",
-    "a web page for editing the plan (the baseline-install-plan CLI edits JSON)",
     "real-hardware verification of any of this",
 )
 

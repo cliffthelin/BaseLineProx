@@ -289,6 +289,7 @@ cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
 # Deliberate drive enrollment and the installer plan (discover/autofill/validate/compile), 2026-10-03.
 cp "$SRC/baseline/lib/drive_enrollment.py" /opt/baseline/lib/drive_enrollment.py
 cp "$SRC/baseline/lib/install_plan.py" /opt/baseline/lib/install_plan.py
+cp "$SRC/baseline/lib/install_plan_page.py" /opt/baseline/lib/install_plan_page.py
 cp "$SRC/baseline/bin/baseline-install-plan" /opt/baseline/bin/baseline-install-plan
 chmod 755 /opt/baseline/bin/baseline-install-plan
 cp "$SRC/baseline/lib/web_gate.py" /opt/baseline/lib/web_gate.py
