@@ -186,8 +186,9 @@ def apply_wifi_firmware(runner: Runner, package: str = "firmware-mediatek") -> C
 
 
 def apply_network_config(runner: Runner, config: dict) -> CommandResult:
-    """Apply hostname only; refuse unsupported link changes before any write."""
-    if set(config) - {"hostname"}:
+    """Apply the hostname; DHCP is already the machine's behaviour, so dhcp=True is
+    accepted. Any other link change is refused before any write."""
+    if set(config) - {"hostname", "dhcp"} or config.get("dhcp", True) is not True:
         return CommandResult(False, "network not applied: only hostname is supported here; link/DHCP changes require the repair transaction")
     hostname = config.get("hostname")
     if not isinstance(hostname, str) or not hostname.strip() or hostname.startswith("-"):

@@ -193,7 +193,17 @@ def test_ssh_reports_service_restart_failure():
     assert ca.apply_ssh_config(runner, {"password_auth": False}).ok is False
 
 
-def test_network_dhcp_request_is_not_reported_as_applied_by_hostname_only():
+def test_network_default_config_applies_hostname_and_accepts_dhcp_true():
+    # settings_web's own default is {"hostname": "baseline", "dhcp": True}; DHCP is
+    # the existing behaviour, so it must not block setting the hostname.
     runner = FakeRunner()
-    assert ca.apply_network_config(runner, {"hostname": "target", "dhcp": True}).ok is False
-    assert runner.calls == []  # refuse an unsupported transaction before partial changes
+    assert ca.apply_network_config(runner, {"hostname": "baseline", "dhcp": True}).ok is True
+    assert runner.calls == [["hostnamectl", "set-hostname", "baseline"]]
+
+
+def test_network_unsupported_link_change_is_refused_before_any_write():
+    for config in ({"hostname": "target", "dhcp": False},
+                   {"hostname": "target", "address": "10.0.0.5/24"}):
+        runner = FakeRunner()
+        assert ca.apply_network_config(runner, config).ok is False
+        assert runner.calls == []

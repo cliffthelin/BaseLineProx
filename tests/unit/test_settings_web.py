@@ -954,7 +954,8 @@ def test_export_install_config_round_trips_through_config_pipeline():
     expected = {"network", "firewall", "ssh", "tether", "handoff",
                 "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
     assert expected == all_named
-    assert set(summary["failed"]) == {"network", "firewall", "tether", "handoff"}
+    assert set(summary["failed"]) == {"firewall", "tether", "handoff"}
+    assert "network" in summary["applied"]  # default {hostname, dhcp: True} sets the hostname
     assert not set(summary["failed"]) & set(summary["applied"])
 
 
