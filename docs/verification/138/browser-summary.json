@@ -1,0 +1,9 @@
+{
+  "scope": "actual headless Chromium / loopback HTTP with synthetic discovery only; no real drive reads or writes",
+  "autofill": true,
+  "edited_name_preserved": true,
+  "preview_executed": false,
+  "export_roundtrip": true,
+  "stale_partition_refused": true,
+  "page_errors": []
+}

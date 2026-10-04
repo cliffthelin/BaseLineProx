@@ -1,0 +1,49 @@
+{
+  "scope": "actual read-only physical metadata discovery using isolated DR135 plus editor increment; no writes or provisioning",
+  "storage": {
+    "substrate": {
+      "serial": "FD01N6557110C271B",
+      "action": "keep"
+    },
+    "baseline": {
+      "serial": "MD89N41071210AP4E",
+      "action": "retain",
+      "personas": [
+        "admin",
+        "personal"
+      ],
+      "erase_existing": false,
+      "volumes": [
+        {
+          "name": "BASELINE",
+          "partuuid": "0ef00b0b-18a6-4e4e-b9bd-31d1c104a20e"
+        },
+        {
+          "name": "INSTALLER_CACHE",
+          "partuuid": "4f897d71-e9b9-4b54-af6d-3b0c4a6a53d8"
+        },
+        {
+          "name": "SESSION_TEMP",
+          "partuuid": "08022051-e994-4f9d-88ad-17bc1b26b4a8"
+        },
+        {
+          "name": "SUBSTRATE",
+          "partuuid": "271ad088-6bd3-4704-996d-bb296ab0c661"
+        },
+        {
+          "name": "USER_ADMIN",
+          "partuuid": "4f82708a-df0c-4c6a-a4ca-d18c5eacb694"
+        },
+        {
+          "name": "USER_PERSONAL",
+          "partuuid": "f88ab289-6359-4c2c-b40b-c26dff908a8f"
+        }
+      ]
+    }
+  },
+  "valid": false,
+  "errors": [
+    "Baseline drive MD89N41071210AP4E: missing volumes APPDATA_ADMIN, APPDATA_PERSONAL; run repair on it or lay it out"
+  ],
+  "executed": false
+}

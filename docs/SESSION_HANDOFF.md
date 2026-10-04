@@ -1394,3 +1394,13 @@ shared discover/capture/lock/acquire/install/verify/rebuild phases, explicit nat
 capabilities and a test-first extension checklist. Current Ubuntu recipe and
 Linux-x64 VS Code limits remain; this document adds no cross-OS runtime support.
 Generic integration and managed reconciliation remain queue76; isolation remains74.
+
+## 2026-10-03 — DR138 installer editor
+
+Authenticated /install-plan now edits, freshly validates, previews and exports
+install plans without executing stages. Actual browser tests used synthetic
+discovery; native read-only discovery of the two actual SK hynix drives worked
+and refused missing APPDATA_ADMIN/APPDATA_PERSONAL. No physical writes or
+provisioning. Read INSTALLER_PLAN_WALKTHROUGH.md and DR138. Existing concurrent
+safety/dependency work is preserved and not bundled into this increment.
+Stage jobs, PARTUUID mounts, storage mapping and full firstboot remain open.

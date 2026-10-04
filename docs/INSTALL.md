@@ -592,3 +592,18 @@ development sandbox returns no `lsblk` output), and nothing has been enrolled
 or provisioned with it. Running the stages as one job, applying the mounts and
 a web editor remain open under rows 72/75/76.
 
+
+## Installer plan web editor and physical discovery (DR138)
+
+Authenticated /install-plan now discovers/autofills, edits JSON choices,
+validates against fresh hardware and previews/exports stage parameters. No
+stages execute. Actual headless-Chromium/loopback HTTP tests use synthetic
+listings; separate native read-only physical discovery found both SK hynix
+drives and selected keep/retain. The existing six-volume drive lacks required
+APPDATA_ADMIN/APPDATA_PERSONAL, so compilation refuses. No drives were changed.
+This supersedes the earlier current-status note that physical discovery could
+not run; DR135's failed sandbox attempt remains historical. The current ISO
+still predates this editor. Full stage execution, PARTUUID mount application
+and provisioning/firstboot remain open under72/75/76. See
+[editor walkthrough](INSTALLER_PLAN_WALKTHROUGH.md) and
+[DR138](design/decision-records/138-authenticated-installer-plan-editor.md).
