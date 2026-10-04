@@ -54,18 +54,36 @@ def _has_any_key(section: dict, keys) -> bool:
     return any(k in section for k in keys)
 
 
-def apply_stored_config(runner: Runner, config: dict | None, *, network_interface: str) -> dict:
+def _lan_only(runner, firewall: dict):
+    try:
+        result = config_apply.apply_firewall_config(runner, firewall)
+    except Exception:
+        return False, "firewall raised"
+    return result.ok, result.detail
+
+
+def apply_stored_config(runner: Runner, config: dict | None, *, network_interface: str,
+                        enforce_lan_only: bool = False) -> dict:
     """Applies every subsystem that has both a real apply function AND
     relevant keys present in the config, independently of the others -
     one subsystem failing (or being absent from the config) never
     skips a different one. Returns {"applied": [...], "skipped": [...],
-    "failed": [...]} naming each subsystem, never raising."""
+    "failed": [...]} naming each subsystem, never raising.
+
+    `enforce_lan_only` is for the full firstboot apply: the LAN-only inbound firewall is then applied
+    even with no (or no firewall section in the) config. A partial apply - the settings page saving one
+    section - leaves it False, so saving an unrelated setting never depends on the firewall."""
     summary = {"applied": [], "skipped": [], "failed": []}
     if not config:
         summary["skipped"] = [
-            "network", "firewall", "ssh", "tether", "handoff",
+            "network", "ssh", "tether", "handoff",
             "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware",
         ]
+        if enforce_lan_only:
+            ok, _ = _lan_only(runner, {})
+            summary["applied" if ok else "failed"].append("firewall")
+        else:
+            summary["skipped"].append("firewall")
         return summary
 
     proxmox = config.get("proxmox") or {}
@@ -81,7 +99,11 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
         if not present:
             summary["skipped"].append(name)
             return
-        result = apply_fn()
+        try:
+            result = apply_fn()
+        except Exception:        # one broken section must never stop the others (or raise out of firstboot)
+            summary["failed"].append(name)
+            return
         (summary["applied"] if result.ok else summary["failed"]).append(name)
 
     # Network settings
@@ -89,9 +111,9 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
     run_subsystem("network", bool(network),
                   lambda: config_apply.apply_network_config(runner, network))
 
-    # Firewall
+    # Firewall - on a full firstboot apply a config with no firewall section gets the LAN-only defaults.
     firewall = config.get("firewall") or {}
-    run_subsystem("firewall", bool(firewall),
+    run_subsystem("firewall", enforce_lan_only or bool(firewall),
                   lambda: config_apply.apply_firewall_config(runner, firewall))
 
     # SSH
@@ -118,8 +140,11 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
     # iperf3
     diagnostics = config.get("diagnostics") or {}
     iperf3 = diagnostics.get("iperf3") or {}
-    run_subsystem("iperf3", bool(iperf3),
-                  lambda: config_apply.apply_iperf3_config(runner, iperf3))
+    def iperf3_apply():
+        if iperf3.get("role") == "server" and "firewall" not in summary["applied"]:
+            return config_apply.CommandResult(False, "iperf3 server not started: the LAN-only firewall is not active")
+        return config_apply.apply_iperf3_config(runner, iperf3)
+    run_subsystem("iperf3", bool(iperf3), iperf3_apply)
 
     # Drivers
     run_subsystem("cpu_microcode", bool(drivers.get("cpu_microcode")),

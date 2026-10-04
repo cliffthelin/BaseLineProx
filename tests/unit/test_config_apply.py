@@ -167,23 +167,154 @@ def test_apply_wifi_firmware_accepts_a_different_package_name():
     assert runner.calls[0] == ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "firmware-realtek"]
 
 
-def test_firewall_configuration_does_not_claim_unperformed_enforcement():
+def _listing_ok():
+    import lan_firewall as lf
+    return "chain input { type filter hook input priority filter; policy drop; " + " ".join(lf.DEFAULT_LAN_SUBNETS) + " }"
+
+
+def test_firewall_applies_lan_only_through_the_lan_firewall_module():
     runner = FakeRunner()
+    runner.script_prefix("nft", "list", "table", stdout=_listing_ok())
     result = ca.apply_firewall_config(runner, {"allow_lan_only": True})
-    assert result.ok is False
-    assert "not applied" in result.detail
+    assert result.ok is True
+    assert ["nft", "-f", "/etc/baseline/lan-only.nft.new"] in runner.calls
 
 
-def test_tether_does_not_claim_an_interface_was_configured():
-    assert ca.apply_tether_config(FakeRunner(), {"enabled": True}).ok is False
+def test_firewall_open_mode_is_refused_not_applied():
+    runner = FakeRunner()
+    result = ca.apply_firewall_config(runner, {"allow_lan_only": False})
+    assert result.ok is False and runner.calls == []
 
 
-def test_handoff_does_not_claim_categories_were_restored():
-    assert ca.apply_handoff_config(FakeRunner(), {"restored_categories": ["network"]}).ok is False
+def test_firewall_unverifiable_ruleset_reports_failure():
+    runner = FakeRunner()
+    runner.script_prefix("nft", "list", "table", stdout="nothing useful")
+    assert ca.apply_firewall_config(runner, {"allow_lan_only": True}).ok is False
 
 
-def test_iperf_does_not_claim_a_configured_service_without_starting_one():
-    assert ca.apply_iperf3_config(FakeRunner(), {"role": "server"}).ok is False
+# -- tether ------------------------------------------------------------------
+
+def test_tether_disabled_has_nothing_to_apply_and_does_not_probe_hardware():
+    def boom():
+        raise AssertionError("must not touch tether hardware when disabled")
+    assert ca.apply_tether_config(FakeRunner(), {"enabled": False}, tether_fn=boom).ok is True
+
+
+def test_tether_enabled_succeeds_only_when_an_interface_really_got_an_address():
+    up = lambda: {"ok": True, "stage": "ok", "interface": "usb0", "address": "192.168.42.10", "detail": "lease"}
+    result = ca.apply_tether_config(FakeRunner(), {"enabled": True}, tether_fn=up)
+    assert result.ok is True and "usb0" in result.detail and "192.168.42.10" in result.detail
+
+
+def test_tether_enabled_reports_the_stage_it_stopped_at():
+    down = lambda: {"ok": False, "stage": "no_dhcp_offer", "interface": "usb0", "address": None, "detail": "hotspot off?"}
+    result = ca.apply_tether_config(FakeRunner(), {"enabled": True}, tether_fn=down)
+    assert result.ok is False and "no_dhcp_offer" in result.detail
+
+
+def test_tether_probe_crash_is_a_failure_not_an_exception():
+    def crash():
+        raise OSError("sysfs gone")
+    assert ca.apply_tether_config(FakeRunner(), {"enabled": True}, tether_fn=crash).ok is False
+
+
+# -- handoff -----------------------------------------------------------------
+
+ARCHIVE = "/mnt/INSTALLER_CACHE/backups/handoff.tar.gz"
+
+
+def test_handoff_with_nothing_to_restore_is_a_no_op_success():
+    result = ca.apply_handoff_config(FakeRunner(), {"restored_categories": []})
+    assert result.ok is True
+
+
+def test_handoff_categories_without_an_archive_are_refused():
+    runner = FakeRunner()
+    assert ca.apply_handoff_config(runner, {"restored_categories": ["network"]}).ok is False
+    assert runner.calls == []
+
+
+def test_handoff_archive_outside_the_backup_folder_is_refused_before_any_command():
+    runner = FakeRunner(files={"/tmp/x.tar.gz": ""})
+    config = {"restored_categories": ["network"], "archive_path": "/tmp/x.tar.gz", "restore_root": "/mnt"}
+    assert ca.apply_handoff_config(runner, config).ok is False
+    assert runner.calls == []
+
+
+def test_handoff_restore_is_gated_on_a_fresh_backup_of_user_data():
+    runner = FakeRunner(files={ARCHIVE: ""})
+    config = {"restored_categories": ["network"], "archive_path": ARCHIVE, "restore_root": "/mnt"}
+    result = ca.apply_handoff_config(runner, config)
+    assert result.ok is False and "backup" in result.detail
+    assert not any(c[0] == "tar" and "-xzf" in c for c in runner.calls)   # tar never ran
+
+
+def test_handoff_restores_when_the_archive_is_valid_and_user_data_is_freshly_backed_up():
+    import backup_restore as br
+    runner = FakeRunner(files={ARCHIVE: ""})
+    for target in br.user_targets():
+        br.record_backup_manifest(runner, target=target, ts=runner.now())
+    config = {"restored_categories": ["network"], "archive_path": ARCHIVE, "restore_root": "/mnt"}
+    result = ca.apply_handoff_config(runner, config)
+    assert result.ok is True, result.detail
+    assert ["tar", "-xzf", ARCHIVE, "-C", "/mnt"] in runner.calls
+
+
+# -- iperf3 ------------------------------------------------------------------
+
+IPERF_JSON = '{"end": {"sum_received": {"bits_per_second": 941000000.0}}}'
+
+
+def test_iperf_client_runs_a_bounded_test_against_a_lan_peer_and_reports_the_result():
+    runner = FakeRunner()
+    runner.script_prefix("iperf3", "-c", stdout=IPERF_JSON)
+    result = ca.apply_iperf3_config(runner, {"role": "client", "peer_address": "192.168.1.20", "port": 5201})
+    assert result.ok is True and "941" in result.detail
+    assert ["iperf3", "-c", "192.168.1.20", "-p", "5201", "-t", "5", "-J"] in runner.calls
+
+
+def test_iperf_client_failure_is_a_failure():
+    runner = FakeRunner()
+    runner.script_prefix("iperf3", "-c", returncode=1, stderr="connection refused")
+    assert ca.apply_iperf3_config(runner, {"role": "client", "peer_address": "192.168.1.20", "port": 5201}).ok is False
+
+
+def test_iperf_peer_must_be_a_lan_address():
+    for peer in ("8.8.8.8", "example.com", "-oProxyCommand=x", "192.168.1.20; reboot", "127.0.0.1", "0.0.0.0", 5):
+        runner = FakeRunner()
+        assert ca.apply_iperf3_config(runner, {"role": "client", "peer_address": peer, "port": 5201}).ok is False
+        assert runner.calls == []
+
+
+def test_iperf_port_from_a_settings_form_may_be_a_digit_string():
+    runner = FakeRunner()
+    runner.script_prefix("iperf3", "-c", stdout=IPERF_JSON)
+    assert ca.apply_iperf3_config(runner, {"role": "client", "peer_address": "10.0.0.2", "port": "5201"}).ok is True
+    assert ["iperf3", "-c", "10.0.0.2", "-p", "5201", "-t", "5", "-J"] in runner.calls
+
+
+def test_iperf_bad_port_is_refused():
+    runner = FakeRunner()
+    assert ca.apply_iperf3_config(runner, {"role": "client", "peer_address": "10.0.0.2", "port": 70000}).ok is False
+    assert ca.apply_iperf3_config(runner, {"role": "client", "peer_address": "10.0.0.2", "port": "5201; id"}).ok is False
+    assert runner.calls == []
+
+
+def test_iperf_server_starts_a_single_bounded_transient_unit():
+    runner = FakeRunner()
+    result = ca.apply_iperf3_config(runner, {"role": "server", "peer_address": "", "port": 5201})
+    assert result.ok is True
+    assert ["systemd-run", "--unit=baseline-iperf3", "--collect", "--property=RuntimeMaxSec=600",
+            "iperf3", "-s", "-1", "-p", "5201"] in runner.calls
+
+
+def test_iperf_without_a_peer_only_checks_the_tool_is_installed():
+    runner = FakeRunner()
+    assert ca.apply_iperf3_config(runner, {"role": "client", "peer_address": "", "port": 5201}).ok is True
+    assert runner.calls == [["iperf3", "--version"]]
+    missing = FakeRunner()
+    missing.script_prefix("iperf3", "--version", returncode=127, stderr="not found")
+    assert ca.apply_iperf3_config(missing, {"role": "client", "peer_address": "", "port": 5201}).ok is False
 
 
 def test_ssh_reports_service_restart_failure():

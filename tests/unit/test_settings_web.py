@@ -954,8 +954,9 @@ def test_export_install_config_round_trips_through_config_pipeline():
     expected = {"network", "firewall", "ssh", "tether", "handoff",
                 "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
     assert expected == all_named
-    assert set(summary["failed"]) == {"firewall", "tether", "handoff"}
-    assert "network" in summary["applied"]  # default {hostname, dhcp: True} sets the hostname
+    # firewall: the fake nft listing cannot verify a ruleset; handoff: no archive named in the default config
+    assert set(summary["failed"]) == {"firewall"}
+    assert {"network", "tether", "handoff"} <= set(summary["applied"])  # no iperf3 section by default: skipped
     assert not set(summary["failed"]) & set(summary["applied"])
 
 

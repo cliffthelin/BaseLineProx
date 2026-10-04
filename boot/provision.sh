@@ -97,6 +97,8 @@ cp "$SRC/baseline/lib/setup_intent.py" /opt/baseline/lib/setup_intent.py
 # have crashed on import before Gate E ever ran at all.
 cp "$SRC/baseline/lib/config_apply.py" /opt/baseline/lib/config_apply.py
 cp "$SRC/baseline/lib/config_pipeline.py" /opt/baseline/lib/config_pipeline.py
+# lan_firewall.py: config_apply.apply_firewall_config imports it (LAN-only inbound policy).
+cp "$SRC/baseline/lib/lan_firewall.py" /opt/baseline/lib/lan_firewall.py
 cp "$SRC/baseline/lib/firstboot_statemachine.py" /opt/baseline/lib/firstboot_statemachine.py
 cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
 # Redirects Baseline's own control-plane paths (/etc/baseline,
@@ -424,7 +426,7 @@ for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/lib/harness.py /opt/baseline/lib/stream_json.py \
          /opt/baseline/lib/harness_adapter.py /opt/baseline/lib/harness_registry.py /opt/baseline/lib/harness_events.py \
          /opt/baseline/lib/clipboard_osc52.py /opt/baseline/lib/status_bar.py \
-         /opt/baseline/lib/config_apply.py /opt/baseline/lib/config_pipeline.py \
+         /opt/baseline/lib/config_apply.py /opt/baseline/lib/config_pipeline.py /opt/baseline/lib/lan_firewall.py \
          /opt/baseline/lib/persist_bind_mounts.py /opt/baseline/bin/baseline-persist-bind-mounts \
          /opt/baseline/lib/physical_device_safety.py /opt/baseline/lib/drive_installer.py \
          /opt/baseline/lib/config_diff.py /opt/baseline/lib/update_pipeline.py \

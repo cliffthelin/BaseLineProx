@@ -74,7 +74,15 @@ def test_already_healthy_lifeline_still_requires_confirmation_for_packages(tmp_p
     result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
                       check_lifeline_fn=healthy_facts)
     assert result["action"] == "committed"
-    assert r.writes == []  # no network file was ever touched - lifeline was already healthy
+    assert not [w for w in r.writes if w.startswith("/etc/network")]  # lifeline was already healthy
+    assert ["nft", "-f", "/etc/baseline/lan-only.nft.new"] in r.calls  # first-boot commit enforces LAN-only
+
+
+def test_first_boot_commit_attempts_lan_only_even_with_no_exported_config(tmp_path):
+    r = full_runner()
+    fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+            check_lifeline_fn=healthy_facts)
+    assert any(c[:2] == ["nft", "-c"] for c in r.calls)
 
 
 # --------------------------------------------------------------------------

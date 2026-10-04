@@ -339,7 +339,8 @@ def _resolve_network_interface(journal: dict) -> str:
         return _DEFAULT_NETWORK_INTERFACE
 
 
-def apply_configurator_settings(runner: repair.Runner, journal: dict, print_fn=print_tty1) -> dict | None:
+def apply_configurator_settings(runner: repair.Runner, journal: dict, print_fn=print_tty1, *,
+                                enforce_lan_only: bool = False) -> dict | None:
     try:
         config = config_pipeline.load_config(runner)
     except Exception as exc:  # noqa: BLE001 - never let a bad config file break firstboot
@@ -347,9 +348,13 @@ def apply_configurator_settings(runner: repair.Runner, journal: dict, print_fn=p
         return None
     if config is None:
         print_fn("[baseline-firstboot] configurator settings: no exported config file found - nothing to apply.")
+        if enforce_lan_only:      # the LAN-only inbound policy does not depend on an exported config
+            lan = config_pipeline.apply_stored_config(
+                runner, None, network_interface=_DEFAULT_NETWORK_INTERFACE, enforce_lan_only=True)
+            print_fn(f"[baseline-firstboot] LAN-only firewall: {'active' if lan['applied'] else 'NOT applied'}")
         return None
     summary = config_pipeline.apply_stored_config(
-        runner, config, network_interface=_resolve_network_interface(journal))
+        runner, config, network_interface=_resolve_network_interface(journal), enforce_lan_only=enforce_lan_only)
     print_fn(f"[baseline-firstboot] configurator settings applied: {summary['applied']} "
               f"skipped: {summary['skipped']} failed: {summary['failed']}")
     return summary
@@ -500,7 +505,7 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
         journal = record_transition(state_dir, journal, "committed")
         print_fn("[baseline-firstboot] COMMITTED. Marker written - will not re-run automatically.")
 
-    apply_configurator_settings(runner, journal, print_fn)
+    apply_configurator_settings(runner, journal, print_fn, enforce_lan_only=True)
     print_fn("[baseline-firstboot] state machine run finished.")
     return {"action": "committed", "package_install_allowed": True}
 

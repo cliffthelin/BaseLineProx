@@ -170,12 +170,22 @@ def test_apply_stored_config_applies_network_hostname():
     assert any(c == ["hostnamectl", "set-hostname", "myhost"] for c in runner.calls)
 
 
-def test_apply_stored_config_reports_unwired_firewall_as_failed():
+def test_apply_stored_config_firewall_fails_when_the_ruleset_cannot_be_verified():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "firewall" in summary["failed"]
+    assert "firewall" in summary["failed"]      # the fake nft listing proves nothing, so it must not pass
     assert "firewall" not in summary["applied"]
+
+
+def test_apply_stored_config_firewall_applies_when_the_live_ruleset_verifies():
+    import lan_firewall as lf
+    runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    runner.script_prefix("nft", "list", "table",
+                         stdout="chain input { hook input; policy drop; " + " ".join(lf.DEFAULT_LAN_SUBNETS) + " }")
+    config = cp.load_config(runner, "/etc/baseline/install-config.json")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "firewall" in summary["applied"]
 
 
 def test_apply_stored_config_applies_ssh():
@@ -189,12 +199,11 @@ def test_apply_stored_config_applies_ssh():
     assert "/etc/ssh/sshd_config" in runner.writes
 
 
-def test_apply_stored_config_reports_unwired_tether_as_failed():
+def test_apply_stored_config_disabled_tether_is_applied_as_nothing_to_do():
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "tether" in summary["failed"]
-    assert "tether" not in summary["applied"]
+    assert "tether" in summary["applied"]
 
 
 def test_apply_stored_config_reports_unwired_handoff_as_failed():
@@ -205,12 +214,14 @@ def test_apply_stored_config_reports_unwired_handoff_as_failed():
     assert "handoff" not in summary["applied"]
 
 
-def test_apply_stored_config_reports_unwired_iperf3_as_failed():
+def test_apply_stored_config_iperf3_server_is_applied_when_the_unit_starts():
+    import lan_firewall as lf
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
+    runner.script_prefix("nft", "list", "table",
+                         stdout="chain input { hook input; policy drop; " + " ".join(lf.DEFAULT_LAN_SUBNETS) + " }")
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
     summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "iperf3" in summary["failed"]
-    assert "iperf3" not in summary["applied"]
+    assert "iperf3" in summary["applied"]
 
 
 def test_apply_stored_config_all_sections_accounted_for():
@@ -225,11 +236,51 @@ def test_apply_stored_config_all_sections_accounted_for():
     assert expected == all_named
 
 
-def test_no_config_skips_all_subsystems():
+def test_no_config_skips_every_subsystem_and_a_partial_apply_never_runs_the_firewall():
     runner = FakeRunner()
     summary = cp.apply_stored_config(runner, None, network_interface="eno1")
+    assert summary["failed"] == [] and "firewall" in summary["skipped"] and runner.calls == []
+
+
+def test_no_config_with_enforcement_still_attempts_the_firewall():
+    runner = FakeRunner()
+    summary = cp.apply_stored_config(runner, None, network_interface="eno1", enforce_lan_only=True)
     assert summary["applied"] == []
-    assert summary["failed"] == []
-    expected = {"network", "firewall", "ssh", "tether", "handoff",
+    assert summary["failed"] == ["firewall"]          # attempted; the fake nft listing proves nothing
+    expected = {"network", "ssh", "tether", "handoff",
                 "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
     assert expected == set(summary["skipped"])
+
+
+def test_firewall_is_enforced_even_when_the_config_has_no_firewall_section():
+    import lan_firewall as lf
+    runner = FakeRunner()
+    runner.script_prefix("nft", "list", "table",
+                         stdout="chain input { hook input; policy drop; " + " ".join(lf.DEFAULT_LAN_SUBNETS) + " }")
+    summary = cp.apply_stored_config(runner, {"ssh": {"password_auth": False}}, network_interface="eno1",
+                                     enforce_lan_only=True)
+    assert "firewall" in summary["applied"]
+    assert ["nft", "-f", lf.RULESET_PATH + ".new"] in runner.calls
+
+
+def test_a_partial_settings_apply_does_not_run_the_firewall_for_an_unrelated_section():
+    runner = FakeRunner()
+    summary = cp.apply_stored_config(runner, {"network": {"hostname": "h", "dhcp": True}}, network_interface="eno1")
+    assert "firewall" in summary["skipped"] and not any(c[0] == "nft" for c in runner.calls)
+
+
+def test_iperf3_server_is_not_started_when_the_firewall_did_not_apply():
+    config = {"diagnostics": {"iperf3": {"role": "server", "peer_address": "", "port": 5201}}}
+    runner = FakeRunner()          # fake nft listing proves nothing, so the firewall fails
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1", enforce_lan_only=True)
+    assert "firewall" in summary["failed"]
+    assert "iperf3" in summary["failed"]
+    assert not any(c[0] == "systemd-run" for c in runner.calls)
+
+
+def test_a_subsystem_that_raises_is_reported_failed_and_does_not_stop_the_others():
+    config = {"diagnostics": {"iperf3": {"role": "client", "peer_address": ["not", "a", "string"], "port": 5201}},
+              "ssh": {"password_auth": False}}
+    runner = FakeRunner(files={"/etc/ssh/sshd_config": "# x\n"})
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    assert "iperf3" in summary["failed"] and "ssh" in summary["applied"]

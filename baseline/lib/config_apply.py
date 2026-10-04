@@ -200,8 +200,10 @@ def apply_network_config(runner: Runner, config: dict) -> CommandResult:
 
 
 def apply_firewall_config(runner: Runner, config: dict) -> CommandResult:
-    """Refuse until a transaction can enforce and verify the requested policy."""
-    return CommandResult(False, "firewall not applied: no enforcement transaction is connected")
+    """LAN-only inbound firewall (see lan_firewall.py): checked, loaded, verified, then persisted."""
+    import lan_firewall
+    ok, detail = lan_firewall.apply(runner, config)
+    return CommandResult(ok, detail)
 
 
 def apply_ssh_config(runner: Runner, config: dict) -> CommandResult:
@@ -222,16 +224,88 @@ def apply_ssh_config(runner: Runner, config: dict) -> CommandResult:
         return CommandResult(False, f"SSH config failed: {e}")
 
 
-def apply_tether_config(runner: Runner, config: dict) -> CommandResult:
-    """Do not report link configuration without an identified device and DHCP result."""
-    return CommandResult(False, "tether not applied: device discovery and DHCP are not connected to this configuration path")
+def apply_tether_config(runner: Runner, config: dict, tether_fn=None) -> CommandResult:
+    """Disabled: nothing to apply. Enabled: bring up a real tether interface and report the
+    observed stage - success only if an interface actually obtained an address."""
+    if not config.get("enabled", False):
+        return CommandResult(True, "tether disabled; nothing to apply")
+    if tether_fn is None:
+        import tether
+        tether_fn = tether.auto_tether
+    try:
+        result = tether_fn()
+    except Exception as exc:
+        return CommandResult(False, f"tether not applied: bring-up failed: {exc}")
+    if result.get("ok") and result.get("address"):
+        return CommandResult(True, f"tether up: {result.get('interface')} -> {result['address']}")
+    return CommandResult(False, f"tether not applied: stopped at {result.get('stage')}: {result.get('detail')}")
 
 
 def apply_handoff_config(runner: Runner, config: dict) -> CommandResult:
-    """Category names alone cannot establish that an archive was restored."""
-    return CommandResult(False, "handoff not applied: no verified archive or restore transaction supplied")
+    """Nothing to restore is a no-op. Named categories need a real archive: it must sit in a backup
+    folder, go to /mnt or a Baseline volume, and restoring over user data stays behind
+    backup_restore's own fresh-backup gate."""
+    if not config.get("restored_categories"):
+        return CommandResult(True, "handoff: no categories to restore")
+    import backup_restore
+    archive, root = config.get("archive_path"), config.get("restore_root")
+    if not archive or not root:
+        return CommandResult(False, "handoff not applied: categories were named but no archive_path/restore_root was supplied")
+    try:
+        archive = backup_restore.check_existing_backup_file(runner, archive)
+        root = backup_restore.check_restore_root(root)
+    except ValueError as exc:
+        return CommandResult(False, f"handoff not applied: {exc}")
+    result = backup_restore.restore_backup(runner, archive_path=archive, dest_root=root, now=runner.now())
+    return CommandResult(result.ok, result.detail if not result.ok else f"handoff restored: {result.detail}")
+
+
+def _iperf_peer_and_port(config: dict):
+    import ipaddress
+    peer = config.get("peer_address") or ""
+    if not isinstance(peer, str):
+        raise ValueError("peer_address must be an IP address on the LAN")
+    peer = peer.strip()
+    port = config.get("port", 5201)
+    if isinstance(port, str) and port.isascii() and port.isdigit():     # settings forms store numbers as text
+        port = int(port)
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise ValueError("port must be 1-65535")
+    if peer:
+        try:
+            addr = ipaddress.ip_address(peer)
+        except ValueError:
+            raise ValueError("peer_address must be an IP address on the LAN") from None
+        if addr.is_loopback or addr.is_unspecified or not (addr.is_private or addr.is_link_local):
+            raise ValueError("peer_address must be on the LAN (private address)")
+    return peer, port
 
 
 def apply_iperf3_config(runner: Runner, config: dict) -> CommandResult:
-    """Do not claim a test service or result without running one."""
-    return CommandResult(False, "iperf3 not applied: no bounded test or LAN-scoped service transaction connected")
+    """Client with a LAN peer: one 5-second measured run. Server: one single-use transient unit that
+    systemd stops after 10 minutes (the LAN-only firewall already limits who can reach it). No peer:
+    only confirm the tool is installed."""
+    import json
+    try:
+        peer, port = _iperf_peer_and_port(config)
+    except ValueError as exc:
+        return CommandResult(False, f"iperf3 not applied: {exc}")
+    if config.get("role", "client") == "server":
+        proc = runner.run(["systemd-run", "--unit=baseline-iperf3", "--collect", "--property=RuntimeMaxSec=600",
+                           "iperf3", "-s", "-1", "-p", str(port)], timeout=15)
+        if proc.returncode != 0:
+            return CommandResult(False, f"iperf3 server not started: {proc.stderr.strip()}")
+        return CommandResult(True, f"iperf3 server listening on port {port} for one test (stops after 10 minutes)")
+    if not peer:
+        proc = runner.run(["iperf3", "--version"], timeout=10)
+        if proc.returncode != 0:
+            return CommandResult(False, "iperf3 is not installed")
+        return CommandResult(True, "iperf3 installed; no peer configured, so no test was run")
+    proc = runner.run(["iperf3", "-c", peer, "-p", str(port), "-t", "5", "-J"], timeout=30)
+    if proc.returncode != 0:
+        return CommandResult(False, f"iperf3 test to {peer}:{port} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+    try:
+        mbps = json.loads(proc.stdout)["end"]["sum_received"]["bits_per_second"] / 1e6
+    except (ValueError, KeyError, TypeError):
+        return CommandResult(False, f"iperf3 test to {peer}:{port} gave no readable result")
+    return CommandResult(True, f"iperf3 to {peer}:{port}: {mbps:.0f} Mbit/s")
