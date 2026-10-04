@@ -21,7 +21,7 @@ echo "=== Installing base packages ==="
 apt-get install -y inxi python3-rich python3-textual tmux gnupg
 
 echo "=== Installing kiosk GUI packages (Track A3 - cage + stock Chromium) ==="
-apt-get install -y cage chromium xorriso curl
+apt-get install -y cage chromium xorriso curl libnotify-bin
 
 echo "=== Installing Podman (Track B4 - Quadlet service management) ==="
 apt-get install -y podman

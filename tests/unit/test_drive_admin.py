@@ -634,11 +634,10 @@ def test_install_drive_stops_before_creating_volumes_when_rebuild_fails():
 # no web-UI entry point anymore - see drive_admin.py's own comment on
 # the removed "install"/"create_volumes_on_existing_vg" actions).
 
-def test_check_cache_updates_returns_a_real_empty_list_not_a_fabricated_one():
-    """No real "is a newer version available" source is wired up for
-    any cached artifact yet - a real empty list, not a per-item
-    "checked, nothing found" that was never actually checked."""
-    assert da.check_cache_updates(FakeRunner()) == []
+def test_check_cache_updates_refuses_without_a_real_update_source():
+    """Unavailable checking must not look like a completed empty check."""
+    with pytest.raises(RuntimeError, match="no verified update source"):
+        da.check_cache_updates(FakeRunner())
 
 
 def test_update_selected_refuses_with_nothing_selected():

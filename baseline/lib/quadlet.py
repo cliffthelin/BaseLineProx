@@ -49,18 +49,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def path_exists(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 
 QUADLET_UNIT_DIR = "/etc/containers/systemd"

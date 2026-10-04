@@ -55,32 +55,7 @@ from __future__ import annotations
 import posixpath
 from dataclasses import dataclass
 
-try:
-    from repair import RealRunner, Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def path_exists(self, path):
-            raise NotImplementedError
-
-        def makedirs(self, path):
-            raise NotImplementedError
-
-        def read_text(self, path):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def append_text(self, path, content):
-            raise NotImplementedError
-
-        def listdir(self, path):
-            raise NotImplementedError
-
-    RealRunner = Runner
+from repair import RealRunner, Runner
 
 
 USER_LABEL = "USER"

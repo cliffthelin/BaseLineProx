@@ -42,23 +42,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-try:
-    from repair import RealRunner, Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def path_exists(self, path):
-            raise NotImplementedError
-
-        def read_text(self, path):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def makedirs(self, path):
-            raise NotImplementedError
-
-    RealRunner = Runner
+from repair import RealRunner, Runner
 
 
 STATE_PATH = "/mnt/SESSION_TEMP/recovery_mode/state.json"

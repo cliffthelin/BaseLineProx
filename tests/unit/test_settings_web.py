@@ -619,17 +619,44 @@ def test_file_backed_elevation_verifier_refuses_when_no_hash_is_stored(tmp_path)
 def test_file_backed_applier_persists_across_a_new_store_instance(tmp_path):
     path = tmp_path / "store.db"
     store1 = sw.LocalAppStore(path)
-    sw.FileBackedSectionApplier(store1).apply("firewall", {"allow_lan_only": False})
+    result = sw.FileBackedSectionApplier(store1).apply("firewall", {"allow_lan_only": False})
+    assert result.applied is False  # persisted configuration is not a live firewall change
 
     store2 = sw.LocalAppStore(path)  # fresh instance, same file
     assert store2.settings()["firewall"]["allow_lan_only"] is False
+
+
+def test_system_section_applier_saves_only_after_real_command_success(tmp_path):
+    from fake_runner import FakeRunner, FakeProc
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[0] == "hostnamectl", FakeProc(1, "", "permission denied")),
+    ])
+    applier = sw.SystemSectionApplier(store, runner)
+    result = applier.apply("network", {"hostname": "target"})
+    assert result.applied is False
+    assert store.settings().get("network", {}).get("hostname") != "target"
+    runner.command_responses = []
+    result = applier.apply("network", {"hostname": "target"})
+    assert result.applied is True
+    assert store.settings()["network"]["hostname"] == "target"
+    assert runner.calls[-1] == ["hostnamectl", "set-hostname", "target"]
+
+
+def test_live_settings_refuse_unknown_fields_and_string_boolean_before_commands(tmp_path):
+    from fake_runner import FakeRunner
+    runner = FakeRunner()
+    applier = sw.SystemSectionApplier(sw.LocalAppStore(tmp_path / "store.db"), runner)
+    assert applier.apply("ssh", {"password_auth": "false"}).applied is False
+    assert applier.apply("ssh", {"password_auth": False, "unknown": True}).applied is False
+    assert runner.calls == []
 
 
 def test_logging_rebuild_trigger_records_a_real_observable_entry(tmp_path):
     store = sw.LocalAppStore(tmp_path / "store.db")
     trigger = sw.LoggingRebuildTrigger(store, clock=lambda: 42.0)
     result = trigger.rebuild("/tmp/x.img", {"a": 1})
-    assert result.applied is True
+    assert result.applied is False  # recording a request does not reinstall its target
     assert store.rebuild_log() == [{"target": "/tmp/x.img", "config": {"a": 1}, "at": 42.0}]
 
 
@@ -927,7 +954,8 @@ def test_export_install_config_round_trips_through_config_pipeline():
     expected = {"network", "firewall", "ssh", "tether", "handoff",
                 "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware"}
     assert expected == all_named
-    assert summary["failed"] == []
+    assert set(summary["failed"]) == {"network", "firewall", "tether", "handoff"}
+    assert not set(summary["failed"]) & set(summary["applied"])
 
 
 # --- stored secrets: verifiable as a match, never recoverable -------------

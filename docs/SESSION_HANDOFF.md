@@ -1414,3 +1414,19 @@ AppData volumes on enrolled drives; no user/cache fallback or actual formatting.
 Physical metadata discovery still refuses missing AppData targets. Read DR140
 and INSTALLER_PLAN_WALKTHROUGH.md; full mount/job/firstboot remains unfinished.
 Concurrent DR139 and other root working-tree edits were excluded and preserved.
+
+## 2026-10-03 — main publication and isolated build (DR140)
+
+GitHub BaseLineProx main is verified at af5fdd251c63b108c5655d554402ed025dcfb7d1.
+The previously absent installer framework is integrated there, with explicit
+external AppData mappings and scoped DR137 drive guards. New code/docs live
+in the isolated worktree .runtime-proof138/main-integration (branch
+local/main-installer-integration); this root checkout remains on its existing
+branch with concurrent uncommitted changes preserved. Do not infer deployment
+from main publication or overwrite this dirty checkout to align it.
+3136 isolated tests passed. Updated manual ISO:
+.runtime-proof140/installer/baseline-140.iso;497 extracted files matched and
+actual isolated KVM boot reached the Proxmox menu. No physical writes. The real
+six-volume drive still lacks ready AppData targets. Applying mounts, migrating
+state, durable stage jobs and full firstboot remain open72/75/76. DR139 and
+other concurrent production audit edits remain separate, not published here.

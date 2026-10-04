@@ -58,13 +58,7 @@ import workload_page
 import web_gate as wg
 import web_security as ws
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
+from repair import Runner
 
 
 NAV_TABS = (

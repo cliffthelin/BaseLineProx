@@ -754,12 +754,9 @@ class SettingsHandler(web_security.SecureHandlerMixin, http.server.BaseHTTPReque
 
 
 # ---------------------------------------------------------------------------
-# Real default implementations - a genuinely working local deployment,
-# not just the injectable interfaces above. Backed by one small JSON
-# file so this runs standalone for evaluation without root, real
-# hardware, or a real Proxmox install. Every "not yet wired to the
-# real subsystem" spot below says so plainly in its returned detail
-# text - functional today, honest about what it's actually doing.
+# Concrete adapters backed by SQLite and real system commands. Live
+# application requires appropriate privilege and tools. Stored values and
+# rebuild request logs are not evidence of applied system changes.
 # ---------------------------------------------------------------------------
 
 _DEFAULT_SETTINGS_SECTIONS = {
@@ -1268,9 +1265,7 @@ class FileBackedSettingsSource(SettingsSource):
 
 
 class FileBackedSectionApplier(SectionApplier):
-    """Persists the edit for real and says so plainly. Wiring this to
-    the actual subsystem apply mechanisms (PRD SS5.10's firewall
-    transaction, etc.) is future integration work, not pretended here."""
+    """Storage-only adapter; production uses SystemSectionApplier for live changes."""
 
     def __init__(self, store: LocalAppStore):
         self.store = store
@@ -1278,11 +1273,42 @@ class FileBackedSectionApplier(SectionApplier):
     def apply(self, section: str, new_values: dict) -> ApplyResult:
         self.store.update_section(section, new_values)
         return ApplyResult(
-            applied=True,
-            detail=f"{section} settings saved. Not yet wired to the live "
-                   f"system's own apply mechanism for this section - saved "
-                   f"here, real application is a follow-up integration.",
+            applied=False,
+            detail=f"{section} settings saved only; no live system change attempted",
         )
+
+
+class SystemSectionApplier(SectionApplier):
+    """Apply through the established firstboot mechanisms before saving state.
+
+Failures can include partial system changes; persistence is not runtime proof.
+"""
+
+    def __init__(self, store: LocalAppStore, runner):
+        self.store = store
+        self.runner = runner
+
+    def apply(self, section: str, new_values: dict) -> ApplyResult:
+        import config_pipeline
+        if section not in KNOWN_SECTIONS or not isinstance(new_values, dict):
+            return ApplyResult(False, "invalid settings section or values")
+        schema = _DEFAULT_SETTINGS_SECTIONS[section]
+        for key, value in new_values.items():
+            if key not in schema or type(value) is not type(schema[key]):
+                return ApplyResult(False, f"invalid live settings field or type: {key}")
+        try:
+            summary = config_pipeline.apply_stored_config(
+                self.runner, {section: new_values},
+                network_interface=new_values.get("ethtool_interface") or "eno1")
+        except Exception as exc:
+            return ApplyResult(False, f"live settings application failed: {exc}")
+        if summary["failed"]:
+            return ApplyResult(False, f"live settings application failed: {', '.join(summary['failed'])}; "
+                               f"completed: {', '.join(summary['applied']) or 'none'}; values were not saved")
+        if not summary["applied"]:
+            return ApplyResult(False, "no supported live settings operation requested; values were not saved")
+        self.store.update_section(section, new_values)
+        return ApplyResult(True, f"Applied {', '.join(summary['applied'])}; settings saved")
 
 
 class PathPrefixRebuildEligibility(RebuildEligibility):
@@ -1319,11 +1345,10 @@ class LoggingRebuildTrigger(RebuildTrigger):
     def rebuild(self, target: str, config: dict) -> ApplyResult:
         self.store.record_rebuild(target, config, self.clock())
         return ApplyResult(
-            applied=True,
+            applied=False,
             detail=f"Rebuild request for {target} recorded. Not yet wired to "
                    f"drive_setup_install.py's real install pipeline - this "
-                   f"proves the eligibility gate and trigger path work "
-                   f"end-to-end; the actual reinstall call is a follow-up.",
+                   f"target was not rebuilt.",
         )
 
 
@@ -1722,6 +1747,7 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
     Runner/persistence layer available at all, matching this
     function's own "no real hardware required" design."""
     import os
+    from repair import RealRunner
     store = LocalAppStore(data_path or Path("/tmp/baseline-settings-web/store.db"), mac_key=store_mac_key,
                           mac_marker=store_mac_marker, on_tamper=on_tamper)
     persona_provider = RunnerBackedActivePersonaProvider(runner) if runner is not None else None
@@ -1729,7 +1755,7 @@ def build_real_server(bind_host: str = "0.0.0.0", bind_port: int = 8100,
         bind_host, bind_port,
         verifier=SystemPasswordVerifier() if os.geteuid() == 0 else SudoPasswordVerifier(),
         source=FileBackedSettingsSource(store),
-        applier=FileBackedSectionApplier(store),
+        applier=SystemSectionApplier(store, runner if runner is not None else RealRunner()),
         eligibility=PathPrefixRebuildEligibility(),
         trigger=LoggingRebuildTrigger(store),
         hasher=default_hasher,

@@ -165,3 +165,35 @@ def test_apply_wifi_firmware_accepts_a_different_package_name():
     runner = FakeRunner()
     ca.apply_wifi_firmware(runner, package="firmware-realtek")
     assert runner.calls[0] == ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "firmware-realtek"]
+
+
+def test_firewall_configuration_does_not_claim_unperformed_enforcement():
+    runner = FakeRunner()
+    result = ca.apply_firewall_config(runner, {"allow_lan_only": True})
+    assert result.ok is False
+    assert "not applied" in result.detail
+
+
+def test_tether_does_not_claim_an_interface_was_configured():
+    assert ca.apply_tether_config(FakeRunner(), {"enabled": True}).ok is False
+
+
+def test_handoff_does_not_claim_categories_were_restored():
+    assert ca.apply_handoff_config(FakeRunner(), {"restored_categories": ["network"]}).ok is False
+
+
+def test_iperf_does_not_claim_a_configured_service_without_starting_one():
+    assert ca.apply_iperf3_config(FakeRunner(), {"role": "server"}).ok is False
+
+
+def test_ssh_reports_service_restart_failure():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a == ["systemctl", "restart", "ssh"], FakeProc(1, "", "service failed")),
+    ])
+    assert ca.apply_ssh_config(runner, {"password_auth": False}).ok is False
+
+
+def test_network_dhcp_request_is_not_reported_as_applied_by_hostname_only():
+    runner = FakeRunner()
+    assert ca.apply_network_config(runner, {"hostname": "target", "dhcp": True}).ok is False
+    assert runner.calls == []  # refuse an unsupported transaction before partial changes

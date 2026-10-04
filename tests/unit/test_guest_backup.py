@@ -21,6 +21,12 @@ CONFIGS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _backup_destination_capacity(monkeypatch):
+    """Capacity belongs to the fake destination, not this machine's /tmp."""
+    monkeypatch.setattr(ob, "_free_and_total", lambda path: (2 * 2**40, 9 * 2**40))
+
+
 def ok(out=""):
     return SimpleNamespace(returncode=0, stdout=out, stderr="")
 
@@ -67,6 +73,15 @@ def test_only_guests_with_a_disk_on_local_lvm_are_dumped(dest_root):
     assert sorted(vz[1:vz.index("--dumpdir")]) == ["100", "200"]          # 101 lives on the cache
     assert "--dumpdir" in vz and "--all" not in vz and "--prune-backups" not in vz and "--remove" not in vz
     assert result.verified and result.set_path.parent == dest_root / "baseline-backups"
+
+
+def test_guest_backup_still_refuses_insufficient_destination_capacity(dest_root, monkeypatch):
+    monkeypatch.setattr(ob, "_free_and_total", lambda path: (10 * 2**30, 9 * 2**40))
+    fake = FakeProxmox()
+    with pytest.raises(ob.BackupError, match="not enough free space"):
+        run_guests(dest_root, fake)
+    assert not any(c[0] == "vzdump" for c in fake.calls)
+    assert not (dest_root / "baseline-backups").exists()
 
 
 def test_the_set_is_new_verifiable_and_lists_every_dump_with_a_checksum(dest_root):

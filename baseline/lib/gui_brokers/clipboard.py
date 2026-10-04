@@ -5,12 +5,7 @@ docs/design/milestone-2-gui-plan.md.
 """
 from __future__ import annotations
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
+from repair import Runner
 
 
 def read_clipboard(runner: Runner) -> str:

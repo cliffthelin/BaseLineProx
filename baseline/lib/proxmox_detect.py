@@ -18,15 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:  # minimal shape match for standalone use/testing
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def path_exists(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 
 @dataclass

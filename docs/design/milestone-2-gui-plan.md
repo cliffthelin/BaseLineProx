@@ -75,11 +75,12 @@ each with an explicit, narrow interface - matching decision record 29's
 "minimal access-broker boundary, not a generic framework" philosophy:
 
 - **Notification** - `notify(app_id: str, summary: str, body: str) -> bool`.
-  MVP implementation: durably logs the request (matches this project's
-  `network.py` `EVENT_LOG` JSONL pattern) and returns success; no visual
-  notification UI yet (no notification daemon exists in this minimal cage
-  session) - explicitly a stub at "minimal, testable level," not a finished
-  feature.
+  Calls the real session notification service through `notify-send` and logs
+  whether delivery was accepted. Missing client/service and command failure
+  return false. DR139 proves acceptance on the development desktop; the cage
+  session's notification daemon and physical deployment remain unverified.
+  Provisioning installs `libnotify-bin`; service acceptance does not prove a
+  human saw the notification.
 - **Clipboard** - `read_clipboard() -> str`, `write_clipboard(text: str) -> None`.
   Wraps `wl-copy`/`wl-paste` (lightweight, Wayland-native CLI tools, no
   portal or D-Bus needed) through the same `Runner`-injectable boundary

@@ -3,6 +3,7 @@ file_picker) - see docs/design/milestone-2-gui-plan.md. Each is a small,
 separately testable, Runner-injectable module - no real wl-copy/wl-paste,
 no real filesystem, matching this project's established FakeRunner style."""
 import json
+from pathlib import Path
 
 from fake_runner import FakeRunner, FakeProc
 
@@ -17,6 +18,20 @@ def test_notify_returns_true():
     runner = FakeRunner()
     result = notification.notify(runner, app_id="chromium", summary="Download complete", body="report.pdf")
     assert result is True
+
+
+def test_notify_reports_delivery_failure_instead_of_log_success():
+    runner = FakeRunner()
+    runner.command_responses = [(lambda a: a[0] == "notify-send", FakeProc(1, "", "no notification service"))]
+    assert notification.notify(runner, app_id="chromium", summary="Download complete", body="report.pdf") is False
+    assert runner.calls == [["notify-send", "--app-name", "chromium", "--", "Download complete", "report.pdf"]]
+    record = json.loads(runner.files[runner.appends[0]].strip())
+    assert record["delivered"] is False
+
+
+def test_provision_installs_the_real_notification_client():
+    script = (Path(__file__).resolve().parents[2] / "boot/provision.sh").read_text()
+    assert any("apt-get install" in line and "libnotify-bin" in line for line in script.splitlines())
 
 
 def test_notify_durably_logs_the_event():

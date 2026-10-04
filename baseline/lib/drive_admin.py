@@ -68,12 +68,7 @@ import web_gate
 # a dev checkout at any other path, since it always finds itself.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
+from repair import Runner
 
 
 # The two SK hynix drives Baseline is set up with (decision records 45-47): the
@@ -732,26 +727,15 @@ def install_drive(runner, *, device_path, pds_runner=None, vg_name: str = PERSIS
 
 
 def check_cache_updates(runner) -> list:
-    """Real per-volume "is a newer compatible version available"
-    check - direct instruction, 2026-09-29. Honestly empty right now:
-    no real update source is wired up for any cached artifact yet (the
-    curated Helper-Scripts in vm_scripts.SCRIPT_MANIFEST are
-    deliberately manually-pinned/reviewed, never auto-checked or
-    auto-updated by design; the cached Proxmox source ISO and any
-    distro ISO have no real version-tracking built yet). Returning a
-    real empty list here, not a fabricated "nothing available" per
-    item - there is a real difference between "checked, found
-    nothing" and "never checked," and this module does not blur it."""
-    return []
+    """Refuse absent publisher/version verification instead of fabricating an empty check."""
+    raise RuntimeError("cache updates unavailable: no verified update source is configured")
 
 
 def update_selected(runner, *, selected: list, **params) -> ActionResult:
-    """The real "Update" action (direct instruction, 2026-09-29):
-    check each selected Baseline volume for a newer compatible version
-    of what it caches, and apply the ones chosen. Honest placeholder
-    for the actual apply step - `check_cache_updates` never returns
-    anything yet (see its own docstring for why), so there is nothing
-    real to apply. Refuses plainly rather than faking success."""
+    """Refuse cache updates until publisher/version verification is connected.
+
+    Manually pinned scripts must retain their explicit review requirement.
+    """
     if not selected:
         return ActionResult(False, "no volumes selected")
     return ActionResult(

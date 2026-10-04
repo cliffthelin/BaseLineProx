@@ -32,21 +32,7 @@ from __future__ import annotations
 
 import secrets
 
-try:
-    from repair import Runner  # type: ignore
-except ImportError:  # pragma: no cover - direct-script execution fallback
-    class Runner:
-        def run(self, argv, timeout=10):
-            raise NotImplementedError
-
-        def write_text_atomic(self, path, content):
-            raise NotImplementedError
-
-        def read_text(self, path):
-            raise NotImplementedError
-
-        def remove(self, path):
-            raise NotImplementedError
+from repair import Runner
 
 
 CIPHER_ID = "aes-256-cbc-pbkdf2"
