@@ -99,11 +99,14 @@ def get_boot_device_serial(runner: Runner) -> str | None:
     device, then read that device's own serial - independent of
     whatever path string a caller passed for the intended target."""
     root_source = runner.run(["findmnt", "/", "-no", "SOURCE"]).strip()
-    if not root_source:
+    if not root_source or len(root_source.splitlines()) != 1 or not root_source.startswith("/dev/"):
         return None
     pkname = runner.run(["lsblk", "-no", "PKNAME", root_source]).strip()
+    if len(pkname.splitlines()) > 1:
+        return None
     parent = f"/dev/{pkname}" if pkname else root_source
-    return get_device_serial(runner, parent)
+    serial = get_device_serial(runner, parent)
+    return serial if isinstance(serial, str) and serial.strip() else None
 
 
 def validate_target_device(path: str, *, expected_serial: str | list[str] | None = None,
@@ -154,7 +157,9 @@ def validate_target_device(path: str, *, expected_serial: str | list[str] | None
                 f"{allowed!r} - refusing")
 
     boot_serial = get_boot_device_serial(runner)
-    if boot_serial is not None and actual_serial == boot_serial:
+    if boot_serial is None:
+        raise PhysicalDeviceSafetyError("could not establish this machine's boot device identity - refusing")
+    if actual_serial == boot_serial:
         raise PhysicalDeviceSafetyError(
             f"{resolved!r} (serial {actual_serial!r}) matches this machine's own "
             f"boot device - refusing regardless of which path was passed")

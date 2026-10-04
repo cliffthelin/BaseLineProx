@@ -1109,11 +1109,14 @@ class _LayoutCmd:
         return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
-def lay_out_baseline_drive(runner, *, device_path, pds_runner=None, on_progress=None, **params) -> ActionResult:
+def lay_out_baseline_drive(runner, *, device_path, expected_serial=None, pds_runner=None,
+                          on_progress=None, **params) -> ActionResult:
     """Erase and re-lay the Baseline drive's volumes (BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE, USER_*, ...).
     Destructive. Only runs against a drive that is empty or already Baseline's own, with nothing mounted, with an
     installer UUID (or blank), and, if it holds Baseline data, with a recent backup (all enforced before this runs)."""
     import baseline_drive_layout as bdl
+    if not expected_serial or expected_serial not in allowed_target_serials():
+        return ActionResult(False, "refused: layout needs the exact confirmed managed drive serial")
     say = on_progress or (lambda line: None)
     pds_runner = pds_runner or pds.Runner()
     mounted = runner.run(["lsblk", "-nr", "-o", "MOUNTPOINT", device_path], timeout=30)
@@ -1129,14 +1132,16 @@ def lay_out_baseline_drive(runner, *, device_path, pds_runner=None, on_progress=
     read = _lsblk_run(pds_runner)
     say(f"laying out the Baseline volumes on {device_path}")
     try:
-        plan = bdl.apply(_LayoutCmd(runner), device_path, validate=validate, read_drive=read)
+        plan = bdl.apply(_LayoutCmd(runner), device_path, validate=validate, read_drive=read,
+                         expected_serial=expected_serial)
     except (bdl.LayoutError, pds.PhysicalDeviceSafetyError, drive_guard.DataProtectionError) as exc:
         return ActionResult(False, f"refused: {exc}")
     say(f"created {len(plan)} volumes; giving the drive its installer identity")
     try:
-        serial = pds.get_device_serial(pds_runner, device_path) or "unknown"
-    except Exception:  # noqa: BLE001 - informational only
-        serial = "unknown"
+        validated = validate(device_path, expected_serial=expected_serial, min_size_bytes=MIN_TARGET_SIZE_BYTES)
+        serial = validated["serial"]
+    except pds.PhysicalDeviceSafetyError as exc:
+        return ActionResult(False, f"refused: {exc}")
     stamped = drive_guard.stamp_installer_identity(runner, device_path, serial=serial, read=read)
     return ActionResult(True, f"laid out {len(plan)} Baseline volumes on {device_path}. " + stamped.detail)
 
@@ -1442,4 +1447,8 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
         call_params["on_progress"] = on_progress
     if action_id in ("lay_out_baseline_drive", "enroll_drive"):
         call_params["pds_runner"] = pds_runner
+    if action_id == "lay_out_baseline_drive":
+        # Internal dispatch value, added only after the web and HITL proofs
+        # verify the original request and this exact device serial.
+        call_params["expected_serial"] = serial
     return spec.run(runner, **call_params)
