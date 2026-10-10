@@ -1,23 +1,27 @@
 """ExecStartPre gate for baseline-scripts-inbox.service - refuses to
-start the scripts inbox CRUD server until USER is actually
-mounted, so a script pushed before that lands on the real persistent
-volume rather than silently writing through to the disposable
-substrate. Reuses persist_bind_mounts.is_mounted unchanged, the exact
-same real-kernel-state check ensure_redirect already relies on for the
-same reason (decision record 62's own established concern, applied
-here to a different consumer of the same mountpoint).
+start the scripts inbox CRUD server until the ACTIVE persona's
+USER_<PERSONA> volume is actually mounted, so a script pushed before that
+lands on the real persistent volume rather than silently writing through
+to the disposable substrate. Reuses persist_bind_mounts.is_mounted
+unchanged, the exact same real-kernel-state check ensure_redirect already
+relies on for the same reason (decision record 62's own established
+concern, applied here to a different consumer of the same mountpoint).
+
+Which volume is resolved by scripts_inbox.active_persona_paths, the same
+function the server uses, so the gate and the server always agree.
 """
 from __future__ import annotations
 
 import sys
 
 import persist_bind_mounts as pbm
+import scripts_inbox as si
 
 from repair import RealRunner
 
 
 def check(runner) -> int:
-    return 0 if pbm.is_mounted(runner, pbm.MOUNT_POINT) else 1
+    return 0 if pbm.is_mounted(runner, si.active_persona_paths(runner)["mountpoint"]) else 1
 
 
 def main(runner=None) -> int:
@@ -25,8 +29,10 @@ def main(runner=None) -> int:
         runner = RealRunner()
     rc = check(runner)
     if rc != 0:
-        print(f"[baseline-scripts-inbox-gate] {pbm.MOUNT_POINT} is not mounted - "
-              "refusing to start the scripts inbox server.", file=sys.stderr)
+        paths = si.active_persona_paths(runner)
+        print(f"[baseline-scripts-inbox-gate] {paths['mountpoint']} (active persona "
+              f"{paths['persona']!r}) is not mounted - refusing to start the scripts inbox server.",
+              file=sys.stderr)
     return rc
 
 

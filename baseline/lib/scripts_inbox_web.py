@@ -168,13 +168,28 @@ def build_real_server(*, bind_host: str = "0.0.0.0", bind_port: int = 8200,
     return httpd
 
 
+def resolve_paths(environ, runner=None) -> tuple:
+    """(data_path, inbox_dir). Explicit environment wins (development);
+    otherwise the ACTIVE persona's own volume, resolved exactly as
+    baseline-scripts-inbox-gate resolves it. Never a /tmp fallback for a
+    real deployment: the auth store must not land on the substrate."""
+    data_path = environ.get("BASELINE_SCRIPTS_INBOX_DATA")
+    inbox_dir = environ.get("BASELINE_SCRIPTS_INBOX_DIR")
+    if data_path and inbox_dir:
+        return data_path, inbox_dir
+    if runner is None:
+        from repair import RealRunner
+        runner = RealRunner()
+    paths = si.active_persona_paths(runner)
+    return data_path or paths["data_path"], inbox_dir or paths["inbox_dir"]
+
+
 def main() -> int:
     import os
     import sys
 
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8200
-    data_path = os.environ.get("BASELINE_SCRIPTS_INBOX_DATA", "/tmp/baseline-scripts-inbox/store.db")
-    inbox_dir = os.environ.get("BASELINE_SCRIPTS_INBOX_DIR", si.DEFAULT_INBOX_DIR)
+    data_path, inbox_dir = resolve_paths(os.environ)
     server = build_real_server(bind_port=port, data_path=data_path, inbox_dir=inbox_dir)
     print(f"Baseline scripts inbox on http://0.0.0.0:{port}/  (no default login: it needs an account created by first-run setup)")
     print(f"Data store: {data_path}")

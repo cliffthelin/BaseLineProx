@@ -35,6 +35,23 @@ DEFAULT_INBOX_DIR = "/mnt/USER/scripts_inbox"
 MAX_SCRIPT_BYTES = 1_000_000  # generous for a hand-written or phone-dictated script; refuses anything absurd
 
 
+def active_persona_paths(runner) -> dict:
+    """Where the inbox lives for the persona that is active right now:
+    that persona's USER_<PERSONA> mountpoint, its inbox and its private
+    auth store. The one place both baseline-scripts-inbox-gate and the
+    server read this from, so they can never disagree.
+
+    Replaces the hardcoded singular /mnt/USER the unit and gate used: that
+    is the pre-persona volume, which no persona install has, so the gate
+    always refused and Restart=on-failure retried every 5 seconds forever
+    (seen in the 2026-10-10 offline rehearsal)."""
+    import persist_bind_mounts as pbm
+    persona = pbm.get_active_persona(runner)
+    mountpoint = pbm.user_mountpoint_for(persona)
+    return {"persona": persona, "mountpoint": mountpoint, "inbox_dir": inbox_dir_for(persona),
+            "data_path": f"{mountpoint}/scripts-inbox-auth/store.json"}
+
+
 def inbox_dir_for(persona: str | None = None) -> str:
     """Persona-aware wiring (work-queue item 25, decision record 78).
     `persona=None` (default) reproduces DEFAULT_INBOX_DIR unchanged -
