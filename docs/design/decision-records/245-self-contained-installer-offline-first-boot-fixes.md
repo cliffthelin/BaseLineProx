@@ -93,6 +93,18 @@ Read on the VM's own console (`/var/log/baseline-first-boot-install.log`, `journ
 - `offline_repository()` reported the npm log file above (fixed by 7);
 - `hardware.collect()` reported `inxi section has an invalid shape`, traced to `Repos` (fixed by 3b).
 
+### 8. Plain files under /sys/class/net are not interfaces (`d4034da`, `7c1e4c0`)
+
+Found by the second re-run: after CONFIRM first boot installed the tools from the drive's repository, then died in
+the tools' functional verification: `/sys/class/net/bonding_masters` (a plain file, present whenever the bonding
+module is loaded, which is normal on Proxmox) was probed as an interface, raising `NetworkProbeError`. No commit
+marker, so the kiosk gate kept refusing. `_physical_nics` now skips non-directories.
+
+## Result of the third re-run (2026-10-10, no network, sparse disk)
+
+Install, first boot, CONFIRM, offline commit, and the kiosk browser showing the Proxmox VE login; clean shutdown,
+QEMU exit 0. This is the rehearsal on a blank virtual disk. The real PC401 run has not been done.
+
 ## Not done here
 
 - 6: the OS-selection and apps-with-overlays stage is not built.
