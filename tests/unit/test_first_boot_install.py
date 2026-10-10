@@ -226,3 +226,39 @@ def test_an_already_complete_install_never_reboots_again(tmp_path, monkeypatch):
     module.main()
     assert "not rebooting" in (tmp_path / "log").read_text()
 
+
+
+# -- The carried repository must survive provisioning unchanged (2026-10-10 rehearsal) -----------------------
+
+def _carried(tmp_path):
+    import json
+    import offline_cache
+    root = tmp_path / "baseline-cache"
+    (root / "apt").mkdir(parents=True)
+    (root / "apt" / "Packages").write_text("Package: x\n")
+    (root / "npm-cache").mkdir()
+    (root / "npm-cache" / "index").write_text("tarball index\n")
+    (root / "MANIFEST.json").write_text(json.dumps(offline_cache.build_manifest(root)))
+    return root
+
+
+def test_an_untouched_carried_repository_verifies_after_provisioning(tmp_path):
+    assert _installer().verify_carried_repository(_carried(tmp_path)) == 2
+
+
+def test_a_file_written_into_the_carried_repository_stops_the_install_by_name(tmp_path):
+    """npm wrote npm-cache/_logs/<time>-debug-0.log into the repository during provisioning, so first boot later
+    refused to trust it offline. The installer now catches that itself, naming the file."""
+    root = _carried(tmp_path)
+    (root / "npm-cache" / "_logs").mkdir()
+    (root / "npm-cache" / "_logs" / "2026-10-10T09_24_43_216Z-debug-0.log").write_text("npm debug\n")
+    with pytest.raises(RuntimeError, match="_logs/2026-10-10T09_24_43_216Z-debug-0.log"):
+        _installer().verify_carried_repository(root)
+
+
+def test_provision_keeps_npm_logs_out_of_the_carried_cache():
+    text = (REPO / "boot/provision.sh").read_text()
+    line = next(l for l in text.splitlines() if "npm install -g --offline" in l)
+    assert '--cache "$BASELINE_PACKAGE_CACHE/npm-cache"' in line
+    block = text[text.index(line):text.index(line) + 200]
+    assert "--logs-dir /var/log/baseline-npm" in block

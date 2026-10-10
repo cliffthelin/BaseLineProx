@@ -44,8 +44,12 @@ apt-get install -y nodejs
 
 echo "=== Installing Claude Code ==="
 if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
-    # npm's own cache, filled with every tarball Claude Code needs when the installer was built
-    npm install -g --offline --cache "$BASELINE_PACKAGE_CACHE/npm-cache" @anthropic-ai/claude-code
+    # npm's own cache, filled with every tarball Claude Code needs when the installer was built. npm writes its
+    # debug log to <cache>/_logs by default; that put a new file inside the carried, manifest-verified repository,
+    # which then failed verification and blocked first boot's offline commit (2026-10-10 rehearsal). Logs go here.
+    mkdir -p /var/log/baseline-npm
+    npm install -g --offline --cache "$BASELINE_PACKAGE_CACHE/npm-cache" --logs-dir /var/log/baseline-npm \
+        @anthropic-ai/claude-code
 else
     npm install -g @anthropic-ai/claude-code
 fi

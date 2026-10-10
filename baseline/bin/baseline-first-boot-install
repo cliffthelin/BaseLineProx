@@ -194,9 +194,23 @@ def offline_environment():
                 DEBIAN_FRONTEND="noninteractive", npm_config_offline="true")
 
 
+def verify_carried_repository(cache):
+    """The carried repository is consumed read-only; anything that writes into it breaks the manifest that first
+    boot re-verifies before trusting it offline. Checked after provisioning so the writer is caught here, by name,
+    rather than surfacing later as an unexplained 'repository does not verify' at first-boot CONFIRM."""
+    try:
+        return verify_manifest(cache, json.loads((cache / "MANIFEST.json").read_text()))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"the carried package repository is unreadable after provisioning: {exc}") from exc
+    except RuntimeError as exc:
+        raise RuntimeError(f"provisioning modified the carried package repository ({exc}); it must stay "
+                           "exactly as built, or first boot cannot verify it offline") from exc
+
+
 def step_provision():
     env = offline_environment()
     run(["/bin/bash", SRC / "boot/provision.sh"], env=env)
+    verify_carried_repository(CACHE / EXPANDED / MEDIA_CACHE)
     # Keep the drive's own repository as a permanent apt source, indexed now, so later steps (first-boot
     # authorization's diagnostic tools, any reinstall) work with no internet. Network sources still apply when
     # a connection exists.
