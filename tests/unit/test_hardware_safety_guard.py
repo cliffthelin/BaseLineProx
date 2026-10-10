@@ -78,3 +78,12 @@ def test_the_guard_is_active_for_a_test_that_does_not_ask_for_it():
 
 def test_the_violation_is_an_assertion_error_so_it_can_never_be_swallowed_as_a_normal_failure():
     assert issubclass(HardwareSafetyViolation, AssertionError)
+
+
+def test_a_forbidden_program_behind_prlimit_is_still_refused():
+    """prlimit wraps a command like env/timeout do. Without it in the wrapper list, `prlimit qemu-img ...` would
+    have slipped past this guard."""
+    import subprocess
+    from conftest import HardwareSafetyViolation
+    with pytest.raises(HardwareSafetyViolation):
+        subprocess.run(["prlimit", "--fsize=1024", "qemu-img", "info", "x"])

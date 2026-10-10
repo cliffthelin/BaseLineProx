@@ -136,7 +136,7 @@ def _check_argv(args, shell=False) -> None:
     else:
         argv = [os.fsdecode(a) for a in args]
         candidates = argv[:1]
-        if argv and os.path.basename(argv[0]) in ("sh", "bash", "dash", "zsh", "env", "nohup", "setsid", "timeout", "nice", "ionice", "xargs"):
+        if argv and os.path.basename(argv[0]) in ("sh", "bash", "dash", "zsh", "env", "nohup", "setsid", "timeout", "nice", "ionice", "xargs", "prlimit"):
             for a in argv[1:]:
                 candidates += _program_names_in_shell_string(a)
     for word in candidates:

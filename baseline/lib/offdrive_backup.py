@@ -53,6 +53,7 @@ SET_RE = re.compile(r"^baseline-\d{8}T\d{6}Z(-\d+)?$")
 
 RESERVE_FRACTION = 0.03        # never leave the drive with less than 3% free
 HEADROOM = 1.10                # and require 10% more than the estimated size
+MIN_BUDGET_BYTES = 2**30       # a write budget smaller than this is not worth starting
 DEFAULT_MIN_INTERVAL_HOURS = 168
 # Backed up changes-only: unchanged installers are never copied twice. The first backup copies everything once;
 # every later set stores only files that are new or changed (size or modification time differs) and the manifest
@@ -174,6 +175,32 @@ def resolve_destination(path: str, *, run, allowed_serials, boot_serial: str | N
 def _free_and_total(path) -> tuple:
     st = os.statvfs(path)
     return st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
+
+
+def budget_from(*, free: int, total: int) -> int:
+    """Bytes a single write may use: the drive's real free space minus its 3% reserve. Never the reserve itself.
+
+    This replaces budgeting the worst case up front for writes whose real size is unknown until they finish - a
+    compressed qcow2 recovery image of a mostly-empty 512 GB drive is a few GB, yet was charged 512 GB plus 10%
+    headroom and refused. The budget is then enforced by the kernel (`capped`), so the reserve holds even if the
+    write turns out larger than hoped: it fails, it never fills the drive."""
+    budget = free - int(total * RESERVE_FRACTION)
+    if budget < MIN_BUDGET_BYTES:
+        raise BackupError(f"the backup drive is at or near its 3% reserve ({free // 2**30} GiB free); "
+                          "free some up yourself first")
+    return budget
+
+
+def capped(argv: list, limit_bytes: int) -> list:
+    """`argv` run with the kernel's per-file size limit (RLIMIT_FSIZE) set to `limit_bytes`: any file the
+    command writes past that size fails with EFBIG/SIGXFSZ instead of growing. A hard stop, not an estimate."""
+    if not isinstance(limit_bytes, int) or limit_bytes <= 0:
+        raise ValueError(f"a write cap must be a positive byte count, got {limit_bytes!r}")
+    return ["prlimit", f"--fsize={limit_bytes}"] + list(argv)
+
+
+def free_and_total(path) -> tuple:
+    return _free_and_total(path)
 
 
 def check_space(dest: Destination, *, needed_bytes: int) -> None:

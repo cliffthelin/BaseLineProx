@@ -72,3 +72,61 @@ def test_quiescence_refuses_active_file_users_without_unmounting(monkeypatch):
     with pytest.raises(recovery.RecoveryError, match="active"):
         recovery.quiesce_source(runner, serial="DRIVE-A", allowed_serials={"DRIVE-A"})
     assert not any(a[0] == "umount" for a in runner.calls)
+
+
+# -- write budget: the image may use real free space, never the destination's 3% reserve (2026-10-10) ----------
+
+def _snapshot_setup(tmp_path, monkeypatch, *, free, total):
+    import drive_recovery as recovery
+    import offdrive_backup as ob
+    size = 512_110_190_592
+    listing = {"blockdevices": [{"name": "/dev/sdx", "type": "disk", "serial": "DRIVE-A", "size": size,
+                                 "mountpoints": [None]}]}
+    target = {"path": "/dev/sdx", "serial": "DRIVE-A", "size_bytes": size}
+    monkeypatch.setattr(recovery.pds, "validate_target_device", lambda *a, **k: dict(target))
+    monkeypatch.setattr(recovery.pds, "get_boot_device_serial", lambda *a, **k: "BOOT")
+    monkeypatch.setattr(ob, "resolve_destination",
+                        lambda path, **k: ob.Destination(path=str(tmp_path), backup_dir=tmp_path / "b", source="x",
+                                                         fstype="ext4", serial="DEST", disks=("sdz",)))
+    monkeypatch.setattr(ob, "_free_and_total", lambda path: (free, total))
+
+    class Runner(FakeRunner):
+        def run(self, argv, timeout=10):
+            if "convert" in argv:
+                open(argv[-1], "wb").write(b"qcow2-bytes")          # the image the real convert would write
+            return super().run(argv, timeout=timeout)
+    runner = Runner(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(0, json.dumps(listing), ""))])
+    return recovery, runner
+
+
+def test_the_recovery_image_is_written_under_a_kernel_cap_of_free_space_minus_the_reserve(tmp_path, monkeypatch):
+    """The real numbers from 2026-10-10: 819.5 GB free on a 10 TB destination. Budgeting the raw 512 GB plus
+    headroom was the old rule; the budget is free minus 3% of the drive, enforced by prlimit."""
+    free, total = 819_542_622_208, 10_000_611_147_776
+    recovery, runner = _snapshot_setup(tmp_path, monkeypatch, free=free, total=total)
+    folder = recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
+    budget = free - int(total * 0.03)
+    qemu = [a for a in runner.calls if "qemu-img" in a]
+    assert qemu[0][:2] == ["prlimit", f"--fsize={budget}"] and qemu[0][2:4] == ["qemu-img", "convert"]
+    assert all(a[0] == "qemu-img" for a in qemu[1:])              # check and compare only read: not capped
+    assert json.loads((folder / "MANIFEST.json").read_text())["complete"] is True
+
+
+def test_a_destination_at_its_reserve_is_refused_before_anything_is_written(tmp_path, monkeypatch):
+    import offdrive_backup as ob
+    total = 10 * 2**40
+    recovery, runner = _snapshot_setup(tmp_path, monkeypatch, free=int(total * 0.03), total=total)
+    with pytest.raises(ob.BackupError, match="3%"):
+        recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
+    assert not any("qemu-img" in a for a in runner.calls)
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith("baseline-recovery-")]
+
+
+def test_an_image_that_outgrows_its_budget_fails_and_stays_incomplete(tmp_path, monkeypatch):
+    free, total = 819_542_622_208, 10_000_611_147_776
+    recovery, runner = _snapshot_setup(tmp_path, monkeypatch, free=free, total=total)
+    runner.command_responses.insert(0, (lambda a: a[0] == "prlimit", FakeProc(153, "", "File size limit exceeded")))
+    with pytest.raises(recovery.RecoveryError, match="write budget"):
+        recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
+    folder = next(p for p in tmp_path.iterdir() if p.name.startswith("baseline-recovery-"))
+    assert (folder / "INCOMPLETE.json").exists() and not (folder / "MANIFEST.json").exists()
