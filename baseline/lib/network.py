@@ -46,9 +46,10 @@ def _log_event(step: str, status: str, detail: str) -> None:
         f.write(json.dumps(rec) + "\n")
 
 
-def _physical_nics(base=Path("/sys/class/net")):
+def _physical_nics(base=None):
     """Real NICs under /sys/class/net - excludes lo and software bridges."""
     out = []
+    base = Path("/sys/class/net") if base is None else base
     try:
         entries = sorted(base.iterdir())
     except OSError as exc:
