@@ -51,13 +51,36 @@ def _section(raw, name):
     return {}
 
 
+# Sections normalize() folds into the Hardware Schema. Each must be a flat list of observation objects.
+_SCHEMA_SECTIONS = frozenset({"System", "Machine", "Memory", "CPU", "Graphics", "Network", "Drives"})
+
+
+def _valid_section_parts(name, parts) -> bool:
+    """Schema sections: a list of objects, nothing else. Any other section may also hold lists of strings,
+    because that is how inxi really groups lines: `Repos` (from -r) is objects for each sources file, each
+    followed by a list of that file's raw repository lines, e.g.
+    [{"Active apt repos in": "/etc/apt/sources.list.d/x.list"}, ["deb [trusted=yes] file:... ./"]].
+    Rejecting that rejected every machine with more than one apt source (seen on the 2026-10-10 rehearsal)."""
+    if not isinstance(parts, list):
+        return False
+    for part in parts:
+        if isinstance(part, dict):
+            continue
+        if (name not in _SCHEMA_SECTIONS and isinstance(part, list)
+                and all(isinstance(line, str) for line in part)):
+            continue
+        return False
+    return True
+
+
 def _validate_raw(raw):
     if not isinstance(raw, list) or not raw or any(not isinstance(entry, dict) for entry in raw):
         raise HardwareInventoryError("inxi inventory must be a nonempty list of section objects")
     for entry in raw:
         for name, parts in entry.items():
-            if not isinstance(name, str) or not isinstance(parts, list) or any(not isinstance(part, dict) for part in parts):
-                raise HardwareInventoryError("inxi section has an invalid shape")
+            label = _clean_key(name) if isinstance(name, str) else repr(name)
+            if not isinstance(name, str) or not _valid_section_parts(label, parts):
+                raise HardwareInventoryError(f"inxi {label} section has an invalid shape")
     for name in ("System", "CPU"):
         section = _section(raw, name)
         if not section:
