@@ -1,0 +1,3800 @@
+{
+  "scope": "actual short client attempts; no remote modifications",
+  "results": [
+    {
+      "peer": "10.0.0.1",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.10",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.100",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.101",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.102",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.103",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.104",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.105",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.106",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.107",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.108",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.109",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.11",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.110",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.111",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.112",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.113",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.114",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.115",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.116",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.117",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.118",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.119",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.12",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.120",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.121",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.122",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.123",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.124",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.125",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.126",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.127",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.128",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.129",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.13",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.130",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.131",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.132",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.133",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.134",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.135",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.136",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.137",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.138",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.139",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.14",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.140",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.141",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.142",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.143",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.144",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.145",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.146",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.147",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.148",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.149",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.15",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.150",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.151",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.152",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.153",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.154",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.155",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.156",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.157",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.158",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.159",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.16",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.160",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.161",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.162",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.163",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.164",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.165",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.166",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.167",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.168",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.169",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.17",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.170",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.171",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.172",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.173",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.174",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.175",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.176",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.177",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.178",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.179",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.18",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.180",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.181",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.182",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.183",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.184",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.185",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.186",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.187",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.188",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.189",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.19",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.190",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.191",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.193",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.194",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.195",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.196",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.197",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.198",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.199",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.2",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.20",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.200",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.201",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.202",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.203",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.204",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.205",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.206",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.207",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.208",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.209",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.21",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.210",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.211",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.212",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.213",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.214",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.215",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.216",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.217",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.218",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.219",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.22",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.220",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.221",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.222",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.223",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.224",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.225",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.226",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.227",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.228",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.229",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.23",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.230",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.232",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.233",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.234",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.235",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.236",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.237",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.238",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.239",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.24",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.240",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.241",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.242",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.243",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.244",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.245",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.246",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.247",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.248",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.249",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.25",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.250",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.251",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.252",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.253",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.254",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.26",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.27",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.28",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.29",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.3",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.30",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.31",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.32",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.33",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.34",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.35",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.36",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.37",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.38",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.39",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.4",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.40",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.41",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.42",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.43",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.44",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.45",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.46",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.47",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.48",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.49",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.5",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.50",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.51",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.52",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.53",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.54",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.55",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.56",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.57",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.58",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.59",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.6",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.60",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.61",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.62",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.63",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.64",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.65",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.66",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.67",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.68",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.69",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.7",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.70",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.71",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.72",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.73",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.74",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.75",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.76",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.77",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.78",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.79",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.8",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.80",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.81",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.82",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.83",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.84",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.85",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.86",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.87",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.88",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.89",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.9",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.90",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.91",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    {
+      "peer": "10.0.0.92",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.93",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.94",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.95",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.96",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.97",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.98",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.0.0.99",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection timed out"
+      },
+      "proxmox_discovery_error": "<urlopen error timed out>"
+    },
+    {
+      "peer": "10.255.33.43",
+      "iperf_exit": 1,
+      "iperf": {
+        "start": {
+          "connected": [],
+          "version": "iperf 3.20",
+          "system_info": "Linux cane-System-Product-Name 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026 x86_64"
+        },
+        "intervals": [],
+        "end": {},
+        "error": "unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused"
+      },
+      "proxmox_discovery_error": "<urlopen error [Errno 111] Connection refused>"
+    }
+  ]
+}

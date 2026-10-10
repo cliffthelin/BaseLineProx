@@ -242,22 +242,102 @@ def apply_tether_config(runner: Runner, config: dict, tether_fn=None) -> Command
 
 
 def apply_handoff_config(runner: Runner, config: dict) -> CommandResult:
-    """Nothing to restore is a no-op. Named categories need a real archive: it must sit in a backup
-    folder, go to /mnt or a Baseline volume, and restoring over user data stays behind
-    backup_restore's own fresh-backup gate."""
-    if not config.get("restored_categories"):
-        return CommandResult(True, "handoff: no categories to restore")
+    """Restore explicitly selected install-config sections without extracting paths."""
+    import json
     import backup_restore
-    archive, root = config.get("archive_path"), config.get("restore_root")
-    if not archive or not root:
-        return CommandResult(False, "handoff not applied: categories were named but no archive_path/restore_root was supplied")
+
+    categories = config.get("restored_categories", [])
+    if categories == []:
+        return CommandResult(True, "handoff: no categories to restore")
+    allowed = {"network", "firewall", "ssh", "tether", "proxmox", "drivers"}
+    if not isinstance(categories, list) or any(not isinstance(x, str) for x in categories):
+        return CommandResult(False, "handoff: restored_categories must be a list of category names")
+    if len(set(categories)) != len(categories) or set(categories) - allowed:
+        return CommandResult(False, "handoff: unsupported or duplicate restore category")
     try:
-        archive = backup_restore.check_existing_backup_file(runner, archive)
-        root = backup_restore.check_restore_root(root)
-    except ValueError as exc:
-        return CommandResult(False, f"handoff not applied: {exc}")
-    result = backup_restore.restore_backup(runner, archive_path=archive, dest_root=root, now=runner.now())
-    return CommandResult(result.ok, result.detail if not result.ok else f"handoff restored: {result.detail}")
+        archive = backup_restore.check_existing_backup_file(runner, config.get("archive_path"), what="handoff archive")
+        members = backup_restore.list_backup_contents(runner, archive)
+    except (ValueError, backup_restore.BackupReadError, TypeError) as exc:
+        return CommandResult(False, f"handoff: {exc}")
+    member = "etc/baseline/install-config.json"
+    if members.count(member) != 1:
+        return CommandResult(False, "handoff: archive must contain exactly one etc/baseline/install-config.json")
+    proc = runner.run(["tar", "-xOzf", archive, member], timeout=30)
+    if proc.returncode != 0:
+        return CommandResult(False, f"handoff: could not read archived config: {proc.stderr.strip() or proc.returncode}")
+    if len(proc.stdout.encode("utf-8")) > 1024 * 1024:
+        return CommandResult(False, "handoff: archived config exceeds 1 MiB")
+    try:
+        archived = json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return CommandResult(False, "handoff: archived install config is invalid JSON")
+    if not isinstance(archived, dict):
+        return CommandResult(False, "handoff: archived install config must be an object")
+    selected = {}
+    supported = {
+        "network": {"hostname", "dhcp"},
+        "firewall": {"allow_lan_only"},
+        "ssh": {"password_auth"},
+        "tether": {"enabled"},
+        "proxmox": {
+            "smartd_health_check", "smartd_monitor_all", "smartd_auto_offline",
+            "smartd_attribute_autosave", "smartd_selftest_schedule", "smartd_email",
+            "smartd_email_frequency", "ethtool_interface", "ethtool_autoneg",
+            "ethtool_speed", "ethtool_duplex", "ethtool_wol", "ethtool_rx_checksum",
+            "ethtool_tx_checksum", "ethtool_tso", "ethtool_gro", "ethtool_pause_autoneg",
+        },
+        "drivers": {"cpu_microcode", "cpu_microcode_package", "nic_wifi_firmware", "wifi_firmware_package"},
+    }
+    actionable = {
+        "proxmox": {"smartd_health_check", "smartd_monitor_all", "smartd_auto_offline",
+                     "smartd_attribute_autosave", "smartd_selftest_schedule", "smartd_email",
+                     "smartd_email_frequency", "ethtool_autoneg", "ethtool_speed", "ethtool_duplex",
+                     "ethtool_wol", "ethtool_rx_checksum", "ethtool_tx_checksum", "ethtool_tso",
+                     "ethtool_gro", "ethtool_pause_autoneg"},
+        "drivers": {"cpu_microcode", "nic_wifi_firmware"},
+    }
+    for category in categories:
+        section = archived.get(category)
+        if not isinstance(section, dict) or not section:
+            return CommandResult(False, f"handoff: archived category {category} is missing or empty")
+        if set(section) - supported[category]:
+            return CommandResult(False, f"handoff: archived category {category} contains unsupported settings")
+        if category in actionable and not (set(section) & actionable[category]):
+            return CommandResult(False, f"handoff: archived category {category} has no applicable settings")
+        selected[category] = section
+    config_path = "/etc/baseline/install-config.json"
+    try:
+        current = json.loads(runner.read_text(config_path)) if runner.path_exists(config_path) else {}
+    except (ValueError, TypeError):
+        return CommandResult(False, "handoff: current install config is invalid JSON")
+    if not isinstance(current, dict):
+        return CommandResult(False, "handoff: current install config must be an object")
+    if "proxmox" in selected and any(k.startswith("ethtool_") for k in selected["proxmox"]):
+        iface = selected["proxmox"].get("ethtool_interface")
+        if not isinstance(iface, str) or not iface.strip():
+            return CommandResult(False, "handoff: ethtool settings require an explicit ethtool_interface")
+    import config_pipeline
+    summary = config_pipeline.apply_stored_config(
+        runner, selected, network_interface="", run_active_diagnostics=False)
+    if summary["failed"]:
+        return CommandResult(False, "handoff: selected config apply failed: " + "; ".join(
+            f"{name}: {summary['errors'].get(name, 'failed')}" for name in summary["failed"]))
+    expected = {
+        "network": {"network"}, "firewall": {"firewall"}, "ssh": {"ssh"}, "tether": {"tether"},
+        "proxmox": {name for name in ("smartd", "ethtool") if name in summary["applied"]},
+        "drivers": {name for name in ("cpu_microcode", "wifi_firmware") if name in summary["applied"]},
+    }
+    for category in categories:
+        if category not in ("proxmox", "drivers") and not (expected[category] & set(summary["applied"])):
+            return CommandResult(False, f"handoff: selected category {category} was not applied")
+        if category in ("proxmox", "drivers") and not expected[category]:
+            return CommandResult(False, f"handoff: selected category {category} was not applied")
+    current.update(selected)
+    try:
+        runner.write_text_atomic(config_path, json.dumps(current, indent=2, sort_keys=True) + "\n")
+    except Exception as exc:
+        return CommandResult(False, f"handoff: selected settings applied but not persisted ({type(exc).__name__})")
+    return CommandResult(True, "handoff: restored and persisted selected categories: " + ", ".join(categories))
 
 
 def _iperf_peer_and_port(config: dict):
@@ -288,14 +368,66 @@ def apply_iperf3_config(runner: Runner, config: dict) -> CommandResult:
     import json
     try:
         peer, port = _iperf_peer_and_port(config)
-    except ValueError as exc:
+        if config.get("role", "client") not in ("client", "server"):
+            raise ValueError("role must be client or server")
+        bind = config.get("bind_address", "")
+        if bind:
+            import ipaddress
+            address = ipaddress.ip_address(bind)
+            if address.is_unspecified or address.is_multicast or not (address.is_private or address.is_link_local):
+                raise ValueError("bind_address must be a specific local/LAN address")
+            bind = str(address)
+    except (ValueError, TypeError) as exc:
         return CommandResult(False, f"iperf3 not applied: {exc}")
     if config.get("role", "client") == "server":
-        proc = runner.run(["systemd-run", "--unit=baseline-iperf3", "--collect", "--property=RuntimeMaxSec=600",
-                           "iperf3", "-s", "-1", "-p", str(port)], timeout=15)
+        import re
+        import time
+        import uuid
+        import os
+        unit = f"baseline-iperf3-{uuid.uuid4().hex}.service"
+        command = ["systemd-run", f"--unit={unit}", "--collect", "--property=RuntimeMaxSec=600",
+                   f"--property=NetworkNamespacePath=/proc/{os.getpid()}/ns/net",
+                   "iperf3", "-s", "-1", "-p", str(port)]
+        if bind:
+            command.extend(["-B", bind])
+        proc = runner.run(command, timeout=15)
         if proc.returncode != 0:
             return CommandResult(False, f"iperf3 server not started: {proc.stderr.strip()}")
-        return CommandResult(True, f"iperf3 server listening on port {port} for one test (stops after 10 minutes)")
+        reason = "listener did not become ready"
+        try:
+            for attempt in range(5):
+                state = runner.run(["systemctl", "show", unit, "--property=ActiveState,SubState,MainPID"], timeout=2)
+                if state.returncode != 0:
+                    reason = "unit observation failed"
+                    break
+                values = dict(line.split("=", 1) for line in state.stdout.splitlines() if "=" in line)
+                pid = values.get("MainPID", "")
+                if values.get("ActiveState") in {"failed", "inactive"}:
+                    reason = "unit exited before readiness"
+                    break
+                sockets = runner.run(["ss", "-H", "-ltnp", f"sport = :{port}"], timeout=2)
+                if sockets.returncode != 0:
+                    reason = "socket observation failed"
+                    break
+                if (values.get("ActiveState") == "active" and values.get("SubState") == "running"
+                        and pid.isdigit() and int(pid) > 0
+                        and re.search(rf"\bpid={re.escape(pid)}(?:,|\))", sockets.stdout)):
+                    return CommandResult(True, f"iperf3 listener verified on port {port}; {unit} is single-use and bounded to 10 minutes")
+                if attempt < 4:
+                    time.sleep(0.2)
+        except Exception as exc:
+            reason = f"readiness observation failed: {exc}"
+        try:
+            runner.run(["systemctl", "stop", unit], timeout=5)
+            observed = runner.run(["systemctl", "show", unit, "--property=LoadState,ActiveState,MainPID"], timeout=2)
+            values = dict(line.split("=", 1) for line in observed.stdout.splitlines() if "=" in line)
+            exited = (values.get("ActiveState") in {"inactive", "failed"}
+                      and values.get("MainPID") == "0"
+                      and (observed.returncode == 0 or values.get("LoadState") == "not-found"))
+            cleanup = "unit stopped (verified)" if exited else "cleanup unverified; unit may remain running for up to 10 minutes"
+        except Exception:
+            cleanup = "cleanup failed; unit may remain running for up to 10 minutes"
+        return CommandResult(False, f"REAL-003: {reason}; {cleanup}; {unit}")
     if not peer:
         proc = runner.run(["iperf3", "--version"], timeout=10)
         if proc.returncode != 0:

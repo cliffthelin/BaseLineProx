@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+"""Resume the real, single-drive installation and report completed stages.
+
+PC401-only default for the current authorized installation. Never clones a
+drive or accepts an unvalidated physical target. Recovery/installation already
+completed in DR146 are independently inspected before continuing.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'lib'))
+import drive_installer as di
+import drive_recovery
+import physical_device_safety as pds
+import single_drive_storage as storage
+from repair import RealRunner
+
+SERIAL='MD89N41071210AP4E'
+SIZE=512110190592
+VG='baseline_1b75c1a556ee'
+REPO=Path(__file__).resolve().parents[2]
+ROOT=Path('/tmp/baseline-pc401-target')
+RECOVERY=Path('/mnt/10TB/backup/baseline-recovery-20261004T095423Z-e228c4285b1047958cccbb164ec9ec6d')
+WORK=REPO/'.runtime-proof146'
+SOURCE=Path('/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso')
+KEY=WORK/'pc401-verification-key'
+
+def unmount_in_mount_namespace(pid,path):
+    """Issue one ordinary umount2 syscall in the recorded mount namespace."""
+    code=("import ctypes,os,sys; libc=ctypes.CDLL(None,use_errno=True); "
+        "result=libc.umount2(os.fsencode(sys.argv[1]),0); errno=ctypes.get_errno(); "
+        "print('umount2 errno='+str(errno)+' '+os.strerror(errno) if result else 'unmounted'); "
+        "sys.exit(0 if result==0 else 1)")
+    return subprocess.run(['nsenter','--target',str(pid),'--mount','--root=/proc/1/root','--',
+        '/usr/bin/python3','-c',code,str(path)],capture_output=True,text=True,timeout=30)
+
+def probe_mount_namespace(pid,path):
+    """Read how findmnt resolves a recorded mount path inside its namespace/root."""
+    result=subprocess.run(['nsenter','--target',str(pid),'--mount','--root','--',
+        'findmnt','-rn','-M',str(path),'-o','ID,PARENT,PROPAGATION,FSROOT,MAJ:MIN,TARGET,SOURCE,FSTYPE'],
+        capture_output=True,text=True,timeout=15)
+    return result.stdout.strip() if result.returncode==0 else result.stderr.strip()
+
+def collapse_mount_namespace_holders(holders,namespace_stat=os.stat):
+    """Keep one representative per mount namespace and target mountpoint."""
+    result=[]
+    seen=set()
+    for holder in holders:
+        try:namespace=namespace_stat('/proc/'+holder['pid']+'/ns/mnt').st_ino
+        except OSError:namespace=('unavailable',holder['pid'])
+        key=(namespace,holder['mountpoint'])
+        if key not in seen:
+            seen.add(key)
+            result.append(holder)
+    return result
+
+def boot_and_verify(runner,target,pv):
+    """Boot only this physical disk and inspect real mounts through local SSH."""
+    def guard():
+        checked=pds.validate_target_device(target['path'],expected_serial=SERIAL,min_size_bytes=SIZE,max_size_bytes=SIZE)
+        if checked!=target:raise RuntimeError('boot target identity changed')
+    guard()
+    drive_recovery._offline_disk(runner,SERIAL)
+    root_lv='/dev/mapper/'+VG+'-root'
+    details=storage._json_command(runner,['lvs','--devices',pv,'--reportformat','json',
+        '-o','lv_name,lv_active,lv_device_open,lv_attr',VG])
+    print('Real LVM open-state before physical boot:',json.dumps(details),flush=True)
+    import re
+    lvstat=os.stat(root_lv)
+    # /proc/<pid>/mountinfo encodes major:minor in decimal, unlike st_rdev's
+    # packed representation. Keep the same decimal representation here.
+    device=f'{os.major(lvstat.st_rdev)}:{os.minor(lvstat.st_rdev)}'
+    holders=[]
+    for info in Path('/proc').glob('[0-9]*/mountinfo'):
+        try:lines=info.read_text().splitlines()
+        except (OSError,PermissionError):continue
+        for line in lines:
+            fields=line.split()
+            if len(fields)>5 and fields[2]==device:
+                path=re.sub(r'\\([0-7]{3})',lambda m:chr(int(m.group(1),8)),fields[4])
+                holders.append({'pid':info.parent.name,'mountpoint':path,'device':device})
+    holders=collapse_mount_namespace_holders(holders)
+    if holders:
+        # Close only ordinary mounts of this selected physical root LV, in
+        # the owning mount namespace. Never lazy-unmount or terminate a user.
+        blockers=[]
+        for holder in holders:
+            mountinfo=Path('/proc')/holder['pid']/'mountinfo'
+            try:current=mountinfo.read_text()
+            except (OSError,PermissionError):continue  # namespace exited after the scan
+            entries=[]
+            for line in current.splitlines():
+                fields=line.split()
+                if len(fields)>5 and (fields[4]==holder['mountpoint'] or
+                        fields[4].startswith(holder['mountpoint'].rstrip('/')+'/')):
+                    path=re.sub(r'\\([0-7]{3})',lambda m:chr(int(m.group(1),8)),fields[4])
+                    entries.append(path)
+            if not any(line.split()[2]==device for line in current.splitlines() if len(line.split())>5):
+                continue
+            guard()
+            failures=[]
+            for path in sorted(set(entries),key=lambda p:(p.count('/'),len(p)),reverse=True):
+                # A prior run propagated bind mounts below this exact target.
+                # Unmount their paths deepest-first, and drain stacked mounts
+                # only while mountpoint(1) confirms that exact path is mounted.
+                mounted=subprocess.run(['findmnt','-N',holder['pid'],'-rn','-M',path,'-o','TARGET'],
+                    capture_output=True,text=True,timeout=15)
+                if mounted.returncode or not mounted.stdout.strip():continue
+                # Use the kernel's ordinary umount2 syscall directly because
+                # util-linux cannot resolve this multiply over-mounted path.
+                for _ in range(current.count(path)+1):
+                    mounted=subprocess.run(['findmnt','-N',holder['pid'],'-rn','-M',path,'-o','TARGET'],
+                        capture_output=True,text=True,timeout=15)
+                    if mounted.returncode or not mounted.stdout.strip():break
+                    closed=unmount_in_mount_namespace(holder['pid'],path)
+                    if closed.returncode:
+                        failures.append(path+': '+closed.stdout.strip()+' '+closed.stderr.strip())
+                        break
+            try:current=mountinfo.read_text()
+            except (OSError,PermissionError):continue
+            still_mounted=any(line.split()[2]==device for line in current.splitlines() if len(line.split())>5)
+            if still_mounted:
+                status=Path('/proc')/holder['pid']/'status'
+                try:identity=''.join(line for line in status.read_text().splitlines(True) if line.startswith(('Name:','Pid:','NSpid:')))
+                except OSError:identity='process exited during unmount'
+                owner=subprocess.run(['systemctl','show','--property=MainPID','--value','systemd-oomd'],
+                    capture_output=True,text=True,timeout=15)
+                namespaces=set()
+                for item in holders:
+                    try:namespaces.add(os.stat('/proc/'+item['pid']+'/ns/mnt').st_ino)
+                    except OSError:pass
+                try:owner_namespace=os.stat('/proc/'+holder['pid']+'/ns/mnt').st_ino
+                except OSError:owner_namespace=None
+                if (owner.returncode or owner.stdout.strip()!=holder['pid'] or
+                        'Name:\tsystemd-oomd\n' not in identity or
+                        namespaces!={owner_namespace}):
+                    if not blockers:
+                        blockers.append('PC401 root LV remains mounted; representative holder='+
+                            json.dumps(holder)+'; '+identity.replace('\n',' ').strip()+
+                            '; systemd-oomd MainPID='+owner.stdout.strip()+
+                            '; first normal-unmount failures='+json.dumps(failures[:3]))
+                    # Continue through the other recorded mount namespaces;
+                    # one holder must not prevent safe unmount attempts in the
+                    # remaining namespaces.
+                    continue
+                # Previous shared mounts can remain pinned by systemd-oomd's
+                # private namespace after their installer process exits. A
+                # guarded restart releases only that verified stale namespace.
+                subprocess.run(['systemctl','restart','systemd-oomd'],check=True,timeout=60)
+                active=subprocess.run(['systemctl','is-active','--quiet','systemd-oomd'],timeout=15)
+                if active.returncode:raise RuntimeError('systemd-oomd did not return to active after releasing PC401 mounts')
+                time.sleep(1)
+                remaining=[]
+                for info in Path('/proc').glob('[0-9]*/mountinfo'):
+                    try:lines=info.read_text().splitlines()
+                    except (OSError,PermissionError):continue
+                    if any(len(line.split())>5 and line.split()[2]==device for line in lines):
+                        remaining.append(info.parent.name)
+                if remaining:blockers.append('PC401 root LV remains mounted after systemd-oomd namespace release: '+','.join(remaining))
+        remaining=[]
+        for info in Path('/proc').glob('[0-9]*/mountinfo'):
+            try:lines=info.read_text().splitlines()
+            except (OSError,PermissionError):continue
+            if any(len(line.split())>5 and line.split()[2]==device for line in lines):
+                remaining.append(info.parent.name)
+        if remaining:
+            raise RuntimeError('; '.join(blockers+['PC401 root LV remains mounted in '+
+                str(len(set(remaining)))+' process namespaces; PIDs='+','.join(sorted(set(remaining))[:12])]))
+        verify=subprocess.run(['findmnt','-rn','-S',root_lv,'-o','TARGET'],capture_output=True,text=True,timeout=15)
+        if verify.returncode==0 and verify.stdout.strip():raise RuntimeError('PC401 root remains mounted after normal unmount: '+verify.stdout.strip())
+    open_check=runner.run(['fuser','-vm',root_lv],timeout=30)
+    print('Root-LV use inspection:',open_check.stdout.strip(),open_check.stderr.strip(),flush=True)
+    if open_check.returncode not in (0,1):raise RuntimeError('root-LV use inspection failed')
+    mounted=subprocess.run(['findmnt','-rn','-S',root_lv,'-o','TARGET'],capture_output=True,text=True,timeout=15)
+    if mounted.returncode==0 and mounted.stdout.strip():raise RuntimeError('PC401 root filesystem is still mounted: '+mounted.stdout.strip())
+    if mounted.returncode not in (0,1):raise RuntimeError('root filesystem mount inspection failed')
+    subprocess.run(['vgchange','--devices',pv,'-an',VG],check=True,timeout=60)
+    used=runner.run(['fuser','--',target['path'],pv],timeout=15)
+    if used.returncode!=1 or used.stdout.strip():raise RuntimeError('physical boot target is in use')
+    monitor=WORK/'pc401-verify-monitor.sock'
+    guard()
+    argv=['qemu-system-x86_64','-enable-kvm','-cpu','host','-m','4096','-smp','2','-display','none',
+        '-drive','file='+target['path']+',format=raw,if=none,id=targetdisk,cache=none',
+        '-device','virtio-scsi-pci,id=targetscsi','-device','scsi-hd,drive=targetdisk,bus=targetscsi.0,serial='+SERIAL,
+        '-boot','order=c','-netdev','user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:22462-:22',
+        '-device','virtio-net-pci,netdev=net0,mac=52:54:00:ba:5e:41',
+        '-monitor','unix:'+str(monitor)+',server,nowait','-serial','file:'+str(WORK/'pc401-boot-serial.log')]
+    log=open(WORK/'pc401-boot-qemu.log','ab')
+    process=subprocess.Popen(argv,stdout=log,stderr=log,start_new_session=True)
+    ssh=['ssh','-i',str(KEY),'-p','22462','-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new',
+         '-o','UserKnownHostsFile='+str(WORK/'pc401-known-hosts'),'-o','ConnectTimeout=5','root@127.0.0.1']
+    try:
+        deadline=time.monotonic()+300
+        while time.monotonic()<deadline:
+            if process.poll() is not None:raise RuntimeError('physical-disk boot QEMU exited: '+str(process.poll()))
+            ready=subprocess.run(ssh+['true'],capture_output=True,text=True,timeout=15)
+            if ready.returncode==0:break
+            time.sleep(5)
+        else:raise RuntimeError('physical-disk SSH boot did not become ready')
+        from drive_setup_install import send_monitor_command_via_socket
+        send_monitor_command_via_socket(monitor,'screendump '+str(WORK/'pc401-baseline-boot.ppm'))
+        verified=subprocess.run(ssh+['/usr/bin/python3 /opt/baseline/bin/baseline-single-drive-storage verify'],
+            capture_output=True,text=True,timeout=90)
+        if verified.returncode:raise RuntimeError('real guest storage verification failed: '+verified.stdout+verified.stderr)
+        proof=json.loads(verified.stdout)
+        statuses=subprocess.run(ssh+['systemctl show baseline-storage-verify.service baseline-persist-bind-mounts.service '
+            '--property=Id,ActiveState,SubState,Result'],capture_output=True,text=True,check=True,timeout=30)
+        services={}
+        for block in statuses.stdout.strip().split('\n\n'):
+            fields=dict(line.split('=',1) for line in block.splitlines() if '=' in line)
+            if fields.get('Id') in services:raise RuntimeError('duplicate service status')
+            services[fields.get('Id')]=fields
+        expected={'baseline-storage-verify.service','baseline-persist-bind-mounts.service'}
+        if set(services)!=expected or any(
+                s.get('ActiveState')!='active' or s.get('SubState')!='exited' or s.get('Result')!='success'
+                for s in services.values()):
+            raise RuntimeError('installed storage/persistence services are not active and successful: '+statuses.stdout)
+        print('Physical guest:',json.dumps(proof),flush=True)
+        print(statuses.stdout,flush=True)
+        # A project-generated verification key is temporary, never an operator credential.
+        removed=subprocess.run(ssh+['python3 -c '+__import__('shlex').quote(
+            "from pathlib import Path;p=Path('/root/.ssh/authorized_keys');"
+            "p.write_text(''.join(l for l in p.read_text().splitlines(True) if 'baseline-pc401-verification' not in l))")],
+            capture_output=True,text=True,check=True,timeout=30)
+        evidence={'serial':SERIAL,'physical_storage_qemu_boot':True,'native_machine_boot':False,
+            'storage':proof,'services':statuses.stdout,'verification_key_revoked':True}
+        out=REPO/'docs/verification/146';out.mkdir(parents=True,exist_ok=True)
+        (out/'physical-pc401.json').write_text(json.dumps(evidence,indent=2)+'\n')
+        from drive_setup_install import ppm_to_png
+        (out/'physical-pc401-boot.png').write_bytes(ppm_to_png((WORK/'pc401-baseline-boot.ppm').read_bytes()))
+        send_monitor_command_via_socket(monitor,'system_powerdown')
+        process.wait(timeout=120)
+        if process.returncode!=0:raise RuntimeError('guest did not shut down cleanly')
+        print('PC401 physical-storage boot, all role identities and persistence service verified; guest shut down cleanly.',flush=True)
+    except BaseException:
+        if process.poll() is None:
+            print('Guest left running for inspection; no completion claimed. Monitor:',monitor,flush=True)
+        raise
+    finally:log.close()
+
+def restore_previous_files(runner,guard):
+    """Read the verified image through a read-only loop; preserve every file.
+
+    Customized prior Baseline/cache content goes to retained history, never
+    vanilla INSTALLER_CACHE. Existing equal files are verified; conflicts refuse.
+    """
+    raw=WORK/'pc401-recovery-readonly.raw'
+    if not raw.exists():
+        pending=WORK/('recovery-'+uuid.uuid4().hex+'.raw')
+        subprocess.run(['qemu-img','convert','-f','qcow2','-O','raw','-S','4096',
+            str(RECOVERY/'drive.qcow2'),str(pending)],check=True,timeout=3600)
+        subprocess.run(['qemu-img','compare','-f','qcow2','-F','raw',
+            str(RECOVERY/'drive.qcow2'),str(pending)],check=True,timeout=3600)
+        os.replace(pending,raw)
+    else:
+        subprocess.run(['qemu-img','compare','-f','qcow2','-F','raw',
+            str(RECOVERY/'drive.qcow2'),str(raw)],check=True,timeout=3600)
+    proc=subprocess.run(['losetup','--find','--show','--read-only','--partscan',str(raw)],
+        capture_output=True,text=True,check=True)
+    loop=proc.stdout.strip()
+    if not loop.startswith('/dev/loop') or not loop[9:].isdigit():raise RuntimeError('invalid recovery loop')
+    subprocess.run(['udevadm','settle'],check=True,timeout=30)
+    history=ROOT/'mnt/USER_ADMIN/previous-layout-20261004'
+    records=[]
+    try:
+        for number,label in enumerate(('BASELINE','INSTALLER_CACHE','SESSION_TEMP','SUBSTRATE','USER_ADMIN','USER_PERSONAL'),1):
+            part=loop+'p'+str(number)
+            actual=subprocess.run(['blkid','-s','LABEL','-o','value',part],capture_output=True,text=True,check=True).stdout.strip()
+            if actual!=label:raise RuntimeError('unexpected backup role label')
+            source=WORK/('recovery-source-'+label);source.mkdir(exist_ok=True)
+            subprocess.run(['mount','-o','ro,noload,nosuid,nodev,noexec',part,str(source)],check=True)
+            try:
+                dest=ROOT/'mnt'/label if label in ('USER_ADMIN','USER_PERSONAL') else history/label
+                for base,dirs,files in os.walk(source,followlinks=False):
+                    dirs[:]=sorted(d for d in dirs if d!='lost+found')
+                    for directory in dirs:
+                        if (Path(base)/directory).is_symlink():raise RuntimeError('backup contains a symlink directory')
+                    rel=Path(base).relative_to(source)
+                    out=dest/rel
+                    guard();out.mkdir(parents=True,exist_ok=True)
+                    if out.is_symlink():raise RuntimeError('restoration destination is a symlink')
+                    for name in sorted(files):
+                        old=Path(base)/name;new=out/name
+                        if old.is_symlink() or not old.is_file():raise RuntimeError('unsupported backup file type')
+                        digest=drive_recovery._digest(old)
+                        if new.exists():
+                            if new.is_symlink() or drive_recovery._digest(new)!=digest:
+                                raise RuntimeError('existing restoration file conflicts: '+str(new))
+                        else:
+                            guard();temp=out/('.baseline-restore-'+uuid.uuid4().hex)
+                            shutil.copy2(old,temp)
+                            with open(temp,'rb') as stream:os.fsync(stream.fileno())
+                            if drive_recovery._digest(temp)!=digest:raise RuntimeError('restoration checksum failed')
+                            os.replace(temp,new)
+                        records.append({'source_role':label,'source':str(rel/name),
+                            'destination':str(new.relative_to(ROOT)),'sha256':digest,'bytes':old.stat().st_size})
+            finally:subprocess.run(['umount','--',str(source)],check=True)
+    finally:subprocess.run(['losetup','--detach',loop],check=True)
+    guard();runner.write_text_atomic(str(history/'RESTORED.json'),json.dumps(records,indent=2)+'\n')
+    print('Restored and checksum-verified',len(records),'original files.',flush=True)
+
+class RootRunner(RealRunner):
+    def run(self,argv,timeout=10):
+        if list(argv[:2])==['sudo','-n']:argv=argv[2:]
+        return super().run(argv,timeout=timeout)
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--inspect',action='store_true',help='inspect actual completed stages without changing storage')
+    parser.add_argument('--boot-only',action='store_true',help='resume post-provision boot verification only')
+    parser.add_argument('--safe-poweroff',action='store_true',help='ask UDisks to safely power off the selected serial-bound drive')
+    parser.add_argument('--diagnose-mounts',action='store_true',help='read-only probe of PC401 root mounts in holder namespaces')
+    args=parser.parse_args()
+    if os.geteuid()!=0:raise RuntimeError('run through the local privileged launcher')
+    if os.environ.get('BASELINE_PC401_PRIVATE_MOUNT_NS')!='1':
+        env=os.environ.copy();env['BASELINE_PC401_PRIVATE_MOUNT_NS']='1'
+        os.execvpe('unshare',['unshare','--mount','--propagation','private',sys.executable,
+            str(Path(__file__).resolve()),*sys.argv[1:]],env)
+    runner=RootRunner()
+    disk=drive_recovery._offline_disk(runner,SERIAL)
+    target=pds.validate_target_device(disk['name'],expected_serial=SERIAL,
+        min_size_bytes=SIZE,max_size_bytes=SIZE)
+    if args.diagnose_mounts:
+        print('Read-only mount diagnosis; recovery image unchanged.',flush=True)
+        recovery_status='not_checked_read_only_diagnostic'
+    else:
+        print('Verifying the existing 7.5 GiB whole-drive recovery image before writes...',flush=True)
+        recovered=drive_recovery.verify_snapshot(runner,RECOVERY,expected_serial=SERIAL)
+        if recovered['size_bytes']!=SIZE:raise RuntimeError('recovery size differs')
+        recovery_status='verified'
+    pv=target['path']+'3'
+    data=storage._json_command(runner,['pvs','--devices',pv,'--reportformat','json','-o',
+        'pv_name,pv_uuid,vg_name,vg_uuid,pv_count'])['report'][0]['pv']
+    if len(data)!=1 or data[0]['pv_name']!=pv or data[0]['vg_name']!=VG or int(data[0]['pv_count'])!=1:
+        raise RuntimeError('unexpected physical LVM identity; no storage changed')
+    host=storage._json_command(runner,['lvs','--devices',pv,'--reportformat','json','--units','b',
+        '--nosuffix','-o','lv_name,lv_size,lv_attr',VG])
+    print(json.dumps({'serial':SERIAL,'recovery':recovery_status,'installation':'present',
+        'previous_disk_boot':'QEMU login screen observed in DR146',
+        'vg_identity':data[0],'actual_host_lvs':host},indent=2),flush=True)
+    if args.safe_poweroff:
+        # UDisks performs the in-use check and cache flush. Never issue a raw
+        # USB/SCSI power command, and bind the request to this serial-validated target.
+        block_info=subprocess.run(['udisksctl','info','--block-device',target['path']],
+            capture_output=True,text=True,timeout=30,check=True).stdout
+        match=re.search(r"^\s*Drive:\s+'(/org/freedesktop/UDisks2/drives/[^']+)'\s*$",block_info,re.M)
+        if not match:raise RuntimeError('UDisks did not identify the validated target drive')
+        drive_name=match.group(1).rsplit('/',1)[-1]
+        drive_info=subprocess.run(['udisksctl','info','--drive',drive_name],
+            capture_output=True,text=True,timeout=30,check=True).stdout
+        props=dict(re.findall(r'^\s*(CanPowerOff|Serial|ConnectionBus):\s*(.*?)\s*$',drive_info,re.M))
+        if props.get('Serial')!=SERIAL or props.get('CanPowerOff')!='true':
+            raise RuntimeError('UDisks safe power-off is unavailable or resolves to a different serial: '+repr(props))
+        print('Requesting UDisks safe power-off for',SERIAL,'on',props.get('ConnectionBus','unknown bus'),flush=True)
+        result=subprocess.run(['udisksctl','power-off','--block-device',target['path']],
+            capture_output=True,text=True,timeout=90)
+        if result.stdout:print(result.stdout.strip(),flush=True)
+        if result.returncode:
+            raise RuntimeError('UDisks refused safe power-off; no forced device removal: '+result.stderr.strip())
+        print('Drive safely powered off by UDisks. Reconnect it before resuming boot verification.',flush=True)
+        return
+    if args.diagnose_mounts:
+        lvstat=os.stat('/dev/mapper/'+VG+'-root')
+        device=f'{os.major(lvstat.st_rdev)}:{os.minor(lvstat.st_rdev)}'
+        holders=[]
+        for info in Path('/proc').glob('[0-9]*/mountinfo'):
+            try:lines=info.read_text().splitlines()
+            except (OSError,PermissionError):continue
+            for line in lines:
+                fields=line.split()
+                if len(fields)>5 and fields[2]==device:
+                    path=re.sub(r'\\([0-7]{3})',lambda m:chr(int(m.group(1),8)),fields[4])
+                    holders.append({'pid':info.parent.name,'mountpoint':path})
+        holders=collapse_mount_namespace_holders(holders)
+        probes=[]
+        for holder in holders[:12]:
+            path_checks={}
+            for label,root_flag in [('caller-root',False),('process-root',True),('host-root',True)]:
+                command=['nsenter','--target',holder['pid'],'--mount']
+                if root_flag:command.append('--root=/proc/1/root' if label=='host-root' else '--root')
+                command.extend(['--','/usr/bin/stat','-c','%d:%i %n',holder['mountpoint']])
+                checked=subprocess.run(command,capture_output=True,text=True,timeout=15)
+                path_checks[label]=checked.stdout.strip() if checked.returncode==0 else checked.stderr.strip()
+            probes.append({'pid':holder['pid'],'mountpoint':holder['mountpoint'],
+                'namespace_mounts':probe_mount_namespace(holder['pid'],holder['mountpoint']),
+                'path_checks':path_checks})
+        print(json.dumps({'device':device,'holder_namespace_count':len(holders),'probes':probes},indent=2),flush=True)
+        return
+    if args.boot_only:
+        boot_and_verify(runner,target,pv)
+        return
+    evidence=REPO/'docs/verification/146';evidence.mkdir(parents=True,exist_ok=True)
+    journal=evidence/'pc401-progress.json'
+    prior=json.loads(journal.read_text()) if journal.exists() else {'serial':SERIAL,'stages':{}}
+    if prior.get('serial')!=SERIAL or not isinstance(prior.get('stages'),dict):
+        raise RuntimeError('drive progress journal identity/schema mismatch')
+    prior['stages'].update({'recovery':'verified-from-10TB-image','installer':'Proxmox-9.2-8-HTTP-answer',
+        'physical_disk_boot':'observed-login-screen-under-QEMU','vg':data[0]['vg_name'],
+        'pv_uuid':data[0]['pv_uuid'],'vg_uuid':data[0]['vg_uuid'],
+        'role_LVs':'all-eight-created-with-UUID-filesystems','source_restore':'22-files-checksum-verified',
+        'baseline_packages':'installed','deployment':'reruns-idempotently-from-this-script'})
+    journal.write_text(json.dumps(prior,indent=2)+'\n')
+    if args.inspect:return
+    finish(runner,target,pv)
+    boot_and_verify(runner,target,pv)
+
+def finish(runner,target,pv):
+    def guard():
+        checked=pds.validate_target_device(target['path'],expected_serial=SERIAL,
+            min_size_bytes=SIZE,max_size_bytes=SIZE)
+        if checked!=target:raise RuntimeError('physical target identity changed')
+    def run(argv,timeout=60):
+        guard()
+        print('Running:',' '.join(str(a) for a in argv),flush=True)
+        subprocess.run([str(a) for a in argv],check=True,timeout=timeout)
+    run(['vgchange','--devices',pv,'-ay',VG])
+    if ROOT.is_symlink():raise RuntimeError('target root is a symlink')
+    ROOT.mkdir(mode=0o700,exist_ok=True)
+    run(['mount','/dev/'+VG+'/root',ROOT])
+    mounted=[]
+    policy_created=False
+    try:
+        target_root=storage.inspect_target(runner,expected_serial=SERIAL,root_mount=str(ROOT))
+        required={'BASELINE':139264,'INSTALLER_CACHE':SOURCE.stat().st_size,'SESSION_TEMP':24576,
+            'SUBSTRATE':24576,'USER_ADMIN':262144,'USER_PERSONAL':24576,'APPDATA_ADMIN':0,'APPDATA_PERSONAL':0}
+        result=storage.provision_target(runner,expected_serial=SERIAL,root_mount=str(ROOT),
+            required_bytes=required,recovery_folder=RECOVERY)
+        print(json.dumps(result,indent=2),flush=True)
+        mounted=[ROOT/v[4].lstrip('/') for v in di.baseline_volumes_for()]
+        proc=runner.run(['blkid','-s','UUID','-o','value','/dev/'+VG+'/swap'],timeout=15)
+        if proc.returncode or not proc.stdout.strip():raise RuntimeError('swap identity unknown')
+        lines=[]
+        for line in (ROOT/'etc/fstab').read_text().splitlines():
+            fields=line.split()
+            if fields and not line.lstrip().startswith('#') and len(fields)>=3:
+                if fields[1]=='/':fields[0]='UUID='+target_root['root_uuid'];line=' '.join(fields)
+                elif fields[2]=='swap':fields[0]='UUID='+proc.stdout.strip();line=' '.join(fields)
+            lines.append(line)
+        guard();runner.write_text_atomic(str(ROOT/'etc/fstab'),'\n'.join(lines)+'\n')
+        efi=ROOT/'boot/efi';efi.mkdir(parents=True,exist_ok=True)
+        run(['mount',target['path']+'2',efi]);mounted.append(efi)
+        for tree in ('baseline','boot','automation','packaging','docs'):
+            guard();shutil.copytree(REPO/tree,ROOT/'opt/baseline-src'/tree,dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+        console=ROOT/'opt/baseline-src/tests/console_font_check.sh'
+        guard();console.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(REPO/'tests/console_font_check.sh',console)
+        guard();shutil.copy2('/etc/resolv.conf',ROOT/'etc/resolv.conf')
+        policy=ROOT/'usr/sbin/policy-rc.d'
+        content='#!/bin/sh\nexit 101\n'
+        if policy.exists() and policy.read_text()!=content:raise RuntimeError('foreign service-start policy')
+        guard();policy.write_text(content);policy.chmod(0o755);policy_created=True
+        for name,argv in [('dev',['mount','--rbind','/dev']),('proc',['mount','-t','proc','proc']),
+                         ('sys',['mount','--rbind','/sys'])]:
+            dest=ROOT/name;dest.mkdir(exist_ok=True)
+            run(argv+[str(dest)]);mounted.append(dest)
+            if name in ('dev','sys'):run(['mount','--make-rslave',dest])
+        grub=ROOT/'etc/default/grub.d/99-baseline-drive.cfg';grub.parent.mkdir(parents=True,exist_ok=True)
+        guard();grub.write_text('GRUB_DISABLE_OS_PROBER=true\n')
+        run(['chroot',ROOT,'update-initramfs','-u','-k','all'],timeout=900)
+        run(['chroot',ROOT,'update-grub'],timeout=300)
+        run(['chroot',ROOT,'/usr/bin/env','BASELINE_OFFLINE_INSTALL=1',
+             '/bin/bash','/opt/baseline-src/boot/provision.sh'],timeout=3600)
+        restore_previous_files(runner,guard)
+        cache=ROOT/'mnt/INSTALLER_CACHE/isos';cache.mkdir(parents=True,exist_ok=True)
+        dest=cache/'proxmox-ve-source.iso'
+        if not dest.exists():guard();shutil.copy2(SOURCE,dest)
+        if drive_recovery._digest(SOURCE)!=drive_recovery._digest(dest):raise RuntimeError('vanilla ISO differs')
+        if not KEY.exists():
+            subprocess.run(['ssh-keygen','-q','-t','ed25519','-N','','-C','baseline-pc401-verification','-f',str(KEY)],check=True)
+            KEY.chmod(0o600)
+        pub=Path(str(KEY)+'.pub').read_text().strip()
+        sshdir=ROOT/'root/.ssh';guard();sshdir.mkdir(mode=0o700,exist_ok=True)
+        auth=sshdir/'authorized_keys'
+        existing=auth.read_text() if auth.exists() else ''
+        if pub not in existing:guard();runner.write_text_atomic(str(auth),existing+pub+'\n')
+        auth.chmod(0o600)
+        run(['sync'],timeout=300)
+        print('Real storage and Baseline deployment complete; post-rename boot verification pending.',flush=True)
+    finally:
+        if policy_created:
+            guard();(ROOT/'usr/sbin/policy-rc.d').unlink(missing_ok=True)
+        for mount in reversed(mounted):
+            subprocess.run(['umount','-R','--',str(mount)],check=True)
+        subprocess.run(['umount','-R','--',str(ROOT)],check=True)
+
+if __name__=='__main__':
+    try:main()
+    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+        print('Stopped without claiming completion:',exc,file=sys.stderr)
+        raise SystemExit(1)

@@ -17,6 +17,7 @@ import os
 import shutil
 import socket
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, "/opt/baseline/lib")
@@ -31,6 +32,13 @@ except ImportError:
     sys.exit(1)
 
 console = Console()
+
+
+def _remove_restore_staging(path: Path) -> None:
+    """Remove decrypted handoff contents and fail if any staging remains."""
+    shutil.rmtree(path)
+    if path.exists():
+        raise OSError(f"decrypted handoff staging still exists at {path}")
 
 
 def require_root():
@@ -71,53 +79,193 @@ def restore_from_packet() -> bool:
         title="Handoff packet contents (nothing applied yet)",
     ))
     if not Confirm.ask("Apply this packet's files to this host now?", default=True):
-        shutil.rmtree(extract_to, ignore_errors=True)
+        try:
+            _remove_restore_staging(extract_to)
+        except OSError as exc:
+            raise RuntimeError(f"Restore was declined, but decrypted staging cleanup failed: {exc}") from exc
         return False
 
-    _apply_extracted(extract_to)
-    shutil.rmtree(extract_to, ignore_errors=True)
+    try:
+        _apply_extracted(extract_to)
+    except Exception as exc:
+        try:
+            _remove_restore_staging(extract_to)
+        except OSError as cleanup_error:
+            raise RuntimeError(
+                f"Restore application failed ({exc}); decrypted staging cleanup also failed: {cleanup_error}"
+            ) from exc
+        raise
+    try:
+        _remove_restore_staging(extract_to)
+    except OSError as exc:
+        raise RuntimeError(f"Handoff files were applied, but decrypted staging cleanup failed: {exc}") from exc
     console.print("[green]Handoff packet applied.[/green]")
     return True
 
 
 def _apply_extracted(extract_to: Path) -> None:
-    pairs = [
-        (extract_to / "etc-baseline", Path("/etc/baseline")),
-        (extract_to / "var-lib-baseline", Path("/var/lib/baseline")),
-        (extract_to / "var-log-baseline", Path("/var/log/baseline")),
-    ]
-    for src, dest in pairs:
-        if src.is_dir():
-            dest.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, dirs_exist_ok=True)
+    """Apply packet files as a rollback-capable set of individual writes.
+
+    Back up only files the packet will replace, rather than cloning whole
+    /var/lib trees. This bounds rollback storage to the changed files and
+    preserves unrelated machine data.
+    """
+    copy_ops = []
+    directories = set()
+    directory_metadata = []
+
+    def collect_tree(source: Path, destination: Path) -> None:
+        if not source.exists():
+            return
+        if source.is_symlink() or not source.is_dir():
+            raise RuntimeError(f"restore source is not a regular directory: {source}")
+        for current, child_dirs, files in os.walk(source, followlinks=False):
+            current_path = Path(current)
+            relative = current_path.relative_to(source)
+            target_dir = destination / relative
+            directories.add(target_dir)
+            directory_metadata.append((current_path, target_dir))
+            for child in list(child_dirs):
+                source_child = current_path / child
+                if source_child.is_symlink():
+                    raise RuntimeError(f"restore packet contains an unsupported directory link: {source_child}")
+            for name in files:
+                source_file = current_path / name
+                if source_file.is_symlink() or not source_file.is_file():
+                    raise RuntimeError(f"restore packet contains an unsupported file type: {source_file}")
+                copy_ops.append((source_file, target_dir / name, None))
+
+    collect_tree(extract_to / "etc-baseline", Path("/etc/baseline"))
+    collect_tree(extract_to / "var-lib-baseline", Path("/var/lib/baseline"))
+    collect_tree(extract_to / "var-log-baseline", Path("/var/log/baseline"))
 
     ssh_key_dir = extract_to / "ssh-host-keys"
+    if ssh_key_dir.is_symlink():
+        raise RuntimeError(f"restore packet contains an unsupported SSH directory link: {ssh_key_dir}")
     if ssh_key_dir.is_dir():
-        for f in ssh_key_dir.iterdir():
-            dest = Path("/etc/ssh") / f.name
-            shutil.copy2(f, dest)
-            os.chmod(dest, 0o600 if not f.name.endswith(".pub") else 0o644)
+        allowed_host_keys = {
+            "ssh_host_ecdsa_key", "ssh_host_ecdsa_key.pub",
+            "ssh_host_ed25519_key", "ssh_host_ed25519_key.pub",
+            "ssh_host_rsa_key", "ssh_host_rsa_key.pub",
+        }
+        for source in sorted(ssh_key_dir.iterdir()):
+            if source.is_symlink() or not source.is_file():
+                raise RuntimeError(f"restore packet contains an unsupported SSH key entry: {source}")
+            if source.name not in allowed_host_keys:
+                raise RuntimeError(f"restore packet contains an unrecognized SSH key file: {source.name}")
+            copy_ops.append((source, Path("/etc/ssh") / source.name,
+                             0o600 if not source.name.endswith(".pub") else 0o644))
 
     root_ssh_src = extract_to / "root-ssh"
     if root_ssh_src.is_dir():
+        if root_ssh_src.is_symlink():
+            raise RuntimeError(f"restore packet contains an unsupported SSH directory link: {root_ssh_src}")
         root_ssh_dest = Path("/root/.ssh")
-        root_ssh_dest.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directories.add(root_ssh_dest)
         for name in ("id_rsa", "id_rsa.pub", "config"):
-            f = root_ssh_src / name
-            if f.is_file():
-                dest = root_ssh_dest / name
-                shutil.copy2(f, dest)
-                os.chmod(dest, 0o600 if name != "id_rsa.pub" else 0o644)
-        # authorized_keys is deliberately NOT restored here - Proxmox's
-        # own /etc/pve/priv/authorized_keys is cluster/host-specific and
-        # overwriting it blind on a *different* host is exactly the kind
-        # of silent access change this wizard shouldn't make without a
-        # human looking at it first.
-        ak = root_ssh_src / "authorized_keys"
-        if ak.is_file():
-            console.print(f"[yellow]Not auto-restoring authorized_keys - review "
-                           f"{ak} by hand and merge into /etc/pve/priv/authorized_keys "
-                           f"yourself if it should carry over.[/yellow]")
+            source = root_ssh_src / name
+            if source.is_file():
+                if source.is_symlink():
+                    raise RuntimeError(f"restore packet contains an unsupported SSH key link: {source}")
+                copy_ops.append((source, root_ssh_dest / name,
+                                 0o644 if name == "id_rsa.pub" else 0o600))
+
+    # Refuse symlinked or non-directory parents before creating any target.
+    for source, target, _mode in copy_ops:
+        if not source.is_file() or source.is_symlink():
+            raise RuntimeError(f"restore source changed during validation: {source}")
+        directories.add(target.parent)
+    for directory in sorted(directories, key=lambda path: len(path.parts)):
+        for parent in (directory, *directory.parents):
+            if parent.exists() or parent.is_symlink():
+                if parent.is_symlink() or not parent.is_dir():
+                    raise RuntimeError(f"restore destination has an unsafe directory component: {parent}")
+    targets = [target for _source, target, _mode in copy_ops]
+    if len(set(targets)) != len(targets):
+        raise RuntimeError("restore packet maps multiple files to the same destination")
+    for target in targets:
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            raise RuntimeError(f"restore destination is not a regular file: {target}")
+
+    rollback_dir = Path(tempfile.mkdtemp(prefix=".baseline-restore-rollback-", dir=extract_to))
+    file_states = []
+    directory_states = []
+    created_directories = []
+    try:
+        # Capture all originals before applying the first change.
+        for index, target in enumerate(targets):
+            if target.is_file():
+                backup = rollback_dir / str(index)
+                shutil.copy2(target, backup)
+                file_states.append((target, backup))
+            else:
+                file_states.append((target, None))
+        for index, (_source_dir, target_dir) in enumerate(directory_metadata):
+            if target_dir.is_dir():
+                metadata_backup = rollback_dir / f"directory-{index}"
+                metadata_backup.mkdir()
+                shutil.copystat(target_dir, metadata_backup, follow_symlinks=False)
+                directory_states.append((target_dir, metadata_backup))
+            else:
+                directory_states.append((target_dir, None))
+
+        for directory in sorted(directories, key=lambda path: len(path.parts)):
+            missing = []
+            current = directory
+            while not current.exists():
+                missing.append(current)
+                current = current.parent
+            for item in reversed(missing):
+                item.mkdir(mode=0o700)
+                created_directories.append(item)
+
+        for (source, target, mode), (state_target, _backup) in zip(copy_ops, file_states):
+            if target != state_target:
+                raise RuntimeError("restore transaction target ordering changed")
+            shutil.copy2(source, target)
+            if mode is not None:
+                os.chmod(target, mode)
+        for source_dir, target_dir in sorted(directory_metadata, key=lambda pair: len(pair[0].parts), reverse=True):
+            shutil.copystat(source_dir, target_dir, follow_symlinks=False)
+    except Exception as apply_error:
+        rollback_errors = []
+        for target, backup in reversed(file_states):
+            try:
+                if backup is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    if target.is_symlink():
+                        target.unlink()
+                    shutil.copy2(backup, target)
+            except OSError as rollback_error:
+                rollback_errors.append(f"{target}: {rollback_error}")
+        for target_dir, metadata_backup in reversed(directory_states):
+            if metadata_backup is None:
+                continue
+            try:
+                shutil.copystat(metadata_backup, target_dir, follow_symlinks=False)
+            except OSError as rollback_error:
+                rollback_errors.append(f"{target_dir} metadata: {rollback_error}")
+        for directory in reversed(created_directories):
+            try:
+                directory.rmdir()
+            except OSError as rollback_error:
+                rollback_errors.append(f"{directory}: {rollback_error}")
+        if rollback_errors:
+            raise RuntimeError(
+                f"handoff apply failed ({apply_error}); rollback was incomplete: " + "; ".join(rollback_errors)
+            ) from apply_error
+        raise
+    finally:
+        shutil.rmtree(rollback_dir)
+    # authorized_keys is deliberately NOT restored here - Proxmox's own
+    # /etc/pve/priv/authorized_keys is cluster/host-specific and should be
+    # reviewed before it is merged on a different host.
+    ak = root_ssh_src / "authorized_keys"
+    if ak.is_file():
+        console.print(f"[yellow]Not auto-restoring authorized_keys - review "
+                       f"{ak} by hand and merge into /etc/pve/priv/authorized_keys "
+                       f"yourself if it should carry over.[/yellow]")
 
 
 def form(restored: bool) -> dict:
@@ -136,11 +284,31 @@ def form(restored: bool) -> dict:
 
 
 def apply_form(values: dict) -> None:
-    Path("/etc/hostname").write_text(values["hostname"] + "\n")
+    hostname_file = Path("/etc/hostname")
     try:
-        socket.sethostname(values["hostname"])
-    except OSError:
-        pass
+        previous_file = hostname_file.read_text()
+    except OSError as exc:
+        raise RuntimeError(f"could not read the current hostname file; no hostname change applied: {exc}") from exc
+    previous_live = socket.gethostname()
+    hostname = values["hostname"]
+    try:
+        socket.sethostname(hostname)
+    except OSError as exc:
+        raise RuntimeError(f"could not set the live hostname; the hostname file was not changed: {exc}") from exc
+    try:
+        hostname_file.write_text(hostname + "\n")
+    except OSError as exc:
+        rollback_errors = []
+        try:
+            hostname_file.write_text(previous_file)
+        except OSError as rollback_exc:
+            rollback_errors.append(f"hostname file rollback failed: {rollback_exc}")
+        try:
+            socket.sethostname(previous_live)
+        except OSError as rollback_exc:
+            rollback_errors.append(f"live hostname rollback failed: {rollback_exc}")
+        detail = "; ".join(rollback_errors) if rollback_errors else "live hostname was rolled back"
+        raise RuntimeError(f"could not persist hostname ({exc}); {detail}") from exc
 
 
 def offer_new_packet() -> None:
@@ -163,9 +331,17 @@ def offer_new_packet() -> None:
 def main() -> int:
     require_root()
     console.print(Panel("BaselineOS first-run setup", style="bold"))
-    restored = restore_from_packet()
+    try:
+        restored = restore_from_packet()
+    except (OSError, RuntimeError) as exc:
+        console.print(f"[red]Setup stopped: {exc}[/red]")
+        return 1
     values = form(restored)
-    apply_form(values)
+    try:
+        apply_form(values)
+    except RuntimeError as exc:
+        console.print(f"[red]Setup stopped: {exc}[/red]")
+        return 1
     if values["need_auth_setup"]:
         console.print("[yellow]No Claude Code token configured - run "
                        "/opt/baseline/bin/baseline-auth-setup.sh yourself when ready "

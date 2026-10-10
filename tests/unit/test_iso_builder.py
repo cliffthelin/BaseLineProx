@@ -17,6 +17,7 @@ class FakeIsoBuilderRunner(ib.IsoBuilderRunner):
         self.files = {}  # path -> size (int) - content itself is irrelevant to this module's own logic
         self.dirs = set()
         self.copied_trees = []  # (src, dst) pairs
+        self.copied_files = []  # (src, dst) pairs
         self.removed_trees = []
         self.removed_files = []
         self.command_responses = []
@@ -48,6 +49,9 @@ class FakeIsoBuilderRunner(ib.IsoBuilderRunner):
     def copytree(self, src, dst):
         self.copied_trees.append((str(src), str(dst)))
         self.dirs.add(str(dst))
+
+    def copy_file(self, src, dst):
+        self.copied_files.append((str(src), str(dst)))
 
     def remove_tree(self, path):
         self.removed_trees.append(str(path))
@@ -226,3 +230,28 @@ def test_installer_carries_registered_tasks_and_user_walkthrough_docs():
     ib.stage_baseline_source(r,repo_root=Path('/repo'),staging_dir=Path('/ws/staging'))
     assert ('/repo/automation','/ws/staging/automation') in r.copied_trees
     assert ('/repo/docs','/ws/staging/docs') in r.copied_trees
+
+
+def test_source_payload_contains_the_console_check_required_by_provision():
+    runner = FakeIsoBuilderRunner()
+    ib.stage_baseline_source(runner, repo_root=Path('/repo'), staging_dir=Path('/stage'))
+    assert ('/repo/tests', '/stage/tests') in runner.copied_trees
+
+
+def test_real_source_staging_carries_root_platform_documentation(tmp_path):
+    """Exercise the production filesystem runner, so ISO docs cannot be
+    silently omitted from the source payload built for a new machine."""
+    repo = tmp_path / "repo"
+    for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
+        (repo / name).mkdir(parents=True)
+        (repo / name / "content.txt").write_text(name, encoding="utf-8")
+    (repo / "README.md").write_text("Platform overview", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("Build and safety instructions", encoding="utf-8")
+
+    staged = tmp_path / "workspace" / "staging"
+    ib.stage_baseline_source(ib.RealIsoBuilderRunner(), repo_root=repo, staging_dir=staged)
+
+    assert (staged / "README.md").read_text(encoding="utf-8") == "Platform overview"
+    assert (staged / "AGENTS.md").read_text(encoding="utf-8") == "Build and safety instructions"
+    assert (staged / "tools" / "content.txt").read_text(encoding="utf-8") == "tools"
+    assert (staged / "docs" / "content.txt").read_text(encoding="utf-8") == "docs"

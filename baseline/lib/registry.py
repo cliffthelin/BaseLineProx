@@ -70,6 +70,10 @@ GLOBAL = "global"
 PROTECTED = "protected"
 SCOPES = (GLOBAL, PROTECTED)
 
+
+class RegistryReadError(RuntimeError):
+    """An existing registry could not be read; its contents are unknown."""
+
 # The shared, non-persona volume - not gated on any one persona's own
 # USER_<PERSONA> being mounted or healthy.
 GLOBAL_DB_PATH = "/mnt/BASELINE/registry/foundation.db"
@@ -299,8 +303,8 @@ def list_entries(type_id: str, *, scope: str, read_only: bool = False) -> dict:
                 rows = conn.execute(
                     "SELECT entry_id, attributes, value FROM registry_entries WHERE type_id = ?", (type_id,)
                 ).fetchall()
-            except sqlite3.OperationalError:
-                return {}
+            except sqlite3.OperationalError as exc:
+                raise RegistryReadError(f"registry database read failed at {path}: {exc}") from exc
         return {
             r[0]: {"attributes": json.loads(r[1]), "value": json.loads(r[2]) if r[2] is not None else None}
             for r in rows

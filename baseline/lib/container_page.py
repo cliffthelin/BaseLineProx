@@ -5,7 +5,7 @@ from pathlib import Path
 
 import distro_containers as dc
 import vm_host as vh
-from vm_page import _CSS
+from vm_page import _CSS, _FORBIDDEN_PREFIXES
 
 
 def perform(host, action, params, *, origin=None, backup_run=None):
@@ -49,24 +49,53 @@ def perform(host, action, params, *, origin=None, backup_run=None):
 
 
 def load_data(config):
+    if not config:
+        return str(dc.DEFAULT_DATA)
+    document = _read_config_document(config)
+    if 'container_data_store' not in document:
+        return str(dc.DEFAULT_DATA)
+    value = document['container_data_store']
+    if not _valid_data_path(value):
+        raise vh.VmError(f'container data configuration {config} has an invalid storage path')
+    return value
+
+
+def _read_config_document(config):
     try:
-        value = json.loads(Path(config).read_text()).get('container_data_store')
-        return value if isinstance(value, str) and value.startswith('/') else dc.DEFAULT_DATA
-    except (OSError, TypeError, ValueError, AttributeError):
-        return dc.DEFAULT_DATA
+        document = json.loads(Path(config).read_text())
+    except FileNotFoundError:
+        return {}
+    except (OSError, TypeError, ValueError, UnicodeError) as exc:
+        raise vh.VmError(f'container data configuration {config} could not be read: {exc}') from exc
+    if not isinstance(document, dict):
+        raise vh.VmError(f'container data configuration {config} must be a JSON object')
+    return document
+
+
+def _valid_data_path(value):
+    if not isinstance(value, str) or not value.startswith('/') or any(char in value for char in ',\n\r'):
+        return False
+    path = Path(value)
+    if str(path) == '/' or '..' in path.parts:
+        return False
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    reserved = ('BASELINE', 'SUBSTRATE', 'SESSION_TEMP', 'INSTALLER_CACHE')
+    if any(part in reserved for candidate in (path, resolved) for part in candidate.parts):
+        return False
+    return not any(str(candidate) == prefix or str(candidate).startswith(prefix + '/')
+                   for candidate in (path, resolved) for prefix in (*_FORBIDDEN_PREFIXES, '/run/lock'))
 
 
 def save_data(config, path):
-    from vm_page import _FORBIDDEN_PREFIXES
     try:
-        folder = Path(path)
-        if '..' in folder.parts or any(str(folder) == p or str(folder).startswith(p+'/') for p in _FORBIDDEN_PREFIXES):
+        if not _valid_data_path(path):
             raise vh.VmError('choose a separate protected data folder outside system paths')
+        folder = Path(path)
         dc.DistroContainers(folder)._check_data()
-        try:
-            value = json.loads(Path(config).read_text())
-        except (OSError, ValueError):
-            value = {}
+        value = _read_config_document(config)
         value['container_data_store'] = str(folder)
         Path(config).parent.mkdir(parents=True, exist_ok=True)
         Path(config).write_text(json.dumps(value))

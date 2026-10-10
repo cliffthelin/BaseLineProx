@@ -10,6 +10,12 @@ from test_offdrive_backup import ScriptedRun as BaseDriveRun, ALLOWED
 from types import SimpleNamespace
 
 
+@pytest.fixture(autouse=True)
+def _known_test_boot_identity(monkeypatch):
+    real=cb.resolve_destination
+    monkeypatch.setattr(cb,'resolve_destination',lambda path,run=None: real(path,run=run,boot_serial='TestBootSerial'))
+
+
 class ScriptedRun(BaseDriveRun):
     def __init__(self,*args,same_drive=False,**kwargs):
         super().__init__(*args,**kwargs);self.same_drive=same_drive
@@ -53,6 +59,33 @@ def test_stopped_container_retained_backup_restores_into_new_native_id_and_keeps
     assert manifest['coverage']['included']==['/home','/root','/data']
     assert manifest['coverage']['excluded']
     assert 'password_hash' not in json.dumps(manifest)
+
+
+def test_listing_does_not_hide_a_corrupt_manifest_as_no_retained_backups(tmp_path):
+    h,native,dest,gate=setup(tmp_path)
+    set_path=dest/'baseline-backups/container-data'/('a'*32)
+    set_path.mkdir(parents=True)
+    (set_path/'MANIFEST.json').write_text('not-json')
+
+    with pytest.raises(dc.vh.VmError,match='manifest'):
+        cb.listing(str(dest),run=ScriptedRun(dest))
+
+
+def test_listing_does_not_silently_skip_a_redirected_retained_set(tmp_path):
+    h,native,dest,gate=setup(tmp_path)
+    outside=tmp_path/'outside';outside.mkdir()
+    (outside/'MANIFEST.json').write_text('{}')
+    root=dest/'baseline-backups/container-data';root.mkdir(parents=True)
+    (root/('c'*32)).symlink_to(outside,target_is_directory=True)
+
+    with pytest.raises(dc.vh.VmError,match='redirected'):
+        cb.listing(str(dest),run=ScriptedRun(dest))
+
+
+def test_listing_omits_only_a_set_without_a_published_manifest(tmp_path):
+    h,native,dest,gate=setup(tmp_path)
+    (dest/'baseline-backups/container-data'/('b'*32)).mkdir(parents=True)
+    assert cb.listing(str(dest),run=ScriptedRun(dest))==[]
 
 
 def test_running_container_and_unsigned_backup_cannot_produce_a_complete_set(tmp_path):

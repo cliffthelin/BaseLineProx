@@ -52,6 +52,7 @@ did not produce itself, never inferred or defaulted.
 """
 from __future__ import annotations
 
+import json
 import posixpath
 from dataclasses import dataclass
 
@@ -103,6 +104,10 @@ class ApplyResult:
     detail: str
 
 
+class PersistenceObservationError(RuntimeError):
+    """Required mount, fstab, or capacity state could not be observed."""
+
+
 def user_mount_fstab_line(persona: str | None = None) -> str:
     label = user_label_for(persona)
     mountpoint = user_mountpoint_for(persona)
@@ -114,15 +119,15 @@ def bind_fstab_line(target_path: str, subdir: str, persona: str | None = None) -
     return f"{mountpoint}/{subdir} {target_path} none bind 0 0\n"
 
 
-def is_mounted(runner: Runner, path: str) -> bool:
+def is_mounted(runner: Runner, path: str, *, mount_table_path: str = "/proc/self/mounts") -> bool:
     """Real kernel-reported state via /proc/self/mounts - never
     inferred from fstab content alone (fstab can list a mount that
     hasn't actually been applied yet, e.g. right after this module
     itself appends an entry but before the next boot)."""
     try:
-        content = runner.read_text("/proc/self/mounts")
-    except Exception:
-        return False
+        content = runner.read_text(mount_table_path)
+    except Exception as exc:
+        raise PersistenceObservationError(f"cannot inspect the kernel mount table at {mount_table_path}: {exc}") from exc
     for line in content.splitlines():
         parts = line.split()
         if len(parts) >= 2 and parts[1] == path:
@@ -130,7 +135,7 @@ def is_mounted(runner: Runner, path: str) -> bool:
     return False
 
 
-def is_mounted_read_write(runner: Runner, path: str) -> bool:
+def is_mounted_read_write(runner: Runner, path: str, *, mount_table_path: str = "/proc/self/mounts") -> bool:
     """Real kernel-reported mount *mode*, not just presence - a real
     corrupted volume can mount successfully but read-only, which
     `is_mounted` alone would call "mounted" while it is not actually
@@ -139,9 +144,9 @@ def is_mounted_read_write(runner: Runner, path: str) -> bool:
     `rw`/`ro` token - used by recovery_mode.py's hard exit condition
     (work-queue item 26)."""
     try:
-        content = runner.read_text("/proc/self/mounts")
-    except Exception:
-        return False
+        content = runner.read_text(mount_table_path)
+    except Exception as exc:
+        raise PersistenceObservationError(f"cannot inspect the kernel mount table at {mount_table_path}: {exc}") from exc
     for line in content.splitlines():
         parts = line.split()
         if len(parts) >= 4 and parts[1] == path:
@@ -150,39 +155,95 @@ def is_mounted_read_write(runner: Runner, path: str) -> bool:
     return False
 
 
-def _fstab_has_line(runner: Runner, line: str) -> bool:
+def _fstab_has_line(runner: Runner, line: str, *, fstab_path: str = FSTAB_PATH) -> bool:
     try:
-        content = runner.read_text(FSTAB_PATH)
-    except Exception:
+        content = runner.read_text(fstab_path)
+    except FileNotFoundError:
         return False
+    except Exception as exc:
+        raise PersistenceObservationError(f"cannot inspect {fstab_path}: {exc}") from exc
     return line.strip() in {existing.strip() for existing in content.splitlines()}
 
 
-def discover_persistence_device(runner: Runner, persona: str | None = None) -> str | None:
-    """Real discovery via blkid - does a USER-labeled
-    device exist anywhere among currently attached block devices,
-    even if mount-by-label just failed (e.g. not yet settled, or a
-    stale mount elsewhere)? Returns the real device path, or None if
-    genuinely not found anywhere. Checked before any local fallback
-    creation, so a real existing volume is never duplicated - the
-    exact "same label, two different real volumes" risk decision
-    record 69 already found once."""
-    label = user_label_for(persona)
-    proc = runner.run(["blkid", "-L", label], timeout=10)
+def discover_device_by_label(runner: Runner, label: str) -> str | None:
+    """Find one exact filesystem label in a complete lsblk inventory.
+
+    `blkid -L` status 2 conflates a missing token with devices that could not
+    be identified. That ambiguity must not authorize local-volume creation.
+    The structured inventory also exposes duplicate labels rather than
+    silently choosing the first matching device.
+    """
+    if not isinstance(label, str) or not label or "\x00" in label:
+        raise PersistenceObservationError("filesystem label for discovery is invalid")
+    try:
+        proc = runner.run(
+            ["lsblk", "--json", "--paths", "--output", "NAME,LABEL,TYPE"],
+            timeout=15,
+        )
+    except Exception as exc:
+        raise PersistenceObservationError(f"cannot inspect block-device labels with lsblk: {exc}") from exc
     if proc.returncode != 0:
-        return None
-    device = proc.stdout.strip()
-    return device or None
+        detail = proc.stderr.strip() or f"lsblk exited {proc.returncode}"
+        raise PersistenceObservationError(f"cannot inspect block-device labels: {detail}")
+    if proc.stderr.strip():
+        raise PersistenceObservationError(
+            f"lsblk reported a diagnostic while inspecting block-device labels: {proc.stderr.strip()}")
+    try:
+        inventory = json.loads(proc.stdout)
+    except (TypeError, ValueError) as exc:
+        raise PersistenceObservationError(f"lsblk returned invalid JSON while looking for {label}: {exc}") from exc
+    devices = inventory.get("blockdevices") if isinstance(inventory, dict) else None
+    if not isinstance(devices, list) or not devices:
+        raise PersistenceObservationError("lsblk returned no complete block-device inventory")
+
+    found = {}
+
+    def visit(items):
+        if not isinstance(items, list):
+            raise PersistenceObservationError("lsblk returned malformed device children")
+        for item in items:
+            if not isinstance(item, dict):
+                raise PersistenceObservationError("lsblk returned a malformed device entry")
+            device = item.get("name")
+            observed_label = item.get("label")
+            children = item.get("children", [])
+            if (not isinstance(device, str) or not device.startswith("/dev/")
+                    or "\x00" in device or not isinstance(item.get("type"), str)
+                    or (observed_label is not None and not isinstance(observed_label, str))):
+                raise PersistenceObservationError("lsblk returned malformed device identity or label fields")
+            if observed_label == label:
+                found[device] = None
+            visit(children)
+
+    visit(devices)
+    if len(found) > 1:
+        paths = ", ".join(sorted(found))
+        raise PersistenceObservationError(f"filesystem label {label} is ambiguous across devices: {paths}")
+    return next(iter(found), None)
+
+
+def discover_persistence_device(runner: Runner, persona: str | None = None) -> str | None:
+    """Find the persistence label in the live block-device inventory.
+
+    Returns None only after lsblk supplied a valid, nonempty inventory with
+    no exact label match. Inventory failures and duplicate labels remain
+    errors, preventing accidental creation of a second persistence volume.
+    """
+    return discover_device_by_label(runner, user_label_for(persona))
 
 
 def _local_fallback_size_gb(runner: Runner, vg_name: str) -> int:
     import drive_installer as di
-    free_proc = runner.run(di.vg_free_bytes_argv(vg_name), timeout=15)
+    try:
+        free_proc = runner.run(di.vg_free_bytes_argv(vg_name), timeout=15)
+    except Exception as exc:
+        raise PersistenceObservationError(f"cannot inspect free capacity in volume group {vg_name}: {exc}") from exc
     if free_proc.returncode != 0:
-        return 0
+        raise PersistenceObservationError(
+            f"cannot inspect free capacity in volume group {vg_name}: {free_proc.stderr.strip() or 'command failed'}")
     free_bytes = di.parse_vg_free_bytes(free_proc.stdout)
     if free_bytes is None:
-        return 0
+        raise PersistenceObservationError(f"volume group {vg_name} returned malformed free-capacity output")
     # Matches drive_installer.persona_volume's own real (min_gb, max_gb)
     # range (50-200, 2026-09-29 sizing defaults) - this is the same
     # USER volume, just self-installed locally instead of
@@ -197,7 +258,7 @@ def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg
 
     A missing external USER is "the most important aspect
     to resolve" (direct instruction) - it is never simply refused.
-    Real discovery first (blkid, not just one mount-by-label attempt):
+    Real discovery first (structured lsblk inventory, not just one mount-by-label attempt):
     if a labeled device exists anywhere, mount it directly rather than
     duplicating it. Only when nothing is found anywhere does this
     self-install a real, adaptively-sized local logical volume - "the
@@ -215,7 +276,10 @@ def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg
         proc = runner.run(["mount", f"LABEL={label}", mountpoint], timeout=30)
         if proc.returncode != 0:
             label_mount_error = proc.stderr.strip()[:300]
-            device = discover_persistence_device(runner, persona)
+            try:
+                device = discover_persistence_device(runner, persona)
+            except PersistenceObservationError as exc:
+                return ApplyResult(False, f"persistence discovery failed; local fallback was not attempted: {exc}")
             if device is not None:
                 direct_proc = runner.run(["mount", device, mountpoint], timeout=30)
                 if direct_proc.returncode != 0:
@@ -224,7 +288,10 @@ def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg
                                f"{direct_proc.stderr.strip()[:300]}")
             else:
                 import drive_installer as di
-                local_size_gb = _local_fallback_size_gb(runner, vg_name)
+                try:
+                    local_size_gb = _local_fallback_size_gb(runner, vg_name)
+                except PersistenceObservationError as exc:
+                    return ApplyResult(False, str(exc))
                 if local_size_gb <= 0:
                     return ApplyResult(
                         False, f"no {label} device found anywhere (label mount: "
@@ -324,6 +391,21 @@ def ensure_all_redirects(runner: Runner, *, persona: str | None = None) -> list[
     """Runs `ensure_user_volume_mounted` first - everything else
     depends on it - then `ensure_redirect` for each of REDIRECT_PATHS.
     Stops and returns early if the persistence mount itself fails."""
+    if persona is None and runner.path_exists("/etc/baseline/independent-drive.json"):
+        # The independent-drive profile creates USER_ADMIN/USER_PERSONAL,
+        # never the legacy shared USER label. Resolve the active persona from
+        # its durable marker and fail closed if it is absent from that drive's
+        # own validated role policy.
+        try:
+            import json
+            import storage_policy
+            policy = storage_policy.load_policy(runner)
+            persona = get_active_persona(runner)
+            if persona not in policy["personas"]:
+                raise ValueError("active persona is not enrolled in the drive policy")
+        except (OSError, ValueError, RuntimeError) as exc:
+            return [ApplyResult(False, f"independent drive persona policy could not be verified: {exc}")]
+
     results = [ensure_user_volume_mounted(runner, persona=persona)]
     if not results[0].applied:
         return results

@@ -1,0 +1,862 @@
+........................................................................ [  2%]
+........................................................................ [  4%]
+.............................FFFFFFF.FFFFFFF...............FFFFFF....... [  6%]
+........................................................................ [  8%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+...F.....F.............................................................. [ 17%]
+........................................................................ [ 20%]
+...................................F.................................... [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................F.........FFFFFFFFF.F..FFFFFFFF................. [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+................F....................................................... [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 91%]
+...............................F..F..................................... [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+......................................................................   [100%]
+=================================== FAILURES ===================================
+__ test_the_bot_can_do_its_own_action_on_the_ram_drive[BotBuildSelfInstaller] __
+
+action = 'build_self_installer'
+ram = <ram_drive.RamDrive object at 0x7c887a7929f0>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_bot_can_do_its_own_ac5')
+
+    @pytest.mark.parametrize("action", ACTIONS, ids=[bot_name(a) for a in ACTIONS])
+    def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body, job = attempt(case, action)
+>           assert status == 200 and job is not None and job["outcome"] == "applied", (status, body, job)
+E           AssertionError: (400, {'detail': 'refused: Baseline acts only on the SK hynix drives it is set up with, and /dev/sdb is not one of the allowed drives', 'outcome': 'refused'}, None)
+E           assert (400 == 200)
+
+tests/unit/test_action_bots_ram.py:71: AssertionError
+_____ test_the_bot_can_do_its_own_action_on_the_ram_drive[BotEnrollDrive] ______
+
+action = 'enroll_drive', ram = <ram_drive.RamDrive object at 0x7c887a5745a0>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_bot_can_do_its_own_ac6')
+
+    @pytest.mark.parametrize("action", ACTIONS, ids=[bot_name(a) for a in ACTIONS])
+    def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body, job = attempt(case, action)
+>           assert status == 200 and job is not None and job["outcome"] == "applied", (status, body, job)
+E           AssertionError: (400, {'detail': "refused: could not establish this machine's boot device identity - refusing", 'outcome': 'refused'}, None)
+E           assert (400 == 200)
+
+tests/unit/test_action_bots_ram.py:71: AssertionError
+_ test_the_bot_can_do_its_own_action_on_the_ram_drive[BotLayOutBaselineDrive] __
+
+action = 'lay_out_baseline_drive'
+ram = <ram_drive.RamDrive object at 0x7c887a575260>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_bot_can_do_its_own_ac7')
+
+    @pytest.mark.parametrize("action", ACTIONS, ids=[bot_name(a) for a in ACTIONS])
+    def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body, job = attempt(case, action)
+>           assert status == 200 and job is not None and job["outcome"] == "applied", (status, body, job)
+E           AssertionError: (400, {'detail': 'refused: Baseline acts only on the SK hynix drives it is set up with, and /dev/sdb is not one of the allowed drives', 'outcome': 'refused'}, None)
+E           assert (400 == 200)
+
+tests/unit/test_action_bots_ram.py:71: AssertionError
+_____ test_the_bot_can_do_its_own_action_on_the_ram_drive[BotMountVolume] ______
+
+action = 'mount_volume', ram = <ram_drive.RamDrive object at 0x7c887a67fa50>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_bot_can_do_its_own_ac8')
+
+    @pytest.mark.parametrize("action", ACTIONS, ids=[bot_name(a) for a in ACTIONS])
+    def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body, job = attempt(case, action)
+>           assert status == 200 and job is not None and job["outcome"] == "applied", (status, body, job)
+E           AssertionError: (400, {'detail': 'refused: Baseline acts only on the SK hynix drives it is set up with, and /dev/sdb is not one of the allowed drives', 'outcome': 'refused'}, None)
+E           assert (400 == 200)
+
+tests/unit/test_action_bots_ram.py:71: AssertionError
+________ test_the_bot_can_do_its_own_action_on_the_ram_drive[BotRepair] ________
+
+action = 'repair', ram = <ram_drive.RamDrive object at 0x7c887a5c8f50>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_bot_can_do_its_own_ac9')
+
+    @pytest.mark.parametrize("action", ACTIONS, ids=[bot_name(a) for a in ACTIONS])
+    def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body, job = attempt(case, action)
+>           assert status == 200 and job is not None and job["outcome"] == "applied", (status, body, job)
+E           AssertionError: (400, {'detail': 'refused: Baseline acts only on the SK hynix drives it is set up with, and /dev/sdb is not one of the allowed drives', 'outcome': 'refused'}, None)
+E           assert (400 == 200)
+
+tests/unit/test_action_bots_ram.py:71: AssertionError
+_ test_the_bot_can_do_its_own_action_on_the_ram_drive[BotStampInstallerIdentity] _
+
+action = 'stamp_installer_identity'
+ram = <ram_drive.RamDrive object at 0x7c887a5c6e40>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_bot_can_do_its_own_ac10')
+
+    @pytest.mark.parametrize("action", ACTIONS, ids=[bot_name(a) for a in ACTIONS])
+    def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body, job = attempt(case, action)
+>           assert status == 200 and job is not None and job["outcome"] == "applied", (status, body, job)
+E           AssertionError: (400, {'detail': 'refused: Baseline acts only on the SK hynix drives it is set up with, and /dev/sdb is not one of the allowed drives', 'outcome': 'refused'}, None)
+E           assert (400 == 200)
+
+tests/unit/test_action_bots_ram.py:71: AssertionError
+____ test_the_bot_can_do_its_own_action_on_the_ram_drive[BotUnmountVolume] _____
+
+action = 'unmount_volume', ram = <ram_drive.RamDrive object at 0x7c887a5ecf50>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_bot_can_do_its_own_ac11')
+
+    @pytest.mark.parametrize("action", ACTIONS, ids=[bot_name(a) for a in ACTIONS])
+    def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body, job = attempt(case, action)
+>           assert status == 200 and job is not None and job["outcome"] == "applied", (status, body, job)
+E           AssertionError: (400, {'detail': 'refused: Baseline acts only on the SK hynix drives it is set up with, and /dev/sdb is not one of the allowed drives', 'outcome': 'refused'}, None)
+E           assert (400 == 200)
+
+tests/unit/test_action_bots_ram.py:71: AssertionError
+_ test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotBuildSelfInstaller] _
+
+action = 'build_self_installer'
+ram = <ram_drive.RamDrive object at 0x7c887a687770>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_cannot_run_it0')
+
+    @pytest.mark.parametrize("action", [a for a in ACTIONS if a not in ops.OPERATIONS],
+                             ids=[bot_name(a) for a in ACTIONS if a not in ops.OPERATIONS])
+    def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
+>           assert body["outcome"] == "confirmation_required" and "job_id" not in body
+E           AssertionError: assert ('refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused)
+
+tests/unit/test_action_bots_ram.py:92: AssertionError
+_ test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotEnrollDrive] _
+
+action = 'enroll_drive', ram = <ram_drive.RamDrive object at 0x7c8879429e60>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_cannot_run_it1')
+
+    @pytest.mark.parametrize("action", [a for a in ACTIONS if a not in ops.OPERATIONS],
+                             ids=[bot_name(a) for a in ACTIONS if a not in ops.OPERATIONS])
+    def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
+>           assert body["outcome"] == "confirmation_required" and "job_id" not in body
+E           AssertionError: assert ('refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused)
+
+tests/unit/test_action_bots_ram.py:92: AssertionError
+_ test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotLayOutBaselineDrive] _
+
+action = 'lay_out_baseline_drive'
+ram = <ram_drive.RamDrive object at 0x7c887a7f1fd0>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_cannot_run_it2')
+
+    @pytest.mark.parametrize("action", [a for a in ACTIONS if a not in ops.OPERATIONS],
+                             ids=[bot_name(a) for a in ACTIONS if a not in ops.OPERATIONS])
+    def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
+>           assert body["outcome"] == "confirmation_required" and "job_id" not in body
+E           AssertionError: assert ('refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused)
+
+tests/unit/test_action_bots_ram.py:92: AssertionError
+_ test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotMountVolume] _
+
+action = 'mount_volume', ram = <ram_drive.RamDrive object at 0x7c887a7f2990>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_cannot_run_it3')
+
+    @pytest.mark.parametrize("action", [a for a in ACTIONS if a not in ops.OPERATIONS],
+                             ids=[bot_name(a) for a in ACTIONS if a not in ops.OPERATIONS])
+    def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
+>           assert body["outcome"] == "confirmation_required" and "job_id" not in body
+E           AssertionError: assert ('refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused)
+
+tests/unit/test_action_bots_ram.py:92: AssertionError
+_ test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotRepair] _
+
+action = 'repair', ram = <ram_drive.RamDrive object at 0x7c887a5eac50>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_cannot_run_it4')
+
+    @pytest.mark.parametrize("action", [a for a in ACTIONS if a not in ops.OPERATIONS],
+                             ids=[bot_name(a) for a in ACTIONS if a not in ops.OPERATIONS])
+    def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
+>           assert body["outcome"] == "confirmation_required" and "job_id" not in body
+E           AssertionError: assert ('refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused)
+
+tests/unit/test_action_bots_ram.py:92: AssertionError
+_ test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotStampInstallerIdentity] _
+
+action = 'stamp_installer_identity'
+ram = <ram_drive.RamDrive object at 0x7c887a5eb960>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_cannot_run_it5')
+
+    @pytest.mark.parametrize("action", [a for a in ACTIONS if a not in ops.OPERATIONS],
+                             ids=[bot_name(a) for a in ACTIONS if a not in ops.OPERATIONS])
+    def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
+>           assert body["outcome"] == "confirmation_required" and "job_id" not in body
+E           AssertionError: assert ('refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused)
+
+tests/unit/test_action_bots_ram.py:92: AssertionError
+_ test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotUnmountVolume] _
+
+action = 'unmount_volume', ram = <ram_drive.RamDrive object at 0x7c887a5ab610>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_cannot_run_it6')
+
+    @pytest.mark.parametrize("action", [a for a in ACTIONS if a not in ops.OPERATIONS],
+                             ids=[bot_name(a) for a in ACTIONS if a not in ops.OPERATIONS])
+    def test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation(action, ram, tmp_path):
+        case = bot_case(f"bot:{action}", tmp_path)
+        try:
+            status, body = _req(case, "POST", "/drive-admin/action", {"action_id": action, "params": params_for(action)})
+>           assert body["outcome"] == "confirmation_required" and "job_id" not in body
+E           AssertionError: assert ('refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused)
+
+tests/unit/test_action_bots_ram.py:92: AssertionError
+___________ test_a_bot_needs_the_root_password_once_a_day_per_drive ____________
+
+ram = <ram_drive.RamDrive object at 0x7c887a5e6330>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_bot_needs_the_root_pass0')
+
+    def test_a_bot_needs_the_root_password_once_a_day_per_drive(ram, tmp_path):
+        case = bot_case("bot:repair", tmp_path)
+        try:
+            _, body = _ask_repair(case)
+>           assert body["outcome"] == "confirmation_required"
+E           AssertionError: assert 'refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused
+
+tests/unit/test_action_bots_ram.py:141: AssertionError
+____ test_without_ticking_the_daily_box_every_run_still_needs_the_password _____
+
+ram = <ram_drive.RamDrive object at 0x7c887a5e5c70>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_without_ticking_the_daily0')
+
+    def test_without_ticking_the_daily_box_every_run_still_needs_the_password(ram, tmp_path):
+        case = bot_case("bot:repair", tmp_path)
+        try:
+            _, body = _ask_repair(case)
+>           _, started = _confirm_daily(case, body["challenge"], daily=False)
+                                              ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_action_bots_ram.py:158: KeyError
+___________________ test_a_new_day_needs_a_new_authorization ___________________
+
+ram = <ram_drive.RamDrive object at 0x7c887a5e7e30>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_new_day_needs_a_new_aut0')
+
+    def test_a_new_day_needs_a_new_authorization(ram, tmp_path):
+        case = bot_case("bot:repair", tmp_path)
+        try:
+            _, body = _ask_repair(case)
+>           _, started = _confirm_daily(case, body["challenge"])
+                                              ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_action_bots_ram.py:169: KeyError
+_________________ test_a_new_target_needs_a_new_authorization __________________
+
+ram = <ram_drive.RamDrive object at 0x7c88794940e0>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_new_target_needs_a_new_0')
+
+    def test_a_new_target_needs_a_new_authorization(ram, tmp_path):
+        case = bot_case("bot:repair", tmp_path)
+        try:
+            _, body = _ask_repair(case)
+>           _, started = _confirm_daily(case, body["challenge"])
+                                              ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_action_bots_ram.py:184: KeyError
+_ test_the_daily_box_is_refused_for_non_bot_logins_and_never_applies_to_the_install _
+
+ram = <ram_drive.RamDrive object at 0x7c88794943b0>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_daily_box_is_refused_0')
+
+    def test_the_daily_box_is_refused_for_non_bot_logins_and_never_applies_to_the_install(ram, tmp_path):
+        admin = bot_case("admin", tmp_path)
+        try:
+            _, body = _ask_repair(admin)
+>           status, out = _confirm_daily(admin, body["challenge"])
+                                                ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_action_bots_ram.py:199: KeyError
+_____ test_the_daily_authorization_is_not_shared_with_another_bot_account ______
+
+ram = <ram_drive.RamDrive object at 0x7c88794949e0>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_the_daily_authorization_i0')
+
+    def test_the_daily_authorization_is_not_shared_with_another_bot_account(ram, tmp_path):
+        case = bot_case("bot:repair", tmp_path)
+        try:
+            _, body = _ask_repair(case)
+>           _confirm_daily(case, body["challenge"])
+                                 ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_action_bots_ram.py:218: KeyError
+_ test_drive_admin_action_reports_a_real_refusal_when_pkexec_authentication_fails _
+
+    def test_drive_admin_action_reports_a_real_refusal_when_pkexec_authentication_fails():
+        """Direct instruction, 2026-09-29: "Make the application ask for
+        the sudo password through Ubuntu best practices" - there's no
+        separate password-verification HTTP step any more (`PkexecRunner`
+        has no password to check at all; PolicyKit's own native agent
+        handles that entirely outside this app). A cancelled/failed
+        authentication surfaces as the underlying privileged command's own
+        non-zero exit (simulated here via a scripted `FakeSudoExecutor`
+        returncode), which the existing job/ActionResult machinery reports
+        as a real refusal - never a special-cased 401 at the HTTP layer."""
+        executor = FakeSudoExecutor(returncode=127, stderr=b"Not authorized\n")
+        case = _RealServerCase(_base_deps(pkexec_executor=executor))
+        try:
+            status, body = case.drive_action("repair", {"device_path": "/dev/sdb"})
+>           assert status == 200  # the job itself always starts - the outcome comes later
+            ^^^^^^^^^^^^^^^^^^^^
+E           assert 400 == 200
+
+tests/unit/test_baseline_web.py:512: AssertionError
+___ test_drive_admin_action_reaches_the_real_action_via_a_real_pkexec_runner ___
+
+    def test_drive_admin_action_reaches_the_real_action_via_a_real_pkexec_runner():
+        """Proves the server actually constructs a real `PkexecRunner` and
+        dispatches to it - not any one action's specific business outcome.
+        `repair` is used since it genuinely calls `runner.run()` (via
+        `find_vg_for_device`'s real `pvs` call); `update_selected` is a
+        pure honest placeholder that never touches the runner at all, so
+        it can't prove this on its own."""
+        executor = FakeSudoExecutor(returncode=0, stdout="")
+        case = _RealServerCase(_base_deps(pkexec_executor=executor))
+        try:
+            status, body = case.drive_action("repair", {"device_path": "/dev/sdb"})
+>           assert status == 200
+E           assert 400 == 200
+
+tests/unit/test_baseline_web.py:619: AssertionError
+____________ test_compute_full_diff_covers_all_four_real_subsystems ____________
+
+    def test_compute_full_diff_covers_all_four_real_subsystems():
+        runner = FakeRunner(command_responses=[
+            (lambda a: a[:1] == ["ethtool"] and len(a) == 2, FakeProc(0, ETHTOOL_SETTINGS_OUTPUT, "")),
+            (lambda a: a[:2] == ["ethtool", "-k"], FakeProc(0, ETHTOOL_FEATURES_OUTPUT, "")),
+            (lambda a: a[:2] == ["ethtool", "-a"], FakeProc(0, ETHTOOL_PAUSE_OUTPUT, "")),
+            (lambda a: a[:1] == ["dpkg-query"] and "amd64-microcode" in a, FakeProc(1, "", "not found")),
+            (lambda a: a[:1] == ["dpkg-query"] and "firmware-mediatek" in a, FakeProc(0, "install ok installed", "")),
+        ])
+        desired_config = {
+            "proxmox": {"smartd_health_check": True, "ethtool_speed": "1000"},
+            "drivers": {"cpu_microcode": True, "cpu_microcode_package": "amd64-microcode",
+                        "nic_wifi_firmware": True, "wifi_firmware_package": "firmware-mediatek"},
+        }
+>       report = cd.compute_full_diff(runner, desired_config, network_interface="eth0")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_config_diff.py:164: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+baseline/lib/config_diff.py:193: in compute_full_diff
+    {"installed": read_current_package_installed(runner, package)}, {"installed": True})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+runner = <fake_runner.FakeRunner object at 0x7c887b7bd010>
+package = 'amd64-microcode'
+
+    def read_current_package_installed(runner: Runner, package: str) -> bool:
+        proc = runner.run(["dpkg-query", "-W", "-f=${Status}", package], timeout=10)
+        if proc.returncode not in (0, 1):
+            raise ReadbackError("REAL-002: package database query failed; installation is unknown")
+        if proc.returncode == 1:
+            # dpkg-query distinguishes a missing package from a failed database/tool.
+            if "no packages found matching" in proc.stderr or "package not found" in proc.stderr:
+                return False
+>           raise ReadbackError("REAL-002: package query failed without a confirmed package absence")
+E           config_diff.ReadbackError: REAL-002: package query failed without a confirmed package absence
+
+baseline/lib/config_diff.py:143: ReadbackError
+___ test_a_request_only_produces_a_challenge_and_the_ram_drive_is_untouched ____
+
+ram = <ram_drive.RamDrive object at 0x7c887a5e7da0>
+
+    def test_a_request_only_produces_a_challenge_and_the_ram_drive_is_untouched(ram):
+        case = _case()
+        try:
+            status, body = _ask(case)
+>           assert status == 200 and body["outcome"] == "confirmation_required"
+E           assert (400 == 200)
+
+tests/unit/test_hitl_web.py:77: AssertionError
+____________ test_no_query_string_or_header_skips_the_confirmation _____________
+
+ram = <ram_drive.RamDrive object at 0x7c887ae9e3c0>
+
+    def test_no_query_string_or_header_skips_the_confirmation(ram):
+        case = _case()
+        try:
+            for path, headers in (("/drive-admin/action?confirm=1&skip=1", None),
+                                  ("/drive-admin/action", {"X-Confirmed": "1", "X-Authorization": "approved", "Authorization": "Bearer x"})):
+                status, body = _req(case, "POST", path, {"action_id": "build_self_installer", "params": {"device_path": "/dev/sdb"}},
+                                    headers=headers)
+>               assert body.get("outcome") == "confirmation_required"
+E               AssertionError: assert 'refused' == 'confirmation_required'
+E                 
+E                 - confirmation_required
+E                 + refused
+
+tests/unit/test_hitl_web.py:108: AssertionError
+_ test_a_correct_confirmation_runs_the_stored_request_once_and_changes_the_ram_drive _
+
+ram = <ram_drive.RamDrive object at 0x7c887ae9e4e0>
+
+    def test_a_correct_confirmation_runs_the_stored_request_once_and_changes_the_ram_drive(ram):
+        case = _case()
+        try:
+            _, body = _ask(case)
+>           status, started = _confirm(case, body["challenge"])
+                                             ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:120: KeyError
+_ test_the_confirm_step_runs_what_was_challenged_not_what_the_confirm_request_says _
+
+ram = <ram_drive.RamDrive object at 0x7c887ae9e600>
+
+    def test_the_confirm_step_runs_what_was_challenged_not_what_the_confirm_request_says(ram):
+        case = _case()
+        try:
+            _, body = _ask(case, action="mount_volume", params={"device_path": "/dev/sdb", "mountpoint": "/mnt/ram-inspect"})
+>           chal = body["challenge"]
+                   ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:133: KeyError
+____________________ test_a_confirmation_cannot_be_replayed ____________________
+
+ram = <ram_drive.RamDrive object at 0x7c887ae9fda0>
+
+    def test_a_confirmation_cannot_be_replayed(ram):
+        case = _case()
+        try:
+            _, body = _ask(case)
+>           _, started = _confirm(case, body["challenge"])
+                                        ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:147: KeyError
+________________ test_a_wrong_password_or_phrase_starts_nothing ________________
+
+ram = <ram_drive.RamDrive object at 0x7c887ae9dd00>
+
+    def test_a_wrong_password_or_phrase_starts_nothing(ram):
+        case = _case()
+        try:
+            _, body = _ask(case)
+            for kw in ({"secret": "guess"}, {"secret": ""}, {"typed": "INSTALL XXXXXX"}, {"typed": ""}):
+>               status, out = _confirm(case, body["challenge"], **kw)
+                                             ^^^^^^^^^^^^^^^^^
+E               KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:160: KeyError
+___ test_guessing_is_rate_limited_and_a_lock_refuses_even_the_right_password ___
+
+ram = <ram_drive.RamDrive object at 0x7c887add2060>
+
+    def test_guessing_is_rate_limited_and_a_lock_refuses_even_the_right_password(ram):
+        case = _case()
+        try:
+            _, body = _ask(case)
+>           statuses = [_confirm(case, body["challenge"], secret=f"guess{i}")[0] for i in range(8)]
+                                       ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:171: KeyError
+_____ test_a_confirmation_that_comes_too_fast_to_have_been_read_is_refused _____
+
+ram = <ram_drive.RamDrive object at 0x7c887add2f90>
+
+    def test_a_confirmation_that_comes_too_fast_to_have_been_read_is_refused(ram):
+        case = _case(min_wait_s=30)
+        try:
+            _, body = _ask(case)
+>           status, out = _confirm(case, body["challenge"])
+                                         ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:183: KeyError
+________________ test_an_expired_challenge_cannot_be_confirmed _________________
+
+ram = <ram_drive.RamDrive object at 0x7c887add2180>
+
+    def test_an_expired_challenge_cannot_be_confirmed(ram):
+        case = _case()
+        try:
+            _, body = _ask(case)
+            case.clock.t += hitl.DEFAULT_TTL_S + 1
+>           status, out = _confirm(case, body["challenge"])
+                                         ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:197: KeyError
+__________ test_another_logged_in_session_cannot_confirm_my_challenge __________
+
+ram = <ram_drive.RamDrive object at 0x7c887add2570>
+
+    def test_another_logged_in_session_cannot_confirm_my_challenge(ram):
+        case = _case()
+        try:
+            other = case.server.deps["sessions"].create("root", now=case.clock()).token
+            _, body = _ask(case)
+>           status, out = _confirm(case, body["challenge"], cookie=other)
+                                         ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:208: KeyError
+______ test_with_no_confirmation_credential_configured_nobody_can_confirm ______
+
+ram = <ram_drive.RamDrive object at 0x7c887af4bb60>
+
+    def test_with_no_confirmation_credential_configured_nobody_can_confirm(ram):
+        clock = Clock()
+        sessions = sw.SessionStore()
+        sessions.create("root", now=clock())
+        deps = _base_deps(sessions=sessions, clock=clock, pkexec_executor=FakeSudoExecutor(returncode=0), recovery_verify_fn=None)
+        case = _RealServerCase({k: v for k, v in deps.items()})
+        case.server.deps.pop("hitl", None)
+        from baseline_web import _hitl_store
+        case.server.deps["hitl"] = _hitl_store({"clock": clock, "recovery_verify_fn": None})
+        try:
+            _, body = _ask(case)
+>           status, out = _confirm(case, body["challenge"], secret="anything")
+                                         ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:236: KeyError
+_________ test_a_standing_approval_needs_the_password_and_the_sentence _________
+
+ram = <ram_drive.RamDrive object at 0x7c887af4a4e0>
+
+    def test_a_standing_approval_needs_the_password_and_the_sentence(ram):
+        case = _case()
+        try:
+>           assert _grant(case, secret="guess")[0] == 403
+E           assert 400 == 403
+
+tests/unit/test_hitl_web.py:275: AssertionError
+_ test_with_an_approval_the_matching_action_runs_without_a_challenge_until_it_is_used_up _
+
+ram = <ram_drive.RamDrive object at 0x7c887af4a720>
+
+    def test_with_an_approval_the_matching_action_runs_without_a_challenge_until_it_is_used_up(ram):
+        case = _case()
+        try:
+            _grant(case, max_uses=2)
+            for _ in range(2):
+                status, body = _ask(case, action="mount_volume", params={"device_path": "/dev/sdb", "mountpoint": "/mnt/ram-inspect"})
+>               assert body["outcome"] == "started"
+E               AssertionError: assert 'refused' == 'started'
+E                 
+E                 - started
+E                 + refused
+
+tests/unit/test_hitl_web.py:289: AssertionError
+____________ test_an_approval_covers_only_its_own_action_and_drive _____________
+
+ram = <ram_drive.RamDrive object at 0x7c887af49880>
+
+    def test_an_approval_covers_only_its_own_action_and_drive(ram):
+        case = _case()
+        try:
+            _grant(case, action="mount_volume")
+            _, other_action = _ask(case, action="unmount_volume", params={"device_path": "/dev/sdb"})
+>           assert other_action["outcome"] == "confirmation_required"
+E           AssertionError: assert 'refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused
+
+tests/unit/test_hitl_web.py:303: AssertionError
+_ test_installing_over_a_drive_can_never_be_pre_approved_and_is_confirmed_every_time _
+
+ram = <ram_drive.RamDrive object at 0x7c887af49400>
+
+    def test_installing_over_a_drive_can_never_be_pre_approved_and_is_confirmed_every_time(ram):
+        case = _case()
+        try:
+            status, out = _grant(case, action="build_self_installer")
+>           assert status == 403 and "every time" in out["detail"]
+E           assert (400 == 403)
+
+tests/unit/test_hitl_web.py:312: AssertionError
+_____________ test_an_approval_belongs_to_the_session_that_made_it _____________
+
+ram = <ram_drive.RamDrive object at 0x7c887af48c20>
+
+    def test_an_approval_belongs_to_the_session_that_made_it(ram):
+        case = _case()
+        try:
+            _grant(case)
+            other = case.server.deps["sessions"].create("root", now=case.clock()).token
+            status, body = _req(case, "POST", "/drive-admin/action",
+                                {"action_id": "mount_volume", "params": {"device_path": "/dev/sdb"}}, cookie=other)
+>           assert body["outcome"] == "confirmation_required"
+E           AssertionError: assert 'refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused
+
+tests/unit/test_hitl_web.py:328: AssertionError
+__________________ test_an_approval_can_be_listed_and_revoked __________________
+
+ram = <ram_drive.RamDrive object at 0x7c887af48290>
+
+    def test_an_approval_can_be_listed_and_revoked(ram):
+        case = _case()
+        try:
+            _, out = _grant(case)
+            _, listing = _req(case, "GET", "/drive-admin/approvals")
+>           assert [g["id"] for g in listing["grants"]] == [out["grant"]["id"]]
+                                                            ^^^^^^^^^^^^
+E           KeyError: 'grant'
+
+tests/unit/test_hitl_web.py:338: KeyError
+___________________________ test_an_approval_expires ___________________________
+
+ram = <ram_drive.RamDrive object at 0x7c887af4aa80>
+
+    def test_an_approval_expires(ram):
+        case = _case()
+        try:
+            _grant(case, minutes=5)
+            case.clock.t += 5 * 60 + 1
+            _, body = _ask(case, action="mount_volume", params={"device_path": "/dev/sdb"})
+>           assert body["outcome"] == "confirmation_required"
+E           AssertionError: assert 'refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused
+
+tests/unit/test_hitl_web.py:352: AssertionError
+_____ test_every_step_lands_in_an_append_only_audit_log_without_the_secret _____
+
+ram = <ram_drive.RamDrive object at 0x7c887add2180>
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_every_step_lands_in_an_ap0')
+
+    def test_every_step_lands_in_an_append_only_audit_log_without_the_secret(ram, tmp_path):
+        audit = tmp_path / "audit" / "hitl.jsonl"
+        clock = Clock()
+        store = hitl.ConfirmationStore(verify_secret=lambda s: s == SECRET, clock=clock, min_wait_s=0, audit=hitl.AuditFile(audit))
+        case = _case(clock=clock)
+        case.server.deps["hitl"] = store
+        try:
+            _, body = _ask(case)
+>           _confirm(case, body["challenge"], secret="a-wrong-secret-value")
+                           ^^^^^^^^^^^^^^^^^
+E           KeyError: 'challenge'
+
+tests/unit/test_hitl_web.py:367: KeyError
+___ test_a_drive_bot_requests_only_its_action_and_gets_a_challenge_not_a_run ___
+
+tmp_path = PosixPath('/tmp/pytest-of-cane/pytest-451/test_a_drive_bot_requests_only0')
+
+    def test_a_drive_bot_requests_only_its_action_and_gets_a_challenge_not_a_run(tmp_path):
+        import hitl
+        case = _case(tmp_path, role="bot:repair", hitl=hitl.ConfirmationStore(verify_secret=lambda s: False, clock=Clock()))
+        try:
+            own = _req(case, "POST", "/drive-admin/action", {"action_id": "repair", "params": {"device_path": "/dev/sdb"}})
+>           assert own[1].get("outcome") == "confirmation_required"
+E           AssertionError: assert 'refused' == 'confirmation_required'
+E             
+E             - confirmation_required
+E             + refused
+
+tests/unit/test_operations_web.py:312: AssertionError
+____________________ test_configs_true_applies_every_field _____________________
+
+    def test_configs_true_applies_every_field():
+        runner = FakeRunner()
+>       summary = up.apply_selective_update(runner, CONFIG, {"configs": True}, network_interface="eno1")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_update_pipeline.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+baseline/lib/update_pipeline.py:116: in apply_selective_update
+    _apply_configs(runner, proxmox, configs_selection, network_interface, summary)
+baseline/lib/update_pipeline.py:90: in _apply_configs
+    merged = config_diff.read_current_ethtool_config(runner, interface)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+runner = <fake_runner.FakeRunner object at 0x7c887955bf50>, interface = 'eno1'
+
+    def read_current_ethtool_config(runner: Runner, interface: str) -> dict:
+        """Read actual settings; failed or incomplete reads are errors, never defaults."""
+        current = {
+            "ethtool_autoneg": "", "ethtool_speed": "", "ethtool_duplex": "", "ethtool_wol": "",
+            "ethtool_rx_checksum": False, "ethtool_tx_checksum": False,
+            "ethtool_tso": False, "ethtool_gro": False,
+            "ethtool_pause_autoneg": False,
+        }
+    
+        settings_proc = runner.run(["ethtool", interface], timeout=10)
+        if settings_proc.returncode != 0:
+            raise ReadbackError("REAL-002: ethtool settings query failed; current settings are unknown")
+        if not settings_proc.stdout.strip():
+>           raise ReadbackError("REAL-002: ethtool settings query returned no settings")
+E           config_diff.ReadbackError: REAL-002: ethtool settings query returned no settings
+
+baseline/lib/config_diff.py:90: ReadbackError
+_________________________ test_all_categories_together _________________________
+
+    def test_all_categories_together():
+        runner = FakeRunner()
+>       summary = up.apply_selective_update(
+            runner, CONFIG,
+            {"code": True, "drivers": True, "applications": True, "os": True, "configs": True},
+            network_interface="eno1")
+
+tests/unit/test_update_pipeline.py:115: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+baseline/lib/update_pipeline.py:116: in apply_selective_update
+    _apply_configs(runner, proxmox, configs_selection, network_interface, summary)
+baseline/lib/update_pipeline.py:90: in _apply_configs
+    merged = config_diff.read_current_ethtool_config(runner, interface)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+runner = <fake_runner.FakeRunner object at 0x7c887b391520>, interface = 'eno1'
+
+    def read_current_ethtool_config(runner: Runner, interface: str) -> dict:
+        """Read actual settings; failed or incomplete reads are errors, never defaults."""
+        current = {
+            "ethtool_autoneg": "", "ethtool_speed": "", "ethtool_duplex": "", "ethtool_wol": "",
+            "ethtool_rx_checksum": False, "ethtool_tx_checksum": False,
+            "ethtool_tso": False, "ethtool_gro": False,
+            "ethtool_pause_autoneg": False,
+        }
+    
+        settings_proc = runner.run(["ethtool", interface], timeout=10)
+        if settings_proc.returncode != 0:
+            raise ReadbackError("REAL-002: ethtool settings query failed; current settings are unknown")
+        if not settings_proc.stdout.strip():
+>           raise ReadbackError("REAL-002: ethtool settings query returned no settings")
+E           config_diff.ReadbackError: REAL-002: ethtool settings query returned no settings
+
+baseline/lib/config_diff.py:90: ReadbackError
+=========================== short test summary info ============================
+FAILED tests/unit/test_action_bots_ram.py::test_the_bot_can_do_its_own_action_on_the_ram_drive[BotBuildSelfInstaller]
+FAILED tests/unit/test_action_bots_ram.py::test_the_bot_can_do_its_own_action_on_the_ram_drive[BotEnrollDrive]
+FAILED tests/unit/test_action_bots_ram.py::test_the_bot_can_do_its_own_action_on_the_ram_drive[BotLayOutBaselineDrive]
+FAILED tests/unit/test_action_bots_ram.py::test_the_bot_can_do_its_own_action_on_the_ram_drive[BotMountVolume]
+FAILED tests/unit/test_action_bots_ram.py::test_the_bot_can_do_its_own_action_on_the_ram_drive[BotRepair]
+FAILED tests/unit/test_action_bots_ram.py::test_the_bot_can_do_its_own_action_on_the_ram_drive[BotStampInstallerIdentity]
+FAILED tests/unit/test_action_bots_ram.py::test_the_bot_can_do_its_own_action_on_the_ram_drive[BotUnmountVolume]
+FAILED tests/unit/test_action_bots_ram.py::test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotBuildSelfInstaller]
+FAILED tests/unit/test_action_bots_ram.py::test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotEnrollDrive]
+FAILED tests/unit/test_action_bots_ram.py::test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotLayOutBaselineDrive]
+FAILED tests/unit/test_action_bots_ram.py::test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotMountVolume]
+FAILED tests/unit/test_action_bots_ram.py::test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotRepair]
+FAILED tests/unit/test_action_bots_ram.py::test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotStampInstallerIdentity]
+FAILED tests/unit/test_action_bots_ram.py::test_a_drive_bot_cannot_run_its_action_without_a_human_confirmation[BotUnmountVolume]
+FAILED tests/unit/test_action_bots_ram.py::test_a_bot_needs_the_root_password_once_a_day_per_drive
+FAILED tests/unit/test_action_bots_ram.py::test_without_ticking_the_daily_box_every_run_still_needs_the_password
+FAILED tests/unit/test_action_bots_ram.py::test_a_new_day_needs_a_new_authorization
+FAILED tests/unit/test_action_bots_ram.py::test_a_new_target_needs_a_new_authorization
+FAILED tests/unit/test_action_bots_ram.py::test_the_daily_box_is_refused_for_non_bot_logins_and_never_applies_to_the_install
+FAILED tests/unit/test_action_bots_ram.py::test_the_daily_authorization_is_not_shared_with_another_bot_account
+FAILED tests/unit/test_baseline_web.py::test_drive_admin_action_reports_a_real_refusal_when_pkexec_authentication_fails
+FAILED tests/unit/test_baseline_web.py::test_drive_admin_action_reaches_the_real_action_via_a_real_pkexec_runner
+FAILED tests/unit/test_config_diff.py::test_compute_full_diff_covers_all_four_real_subsystems
+FAILED tests/unit/test_hitl_web.py::test_a_request_only_produces_a_challenge_and_the_ram_drive_is_untouched
+FAILED tests/unit/test_hitl_web.py::test_no_query_string_or_header_skips_the_confirmation
+FAILED tests/unit/test_hitl_web.py::test_a_correct_confirmation_runs_the_stored_request_once_and_changes_the_ram_drive
+FAILED tests/unit/test_hitl_web.py::test_the_confirm_step_runs_what_was_challenged_not_what_the_confirm_request_says
+FAILED tests/unit/test_hitl_web.py::test_a_confirmation_cannot_be_replayed - ...
+FAILED tests/unit/test_hitl_web.py::test_a_wrong_password_or_phrase_starts_nothing
+FAILED tests/unit/test_hitl_web.py::test_guessing_is_rate_limited_and_a_lock_refuses_even_the_right_password
+FAILED tests/unit/test_hitl_web.py::test_a_confirmation_that_comes_too_fast_to_have_been_read_is_refused
+FAILED tests/unit/test_hitl_web.py::test_an_expired_challenge_cannot_be_confirmed
+FAILED tests/unit/test_hitl_web.py::test_another_logged_in_session_cannot_confirm_my_challenge
+FAILED tests/unit/test_hitl_web.py::test_with_no_confirmation_credential_configured_nobody_can_confirm
+FAILED tests/unit/test_hitl_web.py::test_a_standing_approval_needs_the_password_and_the_sentence
+FAILED tests/unit/test_hitl_web.py::test_with_an_approval_the_matching_action_runs_without_a_challenge_until_it_is_used_up
+FAILED tests/unit/test_hitl_web.py::test_an_approval_covers_only_its_own_action_and_drive
+FAILED tests/unit/test_hitl_web.py::test_installing_over_a_drive_can_never_be_pre_approved_and_is_confirmed_every_time
+FAILED tests/unit/test_hitl_web.py::test_an_approval_belongs_to_the_session_that_made_it
+FAILED tests/unit/test_hitl_web.py::test_an_approval_can_be_listed_and_revoked
+FAILED tests/unit/test_hitl_web.py::test_an_approval_expires - AssertionError...
+FAILED tests/unit/test_hitl_web.py::test_every_step_lands_in_an_append_only_audit_log_without_the_secret
+FAILED tests/unit/test_operations_web.py::test_a_drive_bot_requests_only_its_action_and_gets_a_challenge_not_a_run
+FAILED tests/unit/test_update_pipeline.py::test_configs_true_applies_every_field
+FAILED tests/unit/test_update_pipeline.py::test_all_categories_together - con...
+45 failed, 3193 passed in 112.40s (0:01:52)

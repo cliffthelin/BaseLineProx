@@ -1,0 +1,6 @@
+Full final unit suite: 3352 passed in 115.24s; no deselections, skips or failures.
+Focused installer/HTTP/deployment suite: 128 passed.
+Chromium: existing options-first/draft/hardware checks plus input preparation submit/report passed against isolated fixtures.
+Actual current repository bundle: 762 files captured and exact SHA256/file-set integrity verified; prepared true, ready false, executed false.
+Production reload PID1576009; /login HTTP200, Referrer-Policy same-origin.
+Physical installation execution, post-rename boot and native cold boot: not performed by DR158.

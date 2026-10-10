@@ -9,6 +9,13 @@
 # expected on real hardware, but Node 22 is required regardless).
 set -euo pipefail
 
+# Self-contained installs (baseline-first-boot-install) set BASELINE_PACKAGE_CACHE to the drive's own offline
+# package cache and APT_CONFIG to sources that point only at it: nothing below then reaches the internet.
+if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
+    [ -n "${APT_CONFIG:-}" ] || { echo "BASELINE_PACKAGE_CACHE is set without an offline APT_CONFIG" >&2; exit 1; }
+    echo "=== Offline install from $BASELINE_PACKAGE_CACHE (no internet is used) ==="
+fi
+
 echo "=== Disabling Proxmox enterprise repos (no subscription assumed) ==="
 for f in pve-enterprise.sources ceph.sources; do
     if [ -f "/etc/apt/sources.list.d/$f" ]; then
@@ -21,18 +28,27 @@ echo "=== Installing base packages ==="
 apt-get install -y inxi python3-rich python3-textual tmux gnupg
 
 echo "=== Installing kiosk GUI packages (Track A3 - cage + stock Chromium) ==="
-apt-get install -y cage chromium xorriso curl libnotify-bin
+apt-get install -y cage chromium xorriso curl libnotify-bin kbd
 
 echo "=== Installing Podman (Track B4 - Quadlet service management) ==="
 apt-get install -y podman
 mkdir -p /etc/containers/systemd
 
 echo "=== Installing Node.js 22 (NodeSource - Debian's own package is too old) ==="
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
+    : # nodejs 22 was collected from NodeSource into the offline cache when the installer was built
+else
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+fi
 apt-get install -y nodejs
 
 echo "=== Installing Claude Code ==="
-npm install -g @anthropic-ai/claude-code
+if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
+    # npm's own cache, filled with every tarball Claude Code needs when the installer was built
+    npm install -g --offline --cache "$BASELINE_PACKAGE_CACHE/npm-cache" @anthropic-ai/claude-code
+else
+    npm install -g @anthropic-ai/claude-code
+fi
 
 echo "=== Deploying Baseline app ==="
 mkdir -p /opt/baseline/bin /opt/baseline/lib /etc/baseline /var/lib/baseline
@@ -154,6 +170,11 @@ cp "$SRC/baseline/bin/baseline-kiosk-gate" /opt/baseline/bin/baseline-kiosk-gate
 # this project uses.
 mkdir -p /var/lib/baseline/settings-web
 cp "$SRC/baseline/lib/settings_web.py" /opt/baseline/lib/settings_web.py
+# web_request_json.py: imported by settings_web, baseline_web, control_panel_web and scripts_inbox_web.
+cp "$SRC/baseline/lib/web_request_json.py" /opt/baseline/lib/web_request_json.py
+cp "$SRC/baseline/lib/master_configuration.py" /opt/baseline/lib/master_configuration.py
+cp "$SRC/baseline/lib/configuration_drafts.py" /opt/baseline/lib/configuration_drafts.py
+cp "$SRC/baseline/lib/configuration_draft_ui.py" /opt/baseline/lib/configuration_draft_ui.py
 cp "$SRC/baseline/lib/settings_web_gate.py" /opt/baseline/lib/settings_web_gate.py
 cp "$SRC/baseline/bin/baseline-settings-web" /opt/baseline/bin/baseline-settings-web
 cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-settings-web-gate
@@ -250,13 +271,11 @@ cp "$SRC/baseline/bin/baseline-scripts-inbox-gate" /opt/baseline/bin/baseline-sc
 # 57, 58).
 cp "$SRC/baseline/lib/vm_scripts.py" /opt/baseline/lib/vm_scripts.py
 cp "$SRC/baseline/lib/quadlet.py" /opt/baseline/lib/quadlet.py
-# vm_scripts.py's own adoption-bridge functions (start/stop/destroy)
-# import these two as an optional, try/except-guarded dependency - real
-# code, tested (test_vm_provision.py/test_pct_provision.py), but never
-# staged before now (decision record 65's audit), silently degrading
-# the bridge to a stub CommandResult on any real deployed machine
-# rather than crashing. Staged for the same reason vm_scripts.py itself
-# is: operator-invoked-only, no systemd unit.
+# vm_scripts.py's adoption bridge imports these real, tested lifecycle
+# implementations directly. Stage both before callers so a deployed
+# install has the same functions exercised by test_vm_provision.py and
+# test_pct_provision.py. These stay operator-invoked; no systemd unit
+# starts or manages them automatically.
 cp "$SRC/baseline/lib/vm_provision.py" /opt/baseline/lib/vm_provision.py
 cp "$SRC/baseline/lib/pct_provision.py" /opt/baseline/lib/pct_provision.py
 # The real "Master Config" control-plane: target-drive validation,
@@ -275,6 +294,18 @@ cp "$SRC/baseline/lib/pct_provision.py" /opt/baseline/lib/pct_provision.py
 # are plain one-shot CLI tools with no service to wire at all.
 cp "$SRC/baseline/lib/physical_device_safety.py" /opt/baseline/lib/physical_device_safety.py
 cp "$SRC/baseline/lib/drive_installer.py" /opt/baseline/lib/drive_installer.py
+cp "$SRC/baseline/lib/drive_recovery.py" /opt/baseline/lib/drive_recovery.py
+cp "$SRC/baseline/lib/single_drive_storage.py" /opt/baseline/lib/single_drive_storage.py
+cp "$SRC/baseline/lib/storage_policy.py" /opt/baseline/lib/storage_policy.py
+cp "$SRC/boot/baseline-storage-verify.service" /etc/systemd/system/baseline-storage-verify.service
+for storage_unit in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service; do
+    mkdir -p "/etc/systemd/system/$storage_unit.d"
+    cat > "/etc/systemd/system/$storage_unit.d/storage.conf" <<'STORAGE_GATE'
+[Unit]
+Requires=baseline-storage-verify.service
+After=baseline-storage-verify.service
+STORAGE_GATE
+done
 cp "$SRC/baseline/lib/config_diff.py" /opt/baseline/lib/config_diff.py
 cp "$SRC/baseline/lib/update_pipeline.py" /opt/baseline/lib/update_pipeline.py
 cp "$SRC/baseline/lib/backup_restore.py" /opt/baseline/lib/backup_restore.py
@@ -292,7 +323,17 @@ cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
 cp "$SRC/baseline/lib/drive_enrollment.py" /opt/baseline/lib/drive_enrollment.py
 cp "$SRC/baseline/lib/install_plan.py" /opt/baseline/lib/install_plan.py
 cp "$SRC/baseline/lib/install_plan_page.py" /opt/baseline/lib/install_plan_page.py
+cp "$SRC/baseline/lib/installer_desktop.py" /opt/baseline/lib/installer_desktop.py
+cp "$SRC/baseline/lib/installation_readiness.py" /opt/baseline/lib/installation_readiness.py
+cp "$SRC/baseline/lib/installer_inputs.py" /opt/baseline/lib/installer_inputs.py
+cp "$SRC/baseline/lib/installer_sources.py" /opt/baseline/lib/installer_sources.py
+cp "$SRC/baseline/lib/installed_drive_update.py" /opt/baseline/lib/installed_drive_update.py
+cp "$SRC/baseline/bin/baseline-drive-update" /opt/baseline/bin/baseline-drive-update
+chmod 755 /opt/baseline/bin/baseline-drive-update
 cp "$SRC/baseline/bin/baseline-install-plan" /opt/baseline/bin/baseline-install-plan
+cp "$SRC/baseline/bin/baseline-single-drive-storage" /opt/baseline/bin/baseline-single-drive-storage
+cp "$SRC/baseline/bin/baseline-drive-recovery" /opt/baseline/bin/baseline-drive-recovery
+chmod 755 /opt/baseline/bin/baseline-single-drive-storage /opt/baseline/bin/baseline-drive-recovery
 chmod 755 /opt/baseline/bin/baseline-install-plan
 cp "$SRC/baseline/lib/web_gate.py" /opt/baseline/lib/web_gate.py
 cp "$SRC/baseline/lib/operations.py" /opt/baseline/lib/operations.py
@@ -318,6 +359,10 @@ cp "$SRC/baseline/lib/baseline_drive_layout.py" /opt/baseline/lib/baseline_drive
 # to the operator to run themselves.
 cp "$SRC/baseline/lib/drive_admin.py" /opt/baseline/lib/drive_admin.py
 cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
+cp "$SRC/baseline/lib/host_restart.py" /opt/baseline/lib/host_restart.py
+cp "$SRC/baseline/lib/structured_controls.py" /opt/baseline/lib/structured_controls.py
+cp "$SRC/baseline/lib/hardware_configuration.py" /opt/baseline/lib/hardware_configuration.py
+cp "$SRC/baseline/lib/hardware_tabs.py" /opt/baseline/lib/hardware_tabs.py
 # VM library: Proxmox owns lifecycle on the substrate; local QEMU is the
 # development backend. Ubuntu's seed builder needs xorriso above.
 cp "$SRC/baseline/lib/vm_host.py" /opt/baseline/lib/vm_host.py
@@ -334,6 +379,9 @@ cp "$SRC/baseline/lib/container_page.py" /opt/baseline/lib/container_page.py
 # these as a real staging gap, the same class of bug decision records
 # 80/81 already found and fixed for other modules.
 cp "$SRC/baseline/lib/self_installer.py" /opt/baseline/lib/self_installer.py
+# first_boot_hook.py / offline_cache.py: the self-contained installer an installed drive can rebuild itself with.
+cp "$SRC/baseline/lib/first_boot_hook.py" /opt/baseline/lib/first_boot_hook.py
+cp "$SRC/baseline/lib/offline_cache.py" /opt/baseline/lib/offline_cache.py
 cp "$SRC/baseline/lib/drive_setup_acquire.py" /opt/baseline/lib/drive_setup_acquire.py
 cp "$SRC/baseline/lib/drive_setup_answer.py" /opt/baseline/lib/drive_setup_answer.py
 cp "$SRC/baseline/lib/drive_setup_install.py" /opt/baseline/lib/drive_setup_install.py
@@ -383,7 +431,11 @@ echo "=== Installing the Proxmox<->BaselineOS return command ==="
 cp "$SRC/boot/baseline-return.sh" /etc/profile.d/baseline-return.sh
 
 echo "=== Verifying tty1 console font (read-only check, does not touch tty1 ownership) ==="
-bash "$SRC/tests/console_font_check.sh"
+if [ "${BASELINE_OFFLINE_INSTALL:-0}" = "1" ]; then
+    echo "Offline target: console font verification deferred to target boot; host tty is not the target console."
+else
+    bash "$SRC/tests/console_font_check.sh"
+fi
 
 # --- Atomic verification before any tty1/getty state changes --------------
 #
@@ -481,6 +533,7 @@ echo "=== Enabling units for next boot (no --now, no getty changes - nothing her
 systemctl daemon-reload
 systemctl enable baseline-persist-bind-mounts.service
 systemctl enable baseline-firstboot.service
+systemctl enable baseline-storage-verify.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 systemctl enable baseline-sensors-collect.timer

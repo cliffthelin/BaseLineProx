@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify independent Baseline drive storage identities and capacity
+ConditionPathExists=/etc/baseline/independent-drive.json
+After=local-fs.target pve-cluster.service
+Wants=pve-cluster.service
+RequiresMountsFor=/mnt/BASELINE /mnt/INSTALLER_CACHE /mnt/SESSION_TEMP /mnt/SUBSTRATE /mnt/USER_ADMIN /mnt/USER_PERSONAL /mnt/APPDATA_ADMIN /mnt/APPDATA_PERSONAL
+Before=baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-web.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/baseline/bin/baseline-single-drive-storage verify --reconcile-proxmox
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

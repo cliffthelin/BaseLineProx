@@ -312,7 +312,7 @@ def build_sparse_install_invocation(
             "-serial", f"file:{serial_log}",
         ]
     if monitor_socket is not None:
-        argv += ["-monitor", f"unix:{monitor_socket},server,nowait"]
+        argv += ["-display", "none", "-monitor", f"unix:{monitor_socket},server,nowait"]
 
     device_inventory = {
         "drives": [

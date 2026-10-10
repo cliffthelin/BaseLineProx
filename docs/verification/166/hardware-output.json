@@ -1,0 +1,543 @@
+{
+  "pci": [
+    {
+      "address": "0000:00:00.0",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Root Complex",
+      "pci_id": "1022:14d8",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:00.2",
+      "pci_class": "IOMMU",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge IOMMU",
+      "pci_id": "1022:14d9",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:01.0",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Dummy Host Bridge",
+      "pci_id": "1022:14da",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:01.1",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge GPP Bridge",
+      "pci_id": "1022:14db",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:00:01.2",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge GPP Bridge",
+      "pci_id": "1022:14db",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:00:02.0",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Dummy Host Bridge",
+      "pci_id": "1022:14da",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:02.1",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge GPP Bridge",
+      "pci_id": "1022:14db",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:00:02.2",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge GPP Bridge",
+      "pci_id": "1022:14db",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:00:03.0",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Dummy Host Bridge",
+      "pci_id": "1022:14da",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:04.0",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Dummy Host Bridge",
+      "pci_id": "1022:14da",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:08.0",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Dummy Host Bridge",
+      "pci_id": "1022:14da",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:08.1",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Internal GPP Bridge to Bus [C:A]",
+      "pci_id": "1022:14dd",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:00:08.3",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Internal GPP Bridge to Bus [C:A]",
+      "pci_id": "1022:14dd",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:00:14.0",
+      "pci_class": "SMBus",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "FCH SMBus Controller",
+      "pci_id": "1022:790b",
+      "kernel_driver": "piix4_smbus"
+    },
+    {
+      "address": "0000:00:14.3",
+      "pci_class": "ISA bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "FCH LPC Bridge",
+      "pci_id": "1022:790e",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:18.0",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 0",
+      "pci_id": "1022:14e0",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:18.1",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 1",
+      "pci_id": "1022:14e1",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:18.2",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 2",
+      "pci_id": "1022:14e2",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:18.3",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 3",
+      "pci_id": "1022:14e3",
+      "kernel_driver": "k10temp"
+    },
+    {
+      "address": "0000:00:18.4",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 4",
+      "pci_id": "1022:14e4",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:18.5",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 5",
+      "pci_id": "1022:14e5",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:18.6",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 6",
+      "pci_id": "1022:14e6",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:00:18.7",
+      "pci_class": "Host bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge Data Fabric; Function 7",
+      "pci_id": "1022:14e7",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:01:00.0",
+      "pci_class": "VGA compatible controller",
+      "vendor": "NVIDIA Corporation",
+      "model": "GA104 [GeForce RTX 3070]",
+      "pci_id": "10de:2484",
+      "kernel_driver": "nvidia"
+    },
+    {
+      "address": "0000:01:00.1",
+      "pci_class": "Audio device",
+      "vendor": "NVIDIA Corporation",
+      "model": "GA104 High Definition Audio Controller",
+      "pci_id": "10de:228b",
+      "kernel_driver": "snd_hda_intel"
+    },
+    {
+      "address": "0000:02:00.0",
+      "pci_class": "Non-Volatile memory controller",
+      "vendor": "Phison Electronics Corporation",
+      "model": "PS5013-E13 PCIe3 NVMe Controller (DRAM-less)",
+      "pci_id": "1987:5013",
+      "kernel_driver": "nvme"
+    },
+    {
+      "address": "0000:03:00.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Upstream Port",
+      "pci_id": "1022:43f4",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:04:00.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Downstream Port",
+      "pci_id": "1022:43f5",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:04:08.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Downstream Port",
+      "pci_id": "1022:43f5",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:04:09.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Downstream Port",
+      "pci_id": "1022:43f5",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:04:0a.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Downstream Port",
+      "pci_id": "1022:43f5",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:04:0b.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Downstream Port",
+      "pci_id": "1022:43f5",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:04:0c.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Downstream Port",
+      "pci_id": "1022:43f5",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:04:0d.0",
+      "pci_class": "PCI bridge",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset PCIe Switch Downstream Port",
+      "pci_id": "1022:43f5",
+      "kernel_driver": "pcieport"
+    },
+    {
+      "address": "0000:05:00.0",
+      "pci_class": "3D controller",
+      "vendor": "NVIDIA Corporation",
+      "model": "GP102GL [Tesla P40]",
+      "pci_id": "10de:1b38",
+      "kernel_driver": "nvidia"
+    },
+    {
+      "address": "0000:08:00.0",
+      "pci_class": "Ethernet controller",
+      "vendor": "Intel Corporation",
+      "model": "Ethernet Controller I225-V",
+      "pci_id": "8086:15f3",
+      "kernel_driver": "igc"
+    },
+    {
+      "address": "0000:09:00.0",
+      "pci_class": "Network controller",
+      "vendor": "MEDIATEK Corp.",
+      "model": "MT7921K (RZ608) Wi-Fi 6E 80MHz",
+      "pci_id": "14c3:0608",
+      "kernel_driver": "mt7921e"
+    },
+    {
+      "address": "0000:0a:00.0",
+      "pci_class": "USB controller",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset USB 3.2 Controller",
+      "pci_id": "1022:43f7",
+      "kernel_driver": "xhci_hcd"
+    },
+    {
+      "address": "0000:0b:00.0",
+      "pci_class": "SATA controller",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "600 Series Chipset SATA Controller",
+      "pci_id": "1022:43f6",
+      "kernel_driver": "ahci"
+    },
+    {
+      "address": "0000:0c:00.0",
+      "pci_class": "Non-Volatile memory controller",
+      "vendor": "Phison Electronics Corporation",
+      "model": "E12 NVMe Controller",
+      "pci_id": "1987:5012",
+      "kernel_driver": "nvme"
+    },
+    {
+      "address": "0000:0d:00.0",
+      "pci_class": "Non-Essential Instrumentation",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge PCIe Dummy Function",
+      "pci_id": "1022:14de",
+      "kernel_driver": null
+    },
+    {
+      "address": "0000:0d:00.2",
+      "pci_class": "Encryption controller",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Family 19h PSP/CCP",
+      "pci_id": "1022:1649",
+      "kernel_driver": "ccp"
+    },
+    {
+      "address": "0000:0d:00.3",
+      "pci_class": "USB controller",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge USB 3.1 xHCI",
+      "pci_id": "1022:15b6",
+      "kernel_driver": "xhci_hcd"
+    },
+    {
+      "address": "0000:0d:00.4",
+      "pci_class": "USB controller",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge USB 3.1 xHCI",
+      "pci_id": "1022:15b7",
+      "kernel_driver": "xhci_hcd"
+    },
+    {
+      "address": "0000:0e:00.0",
+      "pci_class": "USB controller",
+      "vendor": "Advanced Micro Devices, Inc. [AMD]",
+      "model": "Raphael/Granite Ridge USB 2.0 xHCI",
+      "pci_id": "1022:15b8",
+      "kernel_driver": "xhci_hcd"
+    }
+  ],
+  "usb": [
+    {
+      "bus": "001",
+      "device": "002",
+      "usb_id": "0b05:1a52",
+      "description": "ASUSTek Computer, Inc. USB Audio"
+    },
+    {
+      "bus": "001",
+      "device": "003",
+      "usb_id": "0b05:19af",
+      "description": "ASUSTek Computer, Inc. AURA LED Controller"
+    },
+    {
+      "bus": "001",
+      "device": "004",
+      "usb_id": "05e3:0608",
+      "description": "Genesys Logic, Inc. Hub"
+    },
+    {
+      "bus": "001",
+      "device": "005",
+      "usb_id": "3938:1191",
+      "description": "2.4G Wireless Mouse"
+    },
+    {
+      "bus": "001",
+      "device": "006",
+      "usb_id": "0e8d:0608",
+      "description": "MediaTek Inc. Wireless_Device"
+    },
+    {
+      "bus": "002",
+      "device": "002",
+      "usb_id": "0bda:9220",
+      "description": "Realtek Semiconductor Corp. RTL9220DP"
+    },
+    {
+      "bus": "003",
+      "device": "002",
+      "usb_id": "14cd:8601",
+      "description": "Super Top 4-Port hub"
+    },
+    {
+      "bus": "004",
+      "device": "002",
+      "usb_id": "0bda:9210",
+      "description": "Realtek Semiconductor Corp. RTL9210 M.2 NVME Adapter"
+    },
+    {
+      "bus": "005",
+      "device": "002",
+      "usb_id": "05e3:0610",
+      "description": "Genesys Logic, Inc. Hub"
+    },
+    {
+      "bus": "005",
+      "device": "003",
+      "usb_id": "174c:2074",
+      "description": "ASMedia Technology Inc. ASM1074 High-Speed hub"
+    },
+    {
+      "bus": "005",
+      "device": "004",
+      "usb_id": "046a:c099",
+      "description": "CHERRY Stream Keyboard TKL"
+    },
+    {
+      "bus": "005",
+      "device": "005",
+      "usb_id": "0bc2:ab44",
+      "description": "Seagate RSS LLC Backup Plus Hub"
+    },
+    {
+      "bus": "005",
+      "device": "006",
+      "usb_id": "0b05:190e",
+      "description": "ASUSTek Computer, Inc. ASUS USB-BT500"
+    },
+    {
+      "bus": "005",
+      "device": "007",
+      "usb_id": "0bc2:ab44",
+      "description": "Seagate RSS LLC Backup Plus Hub"
+    },
+    {
+      "bus": "005",
+      "device": "008",
+      "usb_id": "046d:c52b",
+      "description": "Logitech, Inc. Unifying Receiver"
+    },
+    {
+      "bus": "005",
+      "device": "009",
+      "usb_id": "0bc2:ab44",
+      "description": "Seagate RSS LLC Backup Plus Hub"
+    },
+    {
+      "bus": "006",
+      "device": "002",
+      "usb_id": "05e3:0626",
+      "description": "Genesys Logic, Inc. Hub"
+    },
+    {
+      "bus": "006",
+      "device": "003",
+      "usb_id": "174c:3074",
+      "description": "ASMedia Technology Inc. ASM1074 SuperSpeed hub"
+    },
+    {
+      "bus": "006",
+      "device": "004",
+      "usb_id": "0bc2:ab45",
+      "description": "Seagate RSS LLC Backup+ Hub"
+    },
+    {
+      "bus": "006",
+      "device": "005",
+      "usb_id": "0bc2:ab45",
+      "description": "Seagate RSS LLC Backup+ Hub"
+    },
+    {
+      "bus": "006",
+      "device": "006",
+      "usb_id": "0bc2:ab38",
+      "description": "Seagate RSS LLC Backup Plus Hub (Mass Storage)"
+    },
+    {
+      "bus": "006",
+      "device": "007",
+      "usb_id": "0bc2:ab45",
+      "description": "Seagate RSS LLC Backup+ Hub"
+    },
+    {
+      "bus": "006",
+      "device": "008",
+      "usb_id": "0bc2:ab38",
+      "description": "Seagate RSS LLC Backup Plus Hub (Mass Storage)"
+    },
+    {
+      "bus": "006",
+      "device": "009",
+      "usb_id": "1058:25a3",
+      "description": "Western Digital Technologies, Inc. Elements Desktop (WDBWLG)"
+    },
+    {
+      "bus": "006",
+      "device": "010",
+      "usb_id": "0bc2:ab38",
+      "description": "Seagate RSS LLC Backup Plus Hub (Mass Storage)"
+    }
+  ],
+  "net": [
+    {
+      "name": "eno1",
+      "state": "UP",
+      "mac": "08:bf:b8:32:62:de"
+    },
+    {
+      "name": "wlp9s0",
+      "state": "UP",
+      "mac": "c8:94:02:16:bd:7f"
+    },
+    {
+      "name": "mpqemubr0",
+      "state": "UP",
+      "mac": "52:54:00:80:3d:7a"
+    },
+    {
+      "name": "tailscale0",
+      "state": "UNKNOWN",
+      "mac": ""
+    },
+    {
+      "name": "tap-dadf89c4e3c",
+      "state": "UP",
+      "mac": "ae:dd:ba:35:13:e8"
+    }
+  ]
+}

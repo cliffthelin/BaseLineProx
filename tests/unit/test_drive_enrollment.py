@@ -38,11 +38,20 @@ def test_a_missing_or_malformed_serial_is_never_enrolled(serial):
     assert de.enrolled_serials() == frozenset()
 
 
-def test_an_unreadable_store_reads_as_nothing_enrolled(monkeypatch):
+def test_an_unreadable_store_is_not_reported_as_nothing_enrolled(monkeypatch):
     def broken(*a, **k):
         raise OSError("volume not mounted")
     monkeypatch.setattr(registry, "list_entries", broken)
-    assert de.enrolled_serials() == frozenset()
+    with pytest.raises(de.DriveEnrollmentError, match="volume not mounted"):
+        de.enrolled_serials()
+
+
+def test_allowed_target_inventory_propagates_enrollment_store_error(monkeypatch):
+    def broken(*a, **k):
+        raise OSError("registry database unreadable")
+    monkeypatch.setattr(registry, "list_entries", broken)
+    with pytest.raises(de.DriveEnrollmentError, match="registry database unreadable"):
+        da.allowed_target_serials()
 
 
 # --- drive_admin's gate now admits enrolled drives, and only those ----------------------
@@ -149,6 +158,15 @@ def test_listing_enrollable_drives_only_reads_the_one_lsblk_listing():
     runner = _runner()
     da.list_enrollable_drives(runner, pds_runner=FakePdsRunner(boot_serial="SN211808916391"))
     assert [c[0] for c in runner.calls] == ["lsblk"]
+
+
+def test_list_enrollable_drives_raises_when_drive_probe_fails():
+    from fake_runner import FakeProc, FakeRunner
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lsblk"], FakeProc(1, "", "lsblk denied")),
+    ])
+    with pytest.raises(da.DriveInventoryError, match="lsblk denied"):
+        da.list_enrollable_drives(runner, pds_runner=FakePdsRunner())
 
 
 def test_an_enrolled_drive_moves_to_the_candidate_list():

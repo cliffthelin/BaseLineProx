@@ -101,3 +101,16 @@ def test_restart_keeps_last_observed_native_stage_and_second_service_cannot_take
     store.close()
     restarted=jobs.WorkloadJobs(path)
     assert restarted.get('lost')['result']['last_observed_stage']=='Native command: pct clone'
+
+
+def test_ubuntu_locale_and_configuration_verification_report_survive_job_restart(tmp_path):
+    path=tmp_path/'jobs.sqlite'
+    store=jobs.WorkloadJobs(path)
+    report={'checks':{'locale':True},'configuration_applied':True,'browser_page_loaded':False}
+    job=store.submit('vm','verify_ubuntu',{'name':'desktop','locale':'en_GB.UTF-8'},
+        lambda:{'ok':True,'message':'Configuration checked','configuration_report':report})
+    assert store.wait(job['id'],3)['result']['configuration_report']==report
+    store.close()
+    restarted=jobs.WorkloadJobs(path)
+    try:assert restarted.get(job['id'])['result']['configuration_report']==report
+    finally:restarted.close()

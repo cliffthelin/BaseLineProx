@@ -10,6 +10,10 @@ from fake_runner import FakeRunner
 
 import settings_web as sw
 import web_security as ws
+
+
+def test_same_origin_forms_preserve_origin_evidence():
+    assert dict(ws.SECURITY_HEADERS)['Referrer-Policy'] == 'same-origin'
 from test_baseline_web import _RealServerCase, _base_deps
 
 

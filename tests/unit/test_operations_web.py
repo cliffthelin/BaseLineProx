@@ -106,9 +106,10 @@ def test_schedule_set_list_and_remove_over_the_web(tmp_path):
     try:
         status, body = _req(case, "POST", "/operations/schedule", {"op": "backup_offdrive", "every_hours": 24})
         assert status == 200 and body["outcome"] == "applied"
-        assert b"Scheduled every 24" in case.get("/operations")[1]
+        rendered = case.get("/operations")[1]
+        assert b'id="operation-schedules"' in rendered and b'<td>24 h</td>' in rendered
         _req(case, "POST", "/operations/schedule/remove", {"op": "backup_offdrive"})
-        assert b"Not scheduled" in case.get("/operations")[1]
+        assert b"No schedules configured." in case.get("/operations")[1]
         status, _ = _req(case, "POST", "/operations/schedule", {"op": "backup_list", "every_hours": 24})
         assert status == 400
         status, _ = _req(case, "POST", "/operations/schedule", {"op": "backup_offdrive", "every_hours": 0})

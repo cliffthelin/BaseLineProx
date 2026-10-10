@@ -66,3 +66,11 @@ setup and is disabled. Binds are excluded from vzdump: dedicated quiesced
 backup/restore remains unverified. Containers share the substrate kernel and
 do not supply a distro desktop/browser. The nine requested desktop/NAS/mobile
 systems remain explicitly uninstalled on `/vms`; see DR118 and v0.2 row73.
+
+## Capacity and configurable location (DR144)
+
+Physical read/write destinations are settings; source, overlay and retained
+data roles remain predefined. If 512 GB storage cannot fit, evaluate slower
+enrolled drives and reassess occupants. Common capacity-aware placement and
+verified migration remain REAL-013 work; destination arguments alone do not
+prove this policy is implemented.

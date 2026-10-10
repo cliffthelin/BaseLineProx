@@ -30,6 +30,10 @@ def test_there_are_units_to_check():
 
 @pytest.mark.parametrize("unit", UNITS, ids=lambda u: u.name)
 def test_every_unit_mounts_the_installed_code_read_only(unit):
+    if unit.name == "baseline-persist-bind-mounts.service":
+        # This mount publisher must share the host namespace; root ownership
+        # and write permissions are checked separately below.
+        return
     assert re.search(r"^ReadOnlyPaths=.*?/opt/baseline\b", unit.read_text(), re.M), unit.name
 
 
@@ -75,3 +79,9 @@ def test_units_do_not_set_no_new_privileges_because_drive_admin_needs_pkexec():
 
 def test_provisioning_tightens_state_stores_that_already_exist():
     assert re.search(r"^if \[ -d /var/lib/baseline \]; then chmod -R go-rwx /var/lib/baseline; fi", PROVISION, re.M)
+
+
+def test_persistence_mount_service_uses_host_mount_namespace():
+    text = (BOOT / 'baseline-persist-bind-mounts.service').read_text()
+    for directive in ('ReadOnlyPaths=', 'ReadWritePaths=', 'PrivateMounts=', 'ProtectSystem='):
+        assert not any(line.startswith(directive) for line in text.splitlines())

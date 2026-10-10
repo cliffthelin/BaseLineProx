@@ -1,0 +1,2 @@
+{"actual_firewall_rule_count": 8}
+{"active_policy_verified": true, "unsafe_policy_refused": true, "custom_private_policy_verified": true, "public_policy_refused": true, "missing_policy_refused": true, "scope": "actual isolated kernel nftables"}

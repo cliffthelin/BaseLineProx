@@ -21,6 +21,10 @@ REGISTRY_TYPE = "enrolled_drives"
 _SERIAL_RE = re.compile(r"^[A-Za-z0-9._-]{4,40}$")
 
 
+class DriveEnrollmentError(ValueError):
+    """Enrollment state could not be read; it is not an empty allowlist."""
+
+
 def check_serial(serial) -> str:
     if not isinstance(serial, str) or not _SERIAL_RE.match(serial) or serial.strip(".") == "":
         raise ValueError(f"not a drive serial: {serial!r}")
@@ -30,8 +34,8 @@ def check_serial(serial) -> str:
 def enrolled_serials() -> frozenset:
     try:
         return frozenset(registry.list_entries(REGISTRY_TYPE, scope=registry.GLOBAL, read_only=True))
-    except Exception:  # noqa: BLE001 - an unreadable store admits nothing
-        return frozenset()
+    except Exception as exc:  # noqa: BLE001 - preserve the store failure for every caller
+        raise DriveEnrollmentError(f"drive enrollment registry unavailable: {exc}") from exc
 
 
 def enroll(serial, *, size_bytes: int, model: str, now: float) -> None:

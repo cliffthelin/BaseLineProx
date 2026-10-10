@@ -63,7 +63,7 @@ def _lan_only(runner, firewall: dict):
 
 
 def apply_stored_config(runner: Runner, config: dict | None, *, network_interface: str,
-                        enforce_lan_only: bool = False) -> dict:
+                        enforce_lan_only: bool = False, run_active_diagnostics: bool = False) -> dict:
     """Applies every subsystem that has both a real apply function AND
     relevant keys present in the config, independently of the others -
     one subsystem failing (or being absent from the config) never
@@ -73,14 +73,16 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
     `enforce_lan_only` is for the full firstboot apply: the LAN-only inbound firewall is then applied
     even with no (or no firewall section in the) config. A partial apply - the settings page saving one
     section - leaves it False, so saving an unrelated setting never depends on the firewall."""
-    summary = {"applied": [], "skipped": [], "failed": []}
+    summary = {"applied": [], "skipped": [], "failed": [], "errors": {}, "details": {}}
     if not config:
         summary["skipped"] = [
             "network", "ssh", "tether", "handoff",
             "smartd", "ethtool", "iperf3", "cpu_microcode", "wifi_firmware",
         ]
         if enforce_lan_only:
-            ok, _ = _lan_only(runner, {})
+            ok, detail = _lan_only(runner, {})
+            if not ok:
+                summary["errors"]["firewall"] = detail
             summary["applied" if ok else "failed"].append("firewall")
         else:
             summary["skipped"].append("firewall")
@@ -101,9 +103,14 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
             return
         try:
             result = apply_fn()
-        except Exception:        # one broken section must never stop the others (or raise out of firstboot)
+        except Exception as exc:  # retain failure, continue independent sections
+            summary["errors"][name] = f"{name} application raised {type(exc).__name__}"
             summary["failed"].append(name)
             return
+        if not result.ok:
+            summary["errors"][name] = result.detail
+        else:
+            summary["details"][name] = result.detail
         (summary["applied"] if result.ok else summary["failed"]).append(name)
 
     # Network settings
@@ -126,11 +133,6 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
     run_subsystem("tether", bool(tether),
                   lambda: config_apply.apply_tether_config(runner, tether))
 
-    # Handoff
-    handoff = config.get("handoff") or {}
-    run_subsystem("handoff", bool(handoff),
-                  lambda: config_apply.apply_handoff_config(runner, handoff))
-
     # Diagnostics tools
     run_subsystem("smartd", _has_any_key(proxmox, _SMARTD_KEYS),
                   lambda: config_apply.apply_smartd_config(runner, proxmox))
@@ -141,10 +143,15 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
     diagnostics = config.get("diagnostics") or {}
     iperf3 = diagnostics.get("iperf3") or {}
     def iperf3_apply():
-        if iperf3.get("role") == "server" and "firewall" not in summary["applied"]:
-            return config_apply.CommandResult(False, "iperf3 server not started: the LAN-only firewall is not active")
+        if iperf3.get("role") == "server":
+            if "firewall" in summary["failed"]:
+                return config_apply.CommandResult(False, "iperf3 server not started: requested firewall change failed")
+            import lan_firewall
+            active, detail = lan_firewall.verify_active(runner)
+            if not active:
+                return config_apply.CommandResult(False, f"iperf3 server not started: {detail}")
         return config_apply.apply_iperf3_config(runner, iperf3)
-    run_subsystem("iperf3", bool(iperf3), iperf3_apply)
+    run_subsystem("iperf3", bool(iperf3) and run_active_diagnostics, iperf3_apply)
 
     # Drivers
     run_subsystem("cpu_microcode", bool(drivers.get("cpu_microcode")),
@@ -153,5 +160,11 @@ def apply_stored_config(runner: Runner, config: dict | None, *, network_interfac
     run_subsystem("wifi_firmware", bool(drivers.get("nic_wifi_firmware")),
                   lambda: config_apply.apply_wifi_firmware(
                       runner, package=drivers.get("wifi_firmware_package") or "firmware-mediatek"))
+
+    # Handoff runs last so selected imported settings take precedence over
+    # their pre-existing values from this boot's config.
+    handoff = config.get("handoff") or {}
+    run_subsystem("handoff", bool(handoff),
+                  lambda: config_apply.apply_handoff_config(runner, handoff))
 
     return summary

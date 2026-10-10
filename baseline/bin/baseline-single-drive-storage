@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Apply measured offline storage or verify its real first-boot mounts."""
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import repair
+import single_drive_storage
+import storage_policy
+
+
+class RootRunner(repair.RealRunner):
+    def run(self, argv, timeout=10):
+        if os.geteuid() == 0 and list(argv[:2]) == ["sudo", "-n"]:argv = argv[2:]
+        return super().run(argv, timeout=timeout)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    verify = sub.add_parser("verify")
+    verify.add_argument("--reconcile-proxmox", action="store_true")
+    apply = sub.add_parser("provision")
+    apply.add_argument("serial")
+    apply.add_argument("root_mount")
+    apply.add_argument("measurements", help="JSON object: complete measured bytes for every role")
+    apply.add_argument("recovery_folder", help="verified whole-drive recovery image folder")
+    args = parser.parse_args()
+    runner = RootRunner()
+    try:
+        if args.action == "verify":
+            result = storage_policy.verify_runtime(runner)
+            if args.reconcile_proxmox:
+                result["native_storage"] = single_drive_storage.reconcile_proxmox_storage(runner)
+        else:
+            result = single_drive_storage.provision_target(runner, expected_serial=args.serial,
+                root_mount=args.root_mount, required_bytes=json.loads(Path(args.measurements).read_text()),
+                recovery_folder=args.recovery_folder)
+        print(json.dumps(result, indent=2))
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":raise SystemExit(main())

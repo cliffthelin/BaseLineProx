@@ -41,10 +41,14 @@ def main(argv=None) -> int:
         config = json.load(f)
 
     runner = RealRunner()
-    report = {
-        "install_detected": drive_installer.detect_existing_baseline_install(runner, vg_name=args.vg_name),
-        "diff_sections": config_diff.compute_full_diff(runner, config, network_interface=args.interface),
-    }
+    try:
+        report = {
+            "install_detected": drive_installer.detect_existing_baseline_install(runner, vg_name=args.vg_name),
+            "diff_sections": config_diff.compute_full_diff(runner, config, network_interface=args.interface),
+        }
+    except config_diff.ReadbackError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     text = json.dumps(report, indent=2, sort_keys=True, default=str)
     if args.out:
         with open(args.out, "w") as f:

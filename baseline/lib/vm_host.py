@@ -20,6 +20,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -45,9 +46,32 @@ def valid_name(name) -> bool:
 
 def list_isos(iso_dir) -> list:
     d = Path(iso_dir)
-    if not d.is_dir():
+    try:
+        directory_stat = d.lstat()
+    except FileNotFoundError:
         return []
-    return [{"name": p.name, "path": str(p), "size": p.stat().st_size} for p in sorted(d.glob("*.iso"))]
+    except OSError as exc:
+        raise VmError(f"cannot inspect ISO directory {d}: {exc}") from exc
+    if stat.S_ISLNK(directory_stat.st_mode):
+        raise VmError(f"ISO directory path is a symlink: {d}")
+    if not stat.S_ISDIR(directory_stat.st_mode):
+        raise VmError(f"ISO directory path is not a directory: {d}")
+    try:
+        entries = sorted(d.iterdir())
+    except OSError as exc:
+        raise VmError(f"cannot list ISO directory {d}: {exc}") from exc
+    isos = []
+    for path in entries:
+        if path.suffix.lower() != ".iso":
+            continue
+        try:
+            entry_stat = path.lstat()
+        except OSError as exc:
+            raise VmError(f"cannot inspect ISO entry {path}: {exc}") from exc
+        if not stat.S_ISREG(entry_stat.st_mode):
+            raise VmError(f"ISO entry is not a regular file: {path}")
+        isos.append({"name": path.name, "path": str(path), "size": entry_stat.st_size})
+    return isos
 
 
 def default_display(env) -> str:
@@ -69,6 +93,8 @@ def _real_spawn(argv) -> int:
 
 
 def _real_alive(pid: int) -> bool:
+    if type(pid) is not int or pid <= 0:
+        raise VmError("process observation requires a positive process ID")
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -76,16 +102,24 @@ def _real_alive(pid: int) -> bool:
     except PermissionError:
         return True
     try:
-        return Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0] != "Z"
-    except OSError:
-        return False
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except OSError as exc:
+        raise VmError(f"cannot inspect process state for PID {pid}: {exc}") from exc
+    if not fields:
+        raise VmError(f"process state for PID {pid} is malformed")
+    return fields[0] != "Z"
 
 
 def _real_cmdline(pid: int) -> list:
+    if type(pid) is not int or pid <= 0:
+        raise VmError("process observation requires a positive process ID")
     try:
-        return Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\0")
-    except OSError:
+        content = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError as exc:
+        raise VmError(f"cannot inspect command line for PID {pid}: {exc}") from exc
+    if not content:
         return []
+    return [argument.decode(errors="replace") for argument in content.rstrip(b"\0").split(b"\0")]
 
 
 def _real_kill(pid: int) -> None:
@@ -181,9 +215,18 @@ class VmHost:
     def _spec(self, name: str) -> dict:
         path = self.vm_dir(name) / "vm.json"
         try:
-            return json.loads(path.read_text())
-        except (OSError, ValueError):
+            text = path.read_text()
+        except FileNotFoundError:
             raise VmError(f"no such VM: {name}") from None
+        except OSError as exc:
+            raise VmError(f"cannot read VM record for {name}: {exc}") from exc
+        try:
+            spec = json.loads(text)
+        except (ValueError, UnicodeError):
+            raise VmError(f"invalid VM record for {name}: vm.json is not valid JSON") from None
+        if not isinstance(spec, dict):
+            raise VmError(f"invalid VM record for {name}: expected a JSON object")
+        return spec
 
     def _write_spec(self, name: str, spec: dict) -> None:
         (self.vm_dir(name) / "vm.json").write_text(json.dumps(spec, indent=1))
@@ -282,11 +325,21 @@ class VmHost:
     def _pidfile(self, name: str) -> Path:
         return self.vm_dir(name) / "vm.pid"
 
-    def _recorded_pid(self, name: str):
+    def _recorded_pid(self, name: str, *, pidfile_path=None):
+        self._need_name(name)
+        pidfile = Path(pidfile_path) if pidfile_path is not None else self._pidfile(name)
         try:
-            return int(json.loads(self._pidfile(name).read_text())["pid"])
-        except (OSError, ValueError, KeyError):
+            record = json.loads(pidfile.read_text())
+        except FileNotFoundError:
             return None
+        except OSError as exc:
+            raise VmError(f"cannot inspect VM PID record {pidfile}: {exc}") from exc
+        except (ValueError, TypeError) as exc:
+            raise VmError(f"VM PID record {pidfile} is invalid JSON: {exc}") from exc
+        pid = record.get("pid") if isinstance(record, dict) else None
+        if type(pid) is not int or pid <= 0:
+            raise VmError(f"VM PID record {pidfile} must contain a positive integer PID")
+        return pid
 
     def _is_our_qemu(self, name: str, pid) -> bool:
         if pid is None or not self.is_alive(pid):
@@ -440,22 +493,63 @@ class VmHost:
         os.replace(fresh, disk)
 
     def freeze_as_base(self, name: str, base_name: str) -> None:
-        spec = self._need_stopped(name)
-        if spec.get("base"):
-            raise VmError("only a standalone VM can become a base image")
+        self._need_name(name)
+        self._need_name(base_name)
+        operation = self.store / "operations" / f"freeze-{name}.json"
         target = self.base_path(base_name)
-        if target.exists():
-            raise VmError(f"a base image named {base_name} already exists")
         self.bases_dir.mkdir(parents=True, exist_ok=True)
-        disk = self.disk_path(name)
-        shutil.move(str(disk), str(target))
+        if operation.exists():
+            try:
+                state = json.loads(operation.read_text())
+            except (OSError, ValueError):
+                raise VmError(f"freeze operation state for {name} is unreadable; refusing to guess") from None
+            if state != {"vm": name, "base": base_name}:
+                raise VmError(f"another incomplete freeze operation exists for {name}")
+        else:
+            spec = self._need_stopped(name)
+            if spec.get("base") or not spec.get("root_disk"):
+                raise VmError("only a standalone VM can become a base image")
+            if Path(spec["root_disk"]) != self.standalone_path(name):
+                raise VmError("unexpected standalone disk location")
+            if target.exists():
+                raise VmError(f"a base image named {base_name} already exists")
+            operation.parent.mkdir(parents=True, exist_ok=True)
+            with operation.open("x") as stream:
+                stream.write(json.dumps({"vm": name, "base": base_name}))
+                stream.flush()
+                os.fsync(stream.fileno())
+
+        vm_dir = self.vm_dir(name)
+        source = self.standalone_path(name)
+        if vm_dir.exists():
+            # A retry may resume only the same stopped standalone VM. The durable
+            # operation record survives if rmtree partially removes this directory.
+            if (vm_dir / "vm.json").is_file():
+                spec = self._need_stopped(name)
+                if spec.get("base") or not spec.get("root_disk") or Path(spec["root_disk"]) != source:
+                    raise VmError("incomplete freeze no longer matches the standalone VM")
+            elif source.exists() or not target.is_file():
+                raise VmError("incomplete freeze has no VM record or completed base image")
+        if source.exists() and target.exists():
+            raise VmError("both source disk and base image exist during freeze; refusing to replace either")
+        if source.exists():
+            shutil.move(str(source), str(target))
+        elif not target.is_file():
+            raise VmError("incomplete freeze has neither its source disk nor a base image")
         os.chmod(target, 0o444)
-        shutil.rmtree(self.vm_dir(name), ignore_errors=True)
+        if vm_dir.exists():
+            shutil.rmtree(vm_dir)
+        operation.unlink()
 
     def delete_vm(self, name: str) -> None:
         spec = self._need_stopped(name)
+        if spec.get("root_disk") and not spec.get("deleting"):
+            # Persist intent before touching the separately stored disk. If cleanup
+            # is interrupted, a retry can distinguish our missing disk from drift.
+            spec["deleting"] = True
+            self._write_spec(name, spec)
         if spec.get("root_disk"):
-            self.disk_path(name).unlink()
+            self.standalone_path(name).unlink(missing_ok=bool(spec.get("deleting")))
         shutil.rmtree(self.vm_dir(name))
 
     def delete_base(self, base_name: str) -> None:
@@ -470,6 +564,7 @@ class VmHost:
 
     # ---- listing -----------------------------------------------------------------------------------------------
     def list_bases(self) -> list:
+        self._check_store(self.store)
         if not self.bases_dir.is_dir():
             return []
         out = []
@@ -480,6 +575,7 @@ class VmHost:
         return out
 
     def list_vms(self) -> list:
+        self._check_store(self.store)
         if not self.vms_dir.is_dir():
             return []
         out = []
@@ -487,6 +583,6 @@ class VmHost:
             if valid_name(d.name) and (d / "vm.json").is_file():
                 try:
                     out.append(self.status(d.name))
-                except VmError:
-                    continue
+                except VmError as exc:
+                    raise VmError(f"cannot inspect VM {d.name}: {exc}") from exc
         return out

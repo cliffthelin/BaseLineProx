@@ -17,6 +17,9 @@ Every drive action needs a person to confirm THAT exact request, each time, and 
   with "authorize for today" lets that account run that one action on that one drive until the local day ends;
   a different drive, a different action or the next day needs a new confirmation. Bound to the account (not one
   login), in memory only, revocable, and never available for the install action.
+- Automatic installed updates may request native PolicyKit authorization instead of a second
+  web password and typed phrase (operator instruction 2026-10-07). This pending request
+  is usable only with PkexecRunner; privilege still requires native authorization.
 - Every step is written to an append-only audit log; the secret never is.
 
 This module holds state in memory only: after a restart there are no pending challenges and no approvals.
@@ -45,13 +48,16 @@ VERBS = {
     "repair": "REPAIR",
     "mount_volume": "MOUNT",
     "unmount_volume": "UNMOUNT",
+    "unmount_partition": "UNMOUNT PARTITION",
     "update_selected": "UPDATE",
     "stamp_installer_identity": "STAMP",
     "lay_out_baseline_drive": "LAYOUT",
     "enroll_drive": "ENROLL",
+    "update_installed_drive": "REDEPLOY",
 }
 CONFIRMED_ACTIONS = frozenset(VERBS)
-NEVER_PRE_APPROVED = frozenset({"build_self_installer", "lay_out_baseline_drive", "enroll_drive"})
+NEVER_PRE_APPROVED = frozenset({"build_self_installer", "lay_out_baseline_drive", "enroll_drive", "update_installed_drive", "unmount_partition"})
+NATIVE_POLICYKIT_ACTIONS = frozenset({"update_installed_drive", "unmount_partition"})
 
 _SECRET = secrets.token_bytes(32)
 
@@ -96,7 +102,7 @@ def _mac(nonce: str, digest: str, expires: float, kind: str) -> str:
 
 
 class Authorization:
-    """Proof that a person confirmed one exact request. Minted only by a ConfirmationStore."""
+    """Signed single-use confirmation or pending native authorization request."""
 
     __slots__ = ("_store", "_nonce", "_digest", "_expires", "_kind", "_mac")
 
@@ -234,6 +240,28 @@ class ConfirmationStore:
             self._audit({"event": "confirmed", "id": challenge_id, "action": record["action"],
                          "serial": record["serial"], "who": _who(session_id)})
             return auth
+
+    def request_native_update(self, session_id, challenge_id):
+        """Compatibility wrapper for the installed-update PolicyKit flow."""
+        return self.request_native_policykit(session_id, challenge_id)
+
+    def request_native_policykit(self, session_id, challenge_id):
+        """Single-use request for Ubuntu PolicyKit authorization, not proof it succeeded."""
+        with self._lock:
+            now=self.clock();self._prune(now)
+            record=self._pending.get(challenge_id)
+            if record is None:
+                self._refuse(session_id,challenge_id,'unknown','Native request expired or already used')
+            if record['action'] not in NATIVE_POLICYKIT_ACTIONS:
+                self._refuse(session_id,challenge_id,'action','This action does not support native PolicyKit authorization')
+            if not hmac.compare_digest(str(record['session']),str(session_id)):
+                self._refuse(session_id,challenge_id,'session','Native request belongs to another session')
+            if now-record['created']<self.min_wait_s:
+                self._refuse(session_id,challenge_id,'too_fast','Wait for the native permission review')
+            del self._pending[challenge_id]
+            self._audit({'event':'native_authorization_requested','action':record['action'],
+                         'serial':record['serial'],'who':_who(session_id)})
+            return self._mint(record['digest'],'native_pending',now+AUTHORIZATION_USE_WINDOW_S)
 
     def owns(self, authorization) -> bool:
         return isinstance(authorization, Authorization) and authorization._store is self

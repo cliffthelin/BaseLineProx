@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""Take PC401 from wipe to a working Baseline desktop by script only - no web UI in the install path.
+
+The installer is self-contained: the ISO carries Proxmox, the Baseline source and an offline package cache, and the
+installed system finishes its own installation on first boot with no internet and nothing attached but the ISO.
+This script only builds that installer and runs it against PC401 under KVM:
+
+  preflight    read-only: PC401 identity by serial, PC601 protected, cached Proxmox ISO, verified assistant, space
+  recovery     add-only, verified whole-drive image of PC401 in /mnt/10TB/backup   (drive_recovery)      [root]
+  cache        build the offline package cache once (baseline-build-offline-cache), verify its manifest
+  install      self_installer with the cache and first-boot hook: Proxmox installs onto PC401, then its first
+               boot lays out storage, carries the ISO + environment onto INSTALLER_CACHE and provisions offline;
+               ends at the first-boot authorization screen                                             [root]
+  firstboot    type CONFIRM into that same session; ends when the kiosk browser shows Proxmox
+  kiosk        capture the kiosk screen and shut PC401 down cleanly
+
+Nothing reads console text automatically (no OCR, by design): the person or vision-capable agent watching
+.runtime-proof173/session-latest.ppm records each checkpoint with the `touch` the script prints.
+
+PC401 (MD89N41071210AP4E) is the only possible target; PC601 (FD01N6557110C271B) is refused. Every destructive step
+re-validates the target through physical_device_safety.validate_target_device. The data-protection guard in
+self_installer is honoured, never bypassed: PC401 must be empty or carry an installer-made identity.
+
+    sudo baseline/bin/baseline-allscript-install --from recovery --confirm-wipe MD89N41071210AP4E
+    baseline/bin/baseline-allscript-install --stage preflight    # read-only, no root needed
+"""
+import argparse
+import json
+import os
+import secrets
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "baseline/lib"))
+
+SERIAL = "MD89N41071210AP4E"          # PC401: the operator-selected installation target
+SIZE = 512110190592
+PROTECTED = "FD01N6557110C271B"       # PC601: never a target
+WORK = REPO / ".runtime-proof173"
+SOURCE_ISO = Path("/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso")
+ASSISTANT = Path("/var/tmp/baseline-self-installer/acquire/extracted/usr/bin/proxmox-auto-install-assistant")
+BACKUP_ROOT = Path("/mnt/10TB/backup")
+OS_ISOS = Path("/mnt/INSTALLER_CACHE/isos")     # vanilla installer ISOs already on this machine
+PROXY = REPO / "baseline/lib/installer_package_proxy.py"  # allowlisted package proxy, listens on 127.0.0.1:32165
+PROXY_PORT = 32165
+OPERATOR = "cane"                               # owner of the work directory, so the run can be followed
+
+BUILD = Path("/run/media/cane/CACHE/baseline-build")   # build workspace only; nothing installed depends on it
+CACHE_DIR = BUILD / "offline-cache"
+INSTALL_VM = None                                         # the install stage's KVM session, continued by later stages
+
+STAGES = ("preflight", "recovery", "cache", "install", "firstboot", "kiosk")
+OPTIONAL_STAGES = ("rehearse",)        # run explicitly: --stage rehearse, then --stage firstboot/kiosk in one go
+ROOT_STAGES = {"recovery", "install"}
+
+
+# --- pure decisions (unit-tested) --------------------------------------------------------------
+
+def select_stages(stage, start):
+    if stage == "rehearse":
+        return ["rehearse", "firstboot", "kiosk"]           # one KVM session from install to kiosk
+    if stage is not None:
+        if stage not in STAGES:
+            raise ValueError(f"unknown stage {stage!r}; stages are: {', '.join(STAGES)}")
+        return [stage]
+    if start is not None:
+        if start not in STAGES:
+            raise ValueError(f"unknown stage {start!r}; stages are: {', '.join(STAGES)}")
+        return list(STAGES[STAGES.index(start):])
+    return list(STAGES)
+
+
+def confirmation_ok(typed, serial):
+    return isinstance(typed, str) and typed.strip() == f"WIPE {serial}"
+
+
+def refuse_protected(target, protected):
+    if target.get("serial") == PROTECTED:
+        raise RuntimeError("PC601 is protected and can never be the installation target")
+    if protected is not None and protected.get("path") == target.get("path"):
+        raise RuntimeError("the target resolves to the protected drive's device; refusing")
+
+
+def wipe_authorized(value):
+    """The run-time authorization to erase PC401: its exact serial, given on the command line."""
+    return value == SERIAL
+
+
+# --- shared plumbing -----------------------------------------------------------------------------
+
+def say(*parts):
+    print("[allscript]", *parts, flush=True)
+
+
+def journal():
+    path = WORK / "progress.json"
+    data = json.loads(path.read_text()) if path.exists() else {"serial": SERIAL, "stages": {}}
+    if data.get("serial") != SERIAL:
+        raise RuntimeError("progress journal belongs to a different drive")
+    return data
+
+
+def record(stage, **facts):
+    data = journal()
+    data["stages"][stage] = dict(facts, finished=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    path = WORK / "progress.json"
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    _give_to_operator(path)
+
+
+def _give_to_operator(path):
+    if os.geteuid() == 0:
+        try:
+            shutil.chown(path, OPERATOR, OPERATOR)
+        except (LookupError, OSError):
+            pass
+
+
+def runner():
+    import repair
+
+    class RootRunner(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    return RootRunner()
+
+
+def identify(r):
+    """The serial-validated target and the protected drive's current device, re-resolved every time."""
+    import drive_recovery
+    import physical_device_safety as pds
+    disk = drive_recovery._offline_disk(r, SERIAL)
+    target = pds.validate_target_device(disk["name"], expected_serial=SERIAL, min_size_bytes=SIZE, max_size_bytes=SIZE)
+    try:
+        protected = {"path": drive_recovery._offline_disk(r, PROTECTED)["name"], "serial": PROTECTED}
+    except Exception:  # noqa: BLE001 - an absent PC601 cannot be confused with the target
+        protected = None
+    refuse_protected(target, protected)
+    return target
+
+
+def guarded(target):
+    import physical_device_safety as pds
+
+    def check():
+        fresh = pds.validate_target_device(target["path"], expected_serial=SERIAL, min_size_bytes=SIZE,
+                                           max_size_bytes=SIZE)
+        if fresh != target:
+            raise RuntimeError("target identity changed")
+    return check
+
+
+def sh(argv, *, check=True, timeout=600, env=None, input=None):
+    say("running:", " ".join(shlex.quote(str(a)) for a in argv))
+    return subprocess.run([str(a) for a in argv], check=check, timeout=timeout, env=env, input=input,
+                          text=True, capture_output=input is not None)
+
+
+def lvm_rows(r, pv):
+    import single_drive_storage as storage
+    report = storage._json_command(r, ["pvs", "--devices", pv, "--reportformat", "json", "-o",
+                                       "pv_name,pv_uuid,vg_name,vg_uuid"])
+    return report["report"][0]["pv"]
+
+
+def deactivate_target_vgs(r, target):
+    """Deactivate only the target's own VGs on this host, after confirming none of their LVs is mounted."""
+    pv = target["path"] + "3"
+    if not Path(pv).exists():
+        return []
+    rows = lvm_rows(r, pv)
+    for row in rows:
+        mapper = "/dev/mapper/" + row["vg_name"].replace("-", "--") + "-"
+        mounted = [line for line in Path("/proc/self/mountinfo").read_text().splitlines()
+                   if f" {mapper}" in line]
+        if mounted:
+            raise RuntimeError(f"{row['vg_name']} still has mounted volumes; unmount them first")
+        sh(["vgchange", "--devices", pv, "-an", row["vg_name"]], timeout=120)
+    return [row["vg_name"] for row in rows]
+
+
+# --- stages --------------------------------------------------------------------------------------
+
+def stage_preflight(r):
+    target = identify(r)
+    say("target:", target["path"], "serial", target["serial"], f"{target['size_bytes']} bytes")
+    lsblk = subprocess.run(["lsblk", "-o", "NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS", target["path"]],
+                           capture_output=True, text=True).stdout
+    print(lsblk, flush=True)
+    for need in (SOURCE_ISO, ASSISTANT, PROXY):
+        if not need.exists():
+            raise RuntimeError(f"missing: {need}")
+    free = shutil.disk_usage(BACKUP_ROOT).free
+    if free < 100 * 1024**3:
+        raise RuntimeError(f"less than 100 GiB free in {BACKUP_ROOT}")
+    isos = sorted(p.name for p in OS_ISOS.glob("*.iso")) if OS_ISOS.is_dir() else []
+    import drive_guard
+    state = drive_guard.read_drive_state(target["path"])
+    formattable = (not state.has_data) or drive_guard.is_installer_uuid(state.ptuuid)
+    say("Proxmox source ISO:", SOURCE_ISO.name, "| assistant present | backup free:", f"{free // 1024**3} GiB")
+    say("OS ISOs to offer on PC401:", ", ".join(isos) or "none")
+    say("data-protection guard would allow formatting PC401:", "yes" if formattable else
+        "NO - PC401 holds data whose disk identifier the installer registry does not know")
+    record("preflight", target=target["path"], formattable=formattable, os_isos=isos)
+
+
+def stage_recovery(r):
+    import drive_recovery
+    identify(r)
+    mounts = drive_recovery.quiesce_source(r, serial=SERIAL, allowed_serials=[SERIAL])
+    say("quiesced:", mounts)
+    folder = drive_recovery.create_snapshot(r, serial=SERIAL, destination=str(BACKUP_ROOT), allowed_serials=[SERIAL])
+    manifest = drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
+    say("verified recovery image:", folder)
+    record("recovery", folder=str(folder), manifest=manifest)
+
+
+def stage_install(r):
+    import drive_recovery
+    import drive_setup_acquire as dsa
+    import drive_setup_answer as dsan
+    import drive_setup_install as dsi
+    import iso_builder as ib
+    import physical_device_safety as pds
+    import self_installer as si
+    folder = journal()["stages"].get("recovery", {}).get("folder")
+    if not folder:
+        raise RuntimeError("run the recovery stage first; nothing is written to PC401 without a verified image")
+    drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
+    target = identify(r)
+    say("deactivated on this host:", deactivate_target_vgs(r, target))
+    typed = input(f"\nThis ERASES PC401 ({SERIAL}, {target['path']}). Recovery image: {folder}\n"
+                  f"Type  WIPE {SERIAL}  to continue: ")
+    if not confirmation_ok(typed, SERIAL):
+        raise RuntimeError("not confirmed; nothing was written")
+    if not (CACHE_DIR / "MANIFEST.json").is_file():
+        raise RuntimeError("run the cache stage first; the installer must carry its own packages")
+    target = identify(r)
+    workspace = WORK / "installer"
+    result = si.build_and_write_self_installer(
+        device_path=target["path"], device_min_size_bytes=SIZE, expected_serial=SERIAL,
+        pds_runner=pds.Runner(), acquire_runner=dsa.RealAcquireRunner(), answer_runner=dsan.RealAnswerRunner(),
+        iso_builder_runner=ib.RealIsoBuilderRunner(), install_runner=dsi.RealInstallRunner(),
+        workspace=workspace, repo_root=REPO, assistant_binary=ASSISTANT, proxmox_source_iso=SOURCE_ISO,
+        fqdn="baseline-pc401.local", memory_mb=8192, on_progress=lambda line: say(line),
+        offline_cache=CACHE_DIR, **si.LVM_SIZE_PRESETS["single-drive"])
+    say(result.outcome + ":", result.detail)
+    if result.outcome != "applied" or result.qemu_process is None:
+        raise RuntimeError("the installer refused or did not launch; PC401 was not written by this stage")
+    global INSTALL_VM
+    INSTALL_VM = result.qemu_process
+    # Same KVM session, ISO still attached: Proxmox installs, reboots, its first boot runs the carried hook
+    # (storage, installer carried onto INSTALLER_CACHE, offline provision), then reboots into first-boot
+    # authorization. Nothing here reads console text (no OCR, by design): a person or vision-capable agent watches
+    # the screendump and records each checkpoint.
+    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
+    record("install", workspace=str(workspace))
+
+
+def watch(checkpoint, description):
+    """Refresh the session screendump until the named checkpoint file is created by whoever is watching it."""
+    done = WORK / f"seen-{checkpoint}"
+    shot = WORK / "session-latest.ppm"
+    say(f"waiting for {description}; screendump: {shot} - when it shows, run:  touch {done}")
+    while not done.exists():
+        if INSTALL_VM.poll() is not None:
+            raise RuntimeError(f"the installation VM exited ({INSTALL_VM.poll()}) before: {description}")
+        try:
+            INSTALL_VM.send_monitor_command(f"screendump {shot}")
+            _give_to_operator(shot)
+        except (OSError, RuntimeError):
+            pass
+        time.sleep(10)
+
+
+def send_keys(text):
+    names = {"\n": "ret", " ": "spc", "-": "minus", ".": "dot", "/": "slash"}
+    for char in text:
+        key = names.get(char) or (f"shift-{char.lower()}" if char.isupper() else char)
+        INSTALL_VM.send_monitor_command(f"sendkey {key}")
+        time.sleep(0.05)
+
+
+def stage_cache(r):
+    if (CACHE_DIR / "MANIFEST.json").is_file():
+        say("offline package cache already built:", CACHE_DIR)
+    else:
+        sh([REPO / "baseline/bin/baseline-build-offline-cache", "--source-iso", SOURCE_ISO, "--assistant", ASSISTANT,
+            "--workspace", BUILD / "cache-vm", "--output", CACHE_DIR], timeout=7200)
+    import offline_cache
+    count = offline_cache.verify_manifest(CACHE_DIR, json.loads((CACHE_DIR / "MANIFEST.json").read_text()))
+    record("cache", path=str(CACHE_DIR), files=count)
+
+
+def stage_rehearse(r):
+    """The same self-contained installer, run against a blank sparse disk the size of PC401 with NO network.
+
+    Built by the same functions as the real install (render_answer, first_boot_hook, prepare_iso_defensively,
+    iso_builder with the offline cache). Only the answer delivery differs: embedded in the ISO, which docs/INSTALL.md
+    accepts for disposable VMs only; the real install keeps the HTTP answer server. No root, no physical drive.
+    """
+    import drive_setup_answer as dsan
+    import drive_setup_install as dsi
+    import first_boot_hook as fbh
+    import iso_builder as ib
+    import self_installer as si
+    if not (CACHE_DIR / "MANIFEST.json").is_file():
+        raise RuntimeError("run the cache stage first")
+    work = BUILD / "rehearsal"
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+    password = dsan.generate_one_time_password()
+    secret = work / "root-password"; secret.write_bytes(password + b"\n"); secret.chmod(0o600)
+    answer = work / "answer.toml"
+    answer.write_text(si.render_answer(fqdn="baseline-rehearsal.local",
+                                       password_hash=dsan.hash_password_sha512crypt(password, secrets.token_hex(8)),
+                                       disk_serial="BLREHEARSAL01", first_boot=True,
+                                       **si.LVM_SIZE_PRESETS["single-drive"]))
+    answer.chmod(0o600)                                    # holds the password hash; the build drive's ACLs widen it
+    hook = fbh.build_hook(REPO, work / "baseline-first-boot")
+    prepared = dsan.prepare_iso_defensively(
+        dsan.RealAnswerRunner(), binary=ASSISTANT, source_iso=SOURCE_ISO, answer_file=answer, fetch_from="iso",
+        output_path=work / "answer.iso", tmp_dir=work / "prep-tmp", workspace_root=work, expected_fetch_mode="iso",
+        min_size=1_000_000_000, max_size=3_000_000_000, forbidden_iso_strings=[],
+        extra_args=["--on-first-boot", str(hook)])
+    if not prepared.ok:
+        raise RuntimeError(f"prepare-iso failed: {[c for c in prepared.postconditions if not c.ok]}")
+    built = ib.build_current_iso(ib.RealIsoBuilderRunner(), source_iso=work / "answer.iso", repo_root=REPO,
+                                 output_iso=work / "installer.iso", workspace=work / "iso-build",
+                                 offline_cache=CACHE_DIR)
+    if not built.ok:
+        raise RuntimeError(f"ISO build failed: {[c for c in built.postconditions if not c.ok]}")
+    disk = work / "disk.raw"
+    with open(disk, "wb") as stream:
+        stream.truncate(SIZE)                                  # sparse, same size as PC401
+    invocation = dsi.build_sparse_install_invocation(
+        target_image=disk, prepared_iso=work / "installer.iso", mac="52:54:00:ba:5e:7e",
+        smbios_product="baseline-rehearsal", serial_log=work / "serial.log", memory_mb=8192, smp=4,
+        restrict_network=True, monitor_socket=work / "monitor.sock", target_serial="BLREHEARSAL01")
+    argv = invocation.argv + ["-display", "none"]
+    global INSTALL_VM
+    INSTALL_VM = dsi.RealInstallRunner().popen(argv, monitor_socket=work / "monitor.sock")
+    say("rehearsal installing with no network; root password for this disposable VM:", secret)
+    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
+    record("rehearse", workspace=str(work))
+
+
+def stage_session_firstboot(r):
+    if INSTALL_VM is None:
+        raise RuntimeError("firstboot continues the install stage's session; run them in one invocation")
+    send_keys("CONFIRM\n")
+    say("CONFIRM typed on the first-boot screen")
+    watch("kiosk", "the kiosk browser showing the Proxmox login")
+    record("firstboot")
+
+
+def stage_session_kiosk(r):
+    if INSTALL_VM is None:
+        raise RuntimeError("kiosk continues the install stage's session; run them in one invocation")
+    shot = WORK / "kiosk.ppm"
+    INSTALL_VM.send_monitor_command(f"screendump {shot}")
+    time.sleep(1)
+    from drive_setup_install import ppm_to_png
+    (WORK / "kiosk.png").write_bytes(ppm_to_png(shot.read_bytes()))
+    _give_to_operator(WORK / "kiosk.png")
+    INSTALL_VM.send_monitor_command("system_powerdown")
+    code = INSTALL_VM.wait(timeout=600)
+    say("PC401 shut down cleanly after the kiosk was shown; QEMU exit", code)
+    record("kiosk", screenshot=str(WORK / "kiosk.png"), qemu_exit=code)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--stage", help="run only this stage")
+    parser.add_argument("--from", dest="start", help="run this stage and every later one")
+    parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
+                        help=f"authorize erasing PC401 (after its verified recovery image); must be exactly {SERIAL}")
+    args = parser.parse_args()
+    global CONFIRMED_WIPE
+    CONFIRMED_WIPE = args.confirm_wipe
+    stages = select_stages(args.stage, args.start)
+    if "install" in stages and not wipe_authorized(CONFIRMED_WIPE):
+        raise RuntimeError(f"the install stage erases PC401: add  --confirm-wipe {SERIAL}")
+    needs_root = sorted(set(stages) & ROOT_STAGES)
+    if needs_root and os.geteuid() != 0:
+        raise RuntimeError(f"stages {', '.join(needs_root)} need root: run with sudo")
+    WORK.mkdir(mode=0o750, exist_ok=True)
+    _give_to_operator(WORK)
+    r = runner()
+    functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,
+                 "rehearse": stage_rehearse, "install": stage_install, "firstboot": stage_session_firstboot,
+                 "kiosk": stage_session_kiosk}
+    for stage in stages:
+        say(f"=== {stage} ===")
+        functions[stage](r)
+    say("done:", ", ".join(stages))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        print(f"[allscript] STOPPED, nothing claimed complete: {exc}", file=sys.stderr)
+        sys.exit(1)

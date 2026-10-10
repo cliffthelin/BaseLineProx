@@ -9,10 +9,9 @@ installer at all. The Milestone 1 install-pipeline work
 image* - a different job from this module, which is the check that
 decides whether that job needs to run at all on a given target.
 
-Never raises on an absent tool/path - a host with no Proxmox installed
-at all is the normal "go ahead and install" case, not an error.
-Reuses `repair.py`'s `Runner`/`RealRunner`/`FakeRunner` pattern rather
-than inventing a new subprocess boundary.
+Known package absence, a missing `pveversion` command, and an unmounted
+`/etc/pve` are normal fresh-host evidence. Probe failures remain errors;
+they never authorize the installer path.
 """
 from __future__ import annotations
 
@@ -26,31 +25,42 @@ class InstallState:
     installed: bool
     version: str | None = None
     evidence: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass
 class InstallDecision:
-    action: str  # "run_diagnostics_only" | "run_installer"
+    action: str  # "run_diagnostics_only" | "run_installer" | "detection_unavailable"
     state: InstallState
     reason: str
 
 
-def _dpkg_version(runner: Runner) -> str | None:
-    proc = runner.run(["dpkg-query", "-W", "-f=${Version}", "proxmox-ve"], timeout=10)
-    if proc.returncode == 0 and proc.stdout.strip():
-        return proc.stdout.strip()
-    return None
+def _probe(runner: Runner, argv: list[str], *, absent_markers=()):
+    label = " ".join(argv)
+    try:
+        proc = runner.run(argv, timeout=10)
+    except Exception as exc:  # command-boundary failures are observations, not absence
+        return None, f"{label}: {type(exc).__name__}: {exc}"
+    output = (proc.stdout or "").strip()
+    detail = (proc.stderr or "").strip() or output or f"exited {proc.returncode}"
+    if proc.returncode == 0:
+        if output:
+            return output, None
+        return None, f"{label}: successful command returned no status"
+    if any(marker in detail.lower() for marker in absent_markers):
+        return None, None
+    return None, f"{label}: {detail}"
 
 
-def _pveversion_present(runner: Runner) -> str | None:
-    proc = runner.run(["pveversion"], timeout=10)
-    if proc.returncode == 0 and proc.stdout.strip():
-        return proc.stdout.strip()
-    return None
+def _dpkg_version(runner: Runner):
+    return _probe(runner, ["dpkg-query", "-W", "-f=${Version}", "proxmox-ve"],
+                  absent_markers=("no packages found",))
 
 
-def _pmxcfs_mounted(runner: Runner) -> bool:
-    return runner.path_exists("/etc/pve")
+def _pveversion_present(runner: Runner):
+    return _probe(runner, ["pveversion"],
+                  absent_markers=("command not found", "not found on path",
+                                  "no such file or directory"))
 
 
 def detect_proxmox_install(runner: Runner) -> InstallState:
@@ -62,23 +72,34 @@ def detect_proxmox_install(runner: Runner) -> InstallState:
     project's own disposable QEMU test images) is a normal, expected
     "not installed" result, not an error."""
     evidence: list[str] = []
+    errors: list[str] = []
     version: str | None = None
 
-    dpkg_version = _dpkg_version(runner)
+    dpkg_version, error = _dpkg_version(runner)
+    if error:
+        errors.append(error)
     if dpkg_version:
         evidence.append(f"dpkg-query reports proxmox-ve {dpkg_version} installed")
         version = dpkg_version
 
-    pve_version_output = _pveversion_present(runner)
+    pve_version_output, error = _pveversion_present(runner)
+    if error:
+        errors.append(error)
     if pve_version_output:
         evidence.append(f"pveversion runs and reports: {pve_version_output}")
         if version is None:
             version = pve_version_output
 
-    if _pmxcfs_mounted(runner):
-        evidence.append("/etc/pve (pmxcfs) is present")
+    try:
+        pmxcfs_mounted = runner.path_exists("/etc/pve")
+    except Exception as exc:
+        errors.append(f"/etc/pve mountpoint: {type(exc).__name__}: {exc}")
+    else:
+        if pmxcfs_mounted:
+            evidence.append("/etc/pve (pmxcfs) is present")
 
-    return InstallState(installed=bool(evidence), version=version, evidence=evidence)
+    return InstallState(installed=bool(evidence), version=version,
+                        evidence=evidence, errors=errors)
 
 
 def decide_next_action(state: InstallState) -> InstallDecision:
@@ -91,6 +112,12 @@ def decide_next_action(state: InstallState) -> InstallDecision:
             state=state,
             reason="Proxmox is already installed (" + "; ".join(state.evidence) +
                    ") - skipping the installer entirely and going straight to results.",
+        )
+    if state.errors:
+        return InstallDecision(
+            action="detection_unavailable",
+            state=state,
+            reason="Proxmox installation status could not be established: " + "; ".join(state.errors),
         )
     return InstallDecision(
         action="run_installer",

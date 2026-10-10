@@ -6,8 +6,8 @@ a parallel QEMU process. Directory storage is registered only on explicitly
 mounted volumes. Existing storage definitions are never overwritten.
 
 The current implementation keeps the VMID and home volume across an OS
-rebuild. It refuses destructive retirement of machines with retained data;
-Proxmox's qm destroy otherwise deletes all its owned disks.
+rebuild. Confirmed retirement validates the live VM configuration and storage
+ownership before asking Proxmox to delete its managed disks.
 """
 from __future__ import annotations
 
@@ -27,6 +27,88 @@ USER_STORAGE = "baseline-user"
 def _input(argv, data):
     result = subprocess.run(argv, input=data, capture_output=True, timeout=75)
     return result.returncode, result.stdout.decode(errors='replace'), result.stderr.decode(errors='replace')
+
+
+def retirement_volumes(name, spec, record, config):
+    """Return only this managed VM's owned volumes; reject any unowned disk."""
+    if not isinstance(config, dict):
+        raise vh.VmError('VM configuration is unavailable; retirement refused')
+    volumes = managed_retirement_volumes(name, spec, record)
+    vmid = record['vmid']
+    if config.get('name') != name or config.get('lock'):
+        raise vh.VmError('VM identity or lock changed; retirement refused')
+    if config.get('virtio0', '').split(',')[0] != volumes[0]:
+        raise vh.VmError('managed root-disk attachment changed; retirement refused')
+    home_expected = volumes[1] if spec.get('persistence_disk') else None
+    if home_expected:
+        if (config.get('virtio1', '').split(',')[0] != home_expected
+                or 'serial=baseline-home' not in config.get('virtio1', '').split(',')):
+            raise vh.VmError('retained-home attachment changed; retirement refused')
+    elif config.get('virtio1'):
+        raise vh.VmError('unexpected secondary VM disk; retirement refused')
+    allowed_devices = {'virtio0'} | ({'virtio1'} if home_expected else set())
+    efi_expected = next((volume for volume in volumes if volume.endswith(f'vm-{vmid}-disk-1.raw')), None)
+    for key, value in config.items():
+        if key == 'ide2' and value.startswith(f'{OS_STORAGE}:iso/') and 'media=cdrom' in value.split(','):
+            continue
+        if key == 'efidisk0' and efi_expected:
+            if value.split(',')[0] != efi_expected:
+                raise vh.VmError('EFI disk ownership changed; retirement refused')
+            continue
+        if key in allowed_devices:
+            continue
+        if key.startswith(('virtio', 'scsi', 'sata', 'ide', 'efidisk', 'unused')):
+            raise vh.VmError(f'additional attached volume {key}; retirement refused')
+    if bool(efi_expected) != bool(config.get('efidisk0')):
+        raise vh.VmError('EFI disk attachment is missing; retirement refused')
+    return volumes
+
+
+def managed_retirement_volumes(name, spec, record):
+    """Derive deterministic storage IDs from the durable Baseline VM identity."""
+    vmid = record.get('vmid') if isinstance(record, dict) else None
+    if isinstance(vmid, bool) or not isinstance(vmid, int) or not 100 <= vmid <= 999999999:
+        raise vh.VmError('invalid VM identity; retirement refused')
+    if not isinstance(spec, dict):
+        raise vh.VmError('VM specification is unavailable; retirement refused')
+    root_storage = USER_STORAGE if spec.get('root_disk') else OS_STORAGE
+    root_name = Path(spec['root_disk']).name if spec.get('root_disk') else f'vm-{vmid}-disk-0.qcow2'
+    root = f'{root_storage}:{vmid}/{root_name}'
+    volumes = [root]
+    if spec.get('persistence_disk'):
+        home_name = Path(spec['persistence_disk']).name
+        home = f'{USER_STORAGE}:{vmid}/{home_name}'
+        volumes.append(home)
+    if record.get('efi_created'):
+        volumes.append(f'{OS_STORAGE}:{vmid}/vm-{vmid}-disk-1.raw')
+    return volumes
+
+
+def _cluster_resource(resources, vmid):
+    """Resolve one VMID from Proxmox's live cluster inventory, failing closed."""
+    if not isinstance(resources, list) or not all(isinstance(item, dict) for item in resources):
+        raise vh.VmError('Proxmox returned an invalid cluster inventory; retirement refused')
+    matches = [item for item in resources if item.get('vmid') == vmid]
+    if len(matches) > 1:
+        raise vh.VmError('VMID is ambiguous in Proxmox inventory; retirement refused')
+    if matches and matches[0].get('type') != 'qemu':
+        raise vh.VmError('VMID belongs to a non-VM workload; retirement refused')
+    return matches[0] if matches else None
+
+
+def _parse_qm_config(output):
+    """Parse qm config output without hiding malformed or duplicate settings."""
+    if not isinstance(output, str) or not output.strip():
+        raise vh.VmError('Proxmox returned an empty VM configuration; retirement refused')
+    config = {}
+    for line in output.splitlines():
+        if ': ' not in line:
+            raise vh.VmError('Proxmox returned an invalid VM configuration; retirement refused')
+        key, value = line.split(': ', 1)
+        if not key or key in config:
+            raise vh.VmError('Proxmox returned duplicate VM settings; retirement refused')
+        config[key] = value
+    return config
 
 
 class ProxmoxVmHost(vh.VmHost):
@@ -77,19 +159,36 @@ class ProxmoxVmHost(vh.VmHost):
 
     def guest_homepage(self):
         """Use the bridge shared with guests, independent of an SSH tunnel
-        or the browser's loopback hostname. Unknown means operator input."""
+        or the browser's loopback hostname. A failed probe is an error;
+        only a successful probe with no usable IPv4 address returns empty."""
         try:
-            rc, out, _ = self.run(["ip", "-j", "address", "show", "dev", "vmbr0"])
-            if rc:
-                return ""
-            for interface in json.loads(out):
-                for item in interface.get("addr_info", []):
-                    if item.get("family") == "inet" and item.get("scope") == "global":
+            rc, out, err = self.run(["ip", "-j", "address", "show", "dev", "vmbr0"])
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise vh.VmError(f"Proxmox homepage detection failed: {exc}") from exc
+        if rc:
+            detail = str(err).strip() if err else ""
+            detail = detail or f"ip exited {rc}"
+            raise vh.VmError(f"Proxmox homepage detection failed: {detail}")
+        try:
+            interfaces = json.loads(out)
+        except (TypeError, ValueError) as exc:
+            raise vh.VmError("Proxmox homepage detection returned invalid JSON") from exc
+        if not isinstance(interfaces, list) or not all(isinstance(item, dict) for item in interfaces):
+            raise vh.VmError("Proxmox homepage detection returned an invalid interface list")
+        for interface in interfaces:
+            addresses = interface.get("addr_info")
+            if not isinstance(addresses, list):
+                raise vh.VmError("Proxmox homepage detection returned invalid address details")
+            for item in addresses:
+                if not isinstance(item, dict):
+                    raise vh.VmError("Proxmox homepage detection returned an invalid address entry")
+                if item.get("family") == "inet" and item.get("scope") == "global":
+                    try:
                         addr = ipaddress.IPv4Address(item["local"])
-                        if not addr.is_loopback and not addr.is_link_local and not addr.is_unspecified:
-                            return f"https://{addr}:8006"
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+                    except (KeyError, ipaddress.AddressValueError) as exc:
+                        raise vh.VmError("Proxmox homepage detection returned an invalid IPv4 address") from exc
+                    if not addr.is_loopback and not addr.is_link_local and not addr.is_unspecified:
+                        return f"https://{addr}:8006"
         return ""
 
     def available_isos(self):
@@ -121,6 +220,31 @@ class ProxmoxVmHost(vh.VmHost):
     def _record_path(self, name):
         self._need_name(name)
         return self.names_dir / f"{name}.json"
+
+    def _expected_volume_path(self, volid, vmid):
+        try:
+            storage, identity = volid.split(':', 1)
+            target_vmid, filename = identity.split('/', 1)
+        except ValueError as exc:
+            raise vh.VmError(f'invalid managed volume identity {volid!r}') from exc
+        if (storage not in (OS_STORAGE, USER_STORAGE) or target_vmid != str(vmid)
+                or not filename or Path(filename).name != filename or filename in ('.', '..')):
+            raise vh.VmError(f'unmanaged volume identity {volid!r}; retirement refused')
+        store = self.persistence_store if storage == USER_STORAGE else self.store
+        return store / 'images' / str(vmid) / filename
+
+    def _validate_volume_path(self, volid, vmid, *, must_exist=True):
+        expected = self._expected_volume_path(volid, vmid)
+        if expected.is_symlink():
+            raise vh.VmError(f'managed volume is a symbolic link: {expected}')
+        if not expected.exists() and not must_exist:
+            return expected
+        path_text = self._command(['pvesm', 'path', volid]).strip()
+        actual = Path(path_text)
+        if (not path_text or actual.is_symlink() or not actual.is_file()
+                or actual.resolve() != expected.resolve()):
+            raise vh.VmError(f'volume ownership or path changed for {volid}; retirement refused')
+        return expected
 
     def _record(self, name):
         try:
@@ -292,11 +416,118 @@ class ProxmoxVmHost(vh.VmHost):
         return self.status(name)
 
     def delete_vm(self, name):
-        spec = self._need_stopped(name)
-        if spec.get("persistence_disk"):
-            raise vh.VmError("this VM has retained data; use rebuild, destructive retirement is not implemented")
-        self._command(["qm", "destroy", str(self._record(name)["vmid"]), "--purge"])
-        shutil.rmtree(self.vm_dir(name), ignore_errors=True)
+        self._check_store(self.store)
+        self._check_store(self.persistence_store)
+        spec = self._spec(name)
+        record = self._record(name)
+        vmid = record['vmid']
+        resources = json.loads(self._command(['pvesh', 'get', '/cluster/resources', '--type', 'vm', '--output-format', 'json']))
+        resource = _cluster_resource(resources, vmid)
+        if record.get('registered') and resource is None:
+            # A prior confirmed delete can be resumed after Proxmox removed the
+            # cluster object but before local metadata cleanup completed.
+            record['registered'] = False
+            self._save_record(name, record)
+        elif not record.get('registered') and resource is not None:
+            raise vh.VmError('VMID is registered in Proxmox but the Baseline record says otherwise; retirement refused')
+
+        retirement = record.get('retirement')
+        if retirement is not None and not isinstance(retirement, dict):
+            raise vh.VmError('retirement record is invalid; cleanup refused')
+        if resource is not None:
+            node = resource.get('node')
+            local_node = socket.gethostname().split('.')[0]
+            if not isinstance(node, str) or node != local_node:
+                raise vh.VmError('VM is not on this Proxmox node; retirement refused')
+            status = self._command(['qm', 'status', str(vmid)]).strip()
+            if status != 'status: stopped':
+                raise vh.VmError('VM must be stopped before retirement')
+            definitions = json.loads(self._command(['pvesh', 'get', '/storage', '--output-format', 'json']))
+            if not isinstance(definitions, list) or not all(isinstance(item, dict) for item in definitions):
+                raise vh.VmError('Proxmox returned invalid storage definitions; retirement refused')
+            for ident, path in ((OS_STORAGE, self.store), (USER_STORAGE, self.persistence_store)):
+                matches = [item for item in definitions if item.get('storage') == ident]
+                if (len(matches) != 1 or matches[0].get('type') != 'dir'
+                        or matches[0].get('disable')
+                        or Path(matches[0].get('path', '')).resolve() != path.resolve()):
+                    raise vh.VmError(f'native storage identity changed for {ident}; retirement refused')
+            config = _parse_qm_config(self._command(['qm', 'config', str(vmid)]))
+            volids = retirement_volumes(name, spec, record, config)
+            paths = [str(self._validate_volume_path(volid, vmid)) for volid in volids]
+            retirement = {'volumes': volids, 'paths': paths}
+            record['retirement'] = retirement
+            self._save_record(name, record)
+            self._command(['qm', 'destroy', str(vmid), '--purge'])
+            resources = json.loads(self._command(['pvesh', 'get', '/cluster/resources', '--type', 'vm', '--output-format', 'json']))
+            if _cluster_resource(resources, vmid) is not None:
+                raise vh.VmError('Proxmox still reports the VM after destroy; retirement is incomplete')
+            record['registered'] = False
+            self._save_record(name, record)
+
+        if retirement is None:
+            volumes = managed_retirement_volumes(name, spec, record)
+            paths = [str(self._validate_volume_path(volid, vmid, must_exist=False)) for volid in volumes]
+            retirement = {'volumes': volumes, 'paths': paths}
+            record['retirement'] = retirement
+            self._save_record(name, record)
+
+        if retirement:
+            volumes, paths = retirement.get('volumes'), retirement.get('paths')
+            if (not isinstance(volumes, list) or not isinstance(paths, list)
+                    or len(volumes) != len(paths)
+                    or volumes != managed_retirement_volumes(name, spec, record)):
+                raise vh.VmError('retirement record does not match the managed VM; cleanup refused')
+            for volid, saved_path in zip(volumes, paths):
+                expected = self._expected_volume_path(volid, vmid)
+                path = Path(saved_path)
+                if path != expected:
+                    raise vh.VmError(f'retirement path changed for {volid}; cleanup refused')
+                if path.exists() or path.is_symlink():
+                    if path.is_symlink() or not path.is_file():
+                        raise vh.VmError(f'retired volume is not a regular managed file: {path}')
+                    self._validate_volume_path(volid, vmid)
+                    self._command(['pvesm', 'free', volid])
+                    if path.exists():
+                        raise vh.VmError(f'Proxmox did not remove retired volume {volid}')
+
+        directory = self.vm_dir(name)
+        if directory.exists():
+            allowed = {'vm.json'} | ({'seed.iso', 'seed'} if spec.get('seed') else set())
+            unexpected = sorted(child.name for child in directory.iterdir() if child.name not in allowed)
+            if unexpected:
+                raise vh.VmError(f'unrecognized files remain in VM directory: {", ".join(unexpected)}')
+            for child in directory.iterdir():
+                if child.is_symlink():
+                    raise vh.VmError(f'unexpected symbolic link remains in VM directory: {child.name}')
+                if child.is_dir() and child.name == 'seed' and spec.get('seed'):
+                    seed_files = sorted(item.name for item in child.iterdir())
+                    if seed_files != ['meta-data', 'user-data']:
+                        raise vh.VmError('unrecognized files remain in VM seed directory')
+                    for item in child.iterdir():
+                        if item.is_symlink() or not item.is_file():
+                            raise vh.VmError('unexpected non-file remains in VM seed directory')
+                        item.unlink()
+                    child.rmdir()
+                elif child.is_file():
+                    child.unlink()
+                else:
+                    raise vh.VmError(f'unexpected non-file remains in VM directory: {child.name}')
+            directory.rmdir()
+        for suffix, exists_in_spec in (('installer', bool(spec.get('iso'))), ('seed', bool(spec.get('seed')))):
+            cached_iso = self.store / 'template' / 'iso' / f'{name}-{suffix}.iso'
+            if not exists_in_spec and not cached_iso.exists() and not cached_iso.is_symlink():
+                continue
+            if cached_iso.is_symlink() or (cached_iso.exists() and not cached_iso.is_file()):
+                raise vh.VmError(f'unexpected file remains in Proxmox ISO storage: {cached_iso.name}')
+            cached_iso.unlink(missing_ok=True)
+        for storage in (self.store, self.persistence_store):
+            image_dir = storage / 'images' / str(vmid)
+            if image_dir.exists():
+                try:
+                    image_dir.rmdir()
+                except OSError as exc:
+                    raise vh.VmError(f'unowned files remain in VM storage directory {image_dir}: {exc}') from exc
+        self._record_path(name).unlink()
         self._record_path(name).unlink()
 
     def freeze_as_base(self, name, base_name):
@@ -306,6 +537,8 @@ class ProxmoxVmHost(vh.VmHost):
         self._record_path(name).unlink()
 
     def list_vms(self):
+        self._check_store(self.store)
+        self._check_store(self.persistence_store)
         if not self.names_dir.is_dir():
             return []
         result = []

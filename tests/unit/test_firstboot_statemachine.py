@@ -192,7 +192,8 @@ def test_completion_marker_prevents_rerun(tmp_path):
 
     result2 = fsm.run(r, state_dir=tmp_path, print_fn=lambda *a: None)
     assert result2["action"] == "already_completed"
-    assert len(r.calls) == calls_before  # nothing was re-run
+    assert len(r.calls) > calls_before  # repeat boot re-enforces the firewall
+    assert not any(call[:2] == ['apt-get', 'install'] for call in r.calls[calls_before:])
 
 
 # --------------------------------------------------------------------------
@@ -435,7 +436,7 @@ def test_completion_marker_is_never_bypassed_by_a_corrupted_journal(tmp_path):
     r = full_runner()
     result = fsm.run(r, state_dir=tmp_path, print_fn=lambda *a: None)
     assert result["action"] == "already_completed"
-    assert r.calls == []  # the marker check happens before anything else, always
+    assert r.calls and all(call[0] == 'nft' for call in r.calls)  # enforce only firewall; never replay install
 
 
 # --------------------------------------------------------------------------
@@ -515,3 +516,34 @@ def test_malformed_config_file_never_blocks_or_fails_commit(tmp_path):
                       check_lifeline_fn=broken_facts_fixture_a)
     assert result["action"] == "committed"
     assert (tmp_path / "complete").exists()
+
+
+def test_healthy_resume_rechecks_missing_historical_evidence(tmp_path):
+    fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['NO\n']),
+            print_fn=lambda *a: None, check_lifeline_fn=healthy_facts)
+    path = tmp_path / 'journal.json'
+    journal = json.loads(path.read_text())
+    next(e for e in journal['history'] if e['state'] == 'discovered')['discovery'] = {
+        'lifeline_ok': True, 'facts': []}
+    path.write_text(json.dumps(journal))
+    result = fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['CONFIRM\n']),
+                     print_fn=lambda *a: None, check_lifeline_fn=healthy_facts)
+    assert result['action'] == 'committed'
+
+
+def test_healthy_resume_reports_current_failed_verification(tmp_path):
+    fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['NO\n']),
+            print_fn=lambda *a: None, check_lifeline_fn=healthy_facts)
+    result = fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['CONFIRM\n']),
+                     print_fn=lambda *a: None, check_lifeline_fn=lambda: [])
+    assert result['action'] == 'network_failed'
+    assert not (tmp_path / 'complete').exists()
+
+
+def test_completed_host_still_enforces_firewall(tmp_path, monkeypatch):
+    (tmp_path/'complete').write_text('completed')
+    calls=[]
+    monkeypatch.setattr(fsm,'apply_configurator_settings',lambda *a,**kw:calls.append(kw))
+    result=fsm.run(full_runner(),state_dir=tmp_path,print_fn=lambda *a:None)
+    assert result['action']=='already_completed'
+    assert calls[0]['enforce_lan_only'] is True

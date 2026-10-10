@@ -60,9 +60,23 @@ def test_guest_homepage_uses_the_host_bridge_address_not_the_browser_loopback(tm
     assert h.guest_homepage() == "https://192.168.20.5:8006"
 
 
-def test_unknown_guest_homepage_is_left_for_the_operator_to_fill(tmp_path):
+def test_failed_guest_homepage_probe_is_an_error(tmp_path):
     h, _ = host(tmp_path)
     h.run = lambda args: (1, "", "bridge unavailable")
+    with pytest.raises(vh.VmError, match="homepage detection failed: bridge unavailable"):
+        h.guest_homepage()
+
+
+def test_malformed_bridge_address_output_is_not_reported_as_an_unknown_address(tmp_path):
+    h, _ = host(tmp_path)
+    h.run = lambda args: (0, "not-json", "")
+    with pytest.raises(vh.VmError, match="homepage detection returned invalid JSON"):
+        h.guest_homepage()
+
+
+def test_successful_bridge_probe_without_a_routable_ipv4_address_is_empty(tmp_path):
+    h, _ = host(tmp_path)
+    h.run = lambda args: (0, json.dumps([{"addr_info": []}]), "")
     assert h.guest_homepage() == ""
 
 
@@ -109,14 +123,6 @@ def test_existing_storage_with_the_wrong_path_is_not_adopted(tmp_path):
     with pytest.raises(vh.VmError, match="storage"):
         h.create_overlay("desktop", base="ubuntu")
     assert not any(a[0] in ("qm", "qemu-img") for a in run.calls)
-
-
-def test_deleting_a_persistent_vm_is_explicitly_refused_until_safe_retirement_exists(tmp_path):
-    h, run = host(tmp_path)
-    h.create_overlay("desktop", base="ubuntu")
-    with pytest.raises(vh.VmError, match="retained"):
-        h.delete_vm("desktop")
-    assert not any(a[:2] == ["qm", "destroy"] for a in run.calls)
 
 
 def test_invalid_base_does_not_register_storage_or_reserve_a_vmid(tmp_path):

@@ -37,7 +37,12 @@ class FakePdsRunner:
         if argv[0] == "lsblk" and "NAME,TYPE,FSTYPE,PTUUID,LABEL" in argv:
             return self.drive_table          # what is ON the drive: blank unless a test says otherwise
         if argv[0] == "lsblk":
-            return self.pkname_of_root + "\n"
+            device = argv[-1]
+            if device == self.findmnt_root:
+                return self.pkname_of_root + "\n"
+            if device == f"/dev/{self.pkname_of_root}":
+                return ""
+            return ""
         if argv[0] == "wipefs":
             self.wipe_calls.append(argv)
             return ""
@@ -372,11 +377,10 @@ def test_summarize_drive_partitions_three_real_partitions_none_mounted():
     assert result["usage_text"] == "not mounted"
 
 
-def test_summarize_drive_partitions_reports_unknown_on_a_real_lsblk_failure():
+def test_summarize_drive_partitions_raises_on_a_real_lsblk_failure():
     runner = FakeRunner(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(1, "", "lsblk: error"))])
-    result = da.summarize_drive_partitions(runner, "sdx")
-    assert result["partition_count"] is None
-    assert result["usage_text"] == "unknown"
+    with pytest.raises(da.DriveInventoryError, match="lsblk: error"):
+        da.summarize_drive_partitions(runner, "sdx")
 
 
 def test_list_candidate_drives_excludes_the_real_boot_device():
@@ -407,10 +411,20 @@ def test_list_candidate_drives_returns_real_type_and_model_for_each():
     assert "/dev/sda" not in by_path      # a hard disk outside the allowlist is never offered
 
 
-def test_list_candidate_drives_returns_empty_on_a_real_lsblk_failure():
+def test_list_candidate_drives_raises_on_a_real_lsblk_failure():
     from fake_runner import FakeRunner as _FR
     runner = _FR(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(1, "", "lsblk: not found"))])
-    assert da.list_candidate_drives(runner, pds_runner=FakePdsRunner()) == []
+    with pytest.raises(da.DriveInventoryError, match="lsblk: not found"):
+        da.list_candidate_drives(runner, pds_runner=FakePdsRunner())
+
+
+def test_list_candidate_drives_raises_when_partition_tree_probe_fails():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "-d" in a, FakeProc(0, LSBLK_PAIRS_OUTPUT, "")),
+        (lambda a: "-d" not in a, FakeProc(1, "", "partition tree denied")),
+    ])
+    with pytest.raises(da.DriveInventoryError, match="partition tree denied"):
+        da.list_candidate_drives(runner, pds_runner=FakePdsRunner())
 
 
 def test_list_candidate_drives_includes_real_partition_count_and_usage():
@@ -629,15 +643,33 @@ def test_install_drive_stops_before_creating_volumes_when_rebuild_fails():
 
 # -- check_cache_updates / update_selected --------------------------------------
 # Direct instruction, 2026-09-29: "Update selected" now means checking
-# each selected Baseline volume for a newer compatible version of what
-# it caches (not the old mount-mode/persona-switch behavior, which has
-# no web-UI entry point anymore - see drive_admin.py's own comment on
-# the removed "install"/"create_volumes_on_existing_vg" actions).
+# the selected INSTALLER_CACHE volume for newer versions of already-cached
+# Debian packages. The action downloads verified archives and never installs
+# them into the running host; other source types retain their own workflows.
 
-def test_check_cache_updates_refuses_without_a_real_update_source():
-    """Unavailable checking must not look like a completed empty check."""
-    with pytest.raises(RuntimeError, match="no verified update source"):
-        da.check_cache_updates(FakeRunner())
+def test_check_cache_updates_compares_cached_deb_with_current_apt_candidate():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:3] == ["findmnt", "--json", "--mountpoint"], FakeProc(0,
+            '{"filesystems":[{"target":"/mnt/INSTALLER_CACHE","label":"INSTALLER_CACHE",'
+            '"uuid":"cache-uuid","fstype":"ext4"}]}', "")),
+        (lambda a: a[:3] == ["readlink", "-e", "/mnt/INSTALLER_CACHE/packages"],
+         FakeProc(0, "/mnt/INSTALLER_CACHE/packages\n", "")),
+        (lambda a: a[:3] == ["findmnt", "--json", "--target"], FakeProc(0,
+            '{"filesystems":[{"target":"/mnt/INSTALLER_CACHE","uuid":"cache-uuid"}]}', "")),
+        (lambda a: a[0] == "apt-get" and a[-1] == "update", FakeProc(0, "Hit signed Debian indexes\n", "")),
+        (lambda a: a[:3] == ["ls", "-lA", "--time-style=+"], FakeProc(0,
+            "total 1\n-rw-r--r-- 1 root root 100 inxi_1.0_amd64.deb\n", "")),
+        (lambda a: a[:2] == ["dpkg-deb", "--field"], FakeProc(0, "inxi\n1.0\namd64\n", "")),
+        (lambda a: a[:2] == ["apt-cache", "policy"], FakeProc(0,
+            "inxi:\n  Installed: (none)\n  Candidate: 2.0\n", "")),
+        (lambda a: a[:2] == ["dpkg", "--compare-versions"], FakeProc(0, "", "")),
+    ])
+    updates = da.check_cache_updates(runner)
+    assert updates == [{"package": "inxi", "architecture": "amd64", "current_version": "1.0",
+                       "candidate_version": "2.0", "cached_path": "/mnt/INSTALLER_CACHE/packages/inxi_1.0_amd64.deb"}]
+    assert any(call[0] == "apt-get" and call[-1] == "update" for call in runner.calls)
+    assert "Acquire::AllowInsecureRepositories=false" in next(call for call in runner.calls if call[0] == "apt-get")
+    assert not any(call[:2] == ["apt-get", "install"] for call in runner.calls)
 
 
 def test_update_selected_refuses_with_nothing_selected():
@@ -646,10 +678,38 @@ def test_update_selected_refuses_with_nothing_selected():
     assert "no volumes selected" in result.detail
 
 
-def test_update_selected_is_an_honest_not_implemented_placeholder():
-    result = da.update_selected(FakeRunner(), selected=["INSTALLER_CACHE"])
+def test_update_selected_downloads_and_verifies_new_deb_without_installing(monkeypatch):
+    updates = [{"package": "inxi", "architecture": "amd64", "current_version": "1.0",
+                "candidate_version": "2.0", "cached_path": "/mnt/INSTALLER_CACHE/packages/inxi_1.0_amd64.deb"}]
+    monkeypatch.setattr(da, "check_cache_updates", lambda runner, root="/mnt/INSTALLER_CACHE": updates)
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:3] == ["findmnt", "--json", "--mountpoint"], FakeProc(0,
+            '{"filesystems":[{"target":"/mnt/INSTALLER_CACHE","label":"INSTALLER_CACHE",'
+            '"uuid":"cache-uuid","fstype":"ext4"}]}', "")),
+        (lambda a: a[:3] == ["readlink", "-e", "/mnt/INSTALLER_CACHE/packages"],
+         FakeProc(0, "/mnt/INSTALLER_CACHE/packages\n", "")),
+        (lambda a: a[:3] == ["findmnt", "--json", "--target"], FakeProc(0,
+            '{"filesystems":[{"target":"/mnt/INSTALLER_CACHE","uuid":"cache-uuid"}]}', "")),
+        (lambda a: a[:2] == ["apt-get", "-o"], FakeProc(0, "Downloaded package archives\n", "")),
+        (lambda a: a[:3] == ["ls", "-lA", "--time-style=+"], FakeProc(0,
+            "total 1\n-rw-r--r-- 1 root root 200 inxi_2.0_amd64.deb\n", "")),
+        (lambda a: a[:2] == ["dpkg-deb", "--field"], FakeProc(0, "inxi\n2.0\namd64\n", "")),
+    ])
+    result = da.update_selected(runner, selected=["INSTALLER_CACHE"])
+    assert result.ok is True
+    assert "inxi 1.0 -> 2.0" in result.detail
+    download = next(call for call in runner.calls if call[0] == "apt-get")
+    assert "--download-only" in download and "--reinstall" in download
+    assert "inxi:amd64=2.0" in download
+    assert not any(call[:2] == ["dpkg", "-i"] for call in runner.calls)
+
+
+def test_update_selected_refuses_non_cache_volumes_before_running_commands():
+    runner = FakeRunner()
+    result = da.update_selected(runner, selected=["USER_PERSONAL"])
     assert result.ok is False
-    assert "not implemented" in result.detail
+    assert "INSTALLER_CACHE" in result.detail
+    assert runner.calls == []
 
 
 # -- find_vg_for_device / detect_baseline_drive ---------------------------------
@@ -666,6 +726,14 @@ def test_find_vg_for_device_returns_none_when_the_drive_has_no_real_pv():
         (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdb   baseline_persist\n", "")),
     ])
     assert da.find_vg_for_device(runner, "/dev/sdz") is None
+
+
+def test_find_vg_for_device_does_not_report_probe_failure_as_no_vg():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(1, "", "permission denied")),
+    ])
+    with pytest.raises(da.DriveInventoryError, match="permission denied"):
+        da.find_vg_for_device(runner, "/dev/sdz")
 
 
 def test_detect_baseline_drive_false_when_no_volume_group_exists():
@@ -688,6 +756,15 @@ def test_detect_baseline_drive_true_and_lists_missing_volumes_for_a_partial_inst
     assert result["vg_name"] == "pve"
     assert "baseline_installer_cache" in result["missing_baseline_volumes"]
     assert "baseline_app_state" not in result["missing_baseline_volumes"]
+
+
+def test_detect_baseline_drive_keeps_failed_lvs_probe_as_error():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "pvs" in a, FakeProc(0, "  /dev/sdd3   pve\n", "")),
+        (lambda a: "lvs" in a, FakeProc(1, "", "lvs permission denied")),
+    ])
+    with pytest.raises(da.DriveInventoryError, match="lvs permission denied"):
+        da.detect_baseline_drive(runner, "/dev/sdd")
 
 
 def test_detect_baseline_drive_false_when_volume_group_exists_but_has_no_baseline_volumes():
@@ -840,6 +917,74 @@ def test_mount_and_unmount_volume_are_registered_real_actions():
     described = {d["action_id"]: d for d in da.describe_actions()}
     assert described["mount_volume"]["requires_device"] is True
     assert described["unmount_volume"]["requires_device"] is True
+
+
+def test_unmount_mounted_partition_is_a_serial_scoped_drive_action():
+    assert "unmount_partition" in da.ACTIONS
+    described = {d["action_id"]: d for d in da.describe_actions()}
+    assert described["unmount_partition"]["requires_device"] is True
+    assert da.validate_action_params(
+        "unmount_partition", {"device_path": "/dev/sdb", "partition_mountpoint": "/mnt/sdb2"}
+    ) == {"device_path": "/dev/sdb", "partition_mountpoint": "/mnt/sdb2"}
+    for mountpoint in ("/etc", "/mnt", "/mnt/../etc", "/mnt/10TB"):
+        with pytest.raises(ValueError):
+            da.validate_action_params(
+                "unmount_partition", {"device_path": "/dev/sdb", "partition_mountpoint": mountpoint}
+            )
+
+
+def test_unmount_partition_proves_selected_drive_owns_mount_before_unmounting():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, "/dev/sdb2\n", "")),
+        (lambda a: a[:1] == ["lsblk"], FakeProc(0, "sdb\n", "")),
+        (lambda a: a[:1] == ["udevadm"], FakeProc(0, "ID_SERIAL_SHORT=FD01N6557110C271B\n", "")),
+        (lambda a: a[:1] == ["umount"], FakeProc(0, "", "")),
+    ])
+    result = da.unmount_mounted_partition(
+        runner, device_path="/dev/sdb", expected_serial="FD01N6557110C271B", partition_mountpoint="/mnt/sdb2"
+    )
+    assert result.ok is True
+    assert runner.calls[-1] == ["umount", "--", "/mnt/sdb2"]
+
+
+def test_unmount_partition_refuses_mount_from_other_drive_without_unmounting():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, "/dev/sdc1\n", "")),
+        (lambda a: a[:1] == ["lsblk"], FakeProc(0, "sdc\n", "")),
+        (lambda a: a[:1] == ["udevadm"], FakeProc(0, "ID_SERIAL_SHORT=JEHBBVWM\n", "")),
+    ])
+    result = da.unmount_mounted_partition(
+        runner, device_path="/dev/sdb", expected_serial="FD01N6557110C271B", partition_mountpoint="/mnt/sdb2"
+    )
+    assert result.ok is False and "not proven" in result.detail
+    assert all(call[0] != "umount" for call in runner.calls)
+
+
+def test_unmount_partition_native_authorization_runs_through_pkexec():
+    import subprocess
+    import hitl
+    import web_origin_helper
+    params={"device_path":"/dev/sdb", "partition_mountpoint":"/mnt/sdb2"}
+    pds_runner=FakePdsRunner(serial="FD01N6557110C271B")
+    prepared=da.prepare_action("unmount_partition", params, pds_runner=pds_runner)
+    store=hitl.ConfirmationStore(verify_secret=lambda _secret:False, min_wait_s=0)
+    challenge=store.challenge("owner", "unmount_partition", prepared["params"], prepared["serial"], prepared["summary"])
+    authorization=store.request_native_policykit("owner", challenge["id"])
+    calls=[]
+    def executor(argv, *, input, capture_output, timeout):
+        calls.append(list(argv))
+        command=argv[1:]
+        if command[0] == "findmnt": stdout=b"/dev/sdb2\n"
+        elif command[0] == "lsblk": stdout=b"sdb\n"
+        elif command[0] == "udevadm": stdout=b"ID_SERIAL_SHORT=FD01N6557110C271B\n"
+        else: stdout=b""
+        return subprocess.CompletedProcess(argv, 0, stdout, b"")
+    origin=web_origin_helper.origin_for("drive_action", {"action_id":"unmount_partition", "params":prepared["params"]})
+    result=da.perform_action(da.PkexecRunner(executor=executor), "unmount_partition", params,
+        pds_runner=pds_runner, authorization=authorization, hitl_store=store, origin=origin)
+    assert result.ok is True
+    assert calls[-1] == ["pkexec", "umount", "--", "/mnt/sdb2"]
+    assert all(call[0] == "pkexec" for call in calls)
 
 
 # -- ACTIONS registry / describe_actions / perform_action ----------------------
@@ -1020,8 +1165,9 @@ def test_perform_action_does_not_choke_on_on_progress_for_an_action_that_ignores
 def test_perform_action_dispatches_update_selected_with_its_params():
     runner = FakeRunner()
     result = perform_confirmed(runner, "update_selected", {"selected": ["INSTALLER_CACHE"], "device_path": "/dev/sdd"})
-    assert result.ok is False  # honest placeholder - see test_update_selected_is_an_honest_not_implemented_placeholder
-    assert "not implemented" in result.detail
+    assert result.ok is False
+    assert "identified mounted INSTALLER_CACHE" in result.detail
+    assert not any(call[:2] == ["apt-get", "update"] for call in runner.calls)
 
 
 
@@ -1031,13 +1177,16 @@ DEVICE_ACTIONS = [aid for aid, spec in da.ACTIONS.items() if spec.requires_devic
 
 
 def test_there_are_device_actions_to_guard():
-    assert {"build_self_installer", "repair", "mount_volume", "unmount_volume"} <= set(DEVICE_ACTIONS)
+    assert {"build_self_installer", "repair", "mount_volume", "unmount_volume", "unmount_partition"} <= set(DEVICE_ACTIONS)
 
 
 @pytest.mark.parametrize("action_id", DEVICE_ACTIONS)
 def test_an_action_on_a_drive_outside_the_allowlist_is_refused_and_runs_nothing(action_id):
     runner = FakeRunner()
-    result = perform_with_origin(runner, action_id, {"device_path": "/dev/sda"},
+    params = {"device_path": "/dev/sda"}
+    if action_id == "update_installed_drive":
+        params.update(input_bundle="/tmp/bundle", recovery_folder="/tmp/recovery")
+    result = perform_with_origin(runner, action_id, params,
                                pds_runner=FakePdsRunner(serial="ZCT2WCM2"))
     assert result.ok is False and "allowed" in result.detail.lower()
     assert runner.calls == [], f"{action_id} ran commands against a drive outside the allowlist"
@@ -1199,7 +1348,8 @@ def test_expected_serial_must_be_one_of_the_allowed_drives(value):
 # -- every drive action needs a human confirmation: the core function itself refuses ---------------
 
 @pytest.mark.parametrize("action_id,extra", [
-    ("repair", {}), ("mount_volume", {}), ("unmount_volume", {}), ("build_self_installer", {}),
+    ("repair", {}), ("mount_volume", {}), ("unmount_volume", {}),
+    ("unmount_partition", {"partition_mountpoint": "/mnt/sdb2"}), ("build_self_installer", {}),
 ])
 def test_no_drive_action_runs_without_a_confirmation_and_no_command_is_issued(action_id, extra):
     runner = _runner_with_a_volume_group()

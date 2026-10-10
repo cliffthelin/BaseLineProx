@@ -35,6 +35,8 @@ def bot_case(role, tmp_path):
     sessions.create("bot", now=clock(), role=role)
     deps = _base_deps(sessions=sessions, hitl=store, clock=clock, pkexec_executor=FakeSudoExecutor(returncode=0),
                       recovery_verify_fn=lambda s: s == SECRET)
+    import workload_jobs
+    deps['workload_jobs']=workload_jobs.WorkloadJobs(tmp_path/'jobs.sqlite')
     deps["scheduler"] = ops.Scheduler(deps["web_gate"], ops.ScheduleStore(tmp_path / "sched.json"),
                                       lambda op, params, origin: None, clock=clock)
     return _RealServerCase(deps)
@@ -46,6 +48,10 @@ def params_for(action):
         return {"selected": ["BASELINE"]}
     if action == "enroll_drive":
         return {**PARAMS, "confirm_serial": "MD89N41071210AP4E"}     # the serial the RAM drive reports
+    if action == 'update_installed_drive':
+        return {**PARAMS,'input_bundle':'/tmp/test-bundle','recovery_folder':'/tmp/test-recovery'}
+    if action == "unmount_partition":
+        return {**PARAMS, "partition_mountpoint": "/mnt/sdb2"}
     return PARAMS
 
 
@@ -59,7 +65,16 @@ def attempt(case, action):
             chal = body["challenge"]
             status, body = _req(case, "POST", "/drive-admin/confirm",
                                 {"challenge_id": chal["id"], "typed": chal["phrase"], "secret": SECRET})
-    job = _poll_job(case, body["job_id"]) if isinstance(body, dict) and body.get("job_id") else None
+    if isinstance(body,dict) and body.get('job_id') and body.get('durable'):
+        import time
+        for _ in range(100):
+            observed=case.server.deps['workload_jobs'].get(body['job_id'])
+            if observed['state'] in ('completed','failed','interrupted'):break
+            time.sleep(.01)
+        job={'outcome':'applied' if observed['state']=='completed' else 'refused',
+             'detail':(observed.get('result') or {}).get('message')}
+    else:
+        job = _poll_job(case, body["job_id"]) if isinstance(body, dict) and body.get("job_id") else None
     return status, body, job
 
 
@@ -77,6 +92,9 @@ def test_the_bot_can_do_its_own_action_on_the_ram_drive(action, ram, tmp_path):
             assert getattr(ram, "layouts", 0) == 1 and not ram.intact()
         elif action in ("mount_volume", "unmount_volume"):
             assert ram.calls == [] and ram.installs == 0
+        elif action == "unmount_partition":
+            assert ram.calls == [(action, {"device_path": "/dev/sdb", "partition_mountpoint": "/mnt/sdb2",
+                                          "expected_serial": "MD89N41071210AP4E"})]
         else:
             assert [c[0] for c in ram.calls] == [action]
     finally:

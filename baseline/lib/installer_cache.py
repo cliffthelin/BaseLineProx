@@ -132,6 +132,19 @@ class CacheReport:
         return sum(1 for r in self.rows if not r.present)
 
 
+class CacheScanError(RuntimeError):
+    """The cache could not be completely enumerated; absence is unknown."""
+
+    def __init__(self, message, *, mounted=None, mount_detail=""):
+        super().__init__(message)
+        self.mounted = mounted
+        self.mount_detail = mount_detail
+
+
+class CatalogDefinitionError(RuntimeError):
+    """A module that owns declared build inputs could not be read."""
+
+
 # -- Catalog ----------------------------------------------------------
 # Built from the modules that already own each list, so it cannot drift.
 
@@ -209,16 +222,16 @@ def _diagnostic_packages() -> tuple:
     try:
         import firstboot_statemachine as fsm
         return tuple(fsm.DIAGNOSTIC_PACKAGES)
-    except Exception:
-        return tuple(_DIAGNOSTIC_PURPOSE)
+    except Exception as exc:
+        raise CatalogDefinitionError(f"diagnostic package catalog unavailable: {exc}") from exc
 
 
 def _curated_scripts() -> tuple:
     try:
         import vm_scripts
         return tuple((s.script_id, s.description, s.path) for s in vm_scripts.list_scripts())
-    except Exception:
-        return ()
+    except Exception as exc:
+        raise CatalogDefinitionError(f"VM script catalog unavailable: {exc}") from exc
 
 
 def _script_origin() -> str:
@@ -226,8 +239,8 @@ def _script_origin() -> str:
         import vm_scripts
         return (f"github.com/{vm_scripts.UPSTREAM_SCRIPTS_REPO} "
                 f"@ {vm_scripts.PINNED_COMMIT[:12]} (sha256-pinned)")
-    except Exception:
-        return "community-scripts/ProxmoxVE (sha256-pinned)"
+    except Exception as exc:
+        raise CatalogDefinitionError(f"VM script origin unavailable: {exc}") from exc
 
 
 def catalog() -> list:
@@ -238,11 +251,20 @@ def catalog() -> list:
 
     entries.append(CatalogEntry(
         "proxmox-ve-source", "Proxmox VE (source ISO)", KIND_ISO,
-        origin="enterprise.proxmox.com official ISO (GPG + SHA256 verified by drive_setup_acquire.py)",
+        origin="enterprise.proxmox.com official ISO; publisher verification is not established by file presence",
         install_helper="self_installer.py -> drive_setup_install.py (answer-file auto-install)",
         config_section="self_installer (fqdn, lvm sizing, disk serial)",
         filename="proxmox-ve-source.iso",
         notes="The substrate OS. Located via self_installer._locate_proxmox_source_iso.",
+    ))
+
+    import ubuntu_environment as ue
+    entries.append(CatalogEntry(
+        "ubuntu_base", "Ubuntu 24.04 vanilla cloud image", KIND_ISO,
+        origin=ue.IMAGE_URL,install_helper="installer_sources.acquire_ubuntu (web job)",
+        config_section="Installer Plan / Ubuntu environment",filename=ue.BASE_NAME+".img",
+        digest="sha256:"+ue.IMAGE_SHA256,signature_verified=False,
+        notes="Publisher HTTPS and pinned SHA256; detached signature not verified. Source acquisition creates no VM.",
     ))
 
     for pkg in _diagnostic_packages():
@@ -315,22 +337,43 @@ def _listdir_with_sizes(runner, path: str) -> list:
     the Refresh-with-root path."""
     try:
         proc = runner.run(["ls", "-lA", "--time-style=+", path], timeout=20)
-    except Exception:
-        return []
-    if getattr(proc, "returncode", 1) != 0:
-        return []
+    except Exception as exc:
+        raise CacheScanError(f"could not enumerate {path}: {type(exc).__name__}: {exc}") from exc
+    code = getattr(proc, "returncode", 1)
+    if code != 0:
+        detail = getattr(proc, "stderr", "") or f"ls exited {code}"
+        # The kind subdirectory is created lazily. A confirmed missing
+        # directory means no artifacts of that kind have been cached yet;
+        # permission and command failures leave its contents unknown.
+        if "no such file or directory" in detail.lower():
+            parent = runner.run(["ls", "-ld", "--", path.rsplit("/", 1)[0]], timeout=20)
+            if getattr(parent, "returncode", 1) != 0:
+                parent_detail = getattr(parent, "stderr", "") or f"ls exited {parent.returncode}"
+                raise CacheScanError(f"could not verify cache parent directory for {path}: {parent_detail.strip()}")
+            return []
+        raise CacheScanError(f"could not enumerate {path}: {detail.strip()}")
+    text = getattr(proc, "stdout", None)
+    if not isinstance(text, str):
+        raise CacheScanError(f"could not enumerate {path}: ls output unavailable")
     out = []
-    for line in proc.stdout.splitlines():
-        parts = line.split(maxsplit=5)
-        if len(parts) < 6 or line.startswith("total "):
+    for line in text.splitlines():
+        if not line.strip():
             continue
+        if line.startswith("total "):
+            if not line[6:].strip().isdigit():
+                raise CacheScanError(f"malformed ls total row in {path}: {line!r}")
+            continue
+        parts = line.split(maxsplit=5)
+        if len(parts) != 6 or len(parts[0]) < 10 or not parts[4].isdigit():
+            raise CacheScanError(f"malformed ls entry in {path}: {line!r}")
         perms, size, name = parts[0], parts[4], parts[5].strip()
         if perms.startswith("d"):
             continue
-        try:
-            out.append((name, int(size)))
-        except ValueError:
-            continue
+        if not perms.startswith("-"):
+            raise CacheScanError(f"unsupported entry type in {path}: {name!r} ({perms[0]!r})")
+        if not name:
+            raise CacheScanError(f"malformed ls entry in {path}: missing file name")
+        out.append((name, int(size)))
     return out
 
 
@@ -359,11 +402,27 @@ def reconcile(runner, root: str = DEFAULT_CACHE_ROOT) -> CacheReport:
     result whether present or not; every real file not claimed by an
     entry appears as an extra."""
     mounted, mount_detail = mount_status(runner, root)
-    found = scan_cache(runner, root)
+    if not mounted:
+        return CacheReport(root=root, mounted=False, mount_detail=mount_detail,
+                           scanned_ok=False,
+                           scan_detail=(mount_detail + ". The cache volume is not mounted; "
+                                        "the fallback directory is not used as cache inventory."))
+    try:
+        found = scan_cache(runner, root)
+    except CacheScanError as exc:
+        exc.mounted = mounted
+        exc.mount_detail = mount_detail
+        raise
     report = CacheReport(root=root, mounted=mounted, mount_detail=mount_detail)
 
+    try:
+        catalog_entries = catalog()
+    except CatalogDefinitionError as exc:
+        raise CacheScanError(f"declared cache catalog unavailable: {exc}",
+                             mounted=mounted, mount_detail=mount_detail) from exc
+
     claimed: set = set()
-    for entry in catalog():
+    for entry in catalog_entries:
         subdir = SUBDIR[entry.kind]
         hit = next((f for f in found.get(subdir, []) if _matches(entry, f[0])), None)
         if hit:

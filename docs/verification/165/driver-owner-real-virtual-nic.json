@@ -1,0 +1,6 @@
+{
+  "outcome": "applied",
+  "detail": "Device is bound to virtio-pci (module virtio_pci)",
+  "driver": "virtio-pci",
+  "module": "virtio_pci"
+}

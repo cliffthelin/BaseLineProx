@@ -15,19 +15,30 @@ hardware, no root.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 
 from repair import Runner
 
 
-def _parse_json(text: str):
-    text = (text or "").strip()
-    if not text:
-        return None
+class MetricsError(RuntimeError):
+    """REAL-001: Proxmox observation failed; absence cannot be inferred."""
+
+
+def _read_list(runner, argv):
     try:
-        return json.loads(text)
-    except ValueError:
-        return None
+        proc = runner.run(argv, timeout=10)
+    except Exception as exc:
+        raise MetricsError("REAL-001: Proxmox metrics query unavailable") from exc
+    if proc.returncode != 0:
+        raise MetricsError(f"REAL-001: Proxmox metrics query failed (exit {proc.returncode})")
+    try:
+        data = json.loads(proc.stdout)
+    except (TypeError, ValueError) as exc:
+        raise MetricsError("REAL-001: Proxmox metrics returned invalid JSON") from exc
+    if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        raise MetricsError("REAL-001: Proxmox metrics returned an invalid list")
+    return data
 
 
 @dataclass
@@ -36,45 +47,48 @@ class VmStatus:
     name: str = ""
     type: str = "qemu"  # "qemu" | "lxc"
     status: str = "unknown"
-    cpu: float = 0.0
-    mem: int = 0
-    maxmem: int = 0
-    disk: int = 0
-    maxdisk: int = 0
-    netin: int = 0
-    netout: int = 0
-    uptime: int = 0
+    cpu: float | None = None
+    mem: int | None = None
+    maxmem: int | None = None
+    disk: int | None = None
+    maxdisk: int | None = None
+    netin: int | None = None
+    netout: int | None = None
+    uptime: int | None = None
 
 
 def _list_machines(runner: Runner, node: str, kind: str) -> list:
-    proc = runner.run(["pvesh", "get", f"/nodes/{node}/{kind}", "--output-format", "json"], timeout=10)
-    if proc.returncode != 0:
-        return []
-    data = _parse_json(proc.stdout)
-    return data if isinstance(data, list) else []
+    return _read_list(runner, ["pvesh", "get", f"/nodes/{node}/{kind}", "--output-format", "json"])
 
 
 def list_vms(runner: Runner, node: str = "localhost") -> list:
     """Every QEMU VM and LXC container's current live status on `node`.
-    Returns [] (never raises) if pvesh is unavailable or the node has
-    zero VMs or containers - both normal, expected outcomes on a machine that
-    hasn't created any VMs yet, not errors."""
+    Confirmed empty lists return []; failed observations raise MetricsError."""
     results = []
     for kind, type_name in (("qemu", "qemu"), ("lxc", "lxc")):
         for entry in _list_machines(runner, node, kind):
+            if type(entry.get("vmid")) is not int or entry["vmid"] <= 0:
+                raise MetricsError("REAL-001: Proxmox returned a missing or invalid VM identity")
+            for key in ("cpu", "mem", "maxmem", "disk", "maxdisk", "netin", "netout", "uptime"):
+                value = entry.get(key)
+                if value is None:
+                    continue
+                valid_type = type(value) in (int, float) if key == "cpu" else type(value) is int
+                if not valid_type or value < 0 or (type(value) is float and not math.isfinite(value)):
+                    raise MetricsError(f"REAL-001: Proxmox returned an invalid {key} measurement")
             results.append(VmStatus(
-                vmid=entry.get("vmid", 0),
+                vmid=entry["vmid"],
                 name=entry.get("name", "") or "",
                 type=type_name,
                 status=entry.get("status", "unknown") or "unknown",
-                cpu=entry.get("cpu", 0.0) or 0.0,
-                mem=entry.get("mem", 0) or 0,
-                maxmem=entry.get("maxmem", 0) or 0,
-                disk=entry.get("disk", 0) or 0,
-                maxdisk=entry.get("maxdisk", 0) or 0,
-                netin=entry.get("netin", 0) or 0,
-                netout=entry.get("netout", 0) or 0,
-                uptime=entry.get("uptime", 0) or 0,
+                cpu=entry.get("cpu"),
+                mem=entry.get("mem"),
+                maxmem=entry.get("maxmem"),
+                disk=entry.get("disk"),
+                maxdisk=entry.get("maxdisk"),
+                netin=entry.get("netin"),
+                netout=entry.get("netout"),
+                uptime=entry.get("uptime"),
             ))
     return results
 
@@ -82,13 +96,8 @@ def list_vms(runner: Runner, node: str = "localhost") -> list:
 def vm_rrd_history(runner: Runner, node: str, vmid: int, vm_type: str = "qemu", timeframe: str = "hour") -> list:
     """Historical resource-usage samples for one VM/container, reusing
     Proxmox's own already-retained RRD data rather than a store of our
-    own. Returns [] (never raises) on pvesh failure or no history yet."""
-    proc = runner.run(
-        ["pvesh", "get", f"/nodes/{node}/{vm_type}/{vmid}/rrddata",
-         "--timeframe", timeframe, "--output-format", "json"],
-        timeout=10,
-    )
-    if proc.returncode != 0:
-        return []
-    data = _parse_json(proc.stdout)
-    return data if isinstance(data, list) else []
+    own. Failed observations raise MetricsError; confirmed empty history is []."""
+    return _read_list(runner, [
+        "pvesh", "get", f"/nodes/{node}/{vm_type}/{vmid}/rrddata",
+        "--timeframe", timeframe, "--output-format", "json",
+    ])

@@ -1,0 +1,208 @@
+[
+  {
+    "iops_rd": 0,
+    "detect_zeroes": "off",
+    "active": true,
+    "image": {
+      "backing-image": {
+        "limits": {
+          "request-alignment": 1,
+          "min-mem-alignment": 1,
+          "max-hw-transfer": 1048576,
+          "opt-mem-alignment": 4096,
+          "max-iov": 1024,
+          "max-hw-iov": 2048
+        },
+        "virtual-size": 512110190592,
+        "filename": "/dev/sdc",
+        "format": "raw",
+        "actual-size": 0,
+        "dirty-flag": false
+      },
+      "limits": {
+        "write-zeroes-alignment": 65536,
+        "request-alignment": 1,
+        "min-mem-alignment": 1,
+        "max-hw-transfer": 1048576,
+        "discard-alignment": 65536,
+        "opt-mem-alignment": 4096,
+        "max-iov": 1024,
+        "max-hw-iov": 2048
+      },
+      "backing-filename-format": "raw",
+      "virtual-size": 512110190592,
+      "filename": "json:{\"backing\": {\"driver\": \"raw\", \"file\": {\"driver\": \"host_device\", \"filename\": \"/dev/sdc\"}}, \"driver\": \"qcow2\", \"file\": {\"driver\": \"file\", \"filename\": \"/run/media/cane/CACHE/baseline_repo/.runtime-proof165/host.qcow2\"}}",
+      "cluster-size": 65536,
+      "format": "qcow2",
+      "actual-size": 8311812096,
+      "format-specific": {
+        "type": "qcow2",
+        "data": {
+          "compat": "1.1",
+          "compression-type": "zlib",
+          "lazy-refcounts": false,
+          "refcount-bits": 16,
+          "corrupt": false,
+          "extended-l2": false
+        }
+      },
+      "full-backing-filename": "/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E",
+      "backing-filename": "/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E",
+      "dirty-flag": false
+    },
+    "iops_wr": 0,
+    "ro": false,
+    "children": [
+      {
+        "node-name": "raw",
+        "child": "backing"
+      },
+      {
+        "node-name": "overlay-file",
+        "child": "file"
+      }
+    ],
+    "node-name": "overlay",
+    "backing_file_depth": 1,
+    "drv": "qcow2",
+    "iops": 0,
+    "bps_wr": 0,
+    "write_threshold": 0,
+    "backing_file": "/dev/sdc",
+    "encrypted": false,
+    "bps": 0,
+    "bps_rd": 0,
+    "cache": {
+      "no-flush": false,
+      "direct": false,
+      "writeback": true
+    },
+    "file": "json:{\"backing\": {\"driver\": \"raw\", \"file\": {\"driver\": \"host_device\", \"filename\": \"/dev/sdc\"}}, \"driver\": \"qcow2\", \"file\": {\"driver\": \"file\", \"filename\": \"/run/media/cane/CACHE/baseline_repo/.runtime-proof165/host.qcow2\"}}"
+  },
+  {
+    "iops_rd": 0,
+    "detect_zeroes": "off",
+    "active": true,
+    "image": {
+      "limits": {
+        "request-alignment": 1,
+        "min-mem-alignment": 1,
+        "opt-mem-alignment": 4096,
+        "max-iov": 1024
+      },
+      "virtual-size": 8311865344,
+      "filename": "/run/media/cane/CACHE/baseline_repo/.runtime-proof165/host.qcow2",
+      "format": "file",
+      "actual-size": 8311812096,
+      "format-specific": {
+        "type": "file",
+        "data": {}
+      },
+      "dirty-flag": false
+    },
+    "iops_wr": 0,
+    "ro": false,
+    "children": [],
+    "node-name": "overlay-file",
+    "backing_file_depth": 0,
+    "drv": "file",
+    "iops": 0,
+    "bps_wr": 0,
+    "write_threshold": 0,
+    "encrypted": false,
+    "bps": 0,
+    "bps_rd": 0,
+    "cache": {
+      "no-flush": false,
+      "direct": false,
+      "writeback": true
+    },
+    "file": "/run/media/cane/CACHE/baseline_repo/.runtime-proof165/host.qcow2"
+  },
+  {
+    "iops_rd": 0,
+    "detect_zeroes": "off",
+    "active": true,
+    "image": {
+      "limits": {
+        "request-alignment": 1,
+        "min-mem-alignment": 1,
+        "max-hw-transfer": 1048576,
+        "opt-mem-alignment": 4096,
+        "max-iov": 1024,
+        "max-hw-iov": 2048
+      },
+      "virtual-size": 512110190592,
+      "filename": "/dev/sdc",
+      "format": "raw",
+      "actual-size": 0,
+      "dirty-flag": false
+    },
+    "iops_wr": 0,
+    "ro": true,
+    "children": [
+      {
+        "node-name": "source",
+        "child": "file"
+      }
+    ],
+    "node-name": "raw",
+    "backing_file_depth": 0,
+    "drv": "raw",
+    "iops": 0,
+    "bps_wr": 0,
+    "write_threshold": 0,
+    "encrypted": false,
+    "bps": 0,
+    "bps_rd": 0,
+    "cache": {
+      "no-flush": false,
+      "direct": false,
+      "writeback": true
+    },
+    "file": "/dev/sdc"
+  },
+  {
+    "iops_rd": 0,
+    "detect_zeroes": "off",
+    "active": true,
+    "image": {
+      "limits": {
+        "write-zeroes-alignment": 512,
+        "request-alignment": 1,
+        "min-mem-alignment": 1,
+        "max-hw-transfer": 1048576,
+        "opt-mem-alignment": 4096,
+        "max-iov": 1024,
+        "max-hw-iov": 2048
+      },
+      "virtual-size": 512110190592,
+      "filename": "/dev/sdc",
+      "format": "host_device",
+      "actual-size": 0,
+      "format-specific": {
+        "type": "file",
+        "data": {}
+      },
+      "dirty-flag": false
+    },
+    "iops_wr": 0,
+    "ro": true,
+    "children": [],
+    "node-name": "source",
+    "backing_file_depth": 0,
+    "drv": "host_device",
+    "iops": 0,
+    "bps_wr": 0,
+    "write_threshold": 0,
+    "encrypted": false,
+    "bps": 0,
+    "bps_rd": 0,
+    "cache": {
+      "no-flush": false,
+      "direct": false,
+      "writeback": true
+    },
+    "file": "/dev/sdc"
+  }
+]

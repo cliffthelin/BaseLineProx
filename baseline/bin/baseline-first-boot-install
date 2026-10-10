@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Finish a Baseline installation on the installed system itself, offline. Started once by the first-boot hook.
+
+  1. storage    lay out Baseline's role volumes from this drive's free space (single_drive_storage first-boot mode)
+  2. installer  copy the exact installer ISO and its expanded environment (source + offline package cache) into
+                INSTALLER_CACHE/installer, verified by checksum, so this drive can rebuild itself with no other media
+  3. packages   point apt and npm only at the drive's own offline package cache - no internet is used
+  4. provision  boot/provision.sh from the carried source
+  5. complete   record completion and reboot into the first-boot authorization screen
+
+Each step is safe to repeat. Progress: /var/log/baseline-first-boot-install.log.
+"""
+import hashlib
+import json
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(SRC / "baseline/lib"))
+
+LOG = Path("/var/log/baseline-first-boot-install.log")
+STATE = Path("/var/lib/baseline-install")
+CACHE = Path("/mnt/INSTALLER_CACHE/installer")
+ISO_NAME = "baseline-installer.iso"
+EXPANDED = "expanded"
+MEDIA_SOURCE = "baseline-src"            # iso_builder.ISO_TARGET_DIR without the leading slash
+MEDIA_CACHE = "baseline-cache"           # offline packages carried on the installer ISO
+FIRST_BOOT_BYTES = {"BASELINE": 139264, "INSTALLER_CACHE": 4 * 1024**3, "SESSION_TEMP": 24576,
+                    "SUBSTRATE": 24576, "USER_ADMIN": 262144, "USER_PERSONAL": 24576, "APPDATA_ADMIN": 0,
+                    "APPDATA_PERSONAL": 0}
+
+
+# --- pure helpers (unit-tested with real files) ----------------------------------------------------
+
+def iso_length(stream):
+    """Exact ISO 9660 image length from its primary volume descriptor (sector 16)."""
+    stream.seek(16 * 2048)
+    pvd = stream.read(2048)
+    if len(pvd) < 136 or pvd[0] != 1 or pvd[1:6] != b"CD001":
+        raise RuntimeError("no ISO 9660 primary volume descriptor")
+    blocks = struct.unpack_from("<I", pvd, 80)[0]
+    block_size = struct.unpack_from("<H", pvd, 128)[0]
+    if blocks <= 0 or block_size not in (512, 1024, 2048):
+        raise RuntimeError("implausible ISO 9660 geometry")
+    return blocks * block_size
+
+
+from offline_cache import sha256 as _sha256, verify_manifest  # noqa: E402 - shared with the cache builder
+
+
+# --- steps ---------------------------------------------------------------------------------------
+
+def log(*parts):
+    line = time.strftime("%Y-%m-%dT%H:%M:%S ") + " ".join(str(p) for p in parts)
+    print(line, flush=True)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG, "a") as stream:
+        stream.write(line + "\n")
+
+
+def run(argv, **kwargs):
+    log("running:", " ".join(str(a) for a in argv))
+    return subprocess.run([str(a) for a in argv], check=True, **kwargs)
+
+
+def done(step):
+    return (STATE / step).exists()
+
+
+def mark(step, **facts):
+    STATE.mkdir(parents=True, exist_ok=True)
+    (STATE / step).write_text(json.dumps(dict(facts, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n")
+
+
+def step_storage():
+    import repair
+    import single_drive_storage as storage
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    result = storage.provision_first_boot(Root(), required_bytes=FIRST_BOOT_BYTES)
+    log("storage:", json.dumps({"created": result["created_roles"], "serial": result["serial"]}))
+    mark("storage", created=result["created_roles"])
+
+
+def installer_media():
+    """The attached ISO 9660 device that carries this installer's source tree."""
+    listing = json.loads(subprocess.run(["lsblk", "-J", "-p", "-o", "NAME,TYPE,FSTYPE"], check=True,
+                                        capture_output=True, text=True).stdout)
+    def walk(nodes):
+        for node in nodes or []:
+            yield node
+            yield from walk(node.get("children"))
+    candidates = [n["name"] for n in walk(listing.get("blockdevices")) if n.get("fstype") == "iso9660"]
+    found = []
+    for device in candidates:
+        with tempfile.TemporaryDirectory(prefix="baseline-media-") as mnt:
+            if subprocess.run(["mount", "-o", "ro", device, mnt], capture_output=True).returncode:
+                continue
+            try:
+                if (Path(mnt) / MEDIA_SOURCE / "boot/provision.sh").is_file():
+                    found.append(device)
+            finally:
+                subprocess.run(["umount", mnt], check=True)
+    if len(found) != 1:
+        raise RuntimeError(f"expected exactly one attached Baseline installer medium, found {found or 'none'}")
+    return found[0]
+
+
+def step_installer():
+    """Carry the installer onto this drive: the exact ISO and its expanded environment, both verified."""
+    device = installer_media()
+    CACHE.mkdir(parents=True, exist_ok=True)
+    iso = CACHE / ISO_NAME
+    with open(device, "rb") as source:
+        length = iso_length(source)
+        source.seek(0)
+        partial = iso.with_suffix(".partial")
+        digest = hashlib.sha256()
+        with open(partial, "wb") as out:
+            remaining = length
+            while remaining:
+                chunk = source.read(min(remaining, 8 * 1024**2))
+                if not chunk:
+                    raise RuntimeError("installer medium ended before the ISO's declared length")
+                out.write(chunk); digest.update(chunk); remaining -= len(chunk)
+            out.flush(); os.fsync(out.fileno())
+    if _sha256(partial) != digest.hexdigest():
+        raise RuntimeError("the copied installer ISO does not read back identically")
+    os.replace(partial, iso)
+    expanded = CACHE / EXPANDED
+    with tempfile.TemporaryDirectory(prefix="baseline-media-") as mnt:
+        run(["mount", "-o", "ro", device, mnt])
+        try:
+            for name in (MEDIA_SOURCE, MEDIA_CACHE):
+                if (Path(mnt) / name).is_dir():
+                    if (expanded / name).exists():
+                        shutil.rmtree(expanded / name)
+                    shutil.copytree(Path(mnt) / name, expanded / name)
+        finally:
+            run(["umount", mnt])
+    cache = expanded / MEDIA_CACHE
+    if not (cache / "MANIFEST.json").is_file():
+        raise RuntimeError("the installer carries no offline package cache; it cannot finish without internet")
+    count = verify_manifest(cache, json.loads((cache / "MANIFEST.json").read_text()))
+    (CACHE / f"{ISO_NAME}.sha256").write_text(f"{digest.hexdigest()}  {ISO_NAME}\n")
+    log(f"installer carried: {iso} ({length} bytes, sha256 {digest.hexdigest()}), {count} cached packages verified")
+    mark("installer", iso_sha256=digest.hexdigest(), packages=count)
+
+
+def offline_environment():
+    """apt and npm configured to use only the drive's own offline cache for this run."""
+    cache = CACHE / EXPANDED / MEDIA_CACHE
+    apt_conf = STATE / "apt-offline.conf"
+    sources = STATE / "offline.list"
+    sources.write_text(f"deb [trusted=yes] file:{cache / 'apt'} ./\n")
+    apt_conf.write_text(f'Dir::Etc::SourceList "{sources}";\nDir::Etc::SourceParts "-";\n'
+                        'Acquire::Languages "none";\n')
+    return dict(os.environ, APT_CONFIG=str(apt_conf), BASELINE_PACKAGE_CACHE=str(cache),
+                DEBIAN_FRONTEND="noninteractive", npm_config_offline="true")
+
+
+def step_provision():
+    env = offline_environment()
+    run(["/bin/bash", SRC / "boot/provision.sh"], env=env)
+    # Keep the drive's own repository as a permanent apt source, indexed now, so later steps (first-boot
+    # authorization's diagnostic tools, any reinstall) work with no internet. Network sources still apply when
+    # a connection exists.
+    Path("/etc/apt/sources.list.d/baseline-installer-cache.list").write_text(
+        f"deb [trusted=yes] file:{CACHE / EXPANDED / MEDIA_CACHE / 'apt'} ./\n")
+    run(["apt-get", "update"], env=env)
+    mark("provision")
+
+
+def main():
+    if os.geteuid() != 0:
+        raise SystemExit("run as root (the first-boot hook does)")
+    for step, function in (("storage", step_storage), ("installer", step_installer), ("provision", step_provision)):
+        if done(step):
+            log(f"{step}: already complete")
+            continue
+        log(f"=== {step} ===")
+        function()
+    mark("complete")
+    log("Baseline installation finished on this drive; rebooting into first-boot authorization.")
+    run(["systemctl", "reboot"])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        log("STOPPED, installation not complete:", exc)
+        sys.exit(1)

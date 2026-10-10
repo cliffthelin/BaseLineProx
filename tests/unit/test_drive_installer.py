@@ -77,6 +77,13 @@ def test_parse_logical_volumes_empty():
     assert di.parse_logical_volumes("") == []
 
 
+def test_parse_logical_volumes_rejects_malformed_or_duplicate_rows():
+    with pytest.raises(di.VolumeInventoryParseError, match="malformed"):
+        di.parse_logical_volumes("pve root extra\n")
+    with pytest.raises(di.VolumeInventoryParseError, match="duplicate"):
+        di.parse_logical_volumes("pve root\npve root\n")
+
+
 def test_lv_exists_true():
     groups = [("pve", "root"), ("pve", "baseline_user")]
     assert di.lv_exists(groups, vg_name="pve", lv_name="baseline_user") is True
@@ -146,6 +153,17 @@ def test_ensure_volume_creates_format_and_mounts_when_missing():
     assert kinds == ["sudo", "lvcreate", "mkfs.ext4", "mkdir", "mount"]  # "sudo" -n lvs, real read privilege
 
 
+def test_ensure_volume_refuses_to_create_after_malformed_inventory():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "lvs" in a, FakeProc(0, "garbage\n", "")),
+    ])
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user",
+                              size="300G", label="USER", mountpoint="/mnt/USER")
+    assert result.ok is False
+    assert "malformed" in result.detail
+    assert not any(a[0] in {"lvcreate", "mkfs.ext4"} for a in runner.calls)
+
+
 def test_ensure_volume_never_reformats_an_already_existing_volume():
     runner = FakeRunner(command_responses=[
         (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n  pve   baseline_user  \n", "")),
@@ -161,6 +179,31 @@ def test_ensure_volume_never_reformats_an_already_existing_volume():
     assert "mkfs.ext4" not in kinds
     # still ensures the mount exists even for an already-provisioned volume
     assert "mount" in kinds
+
+
+def test_existing_volume_mount_failure_is_not_reported_as_success():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "lvs" in a, FakeProc(0, "pve baseline_user\n", "")),
+        (lambda a: a[0] == "mount", FakeProc(32, "", "mount failed")),
+    ])
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user",
+                             size="300G", label="USER", mountpoint="/mnt/USER")
+    assert not result.ok
+    assert di.FSTAB_PATH not in runner.appends
+    assert not any(a[0] == "mkfs.ext4" for a in runner.calls)
+
+
+def test_mount_failure_never_remounts_a_different_filesystem():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "lvs" in a, FakeProc(0, "pve baseline_user\n", "")),
+        (lambda a: a[0] == "mount", FakeProc(32, "", "busy")) ,
+        (lambda a: a[0] == "blkid", FakeProc(0, "desired-uuid\n", "")),
+        (lambda a: a[0] == "findmnt", FakeProc(0, "foreign-uuid\n", "")),
+    ])
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user",
+                             size="300G", label="USER", mountpoint="/mnt/USER")
+    assert not result.ok
+    assert not any("remount" in " ".join(a) for a in runner.calls)
 
 
 def test_ensure_volume_reports_the_real_lvcreate_failure_and_never_formats():
@@ -285,6 +328,15 @@ def test_detect_existing_baseline_install_handles_a_real_lvs_failure():
     assert "no such volume group" in result["error"]
 
 
+def test_detect_existing_baseline_install_keeps_malformed_inventory_as_error():
+    runner = FakeRunner(command_responses=[
+        (lambda a: "lvs" in a, FakeProc(0, "garbage\n", "")),
+    ])
+    result = di.detect_existing_baseline_install(runner, vg_name="pve")
+    assert result["has_existing_install"] is False
+    assert "error" in result and "malformed" in result["error"]
+
+
 # --------------------------------------------------------------------------
 # Per-mount permission restrictions (real follow-up work, confirmed
 # direction: keep the per-role LVM volumes, add per-mount permission
@@ -375,6 +427,7 @@ def test_ensure_volume_remounts_an_already_mounted_existing_volume_to_apply_opti
     runner = FakeRunner(command_responses=[
         (lambda a: "lvs" in a, FakeProc(0, "  pve   baseline_session_temp  \n", "")),
         (lambda a: a[:1] == ["mount"] and "-o" in a and "remount" not in a[2], FakeProc(32, "", "already mounted")),
+        (lambda a: a[0] in ("blkid", "findmnt"), FakeProc(0, "same-filesystem-uuid\n", "")),
     ])
     di.ensure_volume(runner, vg_name="pve", lv_name="baseline_session_temp",
                       size="50G", label="SESSION_TEMP", mountpoint="/mnt/SESSION_TEMP")
@@ -579,6 +632,36 @@ def test_old_names_map_to_current_names(old, new):
 def test_current_names_are_left_unchanged():
     for name in ("BASELINE", "INSTALLER_CACHE", "APPDATA_ADMIN", "baseline_app_state"):
         assert di.canonical_name(name) == name
+
+
+def test_volume_detail_lvm_probe_failure_is_not_reported_as_no_volumes():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:3] == ["sudo", "-n", "lvs"], FakeProc(5, "", "permission denied")),
+    ])
+    with pytest.raises(di.VolumeObservationError, match="permission denied"):
+        di.collect_volume_details(runner)
+
+
+def test_volume_detail_lvm_probe_without_stdout_is_not_reported_as_no_volumes():
+    class MissingStdout:
+        returncode = 0
+        stderr = ""
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:3] == ["sudo", "-n", "lvs"], MissingStdout()),
+    ])
+    with pytest.raises(di.VolumeObservationError, match="output unavailable"):
+        di.collect_volume_details(runner)
+
+
+def test_volume_detail_size_probe_failure_is_not_reported_as_unknown_sizes():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:3] == ["sudo", "-n", "lvs"] and "vg_name,lv_name" in a,
+         FakeProc(0, "  pve  baseline_app_state\n", "")),
+        (lambda a: a[:3] == ["sudo", "-n", "lvs"] and "lv_name,lv_size" in a,
+         FakeProc(5, "", "size query denied")),
+    ])
+    with pytest.raises(di.VolumeObservationError, match="size query denied"):
+        di.collect_volume_details(runner)
 
 
 def test_detection_reports_an_old_named_volume_as_legacy_not_missing():

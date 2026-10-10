@@ -21,6 +21,7 @@ uses under the hood), so this module reads serials that way, not via a
 raw sysfs file.
 """
 import os
+import re
 import stat
 import subprocess
 
@@ -101,12 +102,49 @@ def get_boot_device_serial(runner: Runner) -> str | None:
     root_source = runner.run(["findmnt", "/", "-no", "SOURCE"]).strip()
     if not root_source or len(root_source.splitlines()) != 1 or not root_source.startswith("/dev/"):
         return None
-    pkname = runner.run(["lsblk", "-no", "PKNAME", root_source]).strip()
-    if len(pkname.splitlines()) > 1:
+
+    # One serial is supported today. Follow every edge of a single-chain
+    # LVM root; multiple parents, cycles and missing identity must refuse.
+    device = root_source
+    visited = set()
+    try:
+        while device not in visited and len(visited) < 32:
+            visited.add(device)
+            output = runner.run(["lsblk", "-dnr", "-o", "PKNAME", device]).strip()
+            parents = [line.strip() for line in output.splitlines() if line.strip()]
+            if not parents:
+                serial = get_device_serial(runner, device)
+                if isinstance(serial, str) and serial.strip():
+                    return serial.strip()
+                # Sandboxed/early-boot environments may expose the mounted
+                # root through findmnt and sysfs while omitting its /dev node.
+                # Resolve the kernel's major:minor identity to its sysfs disk
+                # and ask udev directly; never infer a serial from a model or
+                # a guessed device name.
+                return _boot_serial_from_sysfs(runner)
+            if len(parents) != 1 or "/" in parents[0] or parents[0] in (".", ".."):
+                return None
+            device = f"/dev/{parents[0]}"
+    except (OSError, subprocess.SubprocessError):
         return None
-    parent = f"/dev/{pkname}" if pkname else root_source
-    serial = get_device_serial(runner, parent)
-    return serial if isinstance(serial, str) and serial.strip() else None
+    return None
+
+
+def _boot_serial_from_sysfs(runner: Runner) -> str | None:
+    try:
+        major_minor = runner.run(["findmnt", "-no", "MAJ:MIN", "/"]).strip()
+        if not re.fullmatch(r"[0-9]+:[0-9]+", major_minor):
+            return None
+        block_path = runner.realpath(f"/sys/dev/block/{major_minor}")
+        if not block_path.startswith("/sys/devices/"):
+            return None
+        if os.path.isfile(os.path.join(block_path, "partition")):
+            block_path = os.path.dirname(block_path)
+        output = runner.run(["udevadm", "info", "--query=property", f"--path={block_path}"])
+        serial = _parse_udevadm_property(output, "ID_SERIAL_SHORT")
+        return serial.strip() if isinstance(serial, str) and serial.strip() else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 def validate_target_device(path: str, *, expected_serial: str | list[str] | None = None,

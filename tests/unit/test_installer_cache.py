@@ -7,6 +7,7 @@ No real volume is ever read - FakeRunner supplies real `findmnt`/`ls -lA`
 output shapes.
 """
 from fake_runner import FakeProc, FakeRunner
+import pytest
 
 import installer_cache as ic
 
@@ -62,6 +63,38 @@ def test_catalog_derives_diagnostic_packages_from_the_module_that_owns_them():
         assert pkg in ids, f"{pkg} is installed at firstboot but absent from the catalog"
 
 
+def test_catalog_does_not_substitute_fallback_package_list_when_owner_is_unavailable(monkeypatch):
+    import builtins
+    original = builtins.__import__
+    def fail_owner(name, *args, **kwargs):
+        if name == "firstboot_statemachine":
+            raise ImportError("owner module unavailable")
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", fail_owner)
+    with pytest.raises(ic.CatalogDefinitionError, match="diagnostic package catalog unavailable"):
+        ic.catalog()
+
+
+def test_catalog_does_not_hide_script_catalog_failure(monkeypatch):
+    import builtins
+    original = builtins.__import__
+    def fail_owner(name, *args, **kwargs):
+        if name == "vm_scripts":
+            raise ImportError("script owner unavailable")
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", fail_owner)
+    with pytest.raises(ic.CatalogDefinitionError, match="VM script catalog unavailable"):
+        ic._curated_scripts()
+
+
+def test_reconcile_surfaces_catalog_owner_failure_as_inventory_error(monkeypatch):
+    def broken_catalog():
+        raise ic.CatalogDefinitionError("diagnostic package catalog unavailable")
+    monkeypatch.setattr(ic, "catalog", broken_catalog)
+    with pytest.raises(ic.CacheScanError, match="declared cache catalog unavailable"):
+        ic.reconcile(_runner())
+
+
 def test_catalog_derives_vm_scripts_from_the_pinned_manifest():
     import vm_scripts
     ids = {e.entry_id for e in ic.catalog()}
@@ -107,11 +140,46 @@ def test_scan_cache_reads_real_files_and_skips_directories():
     assert "nested-dir" not in names
 
 
+def test_scan_cache_does_not_treat_failed_directory_read_as_empty():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, "/dev/cache ext4\n")),
+        (lambda a: a[:1] == ["ls"] and a[-1].endswith("/isos"), FakeProc(2, "", "Permission denied")),
+    ])
+    with pytest.raises(ic.CacheScanError, match="Permission denied"):
+        ic.reconcile(runner)
+
+
+def test_scan_cache_rejects_malformed_long_listing_instead_of_partial_inventory():
+    runner = _runner(isos="total 5\nnot an ls row\n")
+    with pytest.raises(ic.CacheScanError, match="malformed"):
+        ic.reconcile(runner)
+
+
+def test_scan_cache_rejects_symlink_entries_instead_of_counting_them_as_artifacts():
+    runner = _runner(isos=(
+        "total 1\n"
+        "lrwxrwxrwx 1 root root 20 Sep 1 00:00 proxmox-ve-source.iso -> /tmp/fake.iso\n"
+    ))
+    with pytest.raises(ic.CacheScanError, match="unsupported entry type"):
+        ic.reconcile(runner)
+
+
 def test_reconcile_marks_a_present_artifact_with_its_real_size():
     report = ic.reconcile(_runner())
     row = next(r for r in report.rows if r.entry.entry_id == "proxmox-ve-source")
     assert row.present is True
     assert row.size_bytes == 1706178560
+
+
+def test_reconcile_does_not_count_fallback_directory_files_when_cache_is_unmounted():
+    runner = _runner(mounted=False)
+    report = ic.reconcile(runner)
+    assert report.mounted is False
+    assert report.scanned_ok is False
+    assert report.rows == []
+    assert report.extras == []
+    assert "not used as cache inventory" in report.scan_detail
+    assert not any(call[0] == "ls" for call in runner.calls)
 
 
 def test_reconcile_matches_a_versioned_deb_by_package_stem():
@@ -153,6 +221,7 @@ def test_extras_are_ordered_largest_first():
 def test_reconcile_on_an_empty_volume_reports_everything_missing_not_an_error():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["findmnt"], FakeProc(0, "/dev/sdd2 ext4\n")),
+        (lambda a: a[:1] == ["ls"] and a[1:3] == ["-ld", "--"], FakeProc(0, "drwxr-xr-x root root 0 cache\n")),
         (lambda a: a[:1] == ["ls"], FakeProc(2, "", "No such file or directory")),
     ])
     report = ic.reconcile(runner)
@@ -225,3 +294,13 @@ def test_caddy_notes_record_the_admin_port_that_must_not_be_published():
 
 def test_images_are_cached_in_their_own_subdirectory():
     assert _caddy().cache_path == "images/caddy-2.11.4.oci.tar"
+
+
+def test_pinned_ubuntu_source_is_catalogued_with_real_acquisition_and_download():
+    import ubuntu_environment as ue
+    entries={entry.entry_id:entry for entry in ic.catalog()}
+    ubuntu=entries['ubuntu_base']
+    assert ubuntu.filename==ue.BASE_NAME+'.img'
+    assert ubuntu.digest=='sha256:'+ue.IMAGE_SHA256
+    assert not ubuntu.signature_verified
+    assert 'installer_sources.acquire_ubuntu' in ubuntu.install_helper

@@ -652,6 +652,28 @@ def test_live_settings_refuse_unknown_fields_and_string_boolean_before_commands(
     assert runner.calls == []
 
 
+def test_live_network_settings_accept_existing_dhcp_true_mode(tmp_path):
+    from fake_runner import FakeRunner
+    runner = FakeRunner()
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    result = sw.SystemSectionApplier(store, runner).apply(
+        "network", {"hostname": "target", "dhcp": True})
+    assert result.applied is True
+    assert store.settings()["network"] == {"hostname": "target", "dhcp": True}
+    assert runner.calls == [["hostnamectl", "set-hostname", "target"]]
+
+
+def test_live_network_settings_refuse_disabling_dhcp_before_saving(tmp_path):
+    from fake_runner import FakeRunner
+    runner = FakeRunner()
+    store = sw.LocalAppStore(tmp_path / "store.db")
+    result = sw.SystemSectionApplier(store, runner).apply(
+        "network", {"hostname": "target", "dhcp": False})
+    assert result.applied is False
+    assert store.settings()["network"] == {"hostname": "baseline", "dhcp": True}
+    assert runner.calls == []
+
+
 def test_logging_rebuild_trigger_records_a_real_observable_entry(tmp_path):
     store = sw.LocalAppStore(tmp_path / "store.db")
     trigger = sw.LoggingRebuildTrigger(store, clock=lambda: 42.0)
@@ -766,6 +788,16 @@ def test_render_admin_page_omits_the_elevation_form_when_already_elevated():
     assert "/admin/elevate" not in body
 
 
+def test_settings_page_shows_live_interface_inventory_failures():
+    body = sw.render_settings_page({
+        "_live_interfaces": {"available": False, "reason": "physical NIC inventory unavailable: permission denied"},
+        "network": {"ethtool_interface": ""},
+    }).decode()
+    assert 'role="alert"' in body
+    assert "Live network interface choices are unavailable" in body
+    assert "permission denied" in body
+
+
 # --------------------------------------------------------------------------
 # render_field_input / reconstruct_typed_form_values: real typed form
 # controls, never a raw JSON textarea for an ordinary scalar (direct
@@ -810,6 +842,30 @@ def test_render_field_input_falls_back_to_a_raw_json_textarea_only_for_nested_va
     html = sw.render_field_input("restored_categories", ["network", "firewall"])
     assert "<textarea" in html
     assert "network" in html
+
+
+def test_hardware_settings_offer_named_choices_and_help():
+    for key, value in [('smartd_auto_offline', 'on'), ('ethtool_duplex', 'full'),
+                       ('ethtool_speed', ''), ('ethtool_wol', '')]:
+        markup = sw.render_field_input(key, value)
+        assert '<select' in markup
+        assert 'field-info' in markup
+        assert 'aria-label="About ' in markup
+
+
+def test_empty_string_choice_can_clear_optional_setting():
+    assert sw.reconstruct_typed_form_values({'ethtool_speed': '', 'ethtool_speed__type': 'str'},
+                                            ['ethtool_speed']) == {'ethtool_speed': ''}
+
+
+def test_settings_and_admin_autosave_have_no_save_buttons():
+    settings = sw.render_settings_page({'network': {'dhcp': True}}).decode()
+    admin = sw.render_admin_page({'sessions': {'default_session_ttl_hours': 24}}, elevated=True).decode()
+    for page in (settings, admin):
+        assert 'data-autosave' in page
+        assert '>Save' not in page
+        assert 'role="status"' in page
+        assert 'width: 8ch' in page
 
 
 def test_reconstruct_typed_form_values_true_when_checkbox_present():

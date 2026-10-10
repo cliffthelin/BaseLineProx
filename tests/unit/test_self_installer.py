@@ -92,6 +92,16 @@ def _ready_kwargs(tmp_path, **overrides):
     return kwargs
 
 
+def test_single_drive_capacity_is_refused_before_workspace_or_credentials(tmp_path):
+    runner = _pds_runner_ok()
+    runner.sizes["sdd"] = 200 * 1024**3 // 512
+    kwargs = _ready_kwargs(tmp_path, pds_runner=runner, **si.LVM_SIZE_PRESETS["single-drive"])
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "refused"
+    assert "cannot fit" in result.detail
+    assert not (tmp_path / "ws").exists()
+
+
 def test_on_progress_receives_real_stage_descriptions(tmp_path):
     """Direct instruction, 2026-09-29: "add a console log of what is
     running and doing" - the pipeline reports each real stage as it
@@ -416,6 +426,26 @@ def test_does_not_attempt_to_stop_anything_on_the_very_first_run(tmp_path, monke
     lines = []
     si.build_and_write_self_installer(**kwargs, on_progress=lines.append)
     assert not any("previous run's answer server" in line.lower() for line in lines)
+
+
+def test_qemu_answer_server_listens_only_on_loopback(tmp_path, monkeypatch):
+    import iso_builder as ib
+    monkeypatch.setattr(dsan, "prepare_iso_defensively",
+        lambda *a, **k: dsan.PrepareIsoOutcome(ok=True, output_path=Path("/ws/answer.iso")))
+    monkeypatch.setattr(ib, "build_current_iso",
+        lambda *a, **k: ib.IsoBuildResult(ok=True, output_path=Path("/ws/final.iso")))
+    captured = {}
+    class Server(_FakeAnswerServer):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            super().__init__(**kwargs)
+    monkeypatch.setattr(dsan, "EphemeralAnswerServer", Server)
+    kwargs = _ready_kwargs(tmp_path)
+    kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached"
+    kwargs["install_runner"].scripted_popen_process = FakeInstallProcess()
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "applied"
+    assert captured["bind_host"] == "127.0.0.1"
 
 
 def test_on_progress_defaults_to_a_no_op_when_omitted(tmp_path):

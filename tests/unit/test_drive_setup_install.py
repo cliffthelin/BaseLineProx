@@ -13,6 +13,16 @@ import drive_setup_install as di
 from drive_setup_install import InstallRunner, InstallProc, InstallProcess
 
 
+def test_monitor_driven_install_works_without_a_desktop_display(tmp_path):
+    invocation = di.build_sparse_install_invocation(
+        target_image=tmp_path / "disk.raw", prepared_iso=tmp_path / "installer.iso",
+        mac="52:54:00:ba:5e:41", smbios_product="baseline-self-installer",
+        serial_log=tmp_path / "serial.log", monitor_socket=tmp_path / "monitor.sock")
+    assert "-display" in invocation.argv
+    assert invocation.argv[invocation.argv.index("-display") + 1] == "none"
+    assert "-monitor" in invocation.argv
+
+
 class FakeInstallProcess(InstallProcess):
     def __init__(self, exit_code=None, raise_timeout_on_wait=False):
         self._exit_code = exit_code

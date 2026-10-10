@@ -1,0 +1,11 @@
+{
+  "policies": {
+    "Homepage": {
+      "URL": "https://10.0.2.15:8006",
+      "StartPage": "homepage"
+    },
+    "DontCheckDefaultBrowser": true,
+    "OverrideFirstRunPage": "https://10.0.2.15:8006",
+    "OverridePostUpdatePage": ""
+  }
+}

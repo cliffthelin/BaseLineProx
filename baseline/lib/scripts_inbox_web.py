@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote
 
 import scripts_inbox as si
+from web_request_json import JsonBodyError, read_json_object
 from settings_web import FileBackedPasswordVerifier, LocalAppStore, SessionStore, handle_login
 
 
@@ -100,17 +101,15 @@ class ScriptsInboxHandler(http.server.BaseHTTPRequestHandler):
         return self.headers.get("X-Session-Token", "")
 
     def _read_json_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length) if length else b""
-        try:
-            return json.loads(raw.decode()) if raw else {}
-        except ValueError:
-            return {}
+        return read_json_object(self.headers,self.rfile)
 
     def do_POST(self):  # noqa: N802 - stdlib method name
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
-        body = self._read_json_body()
+        try:
+            body = self._read_json_body()
+        except JsonBodyError as exc:
+            return self._respond(RouteResult('refused',400,{'error':str(exc)}))
 
         if self.path == "/login":
             result = handle_login(deps["verifier"], deps["sessions"],

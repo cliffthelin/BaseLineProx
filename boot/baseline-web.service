@@ -15,6 +15,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure
 RestartSec=5
 Environment=BASELINE_SETTINGS_WEB_DATA=/var/lib/baseline/settings-web/store.json
+Environment=BASELINE_WEB_BIND_HOST=0.0.0.0
 StandardOutput=journal
 StandardError=journal
 

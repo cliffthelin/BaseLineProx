@@ -40,6 +40,7 @@ drifting copy of "what this button actually does."
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import shlex
@@ -334,6 +335,24 @@ MIN_TARGET_SIZE_BYTES = 50_000_000_000  # 50GB - excludes small USB sticks/SD ca
 PERSISTENCE_VG_NAME = "baseline_persist"
 
 
+class DriveInventoryError(RuntimeError):
+    """A drive or LVM probe failed; its result is not an empty inventory."""
+
+
+def _run_drive_inventory(runner, argv, label):
+    try:
+        proc = runner.run(argv, timeout=15)
+    except Exception as exc:
+        raise DriveInventoryError(f"{label} probe unavailable: {type(exc).__name__}: {exc}") from exc
+    if getattr(proc, "returncode", 1) != 0:
+        detail = getattr(proc, "stderr", "") or f"exit {proc.returncode}"
+        raise DriveInventoryError(f"{label} probe failed: {detail.strip()}")
+    output = getattr(proc, "stdout", None)
+    if not isinstance(output, str):
+        raise DriveInventoryError(f"{label} output unavailable")
+    return output
+
+
 # ---------------------------------------------------------------------------
 # Real drive enumeration - lists every candidate device an operator could
 # pick, classifies its real physical type, and excludes the machine's
@@ -356,7 +375,16 @@ def parse_lsblk_pairs(text: str) -> list:
     for line in text.splitlines():
         if not line.strip():
             continue
-        rows.append(dict(token.split("=", 1) for token in shlex.split(line) if "=" in token))
+        try:
+            tokens = shlex.split(line)
+            if not tokens or any("=" not in token for token in tokens):
+                raise ValueError("missing key/value field")
+            pairs = [token.split("=", 1) for token in tokens]
+            if any(not key for key, _ in pairs) or len({key for key, _ in pairs}) != len(pairs):
+                raise ValueError("empty or duplicate field")
+            rows.append(dict(pairs))
+        except ValueError as exc:
+            raise DriveInventoryError(f"malformed lsblk row: {line!r}: {exc}") from exc
     return rows
 
 
@@ -418,10 +446,8 @@ def summarize_drive_partitions(runner: Runner, drive_name: str) -> dict:
     """Real partition count and real, mounted-only used/total bytes
     for one real drive (`drive_name`, e.g. `"sdb"` - no `/dev/` prefix,
     matching `lsblk`'s own `NAME`/`PKNAME` convention)."""
-    proc = runner.run(drive_partition_summary_argv(), timeout=15)
-    if proc.returncode != 0:
-        return {"partition_count": None, "usage_text": "unknown"}
-    return _partition_summary_from_rows(parse_lsblk_pairs(proc.stdout), drive_name)
+    output = _run_drive_inventory(runner, drive_partition_summary_argv(), "lsblk partition summary")
+    return _partition_summary_from_rows(parse_lsblk_pairs(output), drive_name)
 
 
 def classify_drive_type(*, tran: str, rota: str, model: str, usb_bridge_model: str | None = None) -> str:
@@ -478,17 +504,17 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
     re-derived here), so it can never even appear as a choice, let
     alone be selected."""
     pds_runner = pds_runner or pds.Runner()
-    proc = runner.run(list_candidate_drives_argv(), timeout=15)
-    if proc.returncode != 0:
-        return []
+    candidate_output = _run_drive_inventory(runner, list_candidate_drives_argv(), "candidate drive list")
     # One real, whole-system lsblk call for every candidate drive's
     # partition count/usage, not one re-query per drive.
-    tree_proc = runner.run(drive_partition_summary_argv(), timeout=15)
-    tree_rows = parse_lsblk_pairs(tree_proc.stdout) if tree_proc.returncode == 0 else []
+    tree_output = _run_drive_inventory(runner, drive_partition_summary_argv(), "drive partition summary")
+    tree_rows = parse_lsblk_pairs(tree_output)
     boot_serial = pds.get_boot_device_serial(pds_runner)
+    if not isinstance(boot_serial, str) or not boot_serial.strip():
+        raise DriveInventoryError("machine boot-drive identity unavailable; candidate drives cannot be safely listed")
     allowed = allowed_target_serials()
     drives = []
-    for row in parse_candidate_drives(proc.stdout):
+    for row in parse_candidate_drives(candidate_output):
         name = row.get("NAME", "")
         serial = row.get("SERIAL") or None
         if not name or (boot_serial is not None and serial == boot_serial):
@@ -505,6 +531,7 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
         baseline_status = detect_baseline_drive(runner, path)
         drives.append({
             "path": path,
+            "serial": serial,
             "model": row.get("MODEL") or "Unknown model",
             "size": row.get("SIZE") or "?",
             "drive_type": classify_drive_type(tran=tran, rota=row.get("ROTA", ""),
@@ -530,13 +557,13 @@ def list_enrollable_drives(runner: Runner, *, pds_runner=None) -> list:
     which includes these drives anyway); nothing else about them is probed - no partitions, no volume groups - until
     a person enrolls one. A drive that reports no serial cannot be enrolled: the serial is its identity."""
     pds_runner = pds_runner or pds.Runner()
-    proc = runner.run(list_candidate_drives_argv(), timeout=15)
-    if proc.returncode != 0:
-        return []
+    output = _run_drive_inventory(runner, list_candidate_drives_argv(), "enrollable drive list")
     boot_serial = pds.get_boot_device_serial(pds_runner)
+    if not isinstance(boot_serial, str) or not boot_serial.strip():
+        raise DriveInventoryError("machine boot-drive identity unavailable; enrollment candidates cannot be safely listed")
     allowed = allowed_target_serials()
     drives = []
-    for row in parse_candidate_drives(proc.stdout):
+    for row in parse_candidate_drives(output):
         serial = row.get("SERIAL") or ""
         if not row.get("NAME") or not serial or serial == boot_serial or serial in allowed:
             continue
@@ -561,6 +588,8 @@ def detect_baseline_drive(runner: Runner, device_path: str) -> dict:
     if vg_name is None:
         return {"is_baseline_drive": False, "vg_name": None, "missing_baseline_volumes": []}
     detection = drive_installer.detect_existing_baseline_install(runner, vg_name=vg_name)
+    if detection.get("error"):
+        raise DriveInventoryError(f"Baseline volume inventory failed for {vg_name}: {detection['error']}")
     return {
         "is_baseline_drive": bool(detection["found_volumes"]),
         "vg_name": vg_name,
@@ -726,21 +755,164 @@ def install_drive(runner, *, device_path, pds_runner=None, vg_name: str = PERSIS
     return ActionResult(True, f"{rebuild_result.detail}; {volumes_result.detail}")
 
 
-def check_cache_updates(runner) -> list:
-    """Refuse absent publisher/version verification instead of fabricating an empty check."""
-    raise RuntimeError("cache updates unavailable: no verified update source is configured")
+def _cache_package_directory(runner, root: str, identity: dict) -> str:
+    """Require the package archive directory to remain on the cache filesystem."""
+    path = f"{root}/packages"
+    resolved = runner.run(["readlink", "-e", path], timeout=10)
+    if resolved.returncode != 0 or resolved.stdout.strip() != path:
+        raise RuntimeError("INSTALLER_CACHE/packages is missing, redirected, or not canonical")
+    mounted = runner.run(["findmnt", "--json", "--target", path, "-o", "TARGET,UUID"], timeout=10)
+    try:
+        filesystems = json.loads(mounted.stdout)["filesystems"]
+    except (ValueError, KeyError, TypeError):
+        filesystems = []
+    if (mounted.returncode != 0 or len(filesystems) != 1
+            or filesystems[0].get("uuid") != identity.get("uuid")
+            or filesystems[0].get("target") != root):
+        raise RuntimeError("INSTALLER_CACHE/packages is not on the identified cache filesystem")
+    return path
+
+
+def check_cache_updates(runner, root: str = "/mnt/INSTALLER_CACHE") -> list:
+    """Find newer APT artifacts already represented in INSTALLER_CACHE.
+
+    APT refreshes its signed repository indexes, then its candidate version is
+    compared with each cached Debian archive using dpkg's version semantics.
+    Only package/firmware artifacts are candidates here; pinned ISOs, OCI
+    images, and reviewed VM scripts keep their independent publisher workflows.
+    """
+    import installer_cache as ic
+    import installer_sources
+
+    root = str(root)
+    identity = installer_sources.cache_identity(runner, root)
+    package_dir = _cache_package_directory(runner, root, identity)
+    refreshed = runner.run([
+        "apt-get", "-o", "Acquire::AllowInsecureRepositories=false",
+        "-o", "Acquire::AllowDowngradeToInsecureRepositories=false",
+        "-o", "APT::Get::AllowUnauthenticated=false", "update",
+    ], timeout=600)
+    if refreshed.returncode != 0:
+        detail = (refreshed.stderr or refreshed.stdout or "no diagnostic output").strip()
+        raise RuntimeError(f"APT repository index refresh failed: {detail}")
+
+    try:
+        cached_files = ic._listdir_with_sizes(runner, package_dir)
+        catalog = ic.catalog()
+    except Exception as exc:
+        raise RuntimeError(f"could not inspect cached package artifacts: {exc}") from exc
+
+    updates = []
+    for entry in catalog:
+        if entry.kind not in (ic.KIND_PACKAGE, ic.KIND_FIRMWARE):
+            continue
+        matches = [(name, size) for name, size in cached_files if ic._matches(entry, name)]
+        if not matches:
+            continue
+
+        versions = []
+        for name, _size in matches:
+            path = f"{package_dir}/{name}"
+            package = runner.run(["dpkg-deb", "--field", path, "Package", "Version", "Architecture"], timeout=30)
+            if package.returncode != 0:
+                raise RuntimeError(f"cached package metadata failed for {name}: {package.stderr.strip()}")
+            fields = package.stdout.splitlines()
+            if len(fields) != 3 or fields[0] != entry.entry_id or not fields[1] or not fields[2]:
+                raise RuntimeError(f"cached package identity/version is malformed for {name}")
+            versions.append((fields[1], fields[2], path))
+
+        newest = versions[0]
+        for candidate in versions[1:]:
+            comparison = runner.run(["dpkg", "--compare-versions", candidate[0], "gt", newest[0]], timeout=10)
+            if comparison.returncode == 0:
+                newest = candidate
+            elif comparison.returncode != 1:
+                raise RuntimeError(f"dpkg could not compare cached versions for {entry.entry_id}")
+
+        current_version, architecture, cached_path = newest
+        policy = runner.run(["apt-cache", "policy", f"{entry.entry_id}:{architecture}"], timeout=30)
+        if policy.returncode != 0:
+            raise RuntimeError(f"APT candidate lookup failed for {entry.entry_id}:{architecture}: {policy.stderr.strip()}")
+        candidate_lines = [line.split(":", 1)[1].strip() for line in policy.stdout.splitlines()
+                           if line.strip().startswith("Candidate:")]
+        if len(candidate_lines) != 1 or not candidate_lines[0] or candidate_lines[0] == "(none)":
+            raise RuntimeError(f"APT has no unambiguous candidate for {entry.entry_id}:{architecture}")
+        candidate_version = candidate_lines[0]
+        comparison = runner.run(["dpkg", "--compare-versions", candidate_version, "gt", current_version], timeout=10)
+        if comparison.returncode == 0:
+            updates.append({"package": entry.entry_id, "architecture": architecture,
+                            "current_version": current_version, "candidate_version": candidate_version,
+                            "cached_path": cached_path})
+        elif comparison.returncode != 1:
+            raise RuntimeError(f"dpkg could not compare APT and cached versions for {entry.entry_id}")
+    return updates
 
 
 def update_selected(runner, *, selected: list, **params) -> ActionResult:
-    """Refuse cache updates until publisher/version verification is connected.
-
-    Manually pinned scripts must retain their explicit review requirement.
-    """
+    """Refresh newer cached .deb archives without installing them on the host."""
     if not selected:
         return ActionResult(False, "no volumes selected")
-    return ActionResult(
-        False, "update-checking is not implemented yet - no real 'newer version available' "
-               "source exists for any cached artifact in this build")
+    if set(selected) != {"INSTALLER_CACHE"}:
+        return ActionResult(False, "select only INSTALLER_CACHE; other volumes do not store updateable package artifacts")
+    import installer_cache as ic
+    import installer_sources
+
+    root = ic.DEFAULT_CACHE_ROOT
+    try:
+        initial_identity = installer_sources.cache_identity(runner, root)
+        package_dir = _cache_package_directory(runner, root, initial_identity)
+        updates = check_cache_updates(runner)
+        if not updates:
+            final_identity = installer_sources.cache_identity(runner, root)
+            if final_identity != initial_identity:
+                return ActionResult(False, "INSTALLER_CACHE identity changed during the update check")
+            return ActionResult(True, "APT indexes refreshed; no newer versions of cached package artifacts were found")
+
+        # APT verifies archive hashes against its signed repository metadata.
+        # Direct its archive store to the identified cache volume and use
+        # download-only mode so no host package is installed or upgraded.
+        package_dir = f"{root}/{ic.SUBDIR[ic.KIND_PACKAGE]}"
+        requested = [
+            (f"{item['package']}={item['candidate_version']}" if item["architecture"] == "all"
+             else f"{item['package']}:{item['architecture']}={item['candidate_version']}")
+            for item in updates
+        ]
+        downloaded = runner.run([
+            "apt-get", "-o", f"Dir::Cache::archives={package_dir}",
+            "-o", f"Dir::Cache::archives::partial={package_dir}/partial",
+            "-o", "Acquire::AllowInsecureRepositories=false",
+            "-o", "Acquire::AllowDowngradeToInsecureRepositories=false",
+            "-o", "APT::Get::AllowUnauthenticated=false",
+            "--download-only", "--reinstall", "--yes", "--no-install-recommends",
+            "install", *requested,
+        ], timeout=1800)
+        if downloaded.returncode != 0:
+            detail = (downloaded.stderr or downloaded.stdout or "no diagnostic output").strip()
+            return ActionResult(False, f"APT archive download failed; no update claimed: {detail}")
+
+        final_identity = installer_sources.cache_identity(runner, root)
+        if final_identity != initial_identity:
+            return ActionResult(False, "INSTALLER_CACHE identity changed during archive download")
+        package_dir = _cache_package_directory(runner, root, final_identity)
+        cached_files = ic._listdir_with_sizes(runner, package_dir)
+        verified = []
+        for item in updates:
+            found = False
+            for name, _size in cached_files:
+                if not name.endswith(".deb") or not name.lower().startswith(item["package"].lower() + "_"):
+                    continue
+                path = f"{package_dir}/{name}"
+                result = runner.run(["dpkg-deb", "--field", path, "Package", "Version", "Architecture"], timeout=30)
+                fields = result.stdout.splitlines() if result.returncode == 0 else []
+                if fields == [item["package"], item["candidate_version"], item["architecture"]]:
+                    found = True
+                    break
+            if not found:
+                return ActionResult(False, f"downloaded {item['package']} archive did not pass package/version verification")
+            verified.append(f"{item['package']} {item['current_version']} -> {item['candidate_version']}")
+        return ActionResult(True, "Verified in INSTALLER_CACHE: " + ", ".join(verified))
+    except Exception as exc:
+        return ActionResult(False, f"cache update failed: {type(exc).__name__}: {exc}")
 
 
 def find_vg_for_device(runner, device_path: str) -> str | None:
@@ -759,12 +931,14 @@ def find_vg_for_device(runner, device_path: str) -> str | None:
     file has `pvs` specifically passwordless (confirmed live via `sudo
     -n -l`) - `-n` fails cleanly rather than hanging on any machine
     where that isn't configured."""
-    proc = runner.run(["sudo", "-n", "pvs", "--noheadings", "-o", "pv_name,vg_name"], timeout=15)
-    if proc.returncode != 0:
-        return None
-    for line in proc.stdout.splitlines():
+    output = _run_drive_inventory(runner, ["sudo", "-n", "pvs", "--noheadings", "-o", "pv_name,vg_name"], "LVM PV/VG list")
+    for line in output.splitlines():
+        if not line.strip():
+            continue
         parts = line.split()
-        if len(parts) >= 2 and parts[0].startswith(device_path):
+        if len(parts) != 2:
+            raise DriveInventoryError(f"malformed LVM PV/VG row: {line!r}")
+        if parts[0].startswith(device_path):
             return parts[1]
     return None
 
@@ -778,7 +952,10 @@ def repair_scan_and_fix(runner, *, device_path, **params) -> ActionResult:
     exists), rather than a bespoke "fix" path of its own. Each missing
     volume this finds is the same real, individually-listable
     validation failure the drive card itself shows."""
-    vg_name = find_vg_for_device(runner, device_path)
+    try:
+        vg_name = find_vg_for_device(runner, device_path)
+    except DriveInventoryError as exc:
+        return ActionResult(False, f"drive/LVM inventory failed; repair not attempted: {exc}")
     if vg_name is None:
         return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to repair")
     detection = drive_installer.detect_existing_baseline_install(runner, vg_name=vg_name)
@@ -810,7 +987,10 @@ def mount_logical_volume(runner, *, device_path, lv_name="root", mountpoint=None
             _check_mountpoint(mountpoint)
     except ValueError as exc:
         return ActionResult(False, f"refused: invalid parameter: {exc}")
-    vg_name = find_vg_for_device(runner, device_path)
+    try:
+        vg_name = find_vg_for_device(runner, device_path)
+    except DriveInventoryError as exc:
+        return ActionResult(False, f"drive/LVM inventory failed; mount not attempted: {exc}")
     if vg_name is None:
         return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to mount")
     progress(f"Activating volume group {vg_name}...")
@@ -843,7 +1023,10 @@ def unmount_logical_volume(runner, *, device_path, lv_name="root", mountpoint=No
             _check_mountpoint(mountpoint)
     except ValueError as exc:
         return ActionResult(False, f"refused: invalid parameter: {exc}")
-    vg_name = find_vg_for_device(runner, device_path)
+    try:
+        vg_name = find_vg_for_device(runner, device_path)
+    except DriveInventoryError as exc:
+        return ActionResult(False, f"drive/LVM inventory failed; unmount not attempted: {exc}")
     if vg_name is None:
         return ActionResult(False, f"{device_path} has no real LVM volume group - nothing to unmount")
     target = mountpoint or f"/mnt/{vg_name}-{lv_name}-inspect"
@@ -852,6 +1035,35 @@ def unmount_logical_volume(runner, *, device_path, lv_name="root", mountpoint=No
     if result.returncode != 0:
         return ActionResult(False, f"unmounting {target} failed: {result.stderr.strip()}")
     return ActionResult(True, f"{target} unmounted")
+
+
+def unmount_mounted_partition(runner, *, device_path, expected_serial, partition_mountpoint,
+                              on_progress=None, **params) -> ActionResult:
+    """Unmount a mounted partition only after proving it belongs to the selected serial."""
+    try:
+        _check_partition_mountpoint(partition_mountpoint)
+        _check_expected_serial(expected_serial)
+    except ValueError as exc:
+        return ActionResult(False, f"refused: invalid parameter: {exc}")
+    progress = on_progress or (lambda line: None)
+    mounted = runner.run(["findmnt", "--noheadings", "--output", "SOURCE", "--target", partition_mountpoint])
+    source = mounted.stdout.strip() if mounted.returncode == 0 else ""
+    if not source.startswith("/dev/") or "\n" in source:
+        return ActionResult(False, f"refused: {partition_mountpoint} is not a mounted block-device partition")
+    ownership = runner.run(["lsblk", "--noheadings", "--output", "PKNAME", "--", source])
+    identity = runner.run(["udevadm", "info", "--query=property", f"--name={device_path}"])
+    parent_names = ownership.stdout.split()
+    serials = [line.partition("=")[2] for line in identity.stdout.splitlines()
+              if line.startswith("ID_SERIAL_SHORT=")]
+    expected_parent = os.path.basename(device_path)
+    if (ownership.returncode != 0 or identity.returncode != 0 or len(parent_names) != 1
+            or parent_names[0] != expected_parent or serials != [expected_serial]):
+        return ActionResult(False, f"refused: mounted source {source} is not proven to belong to selected drive serial {expected_serial}")
+    progress(f"Unmounting {partition_mountpoint} from {source} on serial {expected_serial}...")
+    result = runner.run(["umount", "--", partition_mountpoint])
+    if result.returncode != 0:
+        return ActionResult(False, f"unmounting {partition_mountpoint} failed: {result.stderr.strip()}")
+    return ActionResult(True, f"{partition_mountpoint} unmounted from {source} on serial {expected_serial}")
 
 
 def build_self_installer(runner, *, device_path, pds_runner=None, on_progress=None, **params) -> ActionResult:
@@ -1030,9 +1242,9 @@ ACTIONS = {
     # longer exposed as their own top-level actions.
     "update_selected": ActionSpec(
         "update_selected",
-        "Check every volume on this Baseline drive for a newer compatible version of what it "
-        "caches, and apply the ones you select (or all of them). Only meaningful on a real "
-        "Baseline drive - shown only when one is selected.",
+        "Refresh newer Debian package archives already represented in INSTALLER_CACHE using the "
+        "host's APT repository trust policy. Downloads are verified and cached, never installed here. "
+        "Other volumes are not package caches.",
         lambda runner, selected=(), **params: update_selected(runner, selected=list(selected)),
         requires_device=True,
     ),
@@ -1058,6 +1270,12 @@ ACTIONS = {
         "Unmount a logical volume this drive's mount_volume action mounted - the real "
         "counterpart, not something you have to remember to type yourself.",
         lambda runner, device_path, **params: unmount_logical_volume(runner, device_path=device_path, **params),
+        requires_device=True,
+    ),
+    "unmount_partition": ActionSpec(
+        "unmount_partition",
+        "Safely unmount one mounted partition belonging to this exact drive before it is moved or tested on another machine.",
+        lambda runner, device_path, **params: unmount_mounted_partition(runner, device_path=device_path, **params),
         requires_device=True,
     ),
 }
@@ -1195,11 +1413,13 @@ _SAFE_PATH_ROOTS = ("/mnt/INSTALLER_CACHE/", "/etc/baseline/", "/var/lib/baselin
 _MAX_SELECTED = 20
 
 ACTION_PARAMS = {
+    "update_installed_drive": frozenset({"device_path", "input_bundle", "recovery_folder"}),
     "build_self_installer": frozenset({"device_path", "expected_serial", "proxmox_source_iso", "server_host",
                                        "cert_path", "key_path", "target_mac", "target_dmi_product"}),
     "repair": frozenset({"device_path"}),
     "mount_volume": frozenset({"device_path", "lv_name", "mountpoint"}),
     "unmount_volume": frozenset({"device_path", "lv_name", "mountpoint"}),
+    "unmount_partition": frozenset({"device_path", "partition_mountpoint"}),
     "update_selected": frozenset({"selected", "device_path"}),     # the page sends device_path for every action
     "stamp_installer_identity": frozenset({"device_path"}),
     "lay_out_baseline_drive": frozenset({"device_path"}),
@@ -1269,6 +1489,14 @@ def _check_mountpoint(value) -> str:
     return value
 
 
+def _check_partition_mountpoint(value) -> str:
+    value = _check_str("mountpoint", value)
+    if (not re.fullmatch(r"/mnt/[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value)
+            or value in ("/mnt/10TB", "/mnt/INSTALLER_CACHE")):
+        raise ValueError("partition mountpoint must be a direct child of /mnt, outside the backup and installer cache")
+    return value
+
+
 def _check_safe_path(name: str, value) -> str:
     value = _check_str(name, value)
     if (len(value) > 4096 or not os.path.isabs(value) or os.path.normpath(value) != value
@@ -1305,9 +1533,12 @@ def _check_selected(value) -> list:
 
 
 _PARAM_CHECKS = {
+    "input_bundle": lambda value: _check_update_path(value),
+    "recovery_folder": lambda value: _check_update_path(value),
     "device_path": lambda v: _check_str("device_path", v),
     "lv_name": _check_lv_name,
     "mountpoint": _check_mountpoint,
+    "partition_mountpoint": _check_partition_mountpoint,
     "selected": _check_selected,
     "expected_serial": _check_expected_serial,
     "confirm_serial": drive_enrollment.check_serial,
@@ -1327,6 +1558,8 @@ def validate_action_params(action_id: str, params: dict) -> dict:
     allowed = ACTION_PARAMS.get(action_id)
     if allowed is None:
         raise ValueError(f"unknown action {action_id!r}")
+    if action_id == 'update_installed_drive' and set(params) != set(allowed):
+        raise ValueError('missing required installer update inputs')
     unknown = sorted(set(params) - allowed)
     if unknown:
         raise ValueError(f"unknown parameter(s) for {action_id}: {', '.join(unknown)}")
@@ -1396,8 +1629,10 @@ def prepare_action(action_id: str, params: dict, *, pds_runner=None) -> dict:
     """What a person is being asked to confirm: the cleaned request, the drive's serial, and a plain summary."""
     spec, call_params, serial = _prepare(action_id, params, pds_runner)
     where = f"drive {call_params['device_path']} (serial ending {serial[-6:]})" if "device_path" in call_params else "Baseline's volumes"
+    target = (f"\nMounted partition location: {call_params['partition_mountpoint']}."
+              if action_id == "unmount_partition" else "")
     return {"action_id": action_id, "params": call_params, "serial": serial,
-            "summary": f"{spec.description}\nThis will run on {where}."}
+            "summary": f"{spec.description}\nThis will run on {where}.{target}"}
 
 
 def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=None, pds_runner=None,
@@ -1423,6 +1658,9 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
         web_gate.require(origin, "drive_action", {"action_id": action_id, "params": call_params})
     except web_gate.NotFromWebApp as exc:
         return ActionResult(False, f"refused: {exc}")
+    if getattr(authorization, '_kind', None) == 'native_pending':
+        if action_id not in hitl.NATIVE_POLICYKIT_ACTIONS or type(runner) is not PkexecRunner:
+            return ActionResult(False, 'refused: pending native authorization requires an approved PolicyKit action and PkexecRunner')
     try:
         hitl.require(authorization, action_id, call_params, serial, store=hitl_store)
     except hitl.ConfirmationRequired as exc:
@@ -1435,4 +1673,49 @@ def perform_action(runner: Runner, action_id: str, params: dict, *, on_progress=
         # Internal dispatch value, added only after the web and HITL proofs
         # verify the original request and this exact device serial.
         call_params["expected_serial"] = serial
+    if action_id == "update_installed_drive":
+        call_params["expected_serial"] = serial
+    if action_id == "unmount_partition":
+        call_params["expected_serial"] = serial
     return spec.run(runner, **call_params)
+
+
+def _check_update_path(value):
+    value = _check_str("installer path", value)
+    if (not os.path.isabs(value) or os.path.normpath(value) != value
+            or any(c in value for c in "\x00\n\r") or len(value) > 4096):
+        raise ValueError("installer paths must be clean absolute paths")
+    return value
+
+
+def update_installed_drive(runner, *, device_path, expected_serial, input_bundle,
+                           recovery_folder, on_progress=None):
+    """The helper re-resolves and validates the serial before every physical write."""
+    import json
+    helper = REPO_ROOT / "baseline/bin/baseline-drive-update"
+    if not helper.is_file():
+        return ActionResult(False, "Installed-drive update helper unavailable")
+    if on_progress:
+        on_progress("Verifying target ownership, recovery and captured inputs before updating the installed system.")
+    proc = runner.run(["/usr/bin/python3", str(helper), "--serial", expected_serial,
+                       "--input-bundle", input_bundle, "--recovery-folder", recovery_folder], timeout=7200)
+    if proc.returncode:
+        return ActionResult(False, "Installed-drive update failed; inspect its stage journal before retrying. " +
+                            (proc.stderr or "")[-2000:])
+    try:
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        if result.get("state") != "updated" or result.get("boot_verified") is not False:
+            raise ValueError
+    except (ValueError, IndexError, TypeError):
+        return ActionResult(False, "Update helper did not return a verified completion record")
+    return ActionResult(True, "Installed Baseline updated with retained storage. Physical boot, internet, firewall and workload acceptance remain pending.")
+
+
+ACTIONS["update_installed_drive"] = ActionSpec(
+    "update_installed_drive",
+    "Update a recognized installed Proxmox/Baseline drive from a captured input bundle. "
+    "Verify recovery and storage identity, retain user/application/cache volumes, refresh "
+    "Baseline and boot files using online package sources. Grow disposable BASELINE to at least 50 GiB "
+    "when required, preserving a 16 GiB VG reserve. No partitioning, formatting, "
+    "credential reset or restoration over existing user data. Boot and workload verification follow separately.",
+    lambda runner, **params: update_installed_drive(runner, **params), requires_device=True)

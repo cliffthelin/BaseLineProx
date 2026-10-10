@@ -199,6 +199,34 @@ def test_freeze_is_refused_while_running_and_never_replaces_an_existing_base(h):
     assert (h.host.bases_dir / "b.qcow2").read_bytes() == b"old"
 
 
+def test_freeze_reports_cleanup_failure_and_can_resume(h, monkeypatch):
+    h.host.create_from_iso("dev", iso="/x.iso", disk_gb=10)
+    disk = h.host.disk_path("dev")
+    disk.write_bytes(b"installed os")
+    vm_dir = h.host.vm_dir("dev")
+    target = h.host.base_path("ubuntu-base")
+    real_rmtree = vh.shutil.rmtree
+    calls = 0
+
+    def fail_once(path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            (vm_dir / "vm.json").unlink()
+            raise OSError("simulated freeze cleanup interruption")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(vh.shutil, "rmtree", fail_once)
+    with pytest.raises(OSError, match="freeze cleanup interruption"):
+        h.host.freeze_as_base("dev", "ubuntu-base")
+    assert target.read_bytes() == b"installed os"
+    assert vm_dir.exists()
+
+    h.host.freeze_as_base("dev", "ubuntu-base")
+    assert not vm_dir.exists()
+    assert target.read_bytes() == b"installed os"
+
+
 def test_a_base_with_overlays_cannot_be_deleted(h):
     base = h.host.bases_dir / "golden.qcow2"
     base.parent.mkdir(parents=True)
@@ -217,6 +245,31 @@ def test_delete_vm_needs_it_stopped_and_removes_only_its_own_folder(h):
     h.host.stop("dev")
     h.host.delete_vm("dev")
     assert not h.host.vm_dir("dev").exists() and h.host.vm_dir("other").exists()
+
+
+def test_delete_vm_can_retry_after_partial_directory_cleanup(h, monkeypatch):
+    h.host.create_from_iso("dev", iso="/x.iso", disk_gb=10)
+    vm_dir = h.host.vm_dir("dev")
+    disk = h.host.standalone_path("dev")
+    disk.parent.mkdir(parents=True, exist_ok=True)
+    disk.write_bytes(b"qcow2")
+    real_rmtree = vh.shutil.rmtree
+    calls = 0
+
+    def partial_rmtree(path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("simulated interruption during cleanup")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(vh.shutil, "rmtree", partial_rmtree)
+    with pytest.raises(OSError, match="simulated interruption"):
+        h.host.delete_vm("dev")
+    assert vm_dir.exists() and not disk.exists()
+
+    h.host.delete_vm("dev")
+    assert not vm_dir.exists()
 
 
 def test_not_enough_free_space_refuses_to_create(h):
@@ -242,6 +295,15 @@ def test_list_vms_reports_kind_and_running(h):
     rows = {v["name"]: v for v in h.host.list_vms()}
     assert rows["scratch"]["kind"] == "overlay" and rows["scratch"]["base"] == "golden" and not rows["scratch"]["running"]
     assert rows["dev"]["kind"] == "standalone" and rows["dev"]["running"]
+
+
+def test_list_vms_does_not_hide_a_corrupt_vm_record(h):
+    h.host.create_from_iso("broken", iso="/x.iso", disk_gb=10)
+    h.host.create_from_iso("visible", iso="/x.iso", disk_gb=10)
+    (h.host.vm_dir("broken") / "vm.json").write_text("not-json")
+
+    with pytest.raises(vh.VmError, match="cannot inspect VM broken: invalid VM record"):
+        h.host.list_vms()
 
 
 def test_isos_listed_from_the_installer_cache_folder(tmp_path):

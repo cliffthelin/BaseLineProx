@@ -1,0 +1,137 @@
+.......FFFFFFFFFFFFFFFFFFF                                               [100%]
+=================================== FAILURES ===================================
+_____ test_missing_runner_dependency_prevents_module_loading[config_apply] _____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...s.argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'config_apply'], returncode=0, stdout='', stderr='').returncode
+____ test_missing_runner_dependency_prevents_module_loading[proxmox_detect] ____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'proxmox_detect'], returncode=0, stdout='', stderr='').returncode
+______ test_missing_runner_dependency_prevents_module_loading[vm_scripts] ______
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...sys.argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'vm_scripts'], returncode=0, stdout='', stderr='').returncode
+___ test_missing_runner_dependency_prevents_module_loading[persistence_pool] ___
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...gv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'persistence_pool'], returncode=0, stdout='', stderr='').returncode
+____ test_missing_runner_dependency_prevents_module_loading[scripts_inbox] _____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab....argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'scripts_inbox'], returncode=0, stdout='', stderr='').returncode
+___ test_missing_runner_dependency_prevents_module_loading[update_pipeline] ____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...rgv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'update_pipeline'], returncode=0, stdout='', stderr='').returncode
+_ test_missing_runner_dependency_prevents_module_loading[sensors_interval_control] _
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'sensors_interval_control'], returncode=0, stdout='', stderr='').returncode
+___ test_missing_runner_dependency_prevents_module_loading[backup_recurring] ___
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...gv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'backup_recurring'], returncode=0, stdout='', stderr='').returncode
+_ test_missing_runner_dependency_prevents_module_loading[persist_bind_mounts] __
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'persist_bind_mounts'], returncode=0, stdout='', stderr='').returncode
+__ test_missing_runner_dependency_prevents_module_loading[control_panel_web] ___
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...v[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'control_panel_web'], returncode=0, stdout='', stderr='').returncode
+____ test_missing_runner_dependency_prevents_module_loading[recovery_mode] _____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab....argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'recovery_mode'], returncode=0, stdout='', stderr='').returncode
+____ test_missing_runner_dependency_prevents_module_loading[backup_restore] ____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'backup_restore'], returncode=0, stdout='', stderr='').returncode
+__ test_missing_runner_dependency_prevents_module_loading[proxmox_vm_metrics] __
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'proxmox_vm_metrics'], returncode=0, stdout='', stderr='').returncode
+_______ test_missing_runner_dependency_prevents_module_loading[quadlet] ________
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...__(sys.argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'quadlet'], returncode=0, stdout='', stderr='').returncode
+_____ test_missing_runner_dependency_prevents_module_loading[config_diff] ______
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...ys.argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'config_diff'], returncode=0, stdout='', stderr='').returncode
+_____ test_missing_runner_dependency_prevents_module_loading[diagnostics] ______
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...ys.argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'diagnostics'], returncode=0, stdout='', stderr='').returncode
+___ test_missing_runner_dependency_prevents_module_loading[drive_installer] ____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...rgv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'drive_installer'], returncode=0, stdout='', stderr='').returncode
+___ test_missing_runner_dependency_prevents_module_loading[config_pipeline] ____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab...rgv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'config_pipeline'], returncode=0, stdout='', stderr='').returncode
+____ test_missing_runner_dependency_prevents_module_loading[config_crypto] _____
+tests/unit/test_production_runner_dependency.py:34: in test_missing_runner_dependency_prevents_module_loading
+    assert result.returncode != 0, "missing production dependency was replaced by a stub"
+E   AssertionError: missing production dependency was replaced by a stub
+E   assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/usr/bin/python3', '-c', "\nimport importlib.abc\nimport sys\nclass MissingRepair(importlib.ab....argv[2])\n", '/run/media/cane/CACHE/baseline_repo/baseline/lib', 'config_crypto'], returncode=0, stdout='', stderr='').returncode
+=========================== short test summary info ============================
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[config_apply]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[proxmox_detect]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[vm_scripts]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[persistence_pool]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[scripts_inbox]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[update_pipeline]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[sensors_interval_control]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[backup_recurring]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[persist_bind_mounts]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[control_panel_web]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[recovery_mode]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[backup_restore]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[proxmox_vm_metrics]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[quadlet]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[config_diff]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[diagnostics]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[drive_installer]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[config_pipeline]
+FAILED tests/unit/test_production_runner_dependency.py::test_missing_runner_dependency_prevents_module_loading[config_crypto]
+19 failed, 7 passed in 1.00s

@@ -208,6 +208,19 @@ def autofill(discovery: dict, *, personas=di.DEFAULT_PERSONAS) -> dict:
 
 # --- validation --------------------------------------------------------------------------------
 
+def autofill_single_drive(discovery: dict, serial: str, *, personas=di.DEFAULT_PERSONAS) -> dict:
+    """Explicitly choose one independent installation; never guess or erase it."""
+    if not isinstance(serial, str) or not any(d["serial"] == serial for d in discovery["drives"]):
+        raise PlanError("choose an enrolled drive by its current serial")
+    plan = autofill(discovery, personas=personas)
+    plan["storage"]["substrate"] = {"serial": serial, "action": "install"}
+    plan["storage"]["baseline"] = {"serial": serial, "action": "provision_lvm",
+                                     "personas": list(personas), "erase_existing": False, "volumes": []}
+    plan["notes"] = ["Independent boot and all storage roles on this drive; same profile on each drive, unique identities.",
+                     "Existing contents require verified migration before a fresh installation; no stages execute here."]
+    return plan
+
+
 def _exact_keys(value, keys: set, where: str, errors: list) -> bool:
     if not isinstance(value, dict):
         errors.append(f"{where} must be an object")
@@ -331,6 +344,19 @@ def _check_baseline(spec: dict, discovery: dict, substrate, errors: list, mapped
         errors.append("Baseline drive: erase_existing must be true or false")
     if drive is None:
         return
+    if spec["action"] == "provision_lvm":
+        if substrate is None or substrate["serial"] != drive["serial"]:
+            errors.append("single-drive provisioning requires the same drive for substrate and data")
+        if not personas_ok:
+            return
+        if spec["erase_existing"] or spec["volumes"] or mapped_personas:
+            errors.append("fresh single-drive provisioning cannot erase, retain partition mappings or use external AppData")
+        import self_installer
+        try:
+            self_installer.single_drive_profile(drive["size_bytes"], personas=tuple(spec["personas"]))
+        except ValueError as exc:
+            errors.append(str(exc))
+        return
     if substrate is not None and substrate["serial"] == drive["serial"]:
         errors.append(f"drive {drive['serial']} cannot be both the Proxmox drive and the Baseline drive")
         return
@@ -355,12 +381,25 @@ def _check_environment(env, errors: list) -> None:
 
 
 def _check_applications(apps, errors: list) -> None:
-    if not _exact_keys(apps, {"apps", *DEFAULT_APPLICATIONS}, "applications", errors):
+    keys={"apps", *DEFAULT_APPLICATIONS}
+    if isinstance(apps,dict) and "configurations" in apps:keys.add("configurations")
+    if not _exact_keys(apps, keys, "applications", errors):
         return
     chosen = apps["apps"]
     if (not isinstance(chosen, list) or not chosen or len(set(map(str, chosen))) != len(chosen)
             or not all(a in ab.APPS for a in chosen)):
         errors.append(f"applications: apps must be a non-empty list of distinct choices from {', '.join(ab.APPS)}")
+    configurations=apps.get('configurations',{})
+    if not isinstance(configurations,dict):
+        errors.append('applications: configurations must be an object')
+    else:
+        for app,configuration in configurations.items():
+            try:
+                if not isinstance(configuration,dict):raise er.RecipeError('configuration must be an object')
+                captured=ab.capture(app,json.dumps(configuration))
+                if captured['excluded_count']:raise er.RecipeError('unsupported configuration fields')
+            except (er.RecipeError,ValueError,TypeError) as exc:
+                errors.append('applications: '+str(exc))
     try:
         tasker.validate_task_storage(cache=apps["cache"], generation=apps["generation_root"], data=apps["data"],
                                      run_as=apps["run_as"])
@@ -429,6 +468,9 @@ def validate(plan, discovery: dict) -> list:
             substrate = _check_substrate(storage["substrate"], discovery, errors)
         if _exact_keys(storage["baseline"], _BASELINE_KEYS, "storage.baseline", errors):
             _check_baseline(storage["baseline"], discovery, substrate, errors, [r["persona"] for r in routes])
+            if (isinstance(storage["baseline"], dict) and storage["baseline"].get("action") == "provision_lvm"
+                    and isinstance(storage["substrate"], dict) and storage["substrate"].get("action") != "install"):
+                errors.append("single-drive provisioning requires a fresh substrate install")
     _check_environment(plan["environment"], errors)
     _check_applications(plan["applications"], errors)
     return errors
@@ -463,7 +505,19 @@ def compile_plan(plan, discovery: dict) -> dict:
                            "params": {"expected_serial": substrate["serial"]}}
     else:
         substrate_stage = {"action": "keep"}
-    if baseline["action"] == "lay_out":
+    if baseline["action"] == "provision_lvm":
+        import self_installer
+        profile = self_installer.single_drive_profile(drive["size_bytes"], personas=tuple(baseline["personas"]))
+        substrate_stage["params"]["lvm_size_preset"] = "single-drive"
+        baseline_stage = {"action": "provision_lvm", "expected_serial": baseline["serial"],
+                          "module": "single_drive_storage", "function": "provision_target",
+                          "requires": ["offline_root_mount", "measured_role_bytes", "verified_recovery"],
+                          "params": {"personas": list(baseline["personas"]),
+                                     "planned_sizes_gib": profile["storage"]["volumes_gib"],
+                                     "reserve_bytes": profile["storage"]["growth_bytes"] + profile["storage"]["safety_bytes"]},
+                          "mounts": []}
+        after.append("after fresh installation, verify the selected root/VG backing serial before provisioning these LVs; never wipe the new boot table")
+    elif baseline["action"] == "lay_out":
         baseline_stage = {"action": "lay_out", "drive_action": "lay_out_baseline_drive",
                           "expected_serial": baseline["serial"], "personas": list(baseline["personas"]), "mounts": []}
         after.append("after the layout, discover again and compile a retain plan to bind the new PARTUUIDs to mounts")
@@ -478,7 +532,8 @@ def compile_plan(plan, discovery: dict) -> dict:
         "baseline_drive": baseline_stage,
         "appdata": _appdata_routes(plan,discovery,[]),
         "environment": {"name": env["name"], "desktop": env["variant"] == "desktop", "base": SUPPORTED_OS[env["os"]]},
-        "applications": {"apps": list(apps["apps"]), **{k: apps[k] for k in DEFAULT_APPLICATIONS}},
+        "applications": {"apps": list(apps["apps"]), **{k: apps[k] for k in DEFAULT_APPLICATIONS},
+                         **({"configurations":copy.deepcopy(apps["configurations"])} if "configurations" in apps else {})},
         "after": after,
         "not_yet_connected": list(NOT_YET_CONNECTED),
     }
@@ -499,8 +554,8 @@ def main(argv: list, *, read_listing, boot_serial, allowed_serials, is_installer
     """`discover`, `autofill`, `validate PLAN` or `compile PLAN`. Every command discovers afresh; none writes
     anything. Returns 0, or 1 with every problem printed."""
     command, *rest = argv or ["help"]
-    if command not in ("discover", "autofill", "validate", "compile") or len(rest) != (command in ("validate", "compile")):
-        print_fn("usage: baseline-install-plan discover | autofill | validate PLAN.json | compile PLAN.json")
+    if command not in ("discover", "autofill", "single-drive", "validate", "compile") or len(rest) != (command in ("single-drive", "validate", "compile")):
+        print_fn("usage: baseline-install-plan discover | autofill | single-drive SERIAL | validate PLAN.json | compile PLAN.json")
         return 2
     try:
         found = discover(read_listing(), allowed_serials=allowed_serials, boot_serial=boot_serial,
@@ -509,6 +564,8 @@ def main(argv: list, *, read_listing, boot_serial, allowed_serials, is_installer
             result = found
         elif command == "autofill":
             result = autofill(found)
+        elif command == "single-drive":
+            result = autofill_single_drive(found, rest[0])
         elif command == "validate":
             errors = validate(_read_plan(rest[0]), found)
             if errors:

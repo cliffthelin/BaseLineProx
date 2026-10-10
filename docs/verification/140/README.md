@@ -21,6 +21,10 @@ booted the final artifact to the Proxmox menu with no network or target disks.
 The artifact is a manual installer/source package, not unattended provisioning.
 Final verification notes/manifest are outside the packaging snapshot (self-hash
 would be circular). ISO checksum/content/boot facts are in installer-manifest.json.
+The generated local ISO was removed 2026-10-08 after its checksum, extraction
+manifest, and boot screenshot were retained here; it can be rebuilt from the
+verified publisher source. The remaining local DR140 run directory was removed
+after matching screenshots and summaries were retained in this folder.
 
 Private browser-session token, raw discovery, source snapshots, ISO and Runner
 logs stay local. Other concurrent root working-tree changes, including the

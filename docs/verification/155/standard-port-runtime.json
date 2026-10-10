@@ -1,0 +1,1 @@
+{"port":5201,"default_port_verified":true,"actual_firewall_rule_count":8,"server_applied":true,"client_applied":true,"client_detail":"iperf3 to 10.66.0.1:5201: 60723 Mbit/s","scope":"actual isolated Linux; virtual local transfer, not physical LAN"}

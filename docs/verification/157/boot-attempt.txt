@@ -1,0 +1,80 @@
+Verifying the existing 7.5 GiB whole-drive recovery image before writes...
+{
+  "serial": "MD89N41071210AP4E",
+  "recovery": "verified",
+  "installation": "present",
+  "previous_disk_boot": "QEMU login screen observed in DR146",
+  "vg_identity": {
+    "pv_name": "/dev/sdd3",
+    "pv_uuid": "PtJxk3-3YnM-AnWA-fsJQ-MbDy-TJOB-yiCyM8",
+    "vg_name": "baseline_1b75c1a556ee",
+    "vg_uuid": "Okyyas-6SZq-tSzV-trFO-K5RW-hmXQ-TWPyAE",
+    "pv_count": "1"
+  },
+  "actual_host_lvs": {
+    "report": [
+      {
+        "lv": [
+          {
+            "lv_name": "baseline_app_state",
+            "lv_size": "8589934592",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_appdata_admin",
+            "lv_size": "37580963840",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_appdata_personal",
+            "lv_size": "37580963840",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_installer_cache",
+            "lv_size": "66571993088",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_session_temp",
+            "lv_size": "8589934592",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_substrate",
+            "lv_size": "1073741824",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_user_admin",
+            "lv_size": "66571993088",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_user_personal",
+            "lv_size": "66571993088",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "data",
+            "lv_size": "66567798784",
+            "lv_attr": "twi-a-tz--"
+          },
+          {
+            "lv_name": "root",
+            "lv_size": "34359738368",
+            "lv_attr": "-wi-ao----"
+          },
+          {
+            "lv_name": "swap",
+            "lv_size": "4294967296",
+            "lv_attr": "-wi-a-----"
+          }
+        ]
+      }
+    ],
+    "log": []
+  }
+}
+Real LVM open-state before physical boot: {"report": [{"lv": [{"lv_name": "baseline_app_state", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "baseline_appdata_admin", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "baseline_appdata_personal", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "baseline_installer_cache", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "baseline_session_temp", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "baseline_substrate", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "baseline_user_admin", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "baseline_user_personal", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}, {"lv_name": "data", "lv_active": "active", "lv_device_open": "", "lv_attr": "twi-a-tz--"}, {"lv_name": "root", "lv_active": "active", "lv_device_open": "open", "lv_attr": "-wi-ao----"}, {"lv_name": "swap", "lv_active": "active", "lv_device_open": "", "lv_attr": "-wi-a-----"}]}], "log": []}
+Stopped without claiming completion: PC401 root LV remains mounted; representative holder={"pid": "1224", "mountpoint": "/tmp/baseline-pc401-target", "device": "252:6"}; Name:	systemd-oomd Pid:	1224 NSpid:	1224; systemd-oomd MainPID=1224; first normal-unmount failures=["/tmp/baseline-pc401-target/sys/firmware/efi/efivars: umount2 errno=2 No such file or directory ", "/tmp/baseline-pc401-target/sys/fs/fuse/connections: umount2 errno=2 No such file or directory ", "/tmp/baseline-pc401-target/sys/kernel/security: umount2 errno=2 No such file or directory "]; PC401 root LV remains mounted in 45 process namespaces; PIDs=10832,10881,1136727,1224,1227,13129,13255,1548828,32959,417720,417950,417954

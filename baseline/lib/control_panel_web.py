@@ -38,6 +38,7 @@ import web_gate
 import drive_installer
 import physical_device_safety as pds
 import update_pipeline
+from web_request_json import JsonBodyError, read_json_object
 
 from repair import Runner
 
@@ -99,7 +100,10 @@ def handle_differences(runner: Runner, *, config_path: str = DEFAULT_CONFIG_PATH
         return RouteResult("handed_off", 409,
                             {"reason": f"no exported config found at {config_path} - "
                                        "export one from the Master Config first"})
-    sections = config_diff.compute_full_diff(runner, config, network_interface=network_interface)
+    try:
+        sections = config_diff.compute_full_diff(runner, config, network_interface=network_interface)
+    except config_diff.ReadbackError as exc:
+        return RouteResult("refused", 503, {"reason": str(exc)})
     return RouteResult("applied", 200, {"diff_sections": sections})
 
 
@@ -130,7 +134,10 @@ def handle_backup_list(runner: Runner, *, archive: str) -> RouteResult:
         archive = backup_restore.check_existing_backup_file(runner, archive)
     except ValueError as exc:
         return RouteResult("refused", 422, {"detail": f"refused: {exc}"})
-    contents = backup_restore.list_backup_contents(runner, archive)
+    try:
+        contents = backup_restore.list_backup_contents(runner, archive)
+    except backup_restore.BackupReadError as exc:
+        return RouteResult("refused", 422, {"detail": str(exc)})
     return RouteResult("applied", 200, {"contents": contents})
 
 
@@ -261,12 +268,7 @@ class ControlPanelHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def _read_json_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length) if length else b""
-        try:
-            return json.loads(raw.decode()) if raw else {}
-        except ValueError:
-            return {}
+        return read_json_object(self.headers,self.rfile)
 
     def do_GET(self):  # noqa: N802
         deps = self.server.deps  # type: ignore[attr-defined]
@@ -299,7 +301,10 @@ class ControlPanelHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         deps = self.server.deps  # type: ignore[attr-defined]
-        body = self._read_json_body()
+        try:
+            body = self._read_json_body()
+        except JsonBodyError as exc:
+            return self._json(400,{"outcome":"refused","detail":str(exc)})
 
         if self.path == "/api/backup":
             result = handle_backup(deps["runner"], dest=body.get("dest", ""),

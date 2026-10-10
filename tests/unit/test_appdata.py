@@ -8,6 +8,8 @@ Pure planning: nothing here mounts, chowns or writes. Each of the four
 guarantees the instruction named is asserted directly rather than
 described in a comment.
 """
+import pytest
+
 import appdata
 import installer_cache as ic
 
@@ -54,9 +56,53 @@ def test_appdata_is_per_persona_not_one_shared_store():
     assert appdata.appdata_root("personal").endswith("APPDATA_PERSONAL")
 
 
+def test_appdata_runtime_requires_the_named_ext4_volume_to_be_mounted_at_its_real_root():
+    from fake_runner import FakeProc, FakeRunner
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:2] == ["blkid", "-L"], FakeProc(0, "/dev/mapper/baseline_appdata_personal\n", "")),
+        (lambda a: a[:2] == ["findmnt", "--noheadings"], FakeProc(0, "/dev/mapper/baseline_appdata_personal ext4\n", "")),
+        (lambda a: a[:2] == ["readlink", "-e"], FakeProc(0, "/dev/mapper/baseline_appdata_personal\n", "")),
+    ])
+    assert appdata.verify_appdata_mount(runner, "personal") == "/mnt/APPDATA_PERSONAL"
+    assert runner.calls[0] == ["blkid", "-L", "APPDATA_PERSONAL"]
+    assert runner.calls[1] == ["findmnt", "--noheadings", "--output", "SOURCE,FSTYPE", "--mountpoint", "/mnt/APPDATA_PERSONAL"]
+
+
+def test_appdata_runtime_rejects_a_directory_or_wrong_volume_instead_of_writing_to_substrate():
+    from fake_runner import FakeProc, FakeRunner
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:2] == ["blkid", "-L"], FakeProc(0, "/dev/mapper/baseline_appdata_personal\n", "")),
+        (lambda a: a[:2] == ["findmnt", "--noheadings"], FakeProc(0, "/dev/nvme0n1p2 ext4\n", "")),
+    ])
+    with pytest.raises(appdata.AppDataRuntimeError, match="does not match"):
+        appdata.verify_appdata_mount(runner, "personal")
+    # Canonical source resolution is required because device-mapper aliases
+    # can name the same filesystem through different paths.
+    assert len(runner.calls) == 4
+
+
+def test_appdata_runtime_refuses_unknown_persona_before_running_commands():
+    from fake_runner import FakeRunner
+    runner = FakeRunner()
+    with pytest.raises(ValueError, match="unknown AppData persona"):
+        appdata.verify_appdata_mount(runner, "untrusted-label")
+    assert runner.calls == []
+
+
 def test_every_apps_data_lives_under_its_own_appdata_home():
     for plan in appdata.plan_all("personal"):
         assert plan.home.startswith(appdata.appdata_root("personal") + "/")
+
+
+def test_an_unmapped_catalog_package_fails_instead_of_being_treated_as_stateless(monkeypatch):
+    import installer_cache
+    monkeypatch.setattr(installer_cache, "catalog", lambda: [
+        installer_cache.CatalogEntry(
+            entry_id="unmapped-test-package", name="Unmapped package",
+            kind=installer_cache.KIND_PACKAGE, origin="test source",
+            install_helper="test", config_section="test")])
+    with pytest.raises(appdata.DataTargetPolicyError, match="no explicit AppData data-target policy"):
+        appdata.installable_apps()
         for overlay in plan.overlays:
             assert overlay.upperdir.startswith(plan.home + "/")
             assert overlay.workdir.startswith(plan.home + "/")
@@ -145,11 +191,30 @@ def test_overlay_mounts_back_at_the_path_the_app_already_uses():
 
 def test_mount_argv_is_a_real_overlay_invocation():
     plan = _plan("chromium")
-    argv = plan.overlays[0].mount_argv()
+    argv = plan.overlays[0].mount_argv(target_home="/home/operator")
     assert argv[:4] == ["mount", "-t", "overlay", "overlay"]
     opts = argv[argv.index("-o") + 1]
     assert "lowerdir=" in opts and "upperdir=" in opts and "workdir=" in opts
-    assert argv[-1] == plan.overlays[0].target
+    assert argv[-1] == "/home/operator/.config/chromium"
+
+
+def test_tilde_overlay_cannot_generate_a_literal_nonfunctional_mount_target():
+    plan = _plan("chromium")
+    with pytest.raises(ValueError, match="target_home"):
+        plan.overlays[0].mount_argv()
+
+
+@pytest.mark.parametrize("target_home", ["relative/home", "/home/../root", "/home/user,other", "/home/user:other"])
+def test_per_user_overlay_rejects_unsafe_home_before_building_argv(target_home):
+    plan = _plan("chromium")
+    with pytest.raises(ValueError, match="target_home"):
+        plan.overlays[0].mount_argv(target_home=target_home)
+
+
+def test_system_overlay_needs_no_user_home():
+    plan = _plan("smartmontools")
+    argv = plan.overlays[0].mount_argv()
+    assert argv[-1] == "/var/lib/smartmontools"
 
 
 def test_each_data_target_gets_its_own_upper_and_work_pair():
@@ -425,9 +490,14 @@ def test_no_two_apps_share_an_identifier():
     assert appdata.identifier_collisions(appdata.plan_all("personal")) == []
 
 
-def test_the_owner_uid_comes_from_the_identifier():
+def test_owner_identities_are_unique_between_personas_and_stable_per_plan():
     plan = _plan("caddy")
-    assert plan.owner_user == f"baseline-{plan.baseline_id.lower()}"
+    admin = _plan("caddy", "admin")
+    assert plan.baseline_id == admin.baseline_id  # identity namespaces are persona-scoped independently
+    assert plan.owner_user != admin.owner_user
+    assert plan.owner_uid != admin.owner_uid
+    assert plan.owner_uid == appdata.owner_uid_for("personal", plan.baseline_id)
+    assert admin.owner_uid == appdata.owner_uid_for("admin", admin.baseline_id)
 
 
 def test_the_name_is_only_an_alias_under_by_name():

@@ -30,8 +30,15 @@ def backend_hashes():
     return {name:hashlib.sha256(file.read_bytes()).hexdigest() for name,file in files.items()}
 
 
+def application_catalog_digest():
+    """Digest mutable custom package locks that are outside the source files."""
+    encoded=json.dumps(ab.APPLICATION_DEFINITIONS,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def catalog():
     root=collection_root();role=root/'ansible_collections/baseline/environment'
+    app_catalog_sha256=application_catalog_digest()
     expected=[{'os':os_name,'release':release,'arch':'amd64','applications':list(ab.APPS)}
               for os_name,release in [('ubuntu','24.04'),('ubuntu','26.04'),('debian','13')]]
     components=[]
@@ -42,12 +49,14 @@ def catalog():
         digest=hashlib.sha256()
         for file in files:digest.update(file.name.encode());digest.update(file.read_bytes())
         digest.update(json.dumps(backend_hashes(),sort_keys=True).encode())
+        digest.update(b'application-catalog:');digest.update(app_catalog_sha256.encode())
         variables=({'baseline_suite':'dict','baseline_cache':'absolute-path','baseline_generation':'absolute-path','baseline_data':'absolute-path'}
                    if component==COMPONENT else {'baseline_platform':'dict','baseline_runtime_update':'bool'})
         components.append({'id':component,'revision':digest.hexdigest(),'executor':'ansible-role',
             'classification':['native-deb','native-tar','retained-private-home'] if component==COMPONENT else ['native-prerequisites','administrator-task'],
             'argument_spec':str(role/('roles/'+name+'/meta/argument_specs.yml')),'variables':variables,
             'backend_sha256':backend_hashes(),
+            'application_catalog_sha256':app_catalog_sha256,
             'expected':expected,'capabilities':[capability],
             'limitations':['no GUI/account/recovery proof','system dependencies not byte-locked']})
     return {'format':'baseline.task-catalog/v1','components':components}

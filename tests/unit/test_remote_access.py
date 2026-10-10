@@ -47,6 +47,7 @@ def test_missing_tools_are_reported_not_raised():
             raise FileNotFoundError(argv[0])
     s = ra.collect(Broken())
     assert s["ssh"]["active"] is None and s["tailscale"]["ip"] is None and s["listening"] == []
+    assert not s["listening_available"] and s["observation_errors"]
 
 
 def test_nothing_is_ever_changed():
@@ -55,6 +56,18 @@ def test_nothing_is_ever_changed():
     allowed = {"systemctl", "tailscale", "ss", "sshd"}
     assert all(c[0] in allowed for c in r.calls)
     assert not any(a in c for c in r.calls for a in ("restart", "start", "stop", "enable", "disable", "set", "up", "down"))
+
+
+def test_remote_access_starts_with_configured_controls_and_folds_observations():
+    import operations_page
+    page = operations_page.render_remote_access_page(
+        {'ssh': {'active': True}, 'tailscale': {}, 'listening': [], 'warnings': []},
+        configuration={'ssh': {'password_auth': False}, 'firewall': {'allow_lan_only': True}}).decode()
+    assert page.index('Configuration') < page.index('Observed results')
+    assert 'data-autosave' in page
+    assert '/settings/ssh' in page and '/settings/firewall' in page
+    assert '<details' in page
+    assert 'Default:' in page
 
 
 # -- the page ----------------------------------------------------------------------

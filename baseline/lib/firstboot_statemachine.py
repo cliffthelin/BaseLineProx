@@ -263,6 +263,15 @@ def verify_diagnostic_tools(runner: repair.Runner) -> dict:
             "iperf3_safe": iperf_safe, "functional": functional}
 
 
+def proxmox_detection_block(entry: dict) -> dict | None:
+    """Return a fail-closed firstboot result when absence is unproven."""
+    errors = entry.get("proxmox_probe_errors") or []
+    if entry.get("proxmox_installed") or not errors:
+        return None
+    return {"action": "detection_unavailable", "reason": "; ".join(errors),
+            "package_install_allowed": False}
+
+
 # ---------------------------------------------------------------------------
 # Combined tty1 proposal - everything the operator needs to authorize in
 # one screen, per Gate E's requirement.
@@ -271,7 +280,7 @@ def verify_diagnostic_tools(runner: repair.Runner) -> dict:
 def format_setup_intent_status() -> str:
     """Informational only - see module docstring. Never the gate."""
     return (
-        "Setup-intent bundle: none staged for this boot.\n"
+        "REAL-012: setup-intent staging inspection is unavailable; staged state is unknown.\n"
         "Where a colocated verification key is used elsewhere in this project,\n"
         "it is an INTEGRITY/CORRUPTION check only, per PRD SS5.6 - it is not\n"
         "authentication, and it is never the authorization gate for this\n"
@@ -357,6 +366,8 @@ def apply_configurator_settings(runner: repair.Runner, journal: dict, print_fn=p
         runner, config, network_interface=_resolve_network_interface(journal), enforce_lan_only=enforce_lan_only)
     print_fn(f"[baseline-firstboot] configurator settings applied: {summary['applied']} "
               f"skipped: {summary['skipped']} failed: {summary['failed']}")
+    for name, detail in summary.get("errors", {}).items():
+        print_fn(f"[baseline-firstboot] {name}: {detail}")
     return summary
 
 
@@ -369,7 +380,7 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
     completed_at = already_completed(state_dir)
     if completed_at is not None:
         print_fn(f"[baseline-firstboot] previous run already completed at {completed_at} - not re-triggering.")
-        apply_configurator_settings(runner, load_journal(state_dir), print_fn)
+        apply_configurator_settings(runner, load_journal(state_dir), print_fn, enforce_lan_only=True)
         return {"action": "already_completed", "completed_at": completed_at, "package_install_allowed": True}
 
     journal = load_journal(state_dir)
@@ -380,12 +391,34 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
     if journal["state"] == "new":
         journal = record_transition(state_dir, journal, "created")
 
+    detection = None
     if journal["state"] == "created":
         detection = proxmox_detect.detect_proxmox_install(runner)
         journal = record_transition(state_dir, journal, "detected",
                                      proxmox_installed=detection.installed,
                                      proxmox_version=detection.version,
-                                     proxmox_evidence=detection.evidence)
+                                     proxmox_evidence=detection.evidence,
+                                     proxmox_probe_errors=detection.errors)
+
+    if journal["state"] == "detected":
+        entry = _last(journal, "detected")
+        if proxmox_detection_block(entry):
+            # A previous unavailable observation is retried on each firstboot
+            # invocation. It remains fail-closed until absence is established.
+            if detection is None:
+                detection = proxmox_detect.detect_proxmox_install(runner)
+                journal = record_transition(state_dir, journal, "detected",
+                                             proxmox_installed=detection.installed,
+                                             proxmox_version=detection.version,
+                                             proxmox_evidence=detection.evidence,
+                                             proxmox_probe_errors=detection.errors)
+                entry = _last(journal, "detected")
+            block = proxmox_detection_block(entry)
+            if block:
+                detail = block["reason"]
+                print_fn("[baseline-firstboot] Proxmox detection unavailable: " + detail)
+                print_fn("[baseline-firstboot] remaining at tty1 - installer path refused until detection succeeds.")
+                return block
 
     if journal["state"] == "detected":
         discovery = fbnr.discover(runner, check_lifeline_fn)
@@ -442,13 +475,13 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
             verification = dict(repair_result.verification)
             target_interface = diagnosis["target"]
         else:
-            network_ok = True
-            network_detail = "lifeline already healthy - no repair needed"
-            # Still genuine, not fabricated: the same address/gateway
-            # facts discover() already used to decide the lifeline was
-            # healthy, reused as this path's verification evidence.
-            verification = fbnr.facts_verification(discovery["facts"])
-            target_interface = fbnr.observed_dev(runner, discovery["facts"]) or ""
+            # Persisted discovery is a proposal, not current verification.
+            current = fbnr.discover(runner, check_lifeline_fn)
+            verification = fbnr.facts_verification(current["facts"])
+            target_interface = fbnr.observed_dev(runner, current["facts"]) or ""
+            network_ok = all(v is True for v in verification.values()) and bool(target_interface)
+            network_detail = ("lifeline verified now - no repair needed" if network_ok else
+                              "current address/gateway verification failed; retry discovery")
 
         print_fn(f"[baseline-firstboot] network result: {'success' if network_ok else 'FAILED'} - {network_detail}")
         if network_ok:

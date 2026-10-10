@@ -214,14 +214,15 @@ def test_apply_stored_config_reports_unwired_handoff_as_failed():
     assert "handoff" not in summary["applied"]
 
 
-def test_apply_stored_config_iperf3_server_is_applied_when_the_unit_starts():
+def test_apply_stored_config_iperf3_server_submission_requires_readiness_proof():
     import lan_firewall as lf
     runner = FakeRunner(files={"/etc/baseline/install-config.json": CONFIG_JSON})
     runner.script_prefix("nft", "list", "table",
                          stdout="chain input { hook input; policy drop; " + " ".join(lf.DEFAULT_LAN_SUBNETS) + " }")
     config = cp.load_config(runner, "/etc/baseline/install-config.json")
-    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
-    assert "iperf3" in summary["applied"]
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1", run_active_diagnostics=True)
+    assert "iperf3" in summary["failed"]
+    assert "iperf3" not in summary["applied"]
 
 
 def test_apply_stored_config_all_sections_accounted_for():
@@ -272,7 +273,8 @@ def test_a_partial_settings_apply_does_not_run_the_firewall_for_an_unrelated_sec
 def test_iperf3_server_is_not_started_when_the_firewall_did_not_apply():
     config = {"diagnostics": {"iperf3": {"role": "server", "peer_address": "", "port": 5201}}}
     runner = FakeRunner()          # fake nft listing proves nothing, so the firewall fails
-    summary = cp.apply_stored_config(runner, config, network_interface="eno1", enforce_lan_only=True)
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1", enforce_lan_only=True,
+                                     run_active_diagnostics=True)
     assert "firewall" in summary["failed"]
     assert "iperf3" in summary["failed"]
     assert not any(c[0] == "systemd-run" for c in runner.calls)
@@ -282,5 +284,5 @@ def test_a_subsystem_that_raises_is_reported_failed_and_does_not_stop_the_others
     config = {"diagnostics": {"iperf3": {"role": "client", "peer_address": ["not", "a", "string"], "port": 5201}},
               "ssh": {"password_auth": False}}
     runner = FakeRunner(files={"/etc/ssh/sshd_config": "# x\n"})
-    summary = cp.apply_stored_config(runner, config, network_interface="eno1")
+    summary = cp.apply_stored_config(runner, config, network_interface="eno1", run_active_diagnostics=True)
     assert "iperf3" in summary["failed"] and "ssh" in summary["applied"]

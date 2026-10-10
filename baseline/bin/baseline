@@ -61,8 +61,8 @@ SENSORS_DB_PATH = Path("/var/lib/baseline/sensors_history.db")
 SENSORS_HISTORY_WINDOW_S = 3600
 DASHBOARD_AUTOREFRESH_SECONDS = 30
 CATEGORY_ORDER = ["Network", "AI Provider"]
-STATUS_ORDER = ["Active", "Reachable", "Available", "Unreachable"]
-STATUS_STYLE = {"Active": "#87ff87", "Reachable": "#5faf5f", "Available": "#ffd700", "Unreachable": "#ff5f5f"}
+STATUS_ORDER = ["Active", "Reachable", "Available", "Unreachable", "Unknown"]
+STATUS_STYLE = {"Active": "#87ff87", "Reachable": "#5faf5f", "Available": "#ffd700", "Unreachable": "#ff5f5f", "Unknown": "#afafff"}
 LIFELINE_STAGE_LABELS = [
     ("nic_detected", "NIC detected"),
     ("driver_bound", "Driver bound"),
@@ -239,7 +239,8 @@ class ConnectionModal(ModalScreen):
         # Not named is_active - Screen already has a read-only property
         # of that name (whether *this screen* is the topmost active one).
         self.is_active_device = is_active_device
-        self._admin_up_at_open = True
+        self._admin_up_at_open: bool | None = None
+        self._admin_state_error: str | None = None
 
     def _lifeline_text(self) -> str:
         if not self.is_active_device or not self.facts:
@@ -261,7 +262,12 @@ class ConnectionModal(ModalScreen):
         # genuinely styled by us - its dynamic parts get escape_markup()'d
         # at the point they're interpolated instead.
         details = network.device_details(self.ifname)
-        self._admin_up_at_open = network.is_admin_up(self.ifname)
+        try:
+            self._admin_up_at_open = network.is_admin_up(self.ifname)
+            self._admin_state_error = None
+        except network.NetworkProbeError as exc:
+            self._admin_up_at_open = None
+            self._admin_state_error = str(exc)
         alias = network.load_aliases().get(self.ifname, "")
 
         identity = [f"Device: {self.ifname}"]
@@ -273,6 +279,9 @@ class ConnectionModal(ModalScreen):
             identity.append(f"Model: {details['model']}")
         identity.append(f"Connection: {details.get('connection', 'unknown')}")
         identity.append(f"Driver: {details.get('driver', 'unknown')}")
+        identity.extend(f"Hardware detail unavailable: {error}" for error in details.get("errors", []))
+        enabled_label = ("Enabled:" if self._admin_up_at_open is not None else
+                         f"Enabled: Unknown ({self._admin_state_error or 'state could not be read'})")
 
         pref = netpref.load_preference()
         yield Header(show_clock=True)
@@ -283,8 +292,9 @@ class ConnectionModal(ModalScreen):
             yield Label("Alias (blank = default name):")
             yield Input(value=alias, placeholder=self.friendly, id="alias_input")
             with Horizontal(classes="power_row"):
-                yield Label("Enabled:")
-                yield Switch(value=self._admin_up_at_open, id="power_switch")
+                yield Label(enabled_label, markup=False)
+                yield Switch(value=self._admin_up_at_open is True,
+                             disabled=self._admin_up_at_open is None, id="power_switch")
             yield Label("Role:")
             with RadioSet(id="role_set"):
                 yield RadioButton("Primary", id="role_primary", value=(pref.get("primary") == self.ifname))
@@ -331,7 +341,7 @@ class ConnectionModal(ModalScreen):
             failed = True
             messages.append(f"alias: {exc}")
 
-        if power_on != self._admin_up_at_open:
+        if self._admin_up_at_open is not None and power_on != self._admin_up_at_open:
             ok, detail = network.set_admin_state(self.ifname, power_on)
             messages.append(detail)
             failed = failed or not ok
@@ -359,29 +369,8 @@ class ConnectionModal(ModalScreen):
 
 
 class HardwareModal(ModalScreen):
-    """Any hardware row's modal - Details is real data (every scalar
-    field inxi reported for that item). Description/Troubleshooting/Logs/
-    Configuration are placeholders: the data to fill them (per-device
-    docs, known-fix notes, a real log source, an actual config action)
-    hasn't been determined yet, so they say that honestly rather than
-    faking content.
-
-    BINDINGS carries "escape" -> close: this modal's own TabbedContent
-    (Details/Description/.../Configuration) absorbs every Tab press to
-    cycle its five panes, so Tab alone can never reach the Close button -
-    Escape is the only reliable, always-available way out. "s" is the
-    other exit: Save and Close. There's nothing to save yet - the
-    Configuration tab is still a placeholder with no real fields - so
-    right now it behaves the same as Escape. It's wired up so that once
-    Configuration grows real editable fields, this is the one place that
-    needs to change to persist them; the keybinding itself doesn't need
-    to wait for that."""
-    BINDINGS = [
-        Binding("escape", "close_modal", "Close without saving", show=True),
-        Binding("s", "save_and_close", "Save and Close", show=True),
-        Binding("left", "prev_button", "", show=False),
-        Binding("right", "next_button", "", show=False),
-    ]
+    """Show the real fields reported for one hardware row."""
+    BINDINGS = [Binding("escape", "close_modal", "Close", show=True)]
     CSS = MODAL_CSS + """
     HardwareModal { align: center middle; }
     #hw_dialog {
@@ -390,8 +379,6 @@ class HardwareModal(ModalScreen):
         background: #1c1c1c;
         color: #e4e4e4;
     }
-    #hw_dialog TabbedContent { height: 1fr; }
-    #hw_dialog TabPane { padding: 1 0; }
     #hw_dialog Button { margin-top: 1; margin-right: 1; }
     #hw_modal_title { color: #ffffff; text-style: bold; }
     """
@@ -413,48 +400,20 @@ class HardwareModal(ModalScreen):
         yield Header(show_clock=True)
         with Vertical(id="hw_dialog"):
             yield Label(f"{self.group}: {self.label}", id="hw_modal_title", markup=False)
-            with TabbedContent():
-                with TabPane("Details"):
-                    try:
-                        text = "\n".join(f"{k}: {v}" for k, v in self.fields.items()) or "(no fields reported)"
-                    except Exception as exc:
-                        _log_ui_error("HardwareModal.compose:Details", exc)
-                        text = "(could not render details for this item)"
-                    yield Static(text, markup=False)
-                with TabPane("Description"):
-                    yield Static("No description configured yet for this item.")
-                with TabPane("Troubleshooting"):
-                    yield Static("No troubleshooting guidance configured yet for this item.")
-                with TabPane("Logs"):
-                    yield Static("No log source wired up yet for this item.")
-                with TabPane("Configuration"):
-                    yield Static("No configuration actions defined yet for this item.")
-            with Horizontal():
-                yield Button("Save and Close", id="save", variant="primary")
-                yield Button("Close without saving", id="close")
+            try:
+                text = "\n".join(f"{k}: {v}" for k, v in self.fields.items()) or "(no fields reported)"
+            except Exception as exc:
+                _log_ui_error("HardwareModal.compose", exc)
+                text = "(could not render details for this item)"
+            yield Static(text, markup=False)
+            yield Button("Close", id="close", variant="primary")
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save":
-            self.action_save_and_close()
-        else:
-            self.dismiss()
+        self.dismiss()
 
     def action_close_modal(self) -> None:
         self.dismiss()
-
-    def action_prev_button(self) -> None:
-        self.screen.focus_previous()
-
-    def action_next_button(self) -> None:
-        self.screen.focus_next()
-
-    def action_save_and_close(self) -> None:
-        # Nothing editable exists yet (Configuration is still a
-        # placeholder) - once it holds real fields, persist them here
-        # before dismissing.
-        self.dismiss()
-
 
 class BaselineApp(App):
     TITLE = "BaselineOS"
@@ -563,7 +522,7 @@ class BaselineApp(App):
                 with Horizontal(classes="toolbar"):
                     yield Static("Harness:")
                     yield Select(
-                        [(h["name"] + ("" if h["implemented"] else " (not implemented)"), h["id"]) for h in providers.HARNESSES],
+                        [(h["name"], h["id"]) for h in providers.HARNESSES],
                         value="claude", id="harness_select", allow_blank=False,
                     )
                 yield Static("", id="harness_status", classes="sparkline_label")
@@ -613,11 +572,15 @@ class BaselineApp(App):
         # startup. Updates both the Chat-tab-local line and the
         # app-wide status bar - related but different audiences, not a
         # duplicate to collapse into one.
-        adapter = harness_registry.get_adapter(self.current_harness)
-        if adapter is None:
-            desc = "no harness adapter selected"
-        else:
-            desc = adapter.describe_session(self._session_for(self.current_harness))
+        try:
+            adapter = harness_registry.get_adapter(self.current_harness)
+            if adapter is None:
+                desc = "no harness adapter selected"
+            else:
+                desc = adapter.describe_session(self._session_for(self.current_harness))
+        except harness_registry.HarnessAdapterError as exc:
+            desc = f"harness error: {escape_markup(str(exc))}"
+            _log_ui_error("harness adapter status", exc)
         try:
             self.query_one("#harness_status", Static).update(desc)
         except NoMatches:
@@ -709,10 +672,7 @@ class BaselineApp(App):
             self.current_harness = event.value
             chosen = next(h for h in providers.HARNESSES if h["id"] == event.value)
             log = self.query_one("#chat_log", Log)
-            if chosen["implemented"]:
-                log.write_line(f"[switched to {chosen['name']}]")
-            else:
-                log.write_line(f"[{chosen['name']} is not implemented yet - staying on Claude Code until it is]")
+            log.write_line(f"[switched to {chosen['name']}]")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "chat_input":
@@ -727,11 +687,6 @@ class BaselineApp(App):
         self.query_one("#chat_input", Input).value = ""
         log = self.query_one("#chat_log", Log)
         log.write_line(f"> {question}")
-        chosen = next(h for h in providers.HARNESSES if h["id"] == self.current_harness)
-        if not chosen["implemented"]:
-            log.write_line(f"[{chosen['name']} has no adapter yet - see baseline/lib/harness.py to add one]")
-            log.write_line("")
-            return
         self.ask_harness(question)
 
     def _handle_console_input(self, value: str) -> None:
@@ -829,8 +784,12 @@ class BaselineApp(App):
 
     @work(thread=True, exit_on_error=False)
     def run_console_ask(self, question: str) -> None:
-        adapter = harness_registry.get_adapter(self.current_harness)
         console = self.query_one("#console_log", RichLog)
+        try:
+            adapter = harness_registry.get_adapter(self.current_harness)
+        except harness_registry.HarnessAdapterError as exc:
+            self.call_from_thread(console.write, f"[red]Harness error:[/red] {escape_markup(str(exc))}")
+            return
         if adapter is None:
             self.call_from_thread(console.write, "[red]No adapter for the currently selected harness.[/red]")
             return
@@ -844,7 +803,11 @@ class BaselineApp(App):
         # long-running operation. The operator names the boundary
         # (decision record 32); nothing here infers or guesses one.
         console = self.query_one("#console_log", RichLog)
-        adapter = harness_registry.get_adapter(self.current_harness)
+        try:
+            adapter = harness_registry.get_adapter(self.current_harness)
+        except harness_registry.HarnessAdapterError as exc:
+            console.write(f"[red]Harness error:[/red] {escape_markup(str(exc))}")
+            return
         if not harness_registry.supports_write_grant(adapter):
             console.write(f"[red]The current harness ({self.current_harness}) doesn't support a write grant.[/red]")
             return
@@ -867,7 +830,11 @@ class BaselineApp(App):
 
     def run_console_revoke_write(self) -> None:
         console = self.query_one("#console_log", RichLog)
-        adapter = harness_registry.get_adapter(self.current_harness)
+        try:
+            adapter = harness_registry.get_adapter(self.current_harness)
+        except harness_registry.HarnessAdapterError as exc:
+            console.write(f"[red]Harness error:[/red] {escape_markup(str(exc))}")
+            return
         if not harness_registry.supports_write_grant(adapter):
             console.write(f"[red]The current harness ({self.current_harness}) doesn't support a write grant.[/red]")
             return
@@ -981,26 +948,36 @@ class BaselineApp(App):
     @work(thread=True, exclusive=True, group="vms", exit_on_error=False)
     def collect_vms(self) -> None:
         runner = repair.RealRunner()
-        vms = proxmox_vm_metrics.list_vms(runner)
+        try:
+            vms = proxmox_vm_metrics.list_vms(runner)
+        except proxmox_vm_metrics.MetricsError as exc:
+            self.call_from_thread(self._render_vms, [], [], str(exc))
+            return
         history_values = []
+        error = ""
         running = next((v for v in vms if v.status == "running"), None)
         if running is not None:
-            since = time.time() - SENSORS_HISTORY_WINDOW_S
-            for sample in proxmox_vm_metrics.vm_rrd_history(runner, "localhost", running.vmid, vm_type=running.type):
-                if sample.get("time", 0) >= since and isinstance(sample.get("cpu"), (int, float)):
-                    history_values.append(sample["cpu"])
-        self.call_from_thread(self._render_vms, vms, history_values)
+            try:
+                since = time.time() - SENSORS_HISTORY_WINDOW_S
+                for sample in proxmox_vm_metrics.vm_rrd_history(runner, "localhost", running.vmid, vm_type=running.type):
+                    if sample.get("time", 0) >= since and isinstance(sample.get("cpu"), (int, float)):
+                        history_values.append(sample["cpu"])
+            except proxmox_vm_metrics.MetricsError as exc:
+                error = str(exc)
+        self.call_from_thread(self._render_vms, vms, history_values, error)
 
     @_safe
-    def _render_vms(self, vms: list, history_values: list) -> None:
+    def _render_vms(self, vms: list, history_values: list, error: str = "") -> None:
         table = self.query_one("#vms_table", DataTable)
         table.clear()
-        if not vms:
+        if error:
+            table.add_row("-", escape_markup(error), "-", "-", "-", "-", "-")
+        elif not vms:
             table.add_row("-", "no VMs or containers yet", "-", "-", "-", "-", "-")
         for vm in vms:
-            mem_label = f"{vm.mem // (1 << 20)} MiB" if vm.mem else "-"
-            cpu_label = f"{vm.cpu * 100:.1f}%" if vm.status == "running" else "-"
-            uptime_label = f"{vm.uptime // 3600}h{(vm.uptime % 3600) // 60}m" if vm.uptime else "-"
+            mem_label = f"{vm.mem // (1 << 20)} MiB" if vm.mem is not None else "unknown"
+            cpu_label = (f"{vm.cpu * 100:.1f}%" if vm.cpu is not None else "unknown") if vm.status == "running" else "-"
+            uptime_label = f"{vm.uptime // 3600}h{(vm.uptime % 3600) // 60}m" if vm.uptime is not None else "unknown"
             try:
                 table.add_row(str(vm.vmid), escape_markup(vm.name), escape_markup(vm.type),
                                escape_markup(vm.status), cpu_label, mem_label, uptime_label, key=f"vm:{vm.vmid}")
@@ -1013,7 +990,11 @@ class BaselineApp(App):
     @work(thread=True, exclusive=True, group="network", exit_on_error=False)
     def collect_network(self) -> None:
         facts = network.check_lifeline()
-        interfaces = network.list_interfaces()
+        try:
+            interfaces = network.list_interfaces()
+        except network.NetworkProbeError as exc:
+            interfaces = []
+            facts.append({"fact": "interface_inventory", "ok": False, "detail": str(exc)})
         provider_states = providers.check_providers()
         self.call_from_thread(self._render_network, facts, interfaces, provider_states)
 
@@ -1030,11 +1011,11 @@ class BaselineApp(App):
         if addr_fact and addr_fact["ok"] and ":" in addr_fact["detail"]:
             active_dev, ip = (p.strip() for p in addr_fact["detail"].split(":", 1))
             active_members.add(active_dev)
-            brif = Path("/sys/class/net") / active_dev / "brif"
             try:
-                active_members.update(p.name for p in brif.iterdir())
-            except OSError:
-                pass
+                active_members.update(network._bridge_members(active_dev))
+                bridge_members_error = None
+            except network.NetworkProbeError as exc:
+                bridge_members_error = str(exc)
             display_dev = next((m for m in active_members if m != active_dev), active_dev)
             self._active_display_dev = display_dev
             # "Active" - the one connection actually carrying the lifeline
@@ -1042,22 +1023,43 @@ class BaselineApp(App):
             # ambiguity about which path is in use. IP and traffic shown
             # right on this row, not just in the modal - the two things
             # an operator glancing at the main page needs most.
-            traffic = network.interface_traffic_label(display_dev)
+            try:
+                traffic = network.interface_traffic_label(display_dev)
+            except network.NetworkProbeError as exc:
+                traffic = f"traffic counters unavailable: {exc}"
             detail = f"{ip} | {traffic}" if traffic else ip
             rows.append((f"iface:{display_dev}", "Network", network.friendly_name(display_dev, self.show_hardware_ids), "Active", detail))
+            if bridge_members_error:
+                rows.append(("info:bridge-members", "Network", "Bridge members", "Unknown",
+                             f"bridge member inventory unavailable: {bridge_members_error}"))
 
-        for stage, label in (("gateway_reachable", "Gateway"), ("dns_functioning", "DNS"), ("internet_reachable", "Internet")):
+        for stage, label in (("nic_detected", "Physical network adapters"),
+                             ("driver_bound", "Network driver"),
+                             ("carrier_present", "Network link"),
+                             ("interface_inventory", "Interface details"),
+                             ("gateway_reachable", "Gateway"),
+                             ("dns_functioning", "DNS"),
+                             ("internet_reachable", "Internet")):
             f = fact_map.get(stage)
-            if f is not None:
+            if f is not None and not f["ok"]:
                 rows.append((f"info:{label}", "Network", label, "Reachable" if f["ok"] else "Unreachable", f["detail"]))
 
         for iface in interfaces:
             if iface["name"] in active_members:
                 continue
             name = network.friendly_name(iface["name"], self.show_hardware_ids)
-            if iface["carrier"]:
-                traffic = network.interface_traffic_label(iface["name"])
+            if iface["carrier"] is None:
+                rows.append((f"iface:{iface['name']}", "Network", name, "Unknown",
+                             iface.get("carrier_error") or "carrier state unavailable"))
+            elif iface["carrier"]:
+                try:
+                    traffic = network.interface_traffic_label(iface["name"])
+                except network.NetworkProbeError as exc:
+                    traffic = f"traffic counters unavailable: {exc}"
                 rows.append((f"iface:{iface['name']}", "Network", name, "Available", traffic or "connected, not in use"))
+            elif iface.get("driver_bound") is None or iface.get("wired") is None:
+                rows.append((f"iface:{iface['name']}", "Network", name, "Unknown",
+                             iface.get("driver_error") or "driver/link type unavailable; connection state cannot be inferred"))
             elif iface["wired"]:
                 # A wired link with no carrier is truly physically
                 # disconnected - no command can fix that, so it's
@@ -1071,12 +1073,13 @@ class BaselineApp(App):
 
         claude = next((p for p in provider_states if p["name"] == "Claude Subscription"), None)
         if claude:
-            status = "Reachable" if claude["state"] in ("reachable", "available") else "Unreachable"
-            rows.append((f"info:{claude['name']}", "AI Provider", claude["name"], status, claude["detail"]))
+            rows.append((f"info:{claude['name']}", "AI Provider", claude["name"],
+                         providers.display_status(claude["state"]), claude["detail"]))
         for p in provider_states:
             if p is claude:
                 continue
-            rows.append((f"info:{p['name']}", "AI Provider", p["name"], "Unreachable", p["detail"]))
+            rows.append((f"info:{p['name']}", "AI Provider", p["name"],
+                         providers.display_status(p["state"]), p["detail"]))
 
         self._net_rows_by_key = {key: (label, status, detail) for key, _cat, label, status, detail in rows}
 
@@ -1129,8 +1132,25 @@ class BaselineApp(App):
 
     @work(thread=True, exit_on_error=False)
     def run_tether(self) -> None:
-        tether.auto_tether()
+        result = tether.auto_tether()
+        self.call_from_thread(self.report_tether_result, result)
         self.call_from_thread(self.collect_network)
+
+    def report_tether_result(self, result: dict) -> None:
+        """Show the observed tether outcome instead of silently discarding it."""
+        stage = result.get("stage", "unknown")
+        interface = result.get("interface")
+        if result.get("ok"):
+            message = f"USB tether connected on {interface}: {result.get('address')}"
+            severity = "information"
+        else:
+            message = f"USB tether {stage}: {result.get('detail') or 'no diagnostic detail provided'}"
+            severity = "error"
+        self.notify(message, severity=severity, timeout=10)
+        try:
+            self.query_one("#console_log", RichLog).write(message)
+        except NoMatches:
+            pass
 
     @work(thread=True, exit_on_error=False)
     def ask_harness(self, question: str) -> None:
@@ -1154,7 +1174,12 @@ class BaselineApp(App):
         # "implemented", so adapter is never None in practice, but this
         # stays defensive rather than assuming that guard can never
         # drift out of sync.
-        adapter = harness_registry.get_adapter(self.current_harness)
+        try:
+            adapter = harness_registry.get_adapter(self.current_harness)
+        except harness_registry.HarnessAdapterError as exc:
+            self.call_from_thread(self._append_chat_line, f"[harness error: {escape_markup(str(exc))}]")
+            self.call_from_thread(self._finish_chat_turn, "")
+            return
         if adapter is None:
             self.call_from_thread(self._append_chat_line, f"[no adapter for {self.current_harness!r}]")
             self.call_from_thread(self._finish_chat_turn, "")

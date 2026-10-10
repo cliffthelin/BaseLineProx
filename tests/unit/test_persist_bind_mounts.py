@@ -36,11 +36,6 @@ def test_is_mounted_false_when_absent():
     assert pbm.is_mounted(runner, "/mnt/USER") is False
 
 
-def test_is_mounted_false_when_proc_mounts_unreadable():
-    runner = FakeRunner()  # /proc/self/mounts not present at all
-    assert pbm.is_mounted(runner, "/mnt/USER") is False
-
-
 # -- is_mounted_read_write (work-queue item 26's hard exit condition) -----
 
 def test_is_mounted_read_write_true_for_a_real_rw_mount():
@@ -56,11 +51,6 @@ def test_is_mounted_read_write_false_for_a_real_ro_mount():
 
 def test_is_mounted_read_write_false_when_not_mounted_at_all():
     runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
-    assert pbm.is_mounted_read_write(runner, "/mnt/USER") is False
-
-
-def test_is_mounted_read_write_false_when_proc_mounts_unreadable():
-    runner = FakeRunner()
     assert pbm.is_mounted_read_write(runner, "/mnt/USER") is False
 
 
@@ -204,7 +194,6 @@ def test_ensure_user_volume_mounted_refuses_cleanly_when_local_fallback_has_no_r
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER" in a, FakeProc(1, "", "not found")),
             (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
-            (lambda a: "vgs" in a, FakeProc(0, "0\n", "")),
         ],
     )
     result = pbm.ensure_user_volume_mounted(runner)
@@ -368,7 +357,10 @@ def test_ensure_all_redirects_issues_the_real_mount_command_on_first_boot():
 def test_ensure_all_redirects_stops_early_if_the_persistence_mount_fails():
     runner = FakeRunner(
         files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
-        command_responses=[(lambda a: a[:1] == ["mount"], FakeProc(1, "", "no such partition"))],
+        command_responses=[
+            (lambda a: a[:1] == ["mount"], FakeProc(1, "", "no such partition")),
+            (lambda a: "vgs" in a, FakeProc(0, "0\n", "")),
+        ],
     )
     results = pbm.ensure_all_redirects(runner)
     assert len(results) == 1

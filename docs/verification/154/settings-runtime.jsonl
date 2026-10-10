@@ -1,0 +1,4 @@
+{"actual_firewall_rule_count": 8}
+{"server_applied": true, "server_detail": "iperf3 listener verified on port 33275; baseline-iperf3-54138362c5e8440291cf8be0c8cfd7f2.service is single-use and bounded to 10 minutes"}
+{"client_applied": true, "client_detail": "iperf3 to 10.66.0.1:33275: 60165 Mbit/s"}
+{"settings_workflow_verified": true, "custom_port": 33275, "scope": "real isolated Linux workflow; virtual local transfer, not physical LAN/Proxmox boot"}

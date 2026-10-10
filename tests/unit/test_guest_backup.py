@@ -25,6 +25,15 @@ CONFIGS = {
 def _backup_destination_capacity(monkeypatch):
     """Capacity belongs to the fake destination, not this machine's /tmp."""
     monkeypatch.setattr(ob, "_free_and_total", lambda path: (2 * 2**40, 9 * 2**40))
+    monkeypatch.setattr(ob, "_boot_serial", lambda: "TestBootSerial")
+    real_resolve = ob.resolve_destination
+
+    def resolve_with_fake_host(*args, **kwargs):
+        if kwargs.get("boot_serial") is None:
+            kwargs["boot_serial"] = "TestBootSerial"
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(ob, "resolve_destination", resolve_with_fake_host)
 
 
 def ok(out=""):
@@ -126,7 +135,8 @@ def test_a_failed_vzdump_raises_and_nothing_is_cleaned_up(dest_root):
 
 
 def test_a_guest_set_does_not_make_the_volume_backup_look_recent(dest_root):
-    dest = ob.resolve_destination(str(dest_root), run=ScriptedRun(dest_root), allowed_serials=ALLOWED)
+    dest = ob.resolve_destination(str(dest_root), run=ScriptedRun(dest_root), allowed_serials=ALLOWED,
+                                  boot_serial="TestBootSerial")
     run_guests(dest_root)
     assert ob.is_due(dest, now=1_800_000_000.0 + 60) is True
 

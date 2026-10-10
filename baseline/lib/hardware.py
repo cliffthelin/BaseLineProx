@@ -20,6 +20,10 @@ SCHEMA_VERSION = 1
 KEY_RE = re.compile(r"^\d+#\d+#\d+#(.*)$")
 
 
+class HardwareInventoryError(ValueError):
+    """The collector returned data that cannot support the hardware schema."""
+
+
 def _clean_key(k: str) -> str:
     m = KEY_RE.match(k)
     return m.group(1) if m else k
@@ -38,12 +42,26 @@ def _section(raw, name):
     for entry in raw:
         for k, v in entry.items():
             if _clean_key(k) == name:
+                if not isinstance(v, list) or any(not isinstance(part, dict) for part in v):
+                    raise HardwareInventoryError(f"inxi {name} section has an invalid shape")
                 merged = {}
                 for part in v:
-                    if isinstance(part, dict):
-                        merged.update(part)
+                    merged.update(part)
                 return merged
     return {}
+
+
+def _validate_raw(raw):
+    if not isinstance(raw, list) or not raw or any(not isinstance(entry, dict) for entry in raw):
+        raise HardwareInventoryError("inxi inventory must be a nonempty list of section objects")
+    for entry in raw:
+        for name, parts in entry.items():
+            if not isinstance(name, str) or not isinstance(parts, list) or any(not isinstance(part, dict) for part in parts):
+                raise HardwareInventoryError("inxi section has an invalid shape")
+    for name in ("System", "CPU"):
+        section = _section(raw, name)
+        if not section:
+            raise HardwareInventoryError(f"inxi inventory is missing required {name} observations")
 
 
 def _explicit_tty_stdin():
@@ -100,11 +118,17 @@ def collect(timeout: int = 15):
         raw = json.loads(text)
     except json.JSONDecodeError as e:
         return None, f"bad inxi JSON: {e}"
-    return _clean(raw), None
+    cleaned = _clean(raw)
+    try:
+        _validate_raw(cleaned)
+    except HardwareInventoryError as e:
+        return None, f"invalid inxi inventory: {e}"
+    return cleaned, None
 
 
 def normalize(raw):
     """Fold cleaned inxi output into the Baseline Hardware Schema."""
+    _validate_raw(raw)
     system = _section(raw, "System")
     machine = _section(raw, "Machine")
     memory = _section(raw, "Memory")

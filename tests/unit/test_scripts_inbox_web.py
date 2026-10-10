@@ -167,3 +167,25 @@ def test_build_real_server_wires_real_auth_and_real_runner(tmp_path):
         assert httpd.deps["verifier"].verify("root", "wrong") is False
     finally:
         httpd.server_close()
+
+
+def test_malformed_json_write_is_rejected_without_creating_an_empty_script(tmp_path):
+    import http.client
+    import threading
+    import time
+
+    inbox=tmp_path/'inbox'
+    server=siw.build_real_server(bind_host='127.0.0.1',bind_port=0,
+        data_path=tmp_path/'store.db',inbox_dir=str(inbox))
+    session=server.deps['sessions'].create('operator',time.time())
+    worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
+    try:
+        conn=http.client.HTTPConnection('127.0.0.1',server.server_address[1],timeout=5)
+        conn.request('POST','/api/scripts/empty.sh','{malformed',
+            {'Content-Type':'application/json','X-Session-Token':session.token})
+        response=conn.getresponse();body=response.read()
+        assert response.status==400 and b'malformed JSON' in body
+        assert not (inbox/'empty.sh').exists()
+        conn.close()
+    finally:
+        server.shutdown();server.server_close();worker.join(timeout=5)

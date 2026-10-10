@@ -1,0 +1,15 @@
+{
+  "serial": "MD89N41071210AP4E",
+  "stages": {
+    "recovery": "verified-from-10TB-image",
+    "installer": "Proxmox-9.2-8-HTTP-answer",
+    "physical_disk_boot": "observed-login-screen-under-QEMU",
+    "vg": "baseline_1b75c1a556ee",
+    "pv_uuid": "PtJxk3-3YnM-AnWA-fsJQ-MbDy-TJOB-yiCyM8",
+    "vg_uuid": "Okyyas-6SZq-tSzV-trFO-K5RW-hmXQ-TWPyAE",
+    "role_LVs": "all-eight-created-with-UUID-filesystems",
+    "source_restore": "22-files-checksum-verified",
+    "baseline_packages": "installed",
+    "deployment": "reruns-idempotently-from-this-script"
+  }
+}

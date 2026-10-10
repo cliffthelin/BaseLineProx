@@ -99,6 +99,95 @@ def _verified(listing: str, subnets) -> bool:
     return "policy drop" in listing and "hook input" in listing and all(s in listing for s in subnets)
 
 
+def verify_active(runner) -> tuple:
+    """Verify the owned input policy structurally, without changing it.
+
+    Supports the policy emitted by build_ruleset, including custom private
+    subnets. Unknown expressions or additional allow rules refuse verification.
+    """
+    import json
+    try:
+        listing = runner.run(["nft", "-j", "list", "table", "inet", TABLE], timeout=10)
+        if listing.returncode:
+            return False, "LAN-only firewall readback unavailable"
+        entries = json.loads(listing.stdout)["nftables"]
+        tables, chains, rules = [], [], []
+        for entry in entries:
+            if not isinstance(entry, dict) or len(entry) != 1:
+                raise ValueError("unknown policy entry")
+            kind, value = next(iter(entry.items()))
+            if kind == "metainfo":
+                continue
+            if kind not in {"table", "chain", "rule"} or not isinstance(value, dict):
+                raise ValueError("unsupported policy object")
+            if value.get("family") != "inet":
+                raise ValueError("unexpected policy family")
+            if kind == "table":
+                if value.get("name") != TABLE:
+                    raise ValueError("unexpected table")
+                tables.append(value)
+            else:
+                if value.get("table") != TABLE:
+                    raise ValueError("unexpected rule table")
+                (chains if kind == "chain" else rules).append(value)
+        if len(tables) != 1 or len(chains) != 1:
+            raise ValueError("unexpected table/chain topology")
+        chain = chains[0]
+        if any(chain.get(k) != v for k, v in
+               {"name": "input", "type": "filter", "hook": "input", "prio": 0, "policy": "drop"}.items()):
+            raise ValueError("input chain is not the expected default-drop filter")
+
+        def match(left, right, op="=="):
+            return {"match": {"op": op, "left": left, "right": right}}
+
+        def payload(protocol, field):
+            return {"payload": {"protocol": protocol, "field": field}}
+
+        base = [
+            [match({"meta": {"key": "iif"}}, "lo"), {"accept": None}],
+            [match({"ct": {"key": "state"}}, ["established", "related"], "in"), {"accept": None}],
+            [match({"ct": {"key": "state"}}, "invalid", "in"), {"drop": None}],
+            [match(payload("udp", "sport"), 67), match(payload("udp", "dport"), 68), {"accept": None}],
+            [match(payload("udp", "sport"), 547), match(payload("udp", "dport"), 546), {"accept": None}],
+            [match(payload("icmpv6", "type"), {"set": ["nd-router-solicit", "nd-router-advert",
+                                                     "nd-neighbor-solicit", "nd-neighbor-advert"]}), {"accept": None}],
+        ]
+        if not 7 <= len(rules) <= 8 or any(rule.get("chain") != "input" for rule in rules):
+            raise ValueError("unexpected input rules")
+        if [rule.get("expr") for rule in rules[:6]] != base:
+            raise ValueError("unrecognized base input rules")
+        protocols = set()
+        observed_subnets = []
+        for rule in rules[6:]:
+            expr = rule["expr"]
+            if len(expr) != 2 or expr[1] != {"accept": None}:
+                raise ValueError("unrestricted or unrecognized accept rule")
+            condition = expr[0]["match"]
+            left = condition["left"]["payload"]
+            protocol = left["protocol"]
+            if (condition["op"] != "==" or left != {"protocol": protocol, "field": "saddr"}
+                    or protocol not in {"ip", "ip6"} or protocol in protocols):
+                raise ValueError("unrecognized source restriction")
+            protocols.add(protocol)
+            right = condition["right"]
+            members = right["set"] if isinstance(right, dict) and "set" in right else [right]
+            if not members:
+                raise ValueError("empty source restriction")
+            for member in members:
+                if isinstance(member, dict):
+                    prefix = member["prefix"]
+                    network = ipaddress.ip_network(f'{prefix["addr"]}/{prefix["len"]}', strict=True)
+                else:
+                    network = ipaddress.ip_network(member, strict=True)
+                if network.version != (4 if protocol == "ip" else 6):
+                    raise ValueError("source address family mismatch")
+                observed_subnets.append(str(network))
+        validate_subnets(observed_subnets)
+        return True, "LAN-only firewall verified active; sources: " + ", ".join(observed_subnets)
+    except Exception as exc:
+        return False, f"LAN-only firewall could not be verified: {exc}"
+
+
 def apply(runner, config: dict) -> tuple:
     """Returns (ok, detail). Refuses before any command if the config is open-mode or malformed."""
     if config.get("allow_lan_only", True) is not True:

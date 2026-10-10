@@ -144,6 +144,15 @@ def test_guest_homepage_is_supplied_by_the_host_even_when_the_browser_is_local(e
     assert 'name="homepage"' in page and 'value="https://192.168.20.5:8006"' in page
 
 
+def test_guest_homepage_probe_failure_is_shown_next_to_the_setting(env):
+    f, _ = env
+    page = vp.render_vms_page(store=str(f.host.store), free_gb=10, kvm_ok=True, isos=[],
+                              bases=[], vms=[], notice="", notice_ok=None, default_display="vnc",
+                              homepage_error="ip command permission denied").decode()
+    assert "Proxmox address detection failed" in page
+    assert "ip command permission denied" in page
+
+
 def test_requested_distros_are_shown_with_honest_vm_and_emulator_status():
     page = vp.render_vms_page(store='/os', free_gb=20, kvm_ok=True, isos=[], bases=[], vms=[],
                              notice='', notice_ok=None, default_display='vnc').decode()
@@ -166,3 +175,21 @@ def test_overlay_creation_honors_requested_retained_disk_size(env):
     assert do(env, 'freeze', name='gold', base_name='installed', confirm='yes')['ok']
     assert do(env, 'create_overlay', name='desktop', base='installed', memory_mb='4096', cpus='2', persistence_gb='64')['ok']
     assert env[0].host._spec('desktop')['persistence_gb'] == 64
+
+
+def test_ubuntu_builder_includes_locale_selection(env):
+    f,_=env
+    page=vp.render_vms_page(store=str(f.host.store),free_gb=10,kvm_ok=True,isos=[],
+        bases=[],vms=[],notice='',notice_ok=None,default_display='vnc').decode()
+    assert 'name="locale"' in page
+    assert 'en_GB.UTF-8' in page
+
+
+def test_ubuntu_configuration_verification_is_a_real_native_action(env,monkeypatch):
+    import ubuntu_environment as ue
+    observed=[]
+    monkeypatch.setattr(ue,'verify_configuration',lambda host,name:observed.append(name) or
+        {'ok':False,'message':'Guest checks failed'})
+    result=do(env,'verify_ubuntu',name='desktop')
+    assert observed==['desktop']
+    assert not result['ok']

@@ -6,6 +6,8 @@ memory dashboard").
 No real lspci/lsusb/lsblk is ever invoked - FakeRunner supplies real
 captured output shapes.
 """
+import pytest
+
 from fake_runner import FakeProc, FakeRunner
 
 import hardware_inventory as hi
@@ -73,14 +75,45 @@ def test_collect_pci_reports_the_real_bound_kernel_driver():
 def test_collect_pci_says_no_driver_bound_rather_than_going_silent():
     """A device with no driver is the single most useful thing this page
     can surface - it must never render as a blank field."""
-    devices = {d.address: d for d in hi.collect_pci(_runner())}
+    runner = _runner(files={
+        f"/sys/bus/pci/devices/{address}/uevent": "PCI_CLASS=030000\nPCI_ID=10DE:2484\n"
+        for address in ("0000:00:00.0", "0000:01:00.0", "0000:0c:00.0", "0000:0d:00.0")
+    })
+    devices = {d.address: d for d in hi.collect_pci(runner)}
     assert devices["0000:01:00.0"].kernel_driver is None
     assert devices["0000:01:00.0"].driver_status == "no driver bound"
 
 
-def test_collect_pci_is_empty_not_an_exception_when_lspci_is_missing():
+def test_collect_pci_distinguishes_unreadable_driver_metadata_from_unbound():
+    class ReadFailureRunner(FakeRunner):
+        def read_text(self, path):
+            raise PermissionError("sysfs denied")
+    devices = {d.address: d for d in hi.collect_pci(ReadFailureRunner(command_responses=[
+        (lambda a: a[:1] == ["lspci"], FakeProc(0, LSPCI)),
+    ]))}
+    device = devices["0000:01:00.0"]
+    assert device.kernel_driver is None
+    assert "metadata unavailable" in device.driver_status
+    assert "no driver bound" not in device.driver_status
+
+
+@pytest.mark.parametrize("collector,command", [
+    (hi.collect_pci, "lspci"), (hi.collect_usb, "lsusb"),
+    (hi.collect_block, "lsblk"), (hi.collect_net, "ip"),
+])
+def test_missing_command_stdout_is_an_inventory_error_not_an_empty_bus(collector, command):
+    class MissingStdout:
+        returncode = 0
+        stderr = ""
+    runner = FakeRunner(command_responses=[(lambda a: a[0] == command, MissingStdout())])
+    with pytest.raises(hi.InventoryError, match="REAL-006.*output unavailable"):
+        collector(runner)
+
+
+def test_collect_pci_reports_error_when_lspci_is_missing():
     runner = FakeRunner(command_responses=[(lambda a: a[:1] == ["lspci"], FakeProc(127, "", "not found"))])
-    assert hi.collect_pci(runner) == []
+    with pytest.raises(hi.InventoryError, match="REAL-006"):
+        hi.collect_pci(runner)
 
 
 def test_pci_devices_are_grouped_into_real_categories():
@@ -140,7 +173,45 @@ def test_collect_all_returns_every_category_and_never_raises():
     assert inv["pci"] and inv["usb"] and inv["block"] and inv["net"]
 
 
-def test_collect_all_with_every_tool_missing_returns_empty_lists_not_an_error():
+def test_collect_all_with_every_tool_missing_reports_each_failed_bus():
     runner = FakeRunner(command_responses=[(lambda a: True, FakeProc(127, "", "not found"))])
     inv = hi.collect_all(runner)
-    assert inv == {"pci": [], "usb": [], "block": [], "net": []}
+    assert all(inv[bus] is None for bus in ("pci", "usb", "block", "net"))
+    assert len(inv["errors"]) == 4
+    assert all("REAL-006" in item["error"] for item in inv["errors"])
+
+
+@pytest.mark.parametrize("collector,command,valid", [
+    (hi.collect_pci, "lspci", LSPCI),
+    (hi.collect_usb, "lsusb", LSUSB),
+    (hi.collect_block, "lsblk", LSBLK),
+    (hi.collect_net, "ip", IP_LINK),
+])
+@pytest.mark.parametrize("partial", [False, True])
+def test_malformed_inventory_is_not_an_empty_or_partial_success(collector, command, valid, partial):
+    output = (valid if partial else "") + "unrecognized device output\n"
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[0] == command, FakeProc(0, output)),
+    ])
+    with pytest.raises(hi.InventoryError, match="REAL-006.*malformed"):
+        collector(runner)
+
+
+def test_malformed_bus_does_not_hide_other_successful_observations():
+    runner = _runner()
+    runner.command_responses.insert(0, (lambda a: a[0] == "lsusb", FakeProc(0, "invalid\n")))
+    result = hi.collect_all(runner)
+    assert result["usb"] is None
+    assert result["pci"] and result["block"] and result["net"]
+    assert result["errors"][0]["bus"] == "usb"
+
+
+@pytest.mark.parametrize("collector,command", [
+    (hi.collect_pci, "lspci"), (hi.collect_usb, "lsusb"),
+    (hi.collect_block, "lsblk"), (hi.collect_net, "ip"),
+])
+def test_successful_empty_bus_remains_valid(collector, command):
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[0] == command, FakeProc(0, "\n")),
+    ])
+    assert collector(runner) == []

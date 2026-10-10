@@ -40,8 +40,13 @@ def _run_app_directly() -> bool:
     if not os.path.exists(app):
         return False
     try:
+        env = os.environ.copy()
+        # A developer-launched app has no installed nftables policy around it.
+        # Keep this fallback local even though the installed service is LAN-scoped.
+        env["BASELINE_WEB_BIND_HOST"] = "127.0.0.1"
         subprocess.Popen([sys.executable, app], cwd=os.path.dirname(app), start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         env=env)
     except OSError:
         return False
     return True

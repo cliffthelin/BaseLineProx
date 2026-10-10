@@ -5,75 +5,69 @@ from __future__ import annotations
 import html
 
 
-def render_operations_page(operations: dict, schedules: list, alerts: list | None = None) -> bytes:
-    banner = "".join(
-        f'<p class="op-alert" role="alert">Integrity alert: {html.escape(str(a.get("detail", "")))} '
-        f'({html.escape(str(a.get("namespace", "")))})</p>' for a in (alerts or []))
-    by_op = {s["op"]: s for s in schedules}
-    cards = []
-    for op in operations.values():
-        sched = by_op.get(op.op_id)
-        toggles = "".join(
-            f'<label class="op-flag"><input type="checkbox" data-param="{html.escape(name)}"> {html.escape(name.replace("_", " "))}</label>'
-            for name in op.params)
-        schedule = ""
-        if op.schedulable:
-            current = (f'Scheduled every {html.escape(str(sched["every_hours"]))} h '
-                       f'<button type="button" data-remove="{html.escape(op.op_id)}">Remove schedule</button>'
-                       if sched else "Not scheduled")
-            schedule = (f'<div class="op-schedule"><span>{current}</span> '
-                        f'<label>Every <input type="number" min="1" max="8760" value="24" data-every> hours</label> '
-                        f'<button type="button" data-schedule="{html.escape(op.op_id)}">Set schedule</button></div>')
-        cards.append(
-            f'<section class="op-card" data-op="{html.escape(op.op_id)}"><h2>{html.escape(op.op_id.replace("_", " "))}</h2>'
-            f'<p>{html.escape(op.description)}</p>{toggles}'
-            f'<button type="button" data-run="{html.escape(op.op_id)}">Run now</button>{schedule}</section>')
-    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Operations</title>
-<style>
-body{{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:56rem;padding:1rem}}
-.op-card{{border:1px solid #8886;border-radius:8px;padding:1rem;margin:1rem 0}}
-.op-flag{{margin-right:1rem}} button{{padding:.4rem .8rem}} .op-schedule{{margin-top:.8rem}}
-#op-log{{white-space:pre-wrap;background:#1114;padding:.8rem;border-radius:6px;min-height:4rem}}
-</style></head><body><h1>Operations</h1>
-{banner}
-<p>Run now, or set a schedule. Each run is added to the log below. Backups only ever add files to the backup drive.</p>
-{''.join(cards)}<h2>Log</h2><pre id="op-log">Nothing has run yet.</pre>
+def render_operations_page(operations: dict, schedules: list, alerts: list | None = None,
+                           history: list | None = None, history_error: str | None = None) -> bytes:
+    import json
+    import time
+    def when(value):
+        return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(value)) if isinstance(value, (int, float)) else 'Never run'
+    banner = ''.join(f'<p role="alert"><strong>Integrity alert:</strong> {html.escape(str(a.get("detail", "")))}</p>' for a in (alerts or []))
+    history_status = (f'<p role="alert">Run history unavailable: {html.escape(history_error)}</p>'
+                      if history_error else '')
+    choices = ''.join(f'<option value="{html.escape(op.op_id, quote=True)}">{html.escape(op.op_id.replace("_", " "))}</option>' for op in operations.values())
+    records = {op.op_id: {'description': op.description, 'params': op.params, 'schedulable': op.schedulable} for op in operations.values()}
+    encoded = json.dumps(records).replace('<', '\\u003c')
+    rows = ''.join(f'<tr><td>{html.escape(str(s["op"]).replace("_", " "))}</td><td>{s["every_hours"]} h</td><td>{html.escape(when(s.get("last_run")))}</td><td><button type="button" data-remove="{html.escape(str(s["op"]), quote=True)}">Remove</button></td></tr>' for s in schedules)
+    history_rows = ''.join(f'<tr><td>{html.escape(when(r.get("started")))}</td><td>{html.escape(str(r.get("op", "")).replace("_", " "))}</td><td>{html.escape(str(r.get("source", "unknown")))}</td><td>{html.escape(str(r.get("outcome", "completion unknown")))}</td><td>{html.escape(str(r.get("detail", "")))}</td></tr>' for r in (history or []))
+    if history_error and not history_rows:
+        history_rows = '<tr><td colspan="5">History unavailable.</td></tr>'
+    page = """<!doctype html><html><head><meta charset="utf-8"><title>Operations</title>
+<style>body{font:15px/1.5 system-ui;max-width:65rem;margin:auto;padding:1rem}.op-card{border:1px solid #33364a;border-radius:8px;padding:1rem;margin:1rem 0}label{display:inline-flex;align-items:center;gap:.5rem;margin:.4rem 1rem .4rem 0}input[type=number]{width:8ch}pre{white-space:pre-wrap;overflow-wrap:anywhere}.op-flag{margin-right:1rem}</style></head><body>
+<h1>Operations</h1>__BANNER__
+<section class="op-card"><label for="operation-choice">Action</label><select id="operation-choice">__CHOICES__</select>
+<p id="operation-description"></p><div id="operation-params"></div>
+<button type="button" id="operation-run">Run now</button>
+<div id="operation-scheduling"><label>Repeat every <input id="operation-every" type="number" min="1" max="8760" value="24"> hours</label>
+<button type="button" id="operation-schedule">Set schedule</button><details><summary aria-label="About schedules">ⓘ</summary><p>A schedule runs this action with these choices at the selected interval. Run now starts one immediate run. An existing schedule for this action is replaced when you set it again.</p></details></div>
+<p id="operation-status" role="status" aria-live="polite"></p></section>
+<h2>Schedules</h2><table id="operation-schedules"><thead><tr><th>Action</th><th>Interval</th><th>Last started</th><th></th></tr></thead><tbody>__SCHEDULES__</tbody></table>
+<h2>Run history</h2>__HISTORY_STATUS__<table id="operation-history"><thead><tr><th>Started</th><th>Action</th><th>Trigger</th><th>Result</th><th>Details</th></tr></thead><tbody>__HISTORY__</tbody></table>
+<h2>Current run output</h2><pre id="op-log">Select an action to run or schedule.</pre>
+<script id="operation-data" type="application/json">__DATA__</script>
 <script>
-const log = document.getElementById('op-log');
-async function post(path, body) {{
-  const r = await fetch(path, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body)}});
-  return [r.status, await r.json()];
-}}
-async function poll(jobId) {{
-  for (;;) {{
-    const r = await fetch('/drive-admin/job-log?job_id=' + encodeURIComponent(jobId));
-    const j = await r.json();
-    log.textContent = (j.lines || []).join('\\n') || 'Running...';
-    if (j.done) {{ log.textContent += '\\n[' + j.outcome + '] ' + (j.detail || ''); return; }}
-    await new Promise(res => setTimeout(res, 1500));
-  }}
-}}
-function params(card) {{
-  const p = {{}};
-  card.querySelectorAll('input[data-param]').forEach(i => p[i.dataset.param] = i.checked);
-  return p;
-}}
-document.querySelectorAll('[data-run]').forEach(b => b.onclick = async () => {{
-  const card = b.closest('.op-card');
-  const [s, j] = await post('/operations/run', {{op: b.dataset.run, params: params(card)}});
-  if (j.job_id) {{ log.textContent = 'Started...'; poll(j.job_id); }} else log.textContent = j.detail || 'Refused';
-}});
-document.querySelectorAll('[data-schedule]').forEach(b => b.onclick = async () => {{
-  const card = b.closest('.op-card');
-  const [s, j] = await post('/operations/schedule', {{op: b.dataset.schedule, params: params(card),
-      every_hours: Number(card.querySelector('[data-every]').value)}});
-  if (j.outcome === 'applied') location.reload(); else log.textContent = j.detail || 'Refused';
-}});
-document.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => {{
-  await post('/operations/schedule/remove', {{op: b.dataset.remove}}); location.reload();
-}});
+const specs=JSON.parse(document.getElementById('operation-data').textContent);
+const choice=document.getElementById('operation-choice'),log=document.getElementById('op-log'),status=document.getElementById('operation-status');
+const paramBox=document.getElementById('operation-params');
+function selected(){return specs[choice.value];}
+function show(){const spec=selected();if(!spec)return;
+ document.getElementById('operation-description').textContent=spec.description;paramBox.replaceChildren();
+ for(const [name,value] of Object.entries(spec.params)){const label=document.createElement('label'),input=document.createElement('input');
+ input.type='checkbox';input.checked=value;input.dataset.param=name;label.append(input,document.createTextNode(name.replaceAll('_',' ')));paramBox.append(label);}
+ document.getElementById('operation-scheduling').hidden=!spec.schedulable;
+ document.getElementById('operation-run').disabled=false;status.textContent='';}
+function params(){const result={};for(const input of paramBox.querySelectorAll('[data-param]'))result[input.dataset.param]=input.checked;return result;}
+async function post(path,body){const response=await fetch(path,{method:'POST',credentials:'same-origin',referrerPolicy:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ if(!(response.headers.get('Content-Type')||'').includes('application/json'))throw Error('Log in again');
+ const result=await response.json();if(!response.ok)throw Error(result.detail||result.error||'Request refused');return result;}
+async function refreshHistory(){const response=await fetch('/operations/history');if(!response.ok)throw Error('Run history unavailable');
+ const result=await response.json();const rows=document.querySelector('#operation-history tbody');rows.replaceChildren();
+ for(const run of result.runs){const row=document.createElement('tr');for(const value of [run.started?new Date(run.started*1000).toLocaleString():'Unknown',run.op.replaceAll('_',' '),run.source,run.outcome,run.detail]){const cell=document.createElement('td');cell.textContent=value||'';row.append(cell);}rows.append(row);}}
+async function poll(id){for(;;){const response=await fetch('/drive-admin/job-log?job_id='+encodeURIComponent(id));if(!response.ok)throw Error('Run output unavailable; inspect run history');
+ const job=await response.json();log.textContent=(job.lines||[]).join('\\n')||'Running…';
+ if(job.done){log.textContent+='\\n['+job.outcome+'] '+(job.detail||'');await refreshHistory();return;}await new Promise(resolve=>setTimeout(resolve,1500));}}
+choice.onchange=show;show();
+document.getElementById('operation-run').onclick=async()=>{const button=document.getElementById('operation-run');button.disabled=true;
+ try{const result=await post('/operations/run',{op:choice.value,params:params()});status.textContent='Run started';await refreshHistory();await poll(result.job_id);}
+ catch(error){status.textContent=error.message;}finally{button.disabled=false;}};
+document.getElementById('operation-schedule').onclick=async()=>{const hours=document.getElementById('operation-every');if(!hours.reportValidity())return;
+ try{await post('/operations/schedule',{op:choice.value,params:params(),every_hours:Number(hours.value)});location.reload();}catch(error){status.textContent=error.message;}};
+for(const button of document.querySelectorAll('[data-remove]'))button.onclick=async()=>{try{await post('/operations/schedule/remove',{op:button.dataset.remove});location.reload();}catch(error){status.textContent=error.message;}};
+setInterval(()=>refreshHistory().catch(error=>{status.textContent=error.message;}),10000);
 </script></body></html>"""
-    return body.encode()
+    return (page.replace('__BANNER__', banner).replace('__HISTORY_STATUS__', history_status).replace('__CHOICES__', choices)
+            .replace('__SCHEDULES__', rows or '<tr><td colspan="4">No schedules configured.</td></tr>')
+            .replace('__HISTORY__', history_rows or '<tr><td colspan="5">No recorded runs.</td></tr>')
+            .replace('__DATA__', encoded)).encode()
 
 
 def render_operators_page(accounts: dict, actions: list | None = None) -> bytes:
@@ -125,18 +119,20 @@ document.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => 
     return page.encode()
 
 
-def render_audit_page(records: list) -> bytes:
+def render_audit_page(records: list, error: str | None = None) -> bytes:
     import time
     rows = "".join(
         "<tr><td>{}</td><td>{}</td><td>{}</td></tr>".format(
             html.escape(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r.get("ts", 0))) if isinstance(r.get("ts"), (int, float)) else ""),
             html.escape(str(r.get("event", ""))),
             html.escape(", ".join(f"{k}={v}" for k, v in sorted(r.items()) if k not in ("ts", "event"))))
-        for r in records) or '<tr><td colspan="3">No events recorded yet.</td></tr>'
+        for r in records) or ('<tr><td colspan="3">Audit history unavailable.</td></tr>' if error
+                             else '<tr><td colspan="3">No events recorded yet.</td></tr>')
+    error_notice = f'<p role="alert">Audit log unavailable: {html.escape(error)}</p>' if error else ''
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Audit</title>
 <style>body{{font:14px/1.5 system-ui,sans-serif;margin:0 auto;max-width:70rem;padding:1rem}}
 table{{border-collapse:collapse;width:100%}}td,th{{border-top:1px solid #8884;padding:.35rem .5rem;text-align:left;vertical-align:top}}</style>
-</head><body><h1>Audit</h1><p>The most recent events, newest first. Read-only; secrets are never recorded.</p>
+</head><body><h1>Audit</h1><p>The most recent events, newest first. Read-only; secrets are never recorded.</p>{error_notice}
 <table><tr><th>When</th><th>Event</th><th>Details</th></tr>{rows}</table></body></html>"""
     return page.encode()
 
@@ -164,18 +160,45 @@ document.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => 
     return page.encode()
 
 
-def render_remote_access_page(status: dict) -> bytes:
+def render_remote_access_page(status: dict, configuration=None) -> bytes:
+    import settings_web
+    import structured_controls
+    sections = []
+    for section, key, label in (('ssh','password_auth','SSH password authentication'),
+                                 ('firewall','allow_lan_only','Restrict inbound access to the LAN')):
+        if configuration is None or key not in configuration.get(section, {}):
+            sections.append(f'<p>{label}: configured value unavailable.</p>')
+            continue
+        value = configuration[section][key]
+        default = settings_web._DEFAULT_SETTINGS_SECTIONS[section][key]
+        help_text = ('Disabled permits key-based SSH authentication; enabling permits password authentication too.'
+                     if section == 'ssh' else 'Enabled applies the established LAN-scoped firewall policy. Disabling requests a policy change; unsupported changes are refused, not saved as applied.')
+        sections.append(f'<form method="post" action="/settings/{section}" data-autosave>'
+            f'<label>{label} {settings_web.render_field_input(key,value)}</label>'
+            f'<details class="field-info"><summary aria-label="About {label}">ⓘ</summary><p>{help_text}</p></details>'
+            f'<p>Default: {"enabled" if default else "disabled"}. Configured: {"enabled" if value else "disabled"}.</p>'
+            '<span role="status" data-save-status aria-live="polite"></span></form>')
     def yn(v):
         return "unknown" if v is None else ("on" if v else "off")
-    ports = "".join(f"<li>{html.escape(p['address'])}</li>" for p in status.get("listening", [])) or "<li>none found</li>"
+    listening_available = status.get("listening_available", True)
+    ports = ("".join(f"<li>{html.escape(p['address'])}</li>" for p in status.get("listening", [])) or "<li>none found</li>")
+    if not listening_available:
+        ports = "<li>Listener inventory unavailable</li>"
+    observation_errors = "".join(
+        f'<p role="alert" class="ra-warn">Observation unavailable: {html.escape(error)}</p>'
+        for error in status.get("observation_errors", []))
     warns = "".join(f'<p role="alert" class="ra-warn">{html.escape(w)}</p>' for w in status.get("warnings", []))
     ts = status.get("tailscale", {})
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Remote access</title>
 <style>body{{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:44rem;padding:1rem}}
 .ra-warn{{border:2px solid #c80;padding:.6rem;border-radius:6px}}</style></head><body><h1>Remote access</h1>
-<p>Read-only: this page changes nothing.</p>{warns}
+<h2>Configuration</h2>
+<p>These are the stored Baseline choices. Changes apply through the existing SSH and firewall mechanisms and save only on success.</p>
+{''.join(sections)}
+<h3>Tailscale</h3><p>Tailscale has no stored Baseline configuration policy. Its current connection is reported below; it is not inferred from the SSH or firewall choices.</p>
+<details><summary>Observed results</summary>{warns}{observation_errors}
 <ul><li>SSH: <strong>{yn(status.get("ssh", {}).get("active"))}</strong></li>
 <li>Tailscale address: <strong>{html.escape(str(ts.get("ip") or "none"))}</strong>,
 other devices on the tailnet: <strong>{html.escape(str(ts.get("peers") if ts.get("peers") is not None else "unknown"))}</strong></li></ul>
-<h2>Listening on</h2><ul>{ports}</ul></body></html>"""
+<h2>Listening on</h2><ul>{ports}</ul></details>{structured_controls.script()}</body></html>"""
     return page.encode()

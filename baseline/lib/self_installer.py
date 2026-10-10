@@ -98,6 +98,20 @@ lvm.maxvz = {lvm_maxvz}
 lvm.swapsize = {lvm_swapsize}
 """
 
+# The self-contained installer: Proxmox runs the hook carried in the ISO (first_boot_hook.py) once on the new
+# system, after networking is configured. The hook needs no network; the ordering only waits for a settled system.
+FIRST_BOOT_SECTION = """
+[first-boot]
+source = "from-iso"
+ordering = "network-online"
+"""
+
+
+def render_answer(*, fqdn, password_hash, disk_serial, lvm_maxroot, lvm_maxvz, lvm_swapsize, first_boot=False):
+    text = ANSWER_TEMPLATE.format(fqdn=fqdn, password_hash=password_hash, disk_serial=disk_serial,
+                                  lvm_maxroot=lvm_maxroot, lvm_maxvz=lvm_maxvz, lvm_swapsize=lvm_swapsize)
+    return text + (FIRST_BOOT_SECTION if first_boot else "")
+
 
 # Matches settings_store.py's "self_installer.lvm_size_preset" options
 # exactly - the pre-populated, dropdown-selected sizing an operator
@@ -120,7 +134,37 @@ LVM_SIZE_PRESETS = {
     "small": dict(lvm_maxroot=20, lvm_maxvz=30, lvm_swapsize=2),
     "medium": dict(lvm_maxroot=40, lvm_maxvz=60, lvm_swapsize=4),
     "large": dict(lvm_maxroot=80, lvm_maxvz=120, lvm_swapsize=8),
+    "single-drive": dict(lvm_maxroot=32, lvm_maxvz=64, lvm_swapsize=4),
 }
+
+
+def single_drive_profile(size_bytes: int, *, personas=("admin", "personal"),
+                          growth_percent: int = 20, migration_bytes: int = 0,
+                          required_bytes: dict | None = None, reserve_gui_runtime: bool = True) -> dict:
+    """Same role/sizing profile for each independent install, never a disk clone.
+
+    EFI/GPT/thin metadata have a separate conservative 2-GiB reservation.
+    The Proxmox installer creates its own unique boot/filesystem identities.
+    Applying data volumes is a post-install step; this is not boot proof.
+    """
+    import drive_installer
+    sizes = dict(LVM_SIZE_PRESETS["single-drive"])
+    boot_reserve = 2 * 1024**3
+    host_bytes = sum(sizes.values()) * 1024**3 + boot_reserve
+    storage = drive_installer.single_drive_plan(
+        size_bytes, host_bytes=host_bytes, personas=personas,
+        growth_percent=growth_percent, migration_bytes=migration_bytes,
+        required_bytes=required_bytes, baseline_min_gib=50 if reserve_gui_runtime else 5)
+    # Proxmox deducts two metadata LVs and one 4-MiB extent from maxvz.
+    # Confirmed on the real PC401 and in upstream Proxmox/Install.pm:
+    # a 64-GiB maxvz creates 62 GiB minus 4 MiB of physical thin data.
+    extent = 4 * 1024**2
+    data_budget = sizes["lvm_maxvz"] * 1024**3
+    metadata = min(16 * 1024**3, max(1024**3, data_budget // 100))
+    metadata -= metadata % extent
+    return {"installer_sizes": sizes, "boot_reserve_bytes": boot_reserve,
+            "thin_data_min_bytes": data_budget - 2 * metadata - extent,
+            "storage": storage, "executed": False, "boot_verified": False}
 
 # Real bug found live, 2026-09-29 (a regression from decision record
 # 03's own already-proven fix): `10.0.2.2` is SLIRP's own gateway
@@ -184,6 +228,15 @@ def _locate_proxmox_source_iso(runner) -> Path | None:
     return None
 
 
+def prepare_iso_args(url: str, fingerprint: str, first_boot_hook: Path | None) -> list:
+    """prepare-iso arguments: the answer URL and pinned certificate, plus the carried first-boot hook when the
+    installer is self-contained."""
+    args = ["--url", url, "--cert-fingerprint", fingerprint]
+    if first_boot_hook is not None:
+        args += ["--on-first-boot", str(first_boot_hook)]
+    return args
+
+
 def build_and_write_self_installer(
     *,
     device_path: str,
@@ -211,8 +264,13 @@ def build_and_write_self_installer(
     memory_mb: int = 3072,
     on_progress=None,
     admin_password: str | None = None,
+    offline_cache: Path | None = None,
 ) -> SelfInstallerResult:
-    """The real, composed pipeline. Every stage's own real postcondition
+    """`offline_cache` makes the installer self-contained: the ISO then also carries the first-boot hook
+    (first_boot_hook.py) and this offline package cache, and the installed system finishes its own
+    installation on first boot with no internet and no machine attached (baseline-first-boot-install).
+
+    The real, composed pipeline. Every stage's own real postcondition
     checks (acquire's hash chain, prepare_iso_defensively's byte scan,
     build_current_iso's provision.sh-reachability check) still run -
     this function adds no new trust of its own, it only sequences
@@ -244,12 +302,17 @@ def build_and_write_self_installer(
     # 1. Safety gate - real device validation before anything else.
     progress(f"Validating {device_path} is a real, safe, non-boot target...")
     try:
-        pds.validate_target_device(
+        target = pds.validate_target_device(
             device_path, expected_serial=expected_serial,
             min_size_bytes=device_min_size_bytes, runner=pds_runner,
         )
     except pds.PhysicalDeviceSafetyError as exc:
         return SelfInstallerResult("refused", f"device safety check failed: {exc}")
+    if dict(lvm_maxroot=lvm_maxroot, lvm_maxvz=lvm_maxvz, lvm_swapsize=lvm_swapsize) == LVM_SIZE_PRESETS["single-drive"]:
+        try:
+            single_drive_profile(target["size_bytes"])
+        except ValueError as exc:
+            return SelfInstallerResult("refused", str(exc))
     # A second, independent data-protection check (the web layer already made one): a drive that holds data and
     # has no installer-generated UUID is never installed over. No option relaxes it.
     import drive_guard
@@ -357,9 +420,20 @@ def build_and_write_self_installer(
     # correctly refused: "Installation failed: filter did not match
     # any device" - a genuine variable-name collision, not a real
     # disk-targeting ambiguity.
-    answer_toml = ANSWER_TEMPLATE.format(
+    first_boot_hook = None
+    if offline_cache is not None:
+        import first_boot_hook as fbh
+        if not (Path(offline_cache) / "MANIFEST.json").is_file():
+            return SelfInstallerResult("refused", f"{offline_cache} is not a built offline package cache")
+        progress("Building the first-boot hook that finishes the installation from the drive itself...")
+        try:
+            first_boot_hook = fbh.build_hook(repo_root, workspace / "baseline-first-boot")
+        except fbh.HookError as exc:
+            return SelfInstallerResult("refused", str(exc))
+    answer_toml = render_answer(
         fqdn=fqdn, password_hash=pw_hash, disk_serial=disk_serial,
         lvm_maxroot=lvm_maxroot, lvm_maxvz=lvm_maxvz, lvm_swapsize=lvm_swapsize,
+        first_boot=first_boot_hook is not None,
     )
     session_id = secrets.token_urlsafe(24)
     fingerprint = _cert_fingerprint(answer_runner, cert_path)
@@ -375,7 +449,7 @@ def build_and_write_self_installer(
         expected_fetch_mode="http", expected_url=url, expected_fingerprint=fingerprint,
         min_size=1_000_000_000, max_size=3_000_000_000,
         forbidden_iso_strings=[pw_hash.encode(), answer_toml.encode()],
-        extra_args=["--url", url, "--cert-fingerprint", fingerprint],
+        extra_args=prepare_iso_args(url, fingerprint, first_boot_hook),
     )
     if not prep_outcome.ok:
         failed = next((c for c in prep_outcome.postconditions if not c.ok), None)
@@ -386,7 +460,7 @@ def build_and_write_self_installer(
     final_iso = workspace / "baseline-self-installer.iso"
     build_result = ib.build_current_iso(
         iso_builder_runner, source_iso=answer_iso, repo_root=repo_root,
-        output_iso=final_iso, workspace=workspace / "iso-build",
+        output_iso=final_iso, workspace=workspace / "iso-build", offline_cache=offline_cache,
     )
     if not build_result.ok:
         failed = next((c for c in build_result.postconditions if not c.ok), None)
@@ -430,7 +504,7 @@ def build_and_write_self_installer(
         expected_mac=target_mac, expected_dmi_product=target_dmi_product, ttl_seconds=1800.0,
     )
     server = dsan.EphemeralAnswerServer(
-        bind_host="0.0.0.0", bind_port=server_port,
+        bind_host="127.0.0.1", bind_port=server_port,
         cert_path=str(cert_path), key_path=str(key_path), session=session,
     )
     server.start()
