@@ -46,10 +46,9 @@ def _log_event(step: str, status: str, detail: str) -> None:
         f.write(json.dumps(rec) + "\n")
 
 
-def _physical_nics():
+def _physical_nics(base=Path("/sys/class/net")):
     """Real NICs under /sys/class/net - excludes lo and software bridges."""
     out = []
-    base = Path("/sys/class/net")
     try:
         entries = sorted(base.iterdir())
     except OSError as exc:
@@ -58,6 +57,8 @@ def _physical_nics():
         name = entry.name
         if name == "lo":
             continue
+        if not entry.is_dir():
+            continue  # e.g. bonding_masters, a plain file present whenever the bonding module is loaded
         if _sysfs_path_exists(entry / "bridge"):
             continue  # this is a bridge (e.g. vmbr0), not a physical NIC
         if _sysfs_path_exists(entry / "device"):

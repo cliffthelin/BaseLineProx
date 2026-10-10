@@ -261,3 +261,14 @@ def test_lifeline_reports_address_probe_unavailable_distinctly(monkeypatch):
         'fact': 'address_assigned', 'ok': False,
         'detail': 'address query unavailable: address query failed: permission denied',
     }
+
+
+def test_files_in_sys_class_net_are_not_interfaces(tmp_path):
+    """bonding_masters is a plain file under /sys/class/net whenever the bonding module is loaded (normal on Proxmox).
+    It is not an interface; probing it as one raised NetworkProbeError and stopped first boot before it could commit."""
+    (tmp_path / "bonding_masters").write_text("")
+    (tmp_path / "lo").mkdir()
+    (tmp_path / "vmbr0/bridge").mkdir(parents=True)
+    (tmp_path / "ens3/device").mkdir(parents=True)
+    (tmp_path / "wlan-without-device").mkdir()
+    assert network._physical_nics(tmp_path) == ["ens3"]
