@@ -189,3 +189,40 @@ def test_the_real_assistant_accepts_the_answer_file_with_the_hook(tmp_path):
     answer.write_text(_answer(True))
     proc = subprocess.run([str(ASSISTANT), "validate-answer", str(answer)], capture_output=True, text=True)
     assert proc.returncode == 0 and "successfully" in proc.stdout + proc.stderr, proc.stdout + proc.stderr
+
+
+# -- Reboot after install (fix for the 2026-10-10 rehearsal's reboot loop) ---------------------------------------
+
+@pytest.mark.parametrize("cgroup,unit", [
+    ("0::/system.slice/proxmox-first-boot-network-online.service\n", "proxmox-first-boot-network-online.service"),
+    ("12:pids:/system.slice/proxmox-first-boot-multi-user.service\n1:name=systemd:/system.slice/"
+     "proxmox-first-boot-multi-user.service\n", "proxmox-first-boot-multi-user.service"),
+    ("0::/user.slice/user-0.slice/session-3.scope\n", None),            # run by hand, not by a service
+    ("", None),
+])
+def test_the_invoking_service_is_read_from_the_cgroup(cgroup, unit):
+    assert _installer().invoking_unit(cgroup) == unit
+
+
+def test_the_reboot_is_queued_after_the_invoking_unit_never_run_inline():
+    argv = _installer().reboot_after_argv("proxmox-first-boot-network-online.service")
+    assert argv[0] == "systemd-run" and "--no-block" in argv
+    assert "--property=After=proxmox-first-boot-network-online.service" in argv
+    assert argv[-2:] == ["systemctl", "reboot"]
+
+
+def test_an_already_complete_install_never_reboots_again(tmp_path, monkeypatch):
+    """Returning successfully is what lets Proxmox's ExecStartPost remove its pending flag, so a re-run after
+    completion must do nothing at all - this is what ends any leftover loop."""
+    module = _installer()
+    monkeypatch.setattr(module, "STATE", tmp_path)
+    monkeypatch.setattr(module, "LOG", tmp_path / "log")
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+    (tmp_path / "complete").write_text("{}\n")
+
+    def refuse(argv, **kwargs):
+        raise AssertionError(f"nothing may run once complete, got {argv}")
+    monkeypatch.setattr(module, "run", refuse)
+    module.main()
+    assert "not rebooting" in (tmp_path / "log").read_text()
+

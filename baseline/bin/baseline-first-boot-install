@@ -51,6 +51,31 @@ def iso_length(stream):
     return blocks * block_size
 
 
+def invoking_unit(cgroup_text):
+    """The systemd service this process runs under, from /proc/self/cgroup, or None when it was not started by
+    a service (e.g. run by hand). Read rather than hardcoded: Proxmox picks the unit from the answer's ordering
+    (proxmox-first-boot-network-online.service, -multi-user, ...)."""
+    for line in cgroup_text.splitlines():
+        path = line.rsplit(":", 1)[-1]
+        leaf = path.rstrip("/").rsplit("/", 1)[-1]
+        if leaf.endswith(".service"):
+            return leaf
+    return None
+
+
+def reboot_after_argv(unit):
+    """Queue a reboot that starts only after `unit`'s own start job has finished.
+
+    Proxmox's first-boot unit is Type=oneshot and removes its pending-first-boot-setup flag in ExecStartPost,
+    which runs only after this hook returns. Rebooting from inside the hook killed the unit before
+    ExecStartPost, the flag survived, and the hook ran again on every boot (3 reboot loops in the 2026-10-10
+    rehearsal). A oneshot unit's start job stays pending through ExecStartPost, so a job ordered After= it
+    cannot begin until the flag is gone - an ordering guarantee, not a sleep."""
+    return ["systemd-run", "--no-block", "--unit=baseline-first-boot-reboot", "--collect",
+            f"--property=After={unit}", "--description=Reboot after Baseline first-boot install",
+            "systemctl", "reboot"]
+
+
 from offline_cache import sha256 as _sha256, verify_manifest  # noqa: E402 - shared with the cache builder
 
 
@@ -184,6 +209,11 @@ def step_provision():
 def main():
     if os.geteuid() != 0:
         raise SystemExit("run as root (the first-boot hook does)")
+    if done("complete"):
+        # Already finished on an earlier boot. Never reboot again: returning successfully is what lets the
+        # first-boot unit remove its pending flag, so this is how any leftover loop ends.
+        log("installation already complete on this drive; nothing to do, not rebooting")
+        return
     for step, function in (("storage", step_storage), ("installer", step_installer), ("provision", step_provision)):
         if done(step):
             log(f"{step}: already complete")
@@ -191,8 +221,13 @@ def main():
         log(f"=== {step} ===")
         function()
     mark("complete")
-    log("Baseline installation finished on this drive; rebooting into first-boot authorization.")
-    run(["systemctl", "reboot"])
+    unit = invoking_unit(Path("/proc/self/cgroup").read_text())
+    if unit is None:
+        log("Baseline installation finished on this drive. Not started by a service, so not rebooting; "
+            "reboot to reach first-boot authorization.")
+        return
+    run(reboot_after_argv(unit))
+    log(f"Baseline installation finished on this drive; reboot queued to start after {unit} completes.")
 
 
 if __name__ == "__main__":
