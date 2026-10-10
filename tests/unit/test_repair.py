@@ -259,3 +259,46 @@ def test_boot_time_recovery_restores_when_manifest_pending():
     assert repair.read_pending_manifest(runner) is None
     log_lines = [json.loads(l) for l in runner.files[str(repair.EVENT_LOG)].splitlines()]
     assert any(r["step"] == "boot_recovery_triggered" for r in log_lines)
+
+
+# -- Missing lifeline facts are not health (2026-10-10 rehearsal) -----------------------------------------------
+
+def _carrier_lost():
+    """check_lifeline stops at the first failure, so address/gateway are simply absent."""
+    return [{"fact": "nic_detected", "ok": True, "detail": ""},
+            {"fact": "driver_bound", "ok": True, "detail": ""},
+            {"fact": "carrier_present", "ok": False, "detail": "no carrier"}]
+
+
+def test_healthy_requires_both_facts_present_and_exactly_true():
+    assert repair.lifeline_reports_healthy(healthy_facts()) is True
+    assert repair.lifeline_reports_healthy(broken_facts()) is False
+    assert repair.lifeline_reports_healthy(_carrier_lost()) is False          # absent evidence is not health
+    assert repair.lifeline_reports_healthy([]) is False
+    truthy = [dict(f, ok="yes") if f["fact"] == "gateway_reachable" else f for f in healthy_facts()]
+    assert repair.lifeline_reports_healthy(truthy) is False
+
+
+def test_replace_repair_never_calls_a_device_with_no_carrier_already_healthy():
+    """The guard used to read a missing fact as OK, so a NIC with no carrier was refused as
+    'already_healthy' while discovery (correctly) called it broken."""
+    runner = make_ready_runner()
+    result = repair.reset_interface_to_dhcp(runner, observed_dev="vmbr0", requested_by="test",
+                                             operator_present=True, check_lifeline_fn=_carrier_lost)
+    assert result.refusal_code != "already_healthy"
+    assert "already_healthy" not in result.detail
+
+
+def test_additive_repair_never_calls_a_device_with_no_carrier_already_healthy():
+    import repair_additive
+    from test_phase0_additive_repair import make_additive_runner
+    result = repair_additive.add_dhcp_to_bridge(make_additive_runner(), "vmbr0", "test", operator_present=True,
+                                                check_lifeline_fn=_carrier_lost)
+    assert result.refusal_code != "already_healthy"
+
+
+def test_a_genuine_already_healthy_refusal_carries_its_code():
+    runner = make_ready_runner()
+    result = repair.reset_interface_to_dhcp(runner, observed_dev="vmbr0", requested_by="test",
+                                             operator_present=True, check_lifeline_fn=healthy_facts)
+    assert result.outcome == "refused" and result.refusal_code == "already_healthy"

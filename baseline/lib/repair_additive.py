@@ -165,11 +165,7 @@ def add_dhcp_to_bridge(runner: Runner, observed_dev: str, requested_by: str,
                               f"harness proposed {proposed_target!r}, Baseline derived {target.name!r} "
                               "- using the derivation")
 
-        facts = check_lifeline_fn()
-        fact_map = {f["fact"]: f for f in facts}
-        gw_fact = fact_map.get("gateway_reachable")
-        addr_fact = fact_map.get("address_assigned")
-        if (gw_fact is None or gw_fact["ok"]) and (addr_fact is None or addr_fact["ok"]):
+        if repair.lifeline_reports_healthy(check_lifeline_fn()):
             raise RepairRefused("already_healthy",
                                  f"{target.name} currently reports address_assigned/gateway_reachable OK - "
                                  "refusing to change a device that isn't actually broken")
@@ -334,4 +330,5 @@ def add_dhcp_to_bridge(runner: Runner, observed_dev: str, requested_by: str,
 
     except RepairRefused as refusal:
         repair.log_event(runner, attempt_id, "refused", "fail", refusal.detail, code=refusal.code)
-        return RepairResult(False, attempt_id, "refused", f"{refusal.code}: {refusal.detail}")
+        return RepairResult(False, attempt_id, "refused", f"{refusal.code}: {refusal.detail}",
+                            refusal_code=refusal.code)

@@ -672,3 +672,42 @@ def test_the_confirm_screen_names_the_offline_source_only_when_one_is_present():
     without = fsm.format_full_proposal(D(), {}, diagnosis, offline_available=False)
     assert "own verified package repository" in with_repo
     assert "only after network verifies" in without and "repository" not in without
+
+
+# --------------------------------------------------------------------------
+# Proposal and the repair's own re-check agreeing (2026-10-10 rehearsal)
+# --------------------------------------------------------------------------
+
+def _facts_sequence(*fns):
+    """Discovery sees the first; every later lifeline check sees the next, then the last repeats."""
+    calls = iter(fns)
+    last = [fns[-1]]
+
+    def check():
+        fn = next(calls, last[0])
+        return fn()
+    return check
+
+
+def test_a_lifeline_that_heals_before_the_repair_is_verified_now_not_failed(tmp_path):
+    """Discovery (before CONFIRM) found it broken; the repair's own check then found it healthy and
+    refused. That used to be recorded as a network failure."""
+    r = full_runner()
+    check = _facts_sequence(broken_facts_fixture_a, healthy_facts, healthy_facts)
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                     check_lifeline_fn=check, offline_root=tmp_path / "none", offline_sources=tmp_path / "none.list")
+    assert result["action"] == "committed" and result["network_verified"] is True
+    entry = next(e for e in json.loads((tmp_path / "journal.json").read_text())["history"]
+                 if e["state"] == "network_repaired")
+    assert entry["verification"] and all(v is True for v in entry["verification"].values())
+    assert "verified now" in entry["network_detail"]
+
+
+def test_an_already_healthy_refusal_that_does_not_reverify_is_still_a_failure(tmp_path):
+    r = full_runner()
+    check = _facts_sequence(broken_facts_fixture_a, healthy_facts, broken_facts_fixture_a)
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                     check_lifeline_fn=check, offline_root=tmp_path / "none", offline_sources=tmp_path / "none.list")
+    assert result["action"] == "network_failed"
+    states = [e["state"] for e in json.loads((tmp_path / "journal.json").read_text())["history"]]
+    assert "network_repaired" not in states and states[-1] == "network_repair_failed"

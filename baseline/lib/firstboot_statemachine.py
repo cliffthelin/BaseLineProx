@@ -536,6 +536,19 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
             # populate it on their own success return).
             verification = dict(repair_result.verification)
             target_interface = diagnosis["target"]
+            if repair_result.refusal_code == "already_healthy":
+                # The proposal came from discovery made before CONFIRM; the
+                # repair's own fresh check now says the lifeline is healthy.
+                # That is not a failure - but it is also not evidence by
+                # itself. Re-verify now exactly as the no-repair-needed
+                # branch below does, and record network_repaired only on
+                # that fresh, positive evidence (the invariant still guards it).
+                current = fbnr.discover(runner, check_lifeline_fn)
+                verification = fbnr.facts_verification(current["facts"])
+                target_interface = fbnr.observed_dev(runner, current["facts"]) or ""
+                network_ok = all(v is True for v in verification.values()) and bool(target_interface)
+                network_detail = ("lifeline became healthy before the repair ran; verified now - no change made"
+                                  if network_ok else f"{repair_result.detail}; and re-verification now failed")
         else:
             # Persisted discovery is a proposal, not current verification.
             current = fbnr.discover(runner, check_lifeline_fn)

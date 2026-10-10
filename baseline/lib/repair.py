@@ -184,6 +184,25 @@ class RepairResult:
     # docstring for why a state named "repaired" must never be entered
     # on the mere absence of a False flag.
     verification: dict = field(default_factory=dict)
+    # The RepairRefused.code when outcome == "refused" (e.g. "already_healthy"),
+    # so callers branch on a stable code instead of parsing `detail`.
+    refusal_code: str = ""
+
+
+def lifeline_reports_healthy(facts: list) -> bool:
+    """True only when check_lifeline() recorded BOTH address_assigned and
+    gateway_reachable, each exactly ok=True.
+
+    The repair guards used to treat a MISSING fact as healthy
+    (`gw_fact is None or gw_fact["ok"]`). check_lifeline() stops recording
+    at the first failing fact, so a NIC with no carrier yields neither fact
+    and was declared "already_healthy" - while first boot's discovery
+    (firstboot_network_repair.facts_verification) correctly treated the
+    same facts as broken. The two disagreed on the 2026-10-10 offline
+    rehearsal: the proposal planned a repair after CONFIRM, and the repair
+    then refused it as unnecessary. Absent evidence is not health."""
+    fact_map = {f["fact"]: f for f in facts}
+    return all(fact_map.get(name, {}).get("ok") is True for name in ("address_assigned", "gateway_reachable"))
 
 
 # --------------------------------------------------------------------------
@@ -671,11 +690,7 @@ def reset_interface_to_dhcp(runner: Runner, observed_dev: str, requested_by: str
             log_event(runner, attempt_id, "target_discrepancy", "info",
                       f"harness proposed {proposed_target!r}, Baseline derived {target.name!r} - using the derivation")
 
-        facts = check_lifeline_fn()
-        fact_map = {f["fact"]: f for f in facts}
-        gw_fact = fact_map.get("gateway_reachable")
-        addr_fact = fact_map.get("address_assigned")
-        if (gw_fact is None or gw_fact["ok"]) and (addr_fact is None or addr_fact["ok"]):
+        if lifeline_reports_healthy(check_lifeline_fn()):
             raise RepairRefused("already_healthy",
                                  f"{target.name} currently reports address_assigned/gateway_reachable OK - "
                                  "refusing to change a device that isn't actually broken")
@@ -775,4 +790,5 @@ def reset_interface_to_dhcp(runner: Runner, observed_dev: str, requested_by: str
 
     except RepairRefused as refusal:
         log_event(runner, attempt_id, "refused", "fail", refusal.detail, code=refusal.code)
-        return RepairResult(False, attempt_id, "refused", f"{refusal.code}: {refusal.detail}")
+        return RepairResult(False, attempt_id, "refused", f"{refusal.code}: {refusal.detail}",
+                            refusal_code=refusal.code)
