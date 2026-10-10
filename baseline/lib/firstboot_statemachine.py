@@ -30,7 +30,10 @@ already uses) before the next stage begins:
   -> network_repaired -> packages_installed -> packages_verified
   -> committed
 
-  confirmed -> network_repair_failed  (terminal; network did not verify)
+  confirmed -> network_repair_failed  (terminal, unless the drive carries
+                                       its own verified package repository)
+  network_repair_failed -> packages_installed (package_source="offline")
+  -> packages_verified -> committed (network_verified=False)
 
 `network_repaired` is a success-only state: it is entered if and only if
 the repair applied AND independently verified (or the lifeline was
@@ -62,7 +65,19 @@ Gating, exactly as specified:
     confirms (identical discipline to `wait_for_confirmation`, reused
     unchanged, not reimplemented).
   - Package installation is refused unless network repair (or an
-    already-healthy lifeline) is confirmed AND independently verified.
+    already-healthy lifeline) is confirmed AND independently verified -
+    with one exception, added 2026-10-10 for the self-contained
+    installer: when networking did not verify but this drive carries its
+    own package repository, registered with apt and re-verified against
+    its manifest at that moment (`offline_repository`), the tools are
+    installed from that repository ONLY (`install_diagnostic_tools`
+    restricts apt to that one source list, so no network source is ever
+    consulted). The network failure is not overwritten: it stays in the
+    journal as `network_repair_failed`, and `committed` records
+    `network_verified=False` and `package_source="offline"`. Without a
+    verified repository the old refusal applies unchanged. This does not
+    widen consent: it runs only after CONFIRM, whose screen names the
+    offline source whenever one is present.
   - The durable completion marker is written ONLY after package
     installation AND functional verification both succeed - never on
     confirmation alone, never on network success alone.
@@ -103,6 +118,12 @@ STATES = ["created", "detected", "discovered", "proposed", "confirmed",
           "packages_installed", "packages_verified", "committed"]
 
 DIAGNOSTIC_PACKAGES = ["lm-sensors", "nvme-cli", "smartmontools", "iperf3", "ethtool"]
+
+# The drive's own package repository, carried by the self-contained installer
+# (baseline-first-boot-install's `installer` step) and registered as a
+# permanent apt source by its `provision` step.
+OFFLINE_REPOSITORY = Path("/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache")
+OFFLINE_SOURCES = Path("/etc/apt/sources.list.d/baseline-installer-cache.list")
 
 
 # ---------------------------------------------------------------------------
@@ -220,9 +241,38 @@ def _last(journal: dict, state: str) -> dict:
 # Package install / functional verification for the five diagnostic tools.
 # ---------------------------------------------------------------------------
 
-def install_diagnostic_tools(runner: repair.Runner) -> dict:
-    argv = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y"] + DIAGNOSTIC_PACKAGES
-    proc = runner.run(argv, timeout=300)
+def offline_repository(root: Path = OFFLINE_REPOSITORY, sources: Path = OFFLINE_SOURCES) -> dict:
+    """Is this drive's own package repository present, registered with apt,
+    and intact? Intact means every carried file re-hashes to its manifest
+    entry right now - presence alone is not trusted. Never raises."""
+    import offline_cache
+    facts = {"available": False, "root": str(root), "sources": str(sources), "files_verified": 0, "reason": ""}
+    if not sources.is_file():
+        return dict(facts, reason=f"no apt source registered at {sources}")
+    if not (root / "apt" / "Packages").is_file():
+        return dict(facts, reason=f"no package index at {root / 'apt' / 'Packages'}")
+    try:
+        manifest = json.loads((root / "MANIFEST.json").read_text())
+        count = offline_cache.verify_manifest(root, manifest)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return dict(facts, reason=f"repository does not verify: {exc}")
+    return dict(facts, available=True, files_verified=count)
+
+
+def install_diagnostic_tools(runner: repair.Runner, *, offline_sources: Path | None = None) -> dict:
+    """With `offline_sources`, apt uses that one source list and nothing else:
+    no network source is consulted at all, so a broken or half-working
+    network can neither be used nor hang the install on DNS."""
+    env = ["env", "DEBIAN_FRONTEND=noninteractive"]
+    only = []
+    if offline_sources is not None:
+        only = ["-o", f"Dir::Etc::SourceList={offline_sources}", "-o", "Dir::Etc::SourceParts=-",
+                "-o", "Acquire::Languages=none"]
+        update = runner.run(env + ["apt-get"] + only + ["update"], timeout=300)
+        if update.returncode != 0:
+            tail = (update.stderr or update.stdout or "")[-2000:]
+            return {"ok": False, "returncode": update.returncode, "detail": "offline index update failed: " + tail}
+    proc = runner.run(env + ["apt-get"] + only + ["install", "-y"] + DIAGNOSTIC_PACKAGES, timeout=300)
     ok = proc.returncode == 0
     tail = (proc.stdout if ok else (proc.stderr or proc.stdout)) or ""
     return {"ok": ok, "returncode": proc.returncode, "detail": tail[-2000:]}
@@ -288,7 +338,7 @@ def format_setup_intent_status() -> str:
     )
 
 
-def format_full_proposal(detection, discovery: dict, diagnosis: dict) -> str:
+def format_full_proposal(detection, discovery: dict, diagnosis: dict, *, offline_available: bool = False) -> str:
     lines = ["=" * 64, "Baseline first-boot: detected state and proposed actions", ""]
 
     lines.append(f"Proxmox installation: {'DETECTED' if detection.installed else 'NOT DETECTED'}")
@@ -306,7 +356,11 @@ def format_full_proposal(detection, discovery: dict, diagnosis: dict) -> str:
         lines.append("Network: lifeline already healthy - no repair needed.")
     lines.append("")
 
-    lines.append("Diagnostic tools proposed for installation (only after network verifies):")
+    if offline_available:
+        lines.append("Diagnostic tools proposed for installation (after network verifies, or, if it")
+        lines.append("does not, from this drive's own verified package repository - never the network):")
+    else:
+        lines.append("Diagnostic tools proposed for installation (only after network verifies):")
     for pkg in DIAGNOSTIC_PACKAGES:
         lines.append(f"  - {pkg}")
     lines.append("")
@@ -314,9 +368,15 @@ def format_full_proposal(detection, discovery: dict, diagnosis: dict) -> str:
     lines.append("Rollback and verification:")
     lines.append("  An independent rollback timer is armed BEFORE any network write.")
     lines.append("  Address, target-bound route/gateway, DNS, and HTTPS are independently")
-    lines.append("  re-verified after. Package installation is refused unless that")
-    lines.append("  verification succeeds; the completion marker is written only after")
-    lines.append("  package installation AND functional verification both succeed.")
+    if offline_available:
+        lines.append("  re-verified after. If that verification fails, the failure is recorded")
+        lines.append("  and the tools come from this drive's repository only, re-checked against")
+        lines.append("  its manifest first. The completion marker is written only after package")
+        lines.append("  installation AND functional verification both succeed.")
+    else:
+        lines.append("  re-verified after. Package installation is refused unless that")
+        lines.append("  verification succeeds; the completion marker is written only after")
+        lines.append("  package installation AND functional verification both succeed.")
     lines.append("")
 
     lines.append(format_setup_intent_status())
@@ -376,7 +436,8 @@ def apply_configurator_settings(runner: repair.Runner, journal: dict, print_fn=p
 # ---------------------------------------------------------------------------
 
 def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
-        print_fn=print_tty1, check_lifeline_fn=None) -> dict:
+        print_fn=print_tty1, check_lifeline_fn=None,
+        offline_root: Path = OFFLINE_REPOSITORY, offline_sources: Path = OFFLINE_SOURCES) -> dict:
     completed_at = already_completed(state_dir)
     if completed_at is not None:
         print_fn(f"[baseline-firstboot] previous run already completed at {completed_at} - not re-triggering.")
@@ -447,7 +508,8 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
             evidence = detection_entry["proxmox_evidence"]
 
         discovery = _last(journal, "discovered")["discovery"]
-        print_fn(format_full_proposal(_Detection(), discovery, diagnosis))
+        offline_now = offline_repository(offline_root, offline_sources)["available"]
+        print_fn(format_full_proposal(_Detection(), discovery, diagnosis, offline_available=offline_now))
         confirmed = fbnr.wait_for_confirmation(stdin)
         if not confirmed:
             print_fn("[baseline-firstboot] not confirmed - no change made.")
@@ -491,16 +553,28 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
         else:
             journal = record_transition(state_dir, journal, "network_repair_failed",
                                          network_ok=False, network_detail=network_detail)
-            print_fn("[baseline-firstboot] networking did not verify - package installation refused, not committing.")
-            return {"action": "network_failed", "detail": network_detail, "package_install_allowed": False}
 
     if journal["state"] == "network_repair_failed":
-        # Resuming directly into a recorded failure - branch on the
-        # recorded state, never redo the repair attempt or the
-        # diagnosis that led here.
-        return {"action": "network_failed",
-                "detail": _last(journal, "network_repair_failed")["network_detail"],
-                "package_install_allowed": False}
+        # Fresh or resumed, branch on the recorded state - never redo the
+        # repair attempt or the diagnosis that led here. The failure stays
+        # in the journal either way; nothing here ever writes
+        # `network_repaired`, so its evidence invariant is untouched.
+        failed_detail = _last(journal, "network_repair_failed")["network_detail"]
+        repo = offline_repository(offline_root, offline_sources)
+        if not repo["available"]:
+            print_fn("[baseline-firstboot] networking did not verify and this drive carries no verified "
+                     f"package repository ({repo['reason']}) - package installation refused, not committing.")
+            return {"action": "network_failed", "detail": failed_detail, "package_install_allowed": False}
+        print_fn("[baseline-firstboot] networking did not verify - recorded. Installing diagnostic tools from "
+                 f"this drive's own repository instead ({repo['files_verified']} files re-verified); "
+                 "no network source is used.")
+        install_result = install_diagnostic_tools(runner, offline_sources=offline_sources)
+        journal = record_transition(state_dir, journal, "packages_installed", package_source="offline",
+                                     network_verified=False, offline_repository=repo, **install_result)
+        if not install_result["ok"]:
+            print_fn(f"[baseline-firstboot] offline package installation FAILED - not committing: "
+                     f"{install_result['detail']}")
+            return {"action": "packages_failed", "detail": install_result["detail"], "package_install_allowed": True}
 
     if journal["state"] == "network_repaired":
         # Reaching this state at all - fresh or resumed - already means
@@ -509,7 +583,8 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
         # docstring. No network_ok re-check needed or possible here.
         print_fn("[baseline-firstboot] installing diagnostic tools...")
         install_result = install_diagnostic_tools(runner)
-        journal = record_transition(state_dir, journal, "packages_installed", **install_result)
+        journal = record_transition(state_dir, journal, "packages_installed", package_source="network",
+                                     network_verified=True, **install_result)
         if not install_result["ok"]:
             print_fn(f"[baseline-firstboot] package installation FAILED - not committing: {install_result['detail']}")
             return {"action": "packages_failed", "detail": install_result["detail"], "package_install_allowed": True}
@@ -534,13 +609,23 @@ def run(runner: repair.Runner, *, state_dir: Path = STATE_DIR, stdin=None,
             return {"action": "packages_verify_failed",
                     "detail": _last(journal, "packages_verified").get("reason", ""),
                     "package_install_allowed": True}
+        installed = _last(journal, "packages_installed")
+        network_verified = any(e["state"] == "network_repaired" for e in journal["history"])
         mark_complete(state_dir)
-        journal = record_transition(state_dir, journal, "committed")
-        print_fn("[baseline-firstboot] COMMITTED. Marker written - will not re-run automatically.")
+        journal = record_transition(state_dir, journal, "committed", network_verified=network_verified,
+                                     package_source=installed.get("package_source", "network"))
+        if network_verified:
+            print_fn("[baseline-firstboot] COMMITTED. Marker written - will not re-run automatically.")
+        else:
+            print_fn("[baseline-firstboot] COMMITTED OFFLINE. Marker written - will not re-run automatically. "
+                     "Networking did NOT verify and was not repaired; that failure is recorded in the journal.")
 
+    committed = _last(journal, "committed")
     apply_configurator_settings(runner, journal, print_fn, enforce_lan_only=True)
     print_fn("[baseline-firstboot] state machine run finished.")
-    return {"action": "committed", "package_install_allowed": True}
+    return {"action": "committed", "package_install_allowed": True,
+            "network_verified": committed.get("network_verified", True),
+            "package_source": committed.get("package_source", "network")}
 
 
 def main() -> int:
