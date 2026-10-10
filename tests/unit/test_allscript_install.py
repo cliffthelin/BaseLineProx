@@ -38,18 +38,81 @@ def test_wipe_needs_the_exact_typed_phrase_for_that_serial():
         assert not allscript.confirmation_ok(typed, "MD89N41071210AP4E")
 
 
-def test_the_wipe_flag_must_name_pc401_exactly():
-    assert allscript.wipe_authorized("MD89N41071210AP4E")
-    for value in ("", "FD01N6557110C271B", "md89n41071210ap4e", "MD89N41071210AP4E ", "yes"):
+PC401, PC601 = "MD89N41071210AP4E", "FD01N6557110C271B"
+
+
+@pytest.fixture
+def target(request):
+    """Select a target for one test and restore 'no target' afterwards (module globals)."""
+    def choose(name):
+        allscript.select_target(*allscript.target_for(name, "", ["preflight"]))
+    yield choose
+    allscript.select_target(None, None, None)
+
+
+def test_there_is_no_default_target():
+    """Two drives, two agents: guessing would be a destructive choice made for someone else."""
+    assert allscript.TARGET_NAME is None and allscript.SERIAL is None
+    for stages in (["preflight"], ["install"], list(allscript.STAGES)):
+        with pytest.raises(ValueError, match="no default"):
+            allscript.target_for(None, "", stages)
+
+
+def test_stages_that_never_touch_a_real_drive_need_no_target():
+    assert allscript.target_for(None, "", ["cache"]) == (None, None, None)
+    assert allscript.target_for(None, "", allscript.select_stages("rehearse", None)) == (None, None, None)
+
+
+@pytest.mark.parametrize("name,serial,other", [("PC601", PC601, PC401), ("PC401", PC401, PC601)])
+def test_either_drive_can_be_named_and_the_other_is_then_protected(name, serial, other):
+    assert allscript.target_for(name, "", ["preflight"]) == (name, serial, other)
+
+
+def test_an_exact_confirm_wipe_serial_implies_its_drive():
+    assert allscript.target_for(None, PC601, ["install"]) == ("PC601", PC601, PC401)
+
+
+def test_a_target_and_a_confirm_wipe_for_the_other_drive_are_refused():
+    with pytest.raises(ValueError, match="refusing"):
+        allscript.target_for("PC601", PC401, ["install"])
+
+
+def test_an_unknown_target_is_refused():
+    with pytest.raises(ValueError):
+        allscript.target_for("sda", "", ["preflight"])
+
+
+@pytest.mark.parametrize("name", ["PC601", "PC401"])
+def test_the_wipe_flag_must_name_the_chosen_target_exactly(target, name):
+    target(name)
+    serial = allscript.DRIVES[name]
+    other = PC401 if serial == PC601 else PC601
+    assert allscript.wipe_authorized(serial)
+    for value in ("", other, serial.lower(), serial + " ", "yes"):
         assert not allscript.wipe_authorized(value)
 
 
-def test_the_protected_drive_can_never_be_the_target():
+def test_nothing_is_wipe_authorized_without_a_target():
+    assert not allscript.wipe_authorized(PC401) and not allscript.wipe_authorized(PC601)
+
+
+def test_the_protected_drive_can_never_be_the_target(target):
+    target("PC601")
     with pytest.raises(RuntimeError):
         allscript.refuse_protected({"path": "/dev/sdb", "serial": "X"}, {"path": "/dev/sdb", "serial": "Y"})
     with pytest.raises(RuntimeError):
-        allscript.refuse_protected({"path": "/dev/sdc", "serial": "FD01N6557110C271B"}, None)
-    allscript.refuse_protected({"path": "/dev/sdc", "serial": "MD89N41071210AP4E"}, {"path": "/dev/sdb", "serial": "FD01N6557110C271B"})
+        allscript.refuse_protected({"path": "/dev/sdc", "serial": PC401}, None)      # PC401 protected this run
+    allscript.refuse_protected({"path": "/dev/sdb", "serial": PC601}, {"path": "/dev/sdc", "serial": PC401})
+
+
+def test_each_target_has_its_own_work_folder_off_the_repo():
+    """Never inside the repo (it may sit on NTFS, where screendumps failed), and never shared between targets."""
+    a = allscript.work_dir("PC601", ["preflight"])
+    b = allscript.work_dir("PC401", ["preflight"])
+    assert a != b
+    for folder in (a, b, allscript.work_dir(None, ["rehearse"])):
+        assert folder.is_relative_to(allscript.BUILD)
+        assert not folder.is_relative_to(_PATH.parents[2])
 
 
 def test_package_proxy_is_from_the_maintained_source_tree():

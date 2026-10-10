@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
-"""Take PC401 from wipe to a working Baseline desktop by script only - no web UI in the install path.
+"""Take one SK hynix drive from wipe to a working Baseline desktop by script only - no web UI in the install path.
 
 The installer is self-contained: the ISO carries Proxmox, the Baseline source and an offline package cache, and the
 installed system finishes its own installation on first boot with no internet and nothing attached but the ISO.
-This script only builds that installer and runs it against PC401 under KVM:
+This script only builds that installer and runs it against the chosen target drive under KVM:
 
-  preflight    read-only: PC401 identity by serial, PC601 protected, cached Proxmox ISO, verified assistant, space
-  recovery     add-only, verified whole-drive image of PC401 in /mnt/10TB/backup   (drive_recovery)      [root]
+  preflight    read-only: target identity by serial, the other drive protected, cached Proxmox ISO, assistant, space
+  recovery     add-only, verified whole-drive image of the target in /mnt/10TB/backup   (drive_recovery)  [root]
   cache        build the offline package cache once (baseline-build-offline-cache), verify its manifest
-  install      self_installer with the cache and first-boot hook: Proxmox installs onto PC401, then its first
-               boot lays out storage, carries the ISO + environment onto INSTALLER_CACHE and provisions offline;
-               ends at the first-boot authorization screen                                             [root]
+  install      self_installer with the cache and first-boot hook: Proxmox installs onto the target, then its
+               first boot lays out storage, carries the ISO + environment onto INSTALLER_CACHE and provisions
+               offline; ends at the first-boot authorization screen                                    [root]
   firstboot    type CONFIRM into that same session; ends when the kiosk browser shows Proxmox
-  kiosk        capture the kiosk screen and shut PC401 down cleanly
+  kiosk        capture the kiosk screen and shut the target down cleanly
 
 Nothing reads console text automatically (no OCR, by design): the person or vision-capable agent watching
-.runtime-proof173/session-latest.ppm records each checkpoint with the `touch` the script prints.
+<work>/session-latest.ppm records each checkpoint with the `touch` the script prints. The work folder is
+/run/media/cane/CACHE/baseline-build/allscript-<target> - on ext4, never inside the repo (which may be on an NTFS
+drive where screendumps and private-file modes fail), and one per target so two drives' runs never share progress.
 
-PC401 (MD89N41071210AP4E) is the only possible target; PC601 (FD01N6557110C271B) is refused. Every destructive step
-re-validates the target through physical_device_safety.validate_target_device. The data-protection guard in
-self_installer is honoured, never bypassed: PC401 must be empty or carry an installer-made identity.
+There is NO default target. Two SK hynix drives exist and two agents share this machine, each with its own drive
+(2026-10-10: Claude uses PC601, Codex uses PC401). Name the target with --target, or let an exact --confirm-wipe
+serial imply it; the OTHER drive is then protected for that run. Every destructive step re-validates the target
+through physical_device_safety.validate_target_device. The data-protection guard in self_installer is honoured,
+never bypassed: the target must be empty or carry an installer-made identity.
 
-    sudo baseline/bin/baseline-allscript-install --from recovery --confirm-wipe MD89N41071210AP4E
-    baseline/bin/baseline-allscript-install --stage preflight    # read-only, no root needed
+    sudo baseline/bin/baseline-allscript-install --target PC601 --from recovery --confirm-wipe FD01N6557110C271B
+    baseline/bin/baseline-allscript-install --target PC601 --stage preflight    # read-only, no root needed
+    baseline/bin/baseline-allscript-install --stage rehearse                    # sparse image, no real drive
 """
 import argparse
 import json
@@ -38,10 +43,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "baseline/lib"))
 
-SERIAL = "MD89N41071210AP4E"          # PC401: the operator-selected installation target
+DRIVES = {"PC401": "MD89N41071210AP4E", "PC601": "FD01N6557110C271B"}   # both 512110190592-byte SK hynix NVMe
 SIZE = 512110190592
-PROTECTED = "FD01N6557110C271B"       # PC601: never a target
-WORK = REPO / ".runtime-proof173"
+TARGET_NAME = None                    # chosen per run by select_target(); there is deliberately no default
+SERIAL = None                         # the chosen target's serial
+PROTECTED = None                      # the other drive's serial: never a target in this run
+DRIVE_STAGES = {"preflight", "recovery", "install", "firstboot", "kiosk"}  # touch a real drive (rehearse does not)
+WORK = None                           # set by select_work(): BUILD/allscript-<target>
 SOURCE_ISO = Path("/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso")
 ASSISTANT = Path("/var/tmp/baseline-self-installer/acquire/extracted/usr/bin/proxmox-auto-install-assistant")
 BACKUP_ROOT = Path("/mnt/10TB/backup")
@@ -75,20 +83,54 @@ def select_stages(stage, start):
     return list(STAGES)
 
 
+def target_for(target_arg, confirm_wipe, stages):
+    """(name, serial, protected_serial) for this run, or (None, None, None) when no stage touches a real drive.
+
+    Never defaults: two drives exist and each belongs to a different agent, so guessing would be a destructive
+    choice made for someone. An exact --confirm-wipe serial may imply the target; if both are given they must
+    agree."""
+    implied = next((name for name, serial in DRIVES.items() if serial == confirm_wipe), None)
+    if target_arg is not None and target_arg not in DRIVES:
+        raise ValueError(f"unknown target {target_arg!r}; targets are: {', '.join(DRIVES)}")
+    if target_arg is not None and implied is not None and implied != target_arg:
+        raise ValueError(f"--target {target_arg} but --confirm-wipe names {implied}'s serial; refusing")
+    name = target_arg or implied
+    touches_drive = bool(set(stages) & DRIVE_STAGES) and "rehearse" not in stages
+    if name is None:
+        if touches_drive:
+            raise ValueError(f"stages {', '.join(sorted(set(stages) & DRIVE_STAGES))} touch a real drive: "
+                             f"name it with --target ({' or '.join(DRIVES)}); there is no default")
+        return None, None, None
+    protected = next(serial for other, serial in DRIVES.items() if other != name)
+    return name, DRIVES[name], protected
+
+
+def select_target(name, serial, protected):
+    global TARGET_NAME, SERIAL, PROTECTED
+    TARGET_NAME, SERIAL, PROTECTED = name, serial, protected
+
+
+def work_dir(name, stages):
+    """Per target, on ext4, never inside the repo."""
+    if name is not None:
+        return BUILD / f"allscript-{name}"
+    return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
+
+
 def confirmation_ok(typed, serial):
     return isinstance(typed, str) and typed.strip() == f"WIPE {serial}"
 
 
 def refuse_protected(target, protected):
-    if target.get("serial") == PROTECTED:
-        raise RuntimeError("PC601 is protected and can never be the installation target")
+    if PROTECTED is not None and target.get("serial") == PROTECTED:
+        raise RuntimeError("the other SK hynix drive is protected for this run and can never be its target")
     if protected is not None and protected.get("path") == target.get("path"):
         raise RuntimeError("the target resolves to the protected drive's device; refusing")
 
 
 def wipe_authorized(value):
-    """The run-time authorization to erase PC401: its exact serial, given on the command line."""
-    return value == SERIAL
+    """The run-time authorization to erase the chosen target: its exact serial, given on the command line."""
+    return SERIAL is not None and value == SERIAL
 
 
 # --- shared plumbing -----------------------------------------------------------------------------
@@ -140,7 +182,7 @@ def identify(r):
     target = pds.validate_target_device(disk["name"], expected_serial=SERIAL, min_size_bytes=SIZE, max_size_bytes=SIZE)
     try:
         protected = {"path": drive_recovery._offline_disk(r, PROTECTED)["name"], "serial": PROTECTED}
-    except Exception:  # noqa: BLE001 - an absent PC601 cannot be confused with the target
+    except Exception:  # noqa: BLE001 - an absent protected drive cannot be confused with the target
         protected = None
     refuse_protected(target, protected)
     return target
@@ -205,9 +247,9 @@ def stage_preflight(r):
     state = drive_guard.read_drive_state(target["path"])
     formattable = (not state.has_data) or drive_guard.is_installer_uuid(state.ptuuid)
     say("Proxmox source ISO:", SOURCE_ISO.name, "| assistant present | backup free:", f"{free // 1024**3} GiB")
-    say("OS ISOs to offer on PC401:", ", ".join(isos) or "none")
-    say("data-protection guard would allow formatting PC401:", "yes" if formattable else
-        "NO - PC401 holds data whose disk identifier the installer registry does not know")
+    say(f"OS ISOs to offer on {TARGET_NAME}:", ", ".join(isos) or "none")
+    say(f"data-protection guard would allow formatting {TARGET_NAME}:", "yes" if formattable else
+        f"NO - {TARGET_NAME} holds data whose disk identifier the installer registry does not know")
     record("preflight", target=target["path"], formattable=formattable, os_isos=isos)
 
 
@@ -232,11 +274,11 @@ def stage_install(r):
     import self_installer as si
     folder = journal()["stages"].get("recovery", {}).get("folder")
     if not folder:
-        raise RuntimeError("run the recovery stage first; nothing is written to PC401 without a verified image")
+        raise RuntimeError(f"run the recovery stage first; nothing is written to {TARGET_NAME} without a verified image")
     drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
     target = identify(r)
     say("deactivated on this host:", deactivate_target_vgs(r, target))
-    typed = input(f"\nThis ERASES PC401 ({SERIAL}, {target['path']}). Recovery image: {folder}\n"
+    typed = input(f"\nThis ERASES {TARGET_NAME} ({SERIAL}, {target['path']}). Recovery image: {folder}\n"
                   f"Type  WIPE {SERIAL}  to continue: ")
     if not confirmation_ok(typed, SERIAL):
         raise RuntimeError("not confirmed; nothing was written")
@@ -253,7 +295,7 @@ def stage_install(r):
         offline_cache=CACHE_DIR, **si.LVM_SIZE_PRESETS["single-drive"])
     say(result.outcome + ":", result.detail)
     if result.outcome != "applied" or result.qemu_process is None:
-        raise RuntimeError("the installer refused or did not launch; PC401 was not written by this stage")
+        raise RuntimeError(f"the installer refused or did not launch; {TARGET_NAME} was not written by this stage")
     global INSTALL_VM
     INSTALL_VM = result.qemu_process
     # Same KVM session, ISO still attached: Proxmox installs, reboots, its first boot runs the carried hook
@@ -300,7 +342,7 @@ def stage_cache(r):
 
 
 def stage_rehearse(r):
-    """The same self-contained installer, run against a blank sparse disk the size of PC401 with NO network.
+    """The same self-contained installer, run against a blank sparse disk the size of the SK hynix targets with NO network.
 
     Built by the same functions as the real install (render_answer, first_boot_hook, prepare_iso_defensively,
     iso_builder with the offline cache). Only the answer delivery differs: embedded in the ISO, which docs/INSTALL.md
@@ -340,7 +382,7 @@ def stage_rehearse(r):
         raise RuntimeError(f"ISO build failed: {[c for c in built.postconditions if not c.ok]}")
     disk = work / "disk.raw"
     with open(disk, "wb") as stream:
-        stream.truncate(SIZE)                                  # sparse, same size as PC401
+        stream.truncate(SIZE)                                  # sparse, same size as either SK hynix target
     invocation = dsi.build_sparse_install_invocation(
         target_image=disk, prepared_iso=work / "installer.iso", mac="52:54:00:ba:5e:7e",
         smbios_product="baseline-rehearsal", serial_log=work / "serial.log", memory_mb=8192, smp=4,
@@ -373,7 +415,7 @@ def stage_session_kiosk(r):
     _give_to_operator(WORK / "kiosk.png")
     INSTALL_VM.send_monitor_command("system_powerdown")
     code = INSTALL_VM.wait(timeout=600)
-    say("PC401 shut down cleanly after the kiosk was shown; QEMU exit", code)
+    say(f"{TARGET_NAME or 'the rehearsal VM'} shut down cleanly after the kiosk was shown; QEMU exit", code)
     record("kiosk", screenshot=str(WORK / "kiosk.png"), qemu_exit=code)
 
 
@@ -381,18 +423,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--stage", help="run only this stage")
     parser.add_argument("--from", dest="start", help="run this stage and every later one")
+    parser.add_argument("--target", choices=sorted(DRIVES),
+                        help="the drive this run may touch; the other is protected. No default.")
     parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
-                        help=f"authorize erasing PC401 (after its verified recovery image); must be exactly {SERIAL}")
+                        help="authorize erasing the target (after its verified recovery image); its exact serial")
     args = parser.parse_args()
-    global CONFIRMED_WIPE
+    global CONFIRMED_WIPE, WORK
     CONFIRMED_WIPE = args.confirm_wipe
     stages = select_stages(args.stage, args.start)
+    select_target(*target_for(args.target, CONFIRMED_WIPE, stages))
+    WORK = work_dir(TARGET_NAME, stages)
+    if TARGET_NAME:
+        say(f"target {TARGET_NAME} ({SERIAL}); protected for this run: {PROTECTED}; work folder {WORK}")
     if "install" in stages and not wipe_authorized(CONFIRMED_WIPE):
-        raise RuntimeError(f"the install stage erases PC401: add  --confirm-wipe {SERIAL}")
+        raise RuntimeError(f"the install stage erases {TARGET_NAME}: add  --confirm-wipe {SERIAL}")
     needs_root = sorted(set(stages) & ROOT_STAGES)
     if needs_root and os.geteuid() != 0:
         raise RuntimeError(f"stages {', '.join(needs_root)} need root: run with sudo")
-    WORK.mkdir(mode=0o750, exist_ok=True)
+    WORK.mkdir(mode=0o750, parents=True, exist_ok=True)
     _give_to_operator(WORK)
     r = runner()
     functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,
