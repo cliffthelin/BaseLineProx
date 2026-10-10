@@ -119,3 +119,11 @@ def test_package_proxy_is_from_the_maintained_source_tree():
     repo = _PATH.parents[2]
     assert allscript.PROXY == repo / "baseline" / "lib" / "installer_package_proxy.py"
     assert allscript.PROXY.is_file()
+
+
+def test_a_checkpoint_left_by_an_earlier_run_is_cleared_before_waiting(tmp_path):
+    stale = tmp_path / "seen-firstboot"
+    stale.write_text("")
+    allscript.clear_stale_checkpoint(stale)
+    assert not stale.exists()
+    allscript.clear_stale_checkpoint(stale)          # nothing to clear is not an error

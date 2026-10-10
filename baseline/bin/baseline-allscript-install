@@ -306,9 +306,15 @@ def stage_install(r):
     record("install", workspace=str(workspace))
 
 
+def clear_stale_checkpoint(path):
+    """A checkpoint left by an earlier run says nothing about this one; only a touch after the wait begins counts."""
+    Path(path).unlink(missing_ok=True)
+
+
 def watch(checkpoint, description):
     """Refresh the session screendump until the named checkpoint file is created by whoever is watching it."""
     done = WORK / f"seen-{checkpoint}"
+    clear_stale_checkpoint(done)
     shot = WORK / "session-latest.ppm"
     say(f"waiting for {description}; screendump: {shot} - when it shows, run:  touch {done}")
     while not done.exists():
