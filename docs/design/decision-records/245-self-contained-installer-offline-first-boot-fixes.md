@@ -67,9 +67,34 @@ existing (previously failing) test specification. The compressed image is no lon
 - conftest hardware guard: `prlimit` added to its wrapper list (`prlimit qemu-img ...` slipped past it).
 - 4 assertions in `test_firstboot_statemachine` that could never fail (argv starts with `env`) strengthened.
 
+### 3b. Hardware tab accepts inxi's real `Repos` shape (`06cf038`)
+
+Captured on the rehearsal VM: the only rejected section was `Repos` (`inxi -r`), whose items are objects per apt
+sources file, each followed by a list of that file's raw lines. Not QEMU-specific: any machine with more than one
+apt source failed. Schema sections must still be flat lists of objects; other sections may also hold lists of
+strings; anything else is still rejected.
+
+### 7. Provisioning must not write into the carried repository (`06933f5`)
+
+Found by the re-run rehearsal: first boot correctly refused the repository at CONFIRM because
+`npm install --offline --cache <repository>/npm-cache` had written `npm-cache/_logs/<time>-debug-0.log` into it.
+npm now logs to `/var/log/baseline-npm`, and the installer re-verifies the repository after provisioning, naming
+anything that changed.
+
+## Evidence from the re-run rehearsal (2026-10-10, ISO built from this branch, no network, sparse disk)
+
+Read on the VM's own console (`/var/log/baseline-first-boot-install.log`, `journalctl --list-boots`):
+
+- storage created all 8 volumes under the new names (USER_ADMIN ... APPDATA_PERSONAL);
+- the 2,145,298,432-byte installer ISO was carried onto INSTALLER_CACHE and 257 packages verified;
+- the reboot was queued as `systemd-run --no-block --unit=baseline-first-boot-reboot
+  --property=After=proxmox-first-boot-network-online.service ...`, and the journal shows exactly two boots;
+- `baseline-scripts-inbox`: active, running, NRestarts=0, against `/mnt/USER_ADMIN`;
+- `offline_repository()` reported the npm log file above (fixed by 7);
+- `hardware.collect()` reported `inxi section has an invalid shape`, traced to `Repos` (fixed by 3b).
+
 ## Not done here
 
-- 3b (`inxi` parse failure under QEMU): no captured output existed; deferred to the re-run rehearsal.
 - 6: the OS-selection and apps-with-overlays stage is not built.
 - Two whole-drive recovery images cannot both fit on `/mnt/10TB` (819.5 GB free).
 - The 35 remaining unit-test failures predate this work (mostly in-progress `drive_installer` mount-table probing).
