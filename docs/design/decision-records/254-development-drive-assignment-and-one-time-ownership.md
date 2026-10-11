@@ -57,3 +57,22 @@ Fixes (all with tests):
 - The GUID registration runs even when the install stops part-way, and reads the GUID from the device (`blkid -p`), because udev's
   cache stays blank for a table written by the installer's VM until something with root refreshes it; the guard reads that cache, so a
   half-installed drive still needs one root refresh (`take-ownership --reuse-image` does it) before the guard will allow a retry.
+
+## Second finding: a reinstall over an earlier install (2026-10-11)
+
+With the scrub in place the installer got through, but first boot's storage step stopped: `lvcreate failed: WARNING: ext4 signature ...`.
+The earlier install's filesystem signatures sit deep in the drive, in the space the new volumes are carved from, far beyond the first
+2 GiB. The storage code correctly refuses to create a volume over existing data, which on a reinstall meant refusing its own leftovers.
+This USB bridge supports no discard (`DISC-MAX 0`), so a full wipe would mean writing ~477 GB.
+
+Fix: `drive_installer.create_logical_volume_argv(..., wipe_stale_signatures=True)` adds `--wipesignatures y --yes`; it is opt-in, passed
+only by first-boot storage (`single_drive_storage`), and only applies when a volume is created, never to an existing one (tests cover
+both). The space is unallocated in the new volume group, so what is found there belongs to no existing volume.
+
+Also fixed along the way: the installed hostname was hardcoded `baseline-pc401` (now `baseline-<drive>`), and udev's stale cache made the
+guard misread a drive Baseline itself installed (now refreshed by an open-and-close of the device, which writes nothing).
+
+Evidence: PC601 installed three times by the script as the operator with no root; the fourth, a reinstall over an installed drive,
+reached CONFIRM, committed offline and showed the Proxmox login. On the first successful install: all six OS images carried and
+registered, `APPS-OFFLINE ... ok: true` for all five applications, and the Ubuntu 26.04 desktop image booted in a nested VM (screen
+99.9% non-black). Host-side finding: the 14 active `baseline_1b75c1a556ee-*` volumes on this machine belong to PC401, not PC601.
