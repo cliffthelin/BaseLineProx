@@ -15,6 +15,7 @@ from pathlib import Path
 
 SHARE_TAG = "baseline-isos"
 SUMS = "SHA256SUMS"
+ISO_STORAGE = "baseline-isos"          # the Proxmox storage through which the web app lists the carried images
 _SUM_LINE = re.compile(r"^([0-9a-f]{64}) [ *](.+)$")
 _CHUNK = 8 * 1024 ** 2
 
@@ -100,3 +101,26 @@ def carry(source: Path, dest: Path, *, reserve_bytes: int) -> dict:
             partial.unlink(missing_ok=True)
         report["carried"].append({"name": name, "bytes": size, "sha256": expected})
     return report
+
+
+def link_iso_folder(cache_root: Path) -> None:
+    """Proxmox lists a dir storage's ISOs from <path>/template/iso; Baseline keeps them in <path>/isos."""
+    cache_root = Path(cache_root)
+    link = cache_root / "template" / "iso"
+    if link.is_symlink() and os.readlink(link) == "../isos":
+        return
+    if link.exists() or link.is_symlink():
+        raise RuntimeError(f"{link} already exists and is not the link to ../isos; leaving it alone")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to("../isos")
+
+
+def storage_add_argv(definitions: list, cache_root) -> list | None:
+    """`pvesm add` for the ISO storage, or None when it is already registered for this folder."""
+    existing = next((d for d in definitions if d.get("storage") == ISO_STORAGE), None)
+    if existing is None:
+        return ["pvesm", "add", "dir", ISO_STORAGE, "--path", str(cache_root), "--content", "iso",
+                "--is_mountpoint", str(cache_root)]
+    if existing.get("type") != "dir" or Path(existing.get("path", "")).resolve() != Path(cache_root).resolve():
+        raise RuntimeError(f"storage {ISO_STORAGE} already exists with a different type or path")
+    return None

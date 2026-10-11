@@ -189,6 +189,18 @@ OS_ISOS = Path("/mnt/INSTALLER_CACHE/isos")
 OS_ISO_RESERVE = 2 * 1024**3               # always left free on INSTALLER_CACHE
 
 
+def register_iso_storage():
+    """Let the web app's Proxmox VM page list the carried images: INSTALLER_CACHE as an ISO storage."""
+    import os_isos
+    os_isos.link_iso_folder(OS_ISOS.parent)
+    listing = subprocess.run(["pvesh", "get", "/storage", "--output-format", "json"], capture_output=True, text=True,
+                             check=True).stdout
+    argv = os_isos.storage_add_argv(json.loads(listing), OS_ISOS.parent)
+    if argv is not None:
+        run(argv)
+    log("os-isos: registered", OS_ISOS.parent, "as Proxmox ISO storage", os_isos.ISO_STORAGE)
+
+
 def step_os_isos():
     """Carry the offered OS images. Never stops the installation: a missing offer or a bad image is logged and
     recorded, and the drive simply carries fewer OS choices."""
@@ -210,6 +222,12 @@ def step_os_isos():
             return
         finally:
             run(["umount", mnt], check=False)
+    try:
+        register_iso_storage()
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        log("os-isos: images carried but NOT registered with Proxmox, so the VM page will not list them:", exc)
+        mark("os-isos", offered=True, registered=False, error=str(exc))
+        return
     for kind in ("carried", "already", "skipped"):
         for item in report[kind]:
             log(f"os-isos: {kind}:", item["name"], item.get("reason", ""))

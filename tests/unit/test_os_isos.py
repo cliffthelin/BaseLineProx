@@ -73,3 +73,27 @@ def test_the_offer_is_built_from_real_files_with_their_real_sums(tmp_path):
     assert os_isos.parse_sums((offer / os_isos.SUMS).read_text()) == {"a.iso": hashlib.sha256(b"A" * 100).hexdigest()}
     with pytest.raises(ValueError):
         os_isos.build_offer(tmp_path / "isos", ["missing.iso"], tmp_path / "offer2")
+
+
+def test_the_cache_folder_gets_the_layout_proxmox_lists_isos_from(tmp_path):
+    (tmp_path / "isos").mkdir()
+    (tmp_path / "isos/a.iso").write_bytes(b"x")
+    os_isos.link_iso_folder(tmp_path)
+    assert (tmp_path / "template/iso").is_symlink() and (tmp_path / "template/iso/a.iso").read_bytes() == b"x"
+    os_isos.link_iso_folder(tmp_path)                       # repeating changes nothing
+    other = tmp_path / "other"
+    (other / "template/iso").mkdir(parents=True)
+    with pytest.raises(RuntimeError):                       # a real folder already there is never replaced
+        (other / "isos").mkdir()
+        os_isos.link_iso_folder(other)
+
+
+def test_the_iso_storage_is_added_once_and_a_conflicting_one_is_refused(tmp_path):
+    root = "/mnt/INSTALLER_CACHE"
+    argv = os_isos.storage_add_argv([{"storage": "local", "type": "dir", "path": "/var/lib/vz"}], root)
+    assert argv == ["pvesm", "add", "dir", os_isos.ISO_STORAGE, "--path", root, "--content", "iso",
+                    "--is_mountpoint", root]
+    same = [{"storage": os_isos.ISO_STORAGE, "type": "dir", "path": root, "content": "iso"}]
+    assert os_isos.storage_add_argv(same, root) is None
+    with pytest.raises(RuntimeError):
+        os_isos.storage_add_argv([{"storage": os_isos.ISO_STORAGE, "type": "dir", "path": "/elsewhere"}], root)
