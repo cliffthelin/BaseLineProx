@@ -1,0 +1,19 @@
+#!/bin/bash
+# Development-phase login: make the Linux user named in /etc/baseline/dev-user.hash ("name:sha512crypt-hash"), give it that password,
+# and make it a Proxmox Administrator so it can use the web login (Linux PAM realm). Safe to run on every boot; does nothing if the
+# file is absent. Written only for development: the hash file is root-only and holds a hash, never the password.
+set -euo pipefail
+FILE=/etc/baseline/dev-user.hash
+[ -f "$FILE" ] || exit 0
+line="$(head -n 1 "$FILE")"
+NAME="${line%%:*}"; HASH="${line#*:}"
+[[ "$NAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || { echo "baseline-dev-user: bad user name in $FILE" >&2; exit 1; }
+[[ "$HASH" =~ ^\$6\$[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{86}$ ]] || { echo "baseline-dev-user: not a sha512crypt hash in $FILE" >&2; exit 1; }
+id "$NAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$NAME"
+printf '%s:%s\n' "$NAME" "$HASH" | chpasswd -e
+# Proxmox keeps users and permissions in its cluster filesystem, which is only there once pve-cluster has started
+for _ in $(seq 1 60); do [ -d /etc/pve/priv ] && break; sleep 1; done
+[ -d /etc/pve/priv ] || { echo "baseline-dev-user: /etc/pve is not available; the Linux user exists, the Proxmox permission will be set on the next run" >&2; exit 0; }
+pveum user list --output-format json 2>/dev/null | grep -q "\"$NAME@pam\"" || pveum user add "$NAME@pam"
+pveum acl modify / --users "$NAME@pam" --roles Administrator
+echo "baseline-dev-user: $NAME is a Linux user and a Proxmox Administrator (realm pam)"

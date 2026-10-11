@@ -250,3 +250,22 @@ def test_the_development_root_password_is_created_once_private_and_never_printed
     os.chmod(tmp_path / "pw", 0o644)
     with pytest.raises(RuntimeError):
         allscript.dev_root_password()
+
+
+def test_the_development_user_travels_as_a_hash_only_and_the_file_must_be_private(tmp_path, monkeypatch, capsys):
+    import os
+    import pytest
+    monkeypatch.setattr(allscript, "DEV_USER_FILE", tmp_path / "dev-user")
+    assert allscript.dev_user() is None
+    (tmp_path / "dev-user").write_text("baseline:CTEST1!\n")
+    os.chmod(tmp_path / "dev-user", 0o644)
+    with pytest.raises(RuntimeError):
+        allscript.dev_user()
+    os.chmod(tmp_path / "dev-user", 0o600)
+    value = allscript.dev_user()
+    name, hashed = value.split(":", 1)
+    assert name == "baseline" and hashed.startswith("$6$") and "CTEST1!" not in value
+    assert "CTEST1!" not in capsys.readouterr().out
+    (tmp_path / "dev-user").write_text("Bad Name:password\n")
+    with pytest.raises(RuntimeError):
+        allscript.dev_user()

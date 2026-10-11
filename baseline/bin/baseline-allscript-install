@@ -32,6 +32,7 @@ never bypassed: the target must be empty or carry an installer-made identity.
 import argparse
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -421,6 +422,24 @@ def dev_root_password():
     return password
 
 
+DEV_USER_FILE = Path("/run/media/cane/CACHE/baseline-build/dev-user")
+
+
+def dev_user():
+    """A development login for the installed system as 'name:sha512crypt-hash', from the private file `name:password` (mode 600) if it
+    exists, else None. Only the hash travels (in the first-boot hook on the ISO); the password stays in the file. Development only."""
+    if not DEV_USER_FILE.is_file():
+        return None
+    if DEV_USER_FILE.stat().st_mode & 0o077:
+        raise RuntimeError(f"{DEV_USER_FILE} is readable by others; run: chmod 600 {DEV_USER_FILE}")
+    name, sep, password = DEV_USER_FILE.read_text().rstrip("\n").partition(":")
+    if not sep or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name) or len(password) < 4 or any(c in password for c in "\r\n\x00"):
+        raise RuntimeError(f"{DEV_USER_FILE} must be one line: name:password (name lower-case, password at least 4 characters)")
+    import drive_setup_answer as dsan
+    say(f"development login {name} will be created on the installed system (password not shown)")
+    return f"{name}:{dsan.hash_password_sha512crypt(password.encode(), secrets.token_hex(8))}"
+
+
 MONITOR_KEY = Path("/run/media/cane/CACHE/baseline-build/ssh/baseline-monitor.pub")
 
 
@@ -474,7 +493,7 @@ def stage_install(r):
         iso_builder_runner=ib.RealIsoBuilderRunner(), install_runner=dsi.RealInstallRunner(),
         workspace=workspace, repo_root=REPO, assistant_binary=ASSISTANT, proxmox_source_iso=SOURCE_ISO,
         fqdn=fqdn_for(TARGET_NAME), memory_mb=8192, on_progress=lambda line: say(line),
-        offline_cache=CACHE_DIR, os_share=OS_OFFER, child_identity=child_identity_for(SERIAL), root_ssh_keys=monitor_keys(), admin_password=dev_root_password(),
+        offline_cache=CACHE_DIR, os_share=OS_OFFER, child_identity=child_identity_for(SERIAL), root_ssh_keys=monitor_keys(), admin_password=dev_root_password(), dev_user=dev_user(),
         **si.LVM_SIZE_PRESETS["single-drive"])
     say(result.outcome + ":", result.detail)
     if result.outcome != "applied" or result.qemu_process is None:

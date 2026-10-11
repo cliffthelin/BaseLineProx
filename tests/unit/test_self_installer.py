@@ -601,7 +601,7 @@ def test_the_child_identity_reaches_the_first_boot_hook(tmp_path, monkeypatch):
     import first_boot_hook as fbh
     seen = {}
 
-    def fake_build(repo_root, output, *, child_identity=None):
+    def fake_build(repo_root, output, *, child_identity=None, dev_user=None):
         seen["identity"] = child_identity
         raise fbh.HookError("stop here: only the argument is being checked")
     monkeypatch.setattr(fbh, "build_hook", fake_build)

@@ -16,6 +16,8 @@ NAME="${1:-}"; MODE="${2:-}"
 [ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: authorize-monitor-key PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
 [ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || [ "$MODE" = "--with-password" ] || { echo "unknown option $MODE" >&2; exit 2; }
 PWFILE=/run/media/cane/CACHE/baseline-build/dev-root-password
+DEVUSER=/run/media/cane/CACHE/baseline-build/dev-user
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SERIAL="${SERIALS[$NAME]}"
 KEY_FILE=/run/media/cane/CACHE/baseline-build/ssh/baseline-monitor.pub
 say() { echo "[authorize-monitor-key] $*"; }
@@ -99,5 +101,19 @@ if [ "$MODE" = "--with-password" ]; then
   HASH="$(openssl passwd -6 -stdin < "$PWFILE")"
   printf 'root:%s\n' "$HASH" | chpasswd -R "$MNT" -e
   say "root password on the installed system set from $PWFILE (not shown)"
+fi
+if [ "$MODE" = "--with-password" ] && [ -f "$DEVUSER" ]; then
+  [ "$(stat -c %a "$DEVUSER")" = "600" ] || { say "refusing: $DEVUSER must be mode 600"; exit 1; }
+  [ "$(wc -l < "$DEVUSER")" -le 1 ] || { say "refusing: $DEVUSER must be one line, name:password"; exit 1; }
+  DNAME="$(head -n 1 "$DEVUSER")"; DNAME="${DNAME%%:*}"; DPASS="$(head -n 1 "$DEVUSER")"; DPASS="${DPASS#*:}"
+  [[ "$DNAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] && [ "${#DPASS}" -ge 4 ] || { say "refusing: $DEVUSER must be name:password (name lower-case, password 4+ characters)"; exit 1; }
+  DHASH="$(printf '%s' "$DPASS" | openssl passwd -6 -stdin)"
+  install -d -m 755 "$MNT/etc/baseline" "$MNT/usr/local/sbin" "$MNT/etc/systemd/system/multi-user.target.wants"
+  ( umask 077; printf '%s:%s\n' "$DNAME" "$DHASH" > "$MNT/etc/baseline/dev-user.hash" )
+  chmod 600 "$MNT/etc/baseline/dev-user.hash"
+  install -m 755 "$REPO/baseline/bin/baseline-dev-user" "$MNT/usr/local/sbin/baseline-dev-user"
+  install -m 644 "$REPO/boot/baseline-dev-user.service" "$MNT/etc/systemd/system/baseline-dev-user.service"
+  ln -sf /etc/systemd/system/baseline-dev-user.service "$MNT/etc/systemd/system/multi-user.target.wants/baseline-dev-user.service"
+  say "development login '$DNAME' set up: it is created on the drive's next boot as a Linux user and a Proxmox Administrator (realm: Linux PAM)"
 fi
 say "monitor keys now:"; cut -d' ' -f1,3- "$MNT/$KEYS_REL"

@@ -156,6 +156,31 @@ def step_machine(host_id_path=None, read=None):
     mark("machine", recorded=True, state=result["state"], roles=len(roles))
 
 
+def step_dev_user(write_to=None, systemd=True):
+    """Development-phase login (baseline-dev-user): store the carried 'name:hash' root-only, install the script and its boot unit, run it.
+    Nothing happens when no development user was carried."""
+    value = os.environ.get("BASELINE_DEV_USER")
+    if not value:
+        log("dev-user: none carried")
+        mark("dev-user", carried=False)
+        return
+    target = Path(write_to or "/etc/baseline/dev-user.hash")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(value + "\n")
+    os.chmod(target, 0o600)
+    if systemd:
+        shutil.copy(SRC / "baseline/bin/baseline-dev-user", "/usr/local/sbin/baseline-dev-user")
+        os.chmod("/usr/local/sbin/baseline-dev-user", 0o755)
+        shutil.copy(SRC / "boot/baseline-dev-user.service", "/etc/systemd/system/baseline-dev-user.service")
+        run(["systemctl", "daemon-reload"])
+        run(["systemctl", "enable", "baseline-dev-user.service"])
+        run(["systemctl", "start", "--no-block", "baseline-dev-user.service"])
+    log(f"dev-user: {value.split(':', 1)[0]} will be a Linux user and a Proxmox Administrator")
+    mark("dev-user", carried=True, user=value.split(":", 1)[0])
+
+
 def step_storage():
     import repair
     import single_drive_storage as storage
@@ -331,7 +356,7 @@ def step_provision():
 
 
 STEPS = [("identity", step_identity), ("storage", step_storage), ("machine", step_machine), ("installer", step_installer),
-         ("os-isos", step_os_isos), ("provision", step_provision)]
+         ("os-isos", step_os_isos), ("provision", step_provision), ("dev-user", step_dev_user)]
 
 
 def main():

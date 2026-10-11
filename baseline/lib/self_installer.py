@@ -280,7 +280,7 @@ def build_and_write_self_installer(
     on_progress=None,
     admin_password: str | None = None,
     offline_cache: Path | None = None, os_share: Path | None = None, child_identity: dict | None = None,
-    root_ssh_keys=(),
+    root_ssh_keys=(), dev_user=None,
 ) -> SelfInstallerResult:
     """`offline_cache` makes the installer self-contained: the ISO then also carries the first-boot hook
     (first_boot_hook.py) and this offline package cache, and the installed system finishes its own
@@ -444,7 +444,7 @@ def build_and_write_self_installer(
         progress("Building the first-boot hook that finishes the installation from the drive itself...")
         try:
             first_boot_hook = fbh.build_hook(repo_root, workspace / "baseline-first-boot",
-                                             child_identity=child_identity)
+                                             child_identity=child_identity, dev_user=dev_user)
         except fbh.HookError as exc:
             return SelfInstallerResult("refused", str(exc))
     answer_toml = render_answer(

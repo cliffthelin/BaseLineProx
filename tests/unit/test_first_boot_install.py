@@ -449,3 +449,33 @@ def test_first_boot_without_a_host_identifier_skips_the_machine_record_without_f
     monkeypatch.setattr(installer, "LOG", tmp_path / "log")
     (tmp_path / "state").mkdir()
     installer.step_machine(host_id_path=tmp_path / "absent")
+
+
+def test_first_boot_stores_a_carried_development_user_root_only_and_does_nothing_without_one(tmp_path, monkeypatch):
+    installer = _installer()
+    monkeypatch.setattr(installer, "STATE", tmp_path / "state")
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    (tmp_path / "state").mkdir()
+    monkeypatch.delenv("BASELINE_DEV_USER", raising=False)
+    installer.step_dev_user(write_to=tmp_path / "none", systemd=False)
+    assert not (tmp_path / "none").exists()
+    value = "baseline:$6$abcdefgh$" + "A" * 86
+    monkeypatch.setenv("BASELINE_DEV_USER", value)
+    installer.step_dev_user(write_to=tmp_path / "etc" / "dev-user.hash", systemd=False)
+    stored = tmp_path / "etc" / "dev-user.hash"
+    assert stored.read_text() == value + "\n" and stored.stat().st_mode & 0o777 == 0o600
+    assert [n for n, _ in installer.STEPS][-1] == "dev-user"
+
+
+def test_the_hook_carries_a_development_user_only_if_it_is_a_name_and_a_sha512crypt_hash(tmp_path):
+    import first_boot_hook as fbh
+    import pytest
+    good = "baseline:$6$abcdefgh$" + "A" * 86
+    line = fbh._exec_line(None, good)
+    assert line.startswith("exec env BASELINE_DEV_USER='baseline:$6$abcdefgh$") and line.endswith('"')
+    assert "BASELINE_DEV_USER" not in fbh._exec_line(None, None)
+    both = fbh._exec_line({"uuid": "4af8c95a-fd01-271b-10be-bc48c28f0a00", "serial": "FD01N6557110C271B"}, good)
+    assert "BASELINE_CHILD_UUID=" in both and "BASELINE_DEV_USER='" in both
+    for bad in ("baseline:CTEST1!", "Bad:" + good.split(":", 1)[1], good + "'; rm -rf /", "baseline:$6$x$short", ""):
+        with pytest.raises(fbh.HookError):
+            fbh._exec_line(None, bad)
