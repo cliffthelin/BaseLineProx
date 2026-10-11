@@ -40,6 +40,11 @@ import sys
 import time
 from pathlib import Path
 
+def locate_assistant(candidates):
+    """The verified proxmox-auto-install-assistant: the copy on CACHE first, the older host location second."""
+    return next((c for c in candidates if Path(c).is_file()), Path(candidates[0]))
+
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "baseline/lib"))
 
@@ -51,9 +56,12 @@ PROTECTED = None                      # the other drive's serial: never a target
 DRIVE_STAGES = {"preflight", "recovery", "install", "firstboot", "kiosk"}  # touch a real drive (rehearse does not)
 WORK = None                           # set by select_work(): BUILD/allscript-<target>
 SOURCE_ISO = Path("/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso")
-ASSISTANT = Path("/var/tmp/baseline-self-installer/acquire/extracted/usr/bin/proxmox-auto-install-assistant")
+_ASSISTANT_REL = "extracted/usr/bin/proxmox-auto-install-assistant"
+ASSISTANT_CANDIDATES = [Path("/run/media/cane/CACHE/baseline-build/assistant/acquire") / _ASSISTANT_REL,
+                        Path("/var/tmp/baseline-self-installer/acquire") / _ASSISTANT_REL]
 BACKUP_ROOT = Path("/mnt/10TB/backup")
 OS_ISOS = Path("/mnt/INSTALLER_CACHE/isos")     # vanilla installer ISOs already on this machine
+ASSISTANT = locate_assistant(ASSISTANT_CANDIDATES)
 PROXY = REPO / "baseline/lib/installer_package_proxy.py"  # allowlisted package proxy, listens on 127.0.0.1:32165
 PROXY_PORT = 32165
 OPERATOR = "cane"                               # owner of the work directory, so the run can be followed

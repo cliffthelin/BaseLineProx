@@ -163,3 +163,14 @@ def test_a_rebuild_is_seeded_from_every_cache_that_exists(tmp_path):
     seeds = allscript.cache_seeds(root, [older, tmp_path / "gone"])
     assert seeds == [older, root / "packages", root / "installer/expanded/baseline-cache"]
     assert allscript.cache_seeds(tmp_path / "nothing", []) == []
+
+
+def test_the_assistant_is_taken_from_cache_first_then_from_the_older_host_location(tmp_path):
+    on_cache, on_host = tmp_path / "cache/assistant", tmp_path / "host/assistant"
+    on_host.parent.mkdir(parents=True)
+    on_host.write_text("x")
+    assert allscript.locate_assistant([on_cache, on_host]) == on_host
+    on_cache.parent.mkdir(parents=True)
+    on_cache.write_text("y")
+    assert allscript.locate_assistant([on_cache, on_host]) == on_cache
+    assert allscript.locate_assistant([tmp_path / "none"]) == tmp_path / "none"   # reported missing by preflight
