@@ -71,6 +71,7 @@ CACHE_DIR = BUILD / "offline-cache"
 APPS_DIR = BUILD / "apps"                                 # the five applications, prepared on this machine
 OS_OFFER = None                                           # folder of OS images offered to the installer VM
 INSTALL_VM = None                                         # the install stage's KVM session, continued by later stages
+OPENED_PATH = None                                        # the device node that session opened (a USB reset changes it)
 
 STAGES = ("preflight", "recovery", "cache", "install", "firstboot", "kiosk")
 OPTIONAL_STAGES = ("rehearse", "identity")        # run explicitly: --stage rehearse, then --stage firstboot/kiosk in one go
@@ -397,6 +398,18 @@ def stage_recovery(r):
     record("recovery", folder=str(folder), manifest=manifest)
 
 
+def require_stable_bridge(window_seconds=900):
+    """An install writes for an hour; a USB bridge that dropped off the bus a few minutes ago will do it again. Refuse to start until the
+    kernel has logged no USB disconnect for `window_seconds`, saying what it saw."""
+    import install_watch as iw
+    text = subprocess.run(["journalctl", "-k", "--since", "-30min", "--no-pager"], capture_output=True, text=True).stdout
+    seen = iw.usb_disconnects(text, year=time.localtime().tm_year, now_epoch=time.time(), window_seconds=window_seconds)
+    if seen:
+        raise RuntimeError(f"the kernel logged {seen} USB disconnect(s) in the last {window_seconds // 60} minutes; the drive's bridge is "
+                           f"unstable. Check the cable and port (or move to a USB 3 port that is not shared) and run again after it has been quiet")
+    say(f"USB bridge quiet: no disconnect in the last {window_seconds // 60} minutes")
+
+
 def stage_install(r):
     import drive_recovery
     import drive_setup_acquire as dsa
@@ -409,6 +422,7 @@ def stage_install(r):
     if not folder:
         raise RuntimeError(f"run the recovery stage first; nothing is written to {TARGET_NAME} without a verified image")
     drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
+    require_stable_bridge()
     target = identify(r)
     refresh_udev_view(target["path"])          # the guard reads udev's cache, which an earlier install's VM leaves stale
     say("deactivated on this host:", deactivate_target_vgs(r, target))
@@ -430,13 +444,13 @@ def stage_install(r):
     say(result.outcome + ":", result.detail)
     if result.outcome != "applied" or result.qemu_process is None:
         raise RuntimeError(f"the installer refused or did not launch; {TARGET_NAME} was not written by this stage")
-    global INSTALL_VM
-    INSTALL_VM = result.qemu_process
+    global INSTALL_VM, OPENED_PATH
+    INSTALL_VM, OPENED_PATH = result.qemu_process, target["path"]
     # Same KVM session, ISO still attached: Proxmox installs, reboots, its first boot runs the carried hook
     # (storage, installer carried onto INSTALLER_CACHE, offline provision), then reboots into first-boot
     # authorization. Nothing here reads console text (no OCR, by design): a person or vision-capable agent watches
     # the screendump and records each checkpoint.
-    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
+    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)", opened_path=target["path"])
     record("install", workspace=str(workspace))
 
 
@@ -445,20 +459,61 @@ def clear_stale_checkpoint(path):
     Path(path).unlink(missing_ok=True)
 
 
-def watch(checkpoint, description):
-    """Refresh the session screendump until the named checkpoint file is created by whoever is watching it."""
+STAGE_LIMIT_MINUTES = {"firstboot-screen": 120, "kiosk": 45}
+HEARTBEAT_SECONDS = 60
+
+
+def device_now():
+    """Where the target drive is attached right now (by serial), or None. Re-read each tick: a USB bridge reset gives it a new node."""
+    out = subprocess.run(["lsblk", "-dn", "-o", "PATH,SERIAL"], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == SERIAL:
+            return parts[0]
+    return None
+
+
+def write_status(**fields):
+    """A small file an outside monitor can read without parsing the log: what the run is doing and when it last checked."""
+    path = WORK / "status.json"
+    path.write_text(json.dumps(dict(fields, updated=time.strftime("%H:%M:%S")), indent=1))
+
+
+def watch(checkpoint, description, *, opened_path=None):
+    """Refresh the session screendump until the named checkpoint file is created by whoever is watching it. Every tick it checks the VM's own
+    state, that the target drive is still at the node QEMU opened, whether the screen is changing, and the stage's time limit; it prints a
+    heartbeat each minute and fails at once on anything fatal (a paused VM or a moved drive is not something to wait out)."""
+    import install_watch as iw
     done = WORK / f"seen-{checkpoint}"
     clear_stale_checkpoint(done)
     shot = WORK / "session-latest.ppm"
     say(f"waiting for {description}; screendump: {shot} - when it shows, run:  touch {done}")
+    started = time.monotonic()
+    stage = iw.StageWatch(stage=checkpoint, opened_path=opened_path or "", started=started,
+                          limit_seconds=STAGE_LIMIT_MINUTES.get(checkpoint, 60) * 60)
+    last_beat = -1e9
     while not done.exists():
         if INSTALL_VM.poll() is not None:
             raise RuntimeError(f"the installation VM exited ({INSTALL_VM.poll()}) before: {description}")
+        now = time.monotonic()
         try:
+            status = iw.parse_status(INSTALL_VM.send_monitor_command("info status"))
             INSTALL_VM.send_monitor_command(f"screendump {shot}")
-            _give_to_operator(shot)
         except (OSError, RuntimeError):
-            pass
+            status = None
+        _give_to_operator(shot)
+        device = device_now() if opened_path else ""        # rehearsals run on an image file with no drive to watch
+        verdict = stage.tick(now, status=status, device_path=device, digest=iw.screen_digest(shot))
+        for alert in verdict.alerts:
+            say(f"ALERT [{checkpoint}] {alert}; if this is the prompt you are waiting for: touch {done}")
+        if now - last_beat >= HEARTBEAT_SECONDS:
+            last_beat = now
+            say(f"[watch {checkpoint}] {int((now - started) // 60)} min, vm={status}, drive={device or opened_path or 'n/a'}, "
+                f"screen {'changing' if now - stage.last_change < 60 else f'unchanged {int((now - stage.last_change) // 60)} min'}")
+            write_status(stage=checkpoint, vm=status, drive=device, minutes=int((now - started) // 60), waiting_for=str(done))
+        if verdict.fatal:
+            write_status(stage=checkpoint, fatal=verdict.fatal)
+            raise RuntimeError(f"ALERT [{checkpoint}] {verdict.fatal}")
         time.sleep(10)
 
 
@@ -568,7 +623,7 @@ def stage_session_firstboot(r):
         raise RuntimeError("firstboot continues the install stage's session; run them in one invocation")
     send_keys("CONFIRM\n")
     say("CONFIRM typed on the first-boot screen")
-    watch("kiosk", "the kiosk browser showing the Proxmox login")
+    watch("kiosk", "the kiosk browser showing the Proxmox login", opened_path=OPENED_PATH)
     record("firstboot")
 
 
