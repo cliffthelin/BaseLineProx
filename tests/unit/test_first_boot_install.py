@@ -256,12 +256,16 @@ def test_a_file_written_into_the_carried_repository_stops_the_install_by_name(tm
         _installer().verify_carried_repository(root)
 
 
-def test_provision_keeps_npm_logs_out_of_the_carried_cache():
+def test_provision_gives_npm_a_scratch_copy_so_the_carried_cache_is_never_written():
+    """npm writes into whatever cache it is given (a debug log on 2026-10-10, a rewritten cacache index entry on
+    2026-10-11). Either breaks the carried repository's checksums, so npm only ever sees a scratch copy."""
     text = (REPO / "boot/provision.sh").read_text()
     line = next(l for l in text.splitlines() if "npm install -g --offline" in l)
-    assert '--cache "$BASELINE_PACKAGE_CACHE/npm-cache"' in line
-    block = text[text.index(line):text.index(line) + 200]
+    assert '--cache "$NPM_SCRATCH"' in line and "$BASELINE_PACKAGE_CACHE" not in line
+    block = text[text.index("NPM_SCRATCH="):text.index(line) + 300]
+    assert 'cp -a "$BASELINE_PACKAGE_CACHE/npm-cache" "$NPM_SCRATCH"' in block
     assert "--logs-dir /var/log/baseline-npm" in block
+    assert 'rm -rf "$NPM_SCRATCH"' in text[text.index(line):text.index(line) + 400]
 
 
 def test_the_cache_also_carries_the_runtime_packages_the_applications_need():
