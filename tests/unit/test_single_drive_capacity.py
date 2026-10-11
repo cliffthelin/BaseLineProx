@@ -118,3 +118,18 @@ def test_a_grow_profile_uses_the_measured_host_sizes_not_the_real_drive_preset()
                                       host_bytes_measured=28 * GIB)
     assert profile["installer_sizes"] == SMALL and profile["thin_data_min_bytes"] == 0
     assert profile["storage"]["host_bytes"] == 30 * GIB
+
+
+def test_ensure_volumes_accepts_one_gib_roles_only_in_grow_on_demand_mode(monkeypatch):
+    sizes = {v[3]: 1 for v in di.BASELINE_VOLUMES}
+    sizes["INSTALLER_CACHE"] = 6
+    inventory = ""                                                  # nothing exists yet
+    runner = FakeRunner(command_responses=[
+        (lambda a: "vgs" in a, FakeProc(0, str(100 * GIB), "")),
+        (lambda a: "lvs" in a, FakeProc(0, inventory, "")),
+    ])
+    monkeypatch.setattr(di, "ensure_volume", lambda *a, **k: di.CommandResult(True, "created"))
+    refused = di.ensure_baseline_volumes(runner, planned_sizes_gib=sizes, reserve_bytes=10 * GIB)
+    assert all(not item.ok and "minimum" in item.detail for item in refused.values())
+    accepted = di.ensure_baseline_volumes(runner, planned_sizes_gib=sizes, reserve_bytes=10 * GIB, grow_on_demand=True)
+    assert all(item.ok for item in accepted.values())

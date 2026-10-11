@@ -592,7 +592,8 @@ def compute_adaptive_plan(free_bytes: int, volumes=BASELINE_VOLUMES, *,
 def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                              personas: tuple = DEFAULT_PERSONAS,
                              planned_sizes_gib: dict | None = None,
-                             reserve_bytes: int = 0, wipe_stale_signatures: bool = False) -> dict:
+                             reserve_bytes: int = 0, wipe_stale_signatures: bool = False,
+                             grow_on_demand: bool = False) -> dict:
     """The top-level, idempotent entry point: ensures the three shared
     volumes plus one USER_<PERSONA> volume per `personas`
     all exist on `vg_name`, sizing them adaptively to whatever real
@@ -618,7 +619,8 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
     if planned_sizes_gib is not None:
         if (not isinstance(planned_sizes_gib, dict)
                 or set(planned_sizes_gib) != {v[3] for v in volumes}
-                or any(type(planned_sizes_gib[v[3]]) is not int or planned_sizes_gib[v[3]] < v[1] for v in volumes)):
+                or any(type(planned_sizes_gib[v[3]]) is not int or planned_sizes_gib[v[3]] < (1 if grow_on_demand else v[1])
+                       for v in volumes)):
             return {v[3]: CommandResult(False, "single-drive sizes must cover every role at its minimum") for v in volumes}
         inventory = runner.run(list_logical_volume_sizes_argv(vg_name), timeout=15)
         if inventory.returncode != 0:
