@@ -252,8 +252,7 @@ def offline_repository(root: Path = OFFLINE_REPOSITORY, sources: Path = OFFLINE_
     if not (root / "apt" / "Packages").is_file():
         return dict(facts, reason=f"no package index at {root / 'apt' / 'Packages'}")
     try:
-        manifest = json.loads((root / "MANIFEST.json").read_text())
-        count = offline_cache.verify_manifest(root, manifest)
+        count = offline_cache.verify_carried(root)
     except (OSError, ValueError, RuntimeError) as exc:
         return dict(facts, reason=f"repository does not verify: {exc}")
     return dict(facts, available=True, files_verified=count)

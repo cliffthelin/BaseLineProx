@@ -388,6 +388,10 @@ cp "$SRC/baseline/lib/self_installer.py" /opt/baseline/lib/self_installer.py
 # first_boot_hook.py / offline_cache.py: the self-contained installer an installed drive can rebuild itself with.
 cp "$SRC/baseline/lib/first_boot_hook.py" /opt/baseline/lib/first_boot_hook.py
 cp "$SRC/baseline/lib/offline_cache.py" /opt/baseline/lib/offline_cache.py
+cp "$SRC/baseline/lib/cache_learn.py" /opt/baseline/lib/cache_learn.py
+cp "$SRC/baseline/bin/baseline-cache-learn" /opt/baseline/bin/baseline-cache-learn
+chmod 755 /opt/baseline/bin/baseline-cache-learn
+cp "$SRC/boot/baseline-cache-learn.apt.conf" /etc/apt/apt.conf.d/99baseline-cache-learn
 cp "$SRC/baseline/lib/drive_setup_acquire.py" /opt/baseline/lib/drive_setup_acquire.py
 cp "$SRC/baseline/lib/drive_setup_answer.py" /opt/baseline/lib/drive_setup_answer.py
 cp "$SRC/baseline/lib/drive_setup_install.py" /opt/baseline/lib/drive_setup_install.py

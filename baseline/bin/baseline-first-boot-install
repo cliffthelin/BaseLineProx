@@ -78,7 +78,7 @@ def reboot_after_argv(unit):
             "systemctl", "reboot"]
 
 
-from offline_cache import sha256 as _sha256, verify_manifest  # noqa: E402 - shared with the cache builder
+from offline_cache import sha256 as _sha256, verify_carried, verify_manifest  # noqa: E402 - shared with the cache builder
 
 
 # --- steps ---------------------------------------------------------------------------------------
@@ -259,7 +259,7 @@ def verify_carried_repository(cache):
     boot re-verifies before trusting it offline. Checked after provisioning so the writer is caught here, by name,
     rather than surfacing later as an unexplained 'repository does not verify' at first-boot CONFIRM."""
     try:
-        return verify_manifest(cache, json.loads((cache / "MANIFEST.json").read_text()))
+        return verify_carried(cache)
     except (OSError, ValueError) as exc:
         raise RuntimeError(f"the carried package repository is unreadable after provisioning: {exc}") from exc
     except RuntimeError as exc:

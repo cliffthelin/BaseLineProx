@@ -79,7 +79,7 @@ def sha256(path) -> str:
 def build_manifest(root) -> dict:
     root = Path(root)
     return {str(p.relative_to(root)): sha256(p) for p in sorted(root.rglob("*"))
-            if p.is_file() and p.name != "MANIFEST.json"}
+            if p.is_file() and p.name not in ("MANIFEST.json", "LEARNED.json")}
 
 
 def verify_manifest(root, manifest: dict) -> int:
@@ -90,3 +90,19 @@ def verify_manifest(root, manifest: dict) -> int:
     if bad:
         raise RuntimeError(f"carried files fail their checksums: {bad[:5]}")
     return len(manifest)
+
+
+def verify_carried(root) -> int:
+    """The base manifest together with what the drive learned since (cache_learn.py, LEARNED.json): every file must be
+    listed in one or the other and match; a learned file may supersede a base one (a regenerated index, a newer
+    application) or retire it. An unrecorded or altered file is refused."""
+    import json
+    root = Path(root)
+    expected = dict(json.loads((root / "MANIFEST.json").read_text()))
+    learned_path = root / "LEARNED.json"
+    if learned_path.is_file():
+        learned = json.loads(learned_path.read_text())
+        for path in learned.get("removed", []):
+            expected.pop(path, None)
+        expected.update(learned.get("files", {}))
+    return verify_manifest(root, expected)
