@@ -1,6 +1,6 @@
-# DR255 - Hierarchical identifiers for installs, substrate, VMs, applications and hardware (PROPOSED)
+# DR255 - Hierarchical identifiers for installs, substrate, VMs, applications and hardware 
 
-Date: 2026-10-11. Status: proposed, not implemented. Follows DR254 (host identity). Decided before more is built on it, because changing a
+Date: 2026-10-11. Status: approved by the operator 2026-10-11 and implemented (`identifiers.py`, `installer_identity.py`); rollout to the other registries and to component messages follows (see the end). Follows DR254 (host identity). Decided before more is built on it, because changing a
 scheme later means changing every registry entry that uses it.
 
 ## Requirements

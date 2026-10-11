@@ -4,43 +4,26 @@ Each installer lane (this one, the parallel effort's) has ONE UUID of its own, p
 first time it is needed and never changed afterwards. A lane keeps its own file when source moves between lanes (`.gitattributes`:
 `merge=ours`), and a test pins that this lane's value differs from the parallel lane's.
 
-The identity of a drive an installer installed is derived, never generated, and laid out as a readable control structure
-(operator layout, 2026-10-11):
-
-    AAAAAAAA - SSSS - EEEE - Vcc - HHHHHHHHHHHH
-    |          |      |      |      the first 12 hex digits of sha256(installer UUID : full serial)
-    |          |      |      layout marker V=`b1` (Baseline child, layout 1) + `cc`, a check byte over the first three groups
-    |          |      the LAST 4 characters of the drive's serial
-    |          the FIRST 4 characters of the drive's serial
-    the first 8 hex digits of the installer UUID
-
-A UUID is hex only and serials are not (`MD89N41071210AP4E`), so non-hex characters are skipped: the first group is the first four HEX
-characters of the serial read from the front, the second the last four hex characters read from the back, kept in their written
-order. If a serial has fewer than four hex characters the count is filled with the reserved value `0` (NON_HEX). Those two groups are
-therefore a recognisable hint, not the serial; the hash group binds the identity to the exact full serial, so two drives that share
-those characters still differ. The check byte lets anyone tell which installer lane minted a UUID without knowing the serial
-(`minted_by`).
-
-The same installer and the same drive therefore always give the same UUID, across any number of reinstalls, and it differs between
-installers and between drives. It is written to the drive's GPT disk identifier (`sgdisk -U`, which changes nothing else) and
-registered in the installer registry (drive_guard.py) against the serial. The registry record outlives any wipe of the drive, and a
-reinstall simply stamps the same UUID again, so the identity never changes.
+The identity of a drive an installer installed is derived, never generated, by `identifiers.host_id` (DR255: the first 8 hex digits of
+this lane's UUID, the first and last four hex characters of the drive's serial, a layout/kind/check header and a hash of the full
+installer UUID and serial). The same installer and the same drive always give the same identifier, across any number of reinstalls; it
+differs between lanes and between drives. First boot sets it as the drive's GPT disk identifier (`sfdisk --disk-id`, which changes
+nothing else) before it records anything; the host then verifies it, registers it in the installer registry (drive_guard.py) and in the
+hierarchical registry (identifiers.py), and retires the older identities registered for that serial. The registry records outlive any
+wipe of the drive, and a reinstall simply sets the same identifier again, so it never changes.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 import subprocess
 import uuid
 from pathlib import Path
 
 import drive_guard
+import identifiers
 
 FILE_NAME = "INSTALLER_UUID"        # baseline/INSTALLER_UUID: this lane's pinned installer UUID (each lane keeps its own)
 _SERIAL = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")           # at least 8, so the first and last four characters never overlap
-LAYOUT = "b1"                                                # marker of this layout (Baseline child, version 1)
-_HEX = "0123456789abcdef"
-NON_HEX = "0"                                                # reserved filler when a serial has too few hex characters
 
 
 class IdentityError(RuntimeError):
@@ -64,41 +47,20 @@ def installer_id(directory) -> str:
     return new
 
 
-def serial_hex(serial: str, count: int, *, from_end: bool = False) -> str:
-    """`count` hex characters of `serial`, skipping every non-hex character: from the front, or the last `count` (kept in written
-    order) when `from_end`. Filled with NON_HEX when the serial has too few; the fill goes where the missing characters would be."""
-    hexes = [c.lower() for c in serial if c.lower() in _HEX]
-    if from_end:
-        taken = hexes[-count:]
-        return NON_HEX * (count - len(taken)) + "".join(taken)
-    taken = hexes[:count]
-    return "".join(taken) + NON_HEX * (count - len(taken))
-
-
-def _check(prefix: str, head: str, tail: str, installer: str) -> str:
-    return hashlib.sha256(f"{prefix}{head}{tail}:{installer}".encode()).hexdigest()[:2]
-
-
 def child_uuid(installer: str, serial: str) -> str:
-    if not isinstance(serial, str) or not _SERIAL.match(serial):
-        raise IdentityError("a drive's identity needs its plain hardware serial, at least 8 characters")
-    installer = str(uuid.UUID(installer))
-    prefix = installer.replace("-", "")[:8]
-    head, tail = serial_hex(serial, 4), serial_hex(serial, 4, from_end=True)
-    body = hashlib.sha256(f"{installer}:{serial}".encode()).hexdigest()[:12]
-    return f"{prefix}-{head}-{tail}-{LAYOUT}{_check(prefix, head, tail, installer)}-{body}"
+    """The identifier of the install `installer` makes on the drive with `serial` (identifiers.host_id)."""
+    try:
+        return identifiers.host_id(installer, serial)
+    except identifiers.IdentifierError as exc:
+        raise IdentityError(str(exc)) from None
 
 
 def minted_by(guid: str, installer: str) -> bool:
-    """Whether `guid` has this layout and was minted by `installer`'s lane, judged from the UUID alone (no serial needed)."""
+    """Whether `guid` is a valid host, substrate or VM identifier minted by `installer`'s lane, judged from the UUID alone."""
     try:
-        groups = str(uuid.UUID(guid)).split("-")
-        installer = str(uuid.UUID(installer))
-    except (ValueError, AttributeError, TypeError):
+        return identifiers.parse(guid).lane == str(uuid.UUID(installer)).replace("-", "")[:8]
+    except (identifiers.IdentifierError, ValueError):
         return False
-    prefix = installer.replace("-", "")[:8]
-    return (groups[0] == prefix and groups[3].startswith(LAYOUT)
-            and groups[3][2:] == _check(prefix, groups[1], groups[2], installer))
 
 
 def _real_run(argv):
@@ -125,23 +87,15 @@ def ensure_disk_guid(device, wanted: str, *, run=None, probe=None) -> str:
     return wanted
 
 
-def is_layout_uuid(guid: str) -> bool:
-    """Whether `guid` has this layout (the marker in its fourth group): minted by some lane's installer, not random or older."""
-    try:
-        return str(uuid.UUID(guid)).split("-")[3].startswith(LAYOUT)
-    except (ValueError, AttributeError, TypeError, IndexError):
-        return False
-
-
 def legacy_entries(serial: str) -> list:
-    """Registered identities for `serial` that do not have this layout: random ones an installer's own disk got, and the
-    first-version uuid5 ones. Identities with the layout (any lane's) are never listed."""
+    """Registered identities for `serial` that do not have the DR255 layout: random ones an installer's own disk got, and those of the
+    earlier layouts. Identifiers with the layout (any lane's) are never listed."""
     import registry
     entries = registry.list_entries(drive_guard.REGISTRY_TYPE, scope=registry.GLOBAL, read_only=True)
     found = []
     for guid, entry in entries.items():
         attributes = entry.get("attributes", entry) if isinstance(entry, dict) else {}
-        if attributes.get("serial") == serial and not is_layout_uuid(guid):
+        if attributes.get("serial") == serial and not identifiers.is_valid(guid):
             found.append(guid)
     return sorted(found)
 
@@ -164,5 +118,6 @@ def stamp_child_identity(device, serial: str, installer: str, *, run=None, probe
     wanted = child_uuid(installer, serial)
     ensure_disk_guid(device, wanted, run=run, probe=probe)
     drive_guard.register_installer_uuid(wanted, serial=serial)
+    identifiers.register_host(wanted, serial=serial)
     retire_legacy_entries(serial, wanted)
     return wanted

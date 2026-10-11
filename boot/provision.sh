@@ -394,6 +394,9 @@ cp "$SRC/baseline/lib/self_installer.py" /opt/baseline/lib/self_installer.py
 cp "$SRC/baseline/lib/first_boot_hook.py" /opt/baseline/lib/first_boot_hook.py
 cp "$SRC/baseline/lib/offline_cache.py" /opt/baseline/lib/offline_cache.py
 cp "$SRC/baseline/lib/cache_learn.py" /opt/baseline/lib/cache_learn.py
+# DR255: hierarchical identifiers (host, substrate, VM, application, hardware), minted on the installed system from their parent
+cp "$SRC/baseline/lib/identifiers.py" /opt/baseline/lib/identifiers.py
+cp "$SRC/baseline/lib/installer_identity.py" /opt/baseline/lib/installer_identity.py
 cp "$SRC/baseline/bin/baseline-cache-learn" /opt/baseline/bin/baseline-cache-learn
 chmod 755 /opt/baseline/bin/baseline-cache-learn
 cp "$SRC/boot/baseline-cache-learn.apt.conf" /etc/apt/apt.conf.d/99baseline-cache-learn
