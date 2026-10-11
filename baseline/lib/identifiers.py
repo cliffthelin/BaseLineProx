@@ -11,10 +11,14 @@ hex digits:
     17       kind (0)                 1 substrate, 2 VM / container 3 application, 4 hardware
     18-19    check byte               same                          same
     20-23    host discriminator       inherited from the host       inherited from the host
-    24-31    rest of the host hash    own id (hash of parent+kind+name)   own id (hash of parent+kind+name)
+    24-29    rest of the host hash    own id, 6 hex (hash of parent+kind+name)   same
+    30-31    special handling (00)    special handling                    special handling
 
 A child is derived from its parent, so it can be minted on the installed system with no installer present. Identifiers are stable: the
 same parent, kind and name always give the same identifier. The check byte is integrity (typos, truncation), not authenticity.
+The last two digits are reserved for special handling. `00` is the ordinary, deterministic identifier. Other values mark identifiers
+that are handled differently; `01` associates the identifier with an external UUID through a separate, non-deterministic cross-map
+table (`map_external`). New special values are added to SPECIAL as they arise; readers treat an unknown value as special, never as ordinary.
 The registry holds one shape for every level, so adding a level never changes it.
 """
 from __future__ import annotations
@@ -29,6 +33,8 @@ KINDS = {"host": 0, "substrate": 1, "vm": 2, "application": 3, "hardware": 4}
 KIND_NAMES = {number: name for name, number in KINDS.items()}
 LANE_KINDS = {0, 1, 2}                  # these carry the installer lane; applications and hardware do not
 REGISTRY_TYPE = "baseline_identities"
+SPECIAL = {"none": 0x00, "external": 0x01}   # digits 30-31; 02-7f reserved for future handling, 80-ff for experiments
+CROSS_MAP_TYPE = "baseline_external_map"
 NON_HEX = "0"                           # reserved filler when a serial has fewer hex characters than a group needs
 _HEX = "0123456789abcdef"
 _SERIAL = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")
@@ -86,11 +92,16 @@ def host_id(lane: str, serial: str) -> str:
     lane = str(uuid.UUID(lane))
     scope = lane.replace("-", "")[:8]
     drive = serial_hex(serial, 4) + serial_hex(serial, 4, from_end=True)
-    return _assemble(scope, drive, KINDS["host"], _sha(f"host:{lane}:{serial}")[:12])
+    return _assemble(scope, drive, KINDS["host"], _sha(f"host:{lane}:{serial}")[:10] + "00")
 
 
-def child_id(parent: str, kind: str, name: str, *, counter: int = 0) -> str:
-    """The identifier of the `kind` thing called `name` under `parent`. Pure: the same inputs give the same identifier."""
+def child_id(parent: str, kind: str, name: str, *, counter: int = 0, special: int = 0, own: str | None = None) -> str:
+    """The identifier of the `kind` thing called `name` under `parent`. Pure: the same inputs give the same identifier. `special` is the
+    reserved last byte (SPECIAL); `own` supplies the 6 own-id digits explicitly (only the non-deterministic external mapping does)."""
+    if not isinstance(special, int) or not 0 <= special <= 255:
+        raise IdentifierError("special must be a byte")
+    if own is not None and not re.fullmatch(r"[0-9a-f]{6}", own):
+        raise IdentifierError("own must be 6 hex digits")
     if kind not in KINDS or kind == "host":
         raise IdentifierError(f"{kind!r} is not a kind that has a parent")
     if not isinstance(name, str) or not _NAME.match(name):
@@ -100,9 +111,9 @@ def child_id(parent: str, kind: str, name: str, *, counter: int = 0) -> str:
         raise IdentifierError("the parent is not a valid identifier")
     if int(p[17], 16) not in _PARENTS[kind]:
         raise IdentifierError(f"a {kind} cannot live under a {KIND_NAMES.get(int(p[17], 16), 'thing of that kind')}")
-    own = _sha(f"{str(uuid.UUID(parent))}:{kind}:{name}:{counter}")[:8]
+    own = own or _sha(f"{str(uuid.UUID(parent))}:{kind}:{name}:{counter}")[:6]
     scope = p[:8] if KINDS[kind] in LANE_KINDS else p[24:28] + class_code(name)
-    return _assemble(scope, p[8:16], KINDS[kind], p[20:24] + own)
+    return _assemble(scope, p[8:16], KINDS[kind], p[20:24] + own + format(special, "02x"))
 
 
 def is_valid(guid: str) -> bool:
@@ -127,6 +138,7 @@ class Parsed:
     check: str
     host_discriminator: str
     own: str
+    special: int
 
 
 def parse(guid: str) -> Parsed:
@@ -137,7 +149,7 @@ def parse(guid: str) -> Parsed:
     lane_kind = kind in LANE_KINDS
     return Parsed(version=d[16], kind=KIND_NAMES[kind], lane=d[:8] if lane_kind else None,
                   parent_pointer=None if lane_kind else d[:4], class_code=None if lane_kind else d[4:8],
-                  head=d[8:12], tail=d[12:16], check=d[18:20], host_discriminator=d[20:24], own=d[24:32])
+                  head=d[8:12], tail=d[12:16], check=d[18:20], host_discriminator=d[20:24], own=d[24:30], special=int(d[30:32], 16))
 
 
 def lane_prefix(guid: str) -> str | None:
@@ -171,9 +183,10 @@ def register_host(host: str, *, serial: str) -> None:
                                       "layout": VERSION, "counter": 0})
 
 
-def mint(parent: str, kind: str, name: str) -> str:
+def mint(parent: str, kind: str, name: str, *, source: dict | None = None) -> str:
     """The identifier of `kind` `name` under `parent`, registered with its parent and the drive's serial. Idempotent. If a different
-    (parent, kind, name) already holds the identifier (about 1 in 4 billion per pair) the next counter is used and recorded."""
+    (parent, kind, name) already holds the identifier (about 1 in 4 billion per pair) the next counter is used and recorded.
+    `source` ({"type": ..., "id": ...}) names the entry of another registry this identifier stands for (references.py)."""
     registry = _registry()
     parent_entry = registry.get_entry(REGISTRY_TYPE, parent, scope=registry.GLOBAL)
     serial = _attributes(parent_entry).get("serial") if parent_entry else None
@@ -183,10 +196,13 @@ def mint(parent: str, kind: str, name: str) -> str:
         if existing is None:
             registry.upsert_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL, value={"by": "baseline"},
                                   attributes={"kind": kind, "level": KINDS[kind], "serial": serial, "parent": parent, "name": name,
-                                              "layout": VERSION, "counter": counter})
+                                              "layout": VERSION, "counter": counter, "source": source})
             return candidate
         attrs = _attributes(existing)
         if (attrs.get("parent"), attrs.get("kind"), attrs.get("name")) == (parent, kind, name):
+            if source is not None and attrs.get("source") != source:
+                registry.upsert_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL, value=existing.get("value"),
+                                      attributes=dict(attrs, source=source))
             return candidate
     raise IdentifierError("no free identifier after 16 counters; this should never happen")
 
@@ -203,3 +219,50 @@ def descendants(host: str) -> list:
             return False
         return parent == host or below(parent, seen + (guid,))
     return sorted(guid for guid in parents if guid != host and below(guid))
+
+
+# --- special handling: external UUIDs (digits 30-31 = 01) -------------------------------------------------------------------
+
+def _cross_map():
+    import registry
+    registry.register_type(CROSS_MAP_TYPE, "Baseline identifier <-> external UUID cross-map; non-deterministic by design (DR255)",
+                           default_scope=registry.GLOBAL)
+    return registry
+
+
+def map_external(parent: str, kind: str, name: str, external: str) -> str:
+    """The identifier associated with `external` (a UUID from outside Baseline: a disk, VM or filesystem UUID). The first call picks a
+    random own id and records the pair in the cross-map table; later calls return the same identifier, so the association is stable
+    even though it is not derivable from the inputs. Never derive an external mapping: use `lookup_external`."""
+    external = str(uuid.UUID(external))
+    registry = _cross_map()
+    found = lookup_external(external)
+    if found:
+        return found
+    _registry()
+    for _ in range(16):
+        candidate = child_id(parent, kind, name, special=SPECIAL["external"], own=uuid.uuid4().hex[:6])
+        if registry.get_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL) is None:
+            registry.upsert_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL, value={"by": "baseline"},
+                                  attributes={"kind": kind, "level": KINDS[kind], "parent": parent, "name": name,
+                                              "layout": VERSION, "special": SPECIAL["external"], "external": external})
+            registry.upsert_entry(CROSS_MAP_TYPE, external, scope=registry.GLOBAL, value={"id": candidate},
+                                  attributes={"id": candidate})
+            return candidate
+    raise IdentifierError("no free identifier for an external mapping")
+
+
+def lookup_external(external: str) -> str | None:
+    try:
+        external = str(uuid.UUID(external))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    registry = _cross_map()
+    entry = registry.get_entry(CROSS_MAP_TYPE, external, scope=registry.GLOBAL)
+    return _attributes(entry).get("id") if entry else None
+
+
+def external_of(guid: str) -> str | None:
+    registry = _cross_map()
+    entry = registry.get_entry(REGISTRY_TYPE, guid, scope=registry.GLOBAL)
+    return _attributes(entry).get("external") if entry else None

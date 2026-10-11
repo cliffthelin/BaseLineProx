@@ -33,7 +33,7 @@ def test_non_hex_serial_characters_are_skipped_and_a_short_serial_is_filled_with
 
 
 def test_the_host_identifier_of_pc601_is_pinned():
-    assert idn.host_id(LANE, PC601) == "4af8c95a-fd01-271b-10c2-bc48c28f0ace"
+    assert idn.host_id(LANE, PC601) == "4af8c95a-fd01-271b-10be-bc48c28f0a00"
 
 
 def test_the_same_inputs_always_give_the_same_identifier_and_different_inputs_do_not():
@@ -51,7 +51,7 @@ def test_substrate_and_vm_children_inherit_the_hosts_digits_and_add_their_own_id
         assert hexpos(child, 0, 16) == hexpos(host, 0, 16)           # lane and serial hint: the ancestry
         assert hexpos(child, 17, 18) == digit and idn.is_valid(child)
         assert hexpos(child, 20, 24) == hexpos(host, 20, 24)         # the host discriminator
-        assert hexpos(child, 24, 32) != hexpos(host, 24, 32)
+        assert hexpos(child, 24, 30) != hexpos(host, 24, 30) and hexpos(child, 30, 32) == "00"
     assert idn.child_id(host, "vm", "a") != idn.child_id(host, "vm", "b")
     assert idn.child_id(host, "vm", "a") != idn.child_id(host, "substrate", "a")
     assert idn.child_id(host, "vm", "a") == idn.child_id(host, "vm", "a")
@@ -156,3 +156,27 @@ def test_everything_under_a_host_can_be_listed_from_its_digits():
     app = idn.mint(vm, "application", "chrome/main")
     idn.mint(other, "vm", "someone-elses")
     assert sorted(idn.descendants(host)) == sorted([vm, app])
+
+
+def test_the_last_byte_is_reserved_for_special_handling_and_ordinary_identifiers_carry_zero():
+    host = idn.host_id(LANE, PC601)
+    assert hexpos(host, 30, 32) == "00" and idn.parse(host).special == 0
+    app = idn.child_id(host, "application", "chrome")
+    assert idn.parse(app).special == 0
+    flagged = idn.child_id(host, "vm", "x", special=0x80)
+    assert idn.parse(flagged).special == 0x80 and idn.is_valid(flagged) and flagged != idn.child_id(host, "vm", "x")
+    with pytest.raises(idn.IdentifierError):
+        idn.child_id(host, "vm", "x", special=256)
+
+
+def test_an_external_uuid_maps_to_a_stable_but_not_derivable_identifier_through_the_cross_map():
+    host = idn.host_id(LANE, PC601)
+    idn.register_host(host, serial=PC601)
+    outside = "9b1d6f0e-3a54-4c1f-8f6e-0a1b2c3d4e5f"
+    first = idn.map_external(host, "vm", "imported-disk", outside)
+    assert idn.is_valid(first) and idn.parse(first).special == idn.SPECIAL["external"]
+    assert idn.map_external(host, "vm", "imported-disk", outside) == first          # stable once recorded
+    assert idn.lookup_external(outside) == first and idn.external_of(first) == outside
+    other = idn.map_external(host, "vm", "other", "11111111-2222-4333-8444-555555555555")
+    assert other != first
+    assert idn.lookup_external("not-a-uuid") is None

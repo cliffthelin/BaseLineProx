@@ -393,8 +393,10 @@ def test_first_boot_sets_the_identifier_on_the_one_disk_with_that_serial_before_
     monkeypatch.setattr(installer, "LOG", tmp_path / "log")
     (tmp_path / "state").mkdir()
     monkeypatch.setattr(installer, "list_disks", lambda: "/dev/sda FD01N6557110C271B\n/dev/sdb MD89N41071210AP4E\n")
-    installer.step_identity(ensure=lambda device, wanted: calls.append((device, wanted)))
+    host_file = tmp_path / "etc" / "host-id"
+    installer.step_identity(ensure=lambda device, wanted: calls.append((device, wanted)), host_id_path=host_file)
     assert calls == [("/dev/sda", IDENTITY["uuid"])]
+    assert host_file.read_text() == IDENTITY["uuid"] + "\n"        # the backbone reference components read
     assert [name for name, _ in installer.STEPS][:2] == ["identity", "storage"]
 
 
@@ -407,7 +409,8 @@ def test_first_boot_refuses_when_the_serial_is_on_no_disk_or_on_two(tmp_path, mo
     for listing in ("/dev/sdb MD89N41071210AP4E\n", "/dev/sda FD01N6557110C271B\n/dev/sdc FD01N6557110C271B\n"):
         monkeypatch.setattr(installer, "list_disks", lambda l=listing: l)
         with pytest.raises(RuntimeError):
-            installer.step_identity(ensure=lambda *a: None)
+            installer.step_identity(ensure=lambda *a: None, host_id_path=tmp_path / "host-id")
+    assert not (tmp_path / "host-id").exists()
 
 
 def test_first_boot_without_a_carried_identity_leaves_the_disk_identifier_alone(tmp_path, monkeypatch):

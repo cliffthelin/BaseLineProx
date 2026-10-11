@@ -26,7 +26,8 @@ scheme later means changing every registry entry that uses it.
 | 17 | kind (`0`) | `1` substrate, `2` VM or container | `3` application, `4` hardware |
 | 18-19 | check byte | same | same |
 | 20-23 | host discriminator: first 4 of the host's hash | inherited from the host | inherited from the host |
-| 24-31 | rest of the host hash | own id: 8 hex, hash of (parent id, kind, name) | own id: 8 hex, hash of (parent id, kind, name) |
+| 24-29 | rest of the host hash (6 hex) | own id: 6 hex, hash of (parent id, kind, name) | same |
+| 30-31 | **special handling**, `00` ordinary | same | same |
 
 - The serial groups skip non-hex characters and fill with `0` when short (DR254): a recognisable hint of the drive, not the serial.
 - Host hash = sha256(lane UUID : full serial), so two drives that share their serial hint still differ.
@@ -39,6 +40,28 @@ scheme later means changing every registry entry that uses it.
 
 The remaining 16 digits of a host's identifier (header + discriminator) are exactly the space its substrate and VM children inherit and
 extend, which is the operator's "reserved for installs of substrate or VMs".
+
+## Reserved last byte (operator, 2026-10-11)
+
+Digits 30-31 are reserved for special handling. `00` is an ordinary, deterministic identifier. `01` marks an identifier associated with
+an external UUID through a separate cross-map table (registry type `baseline_external_map`, external UUID -> identifier); that mapping is
+deliberately non-deterministic (random own id, stable once recorded: `identifiers.map_external`, `lookup_external`, `external_of`).
+`02-7f` are reserved for future handling, `80-ff` for experiments. Readers treat an unknown value as special, never as ordinary. The
+own id is therefore 6 hex digits (24 bits) with the parent pointer taken from the host hash; collisions are still caught at mint.
+This changed PC601's host identifier from `...10c2-bc48c28f0ace` to `...10be-bc48c28f0a00`; nothing had been built on the earlier value.
+
+## Rollout of the backbone
+
+| Component | Reference |
+|---|---|
+| `naming.allocate` | `references.link_naming`: the global reference for each local code (application / vm / substrate) |
+| `gateway_routes.set_route` | substrate reference per route |
+| `drive_enrollment.enroll` | hardware reference per enrolled serial |
+| `repair.log_event` | `source_ref` = this host on every event |
+| `handoff.collect` | `host_ref` in the packet manifest |
+| first boot | writes `/etc/baseline/host-id` after setting the disk identifier |
+
+Not yet: gpu_admin, network aliases, vm_host, storage volumes, settings_store, installer_cache, harness_events.
 
 ## Minting
 
@@ -56,7 +79,7 @@ One registry type for every level, keyed by the identifier:
 ## Illustrative values (prototype; lane `4af8c95a-...`, PC601)
 
 ```
-host       4af8c95a-fd01-271b-10c2-bc48c28f0ace
+host       4af8c95a-fd01-271b-10be-bc48c28f0a00
 substrate  4af8c95a-fd01-271b-110d-bc48c1c77a36      baseline
 vm         4af8c95a-fd01-271b-124a-bc4812c66066      ubuntu-desktop
 application 12c6f39c-fd01-271b-1336-bc48388aa637     chrome in that VM   (lane dropped: 12c6 = parent pointer, f39c = class)

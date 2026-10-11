@@ -22,6 +22,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import references
+
 MANIFEST_NAME = "handoff_manifest.json"
 _MAX_MANIFEST_BYTES = 1024 * 1024
 
@@ -125,6 +127,9 @@ def collect(staging_dir: Path, host_label: str) -> dict:
         "has_interface_aliases": (staging_dir / "etc-baseline" / "interface_aliases.json").exists(),
         "files_included": sorted(included),
     }
+    host = references.current_host()
+    if host:
+        manifest["host_ref"] = host
     (staging_dir / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2))
     return manifest
 

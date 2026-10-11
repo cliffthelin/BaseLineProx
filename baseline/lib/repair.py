@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 import ifnet_config  # noqa: E402
 import network  # noqa: E402
+import references  # noqa: E402
 import topology  # noqa: E402
 
 INTERFACES_PATH = "/etc/network/interfaces"
@@ -219,6 +220,7 @@ def log_event(runner: Runner, attempt_id: str, step: str, status: str, detail: s
         "detail": detail,
     }
     rec.update(extra)
+    rec = references.stamp(rec, source=references.HOST)
     runner.append_text(str(EVENT_LOG), json.dumps(rec) + "\n")
     return rec
 

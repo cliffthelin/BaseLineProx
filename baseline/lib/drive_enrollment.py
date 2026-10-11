@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+import references
 import registry
 
 REGISTRY_TYPE = "enrolled_drives"
@@ -44,3 +45,4 @@ def enroll(serial, *, size_bytes: int, model: str, now: float) -> None:
                            "(drive_enrollment.py)", default_scope=registry.GLOBAL)
     registry.upsert_entry(REGISTRY_TYPE, serial, scope=registry.GLOBAL,
                           attributes={"size_bytes": int(size_bytes), "model": str(model), "enrolled_at": float(now)})
+    references.link(REGISTRY_TYPE, serial, kind="hardware")
