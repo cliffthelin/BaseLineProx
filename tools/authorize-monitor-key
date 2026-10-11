@@ -6,7 +6,7 @@
 #
 # Why this exists: reading or writing the installed system needs its LVM volume group activated, which needs root. The installer now
 # carries the same key (answer file `root-ssh-keys`), so after the next rebuild this is not needed. It touches only PC601 (serial below),
-# only the one root filesystem on it, only /root/.ssh/authorized_keys (appending the key if it is not already there), then unmounts and
+# only the one root filesystem on it, /etc/baseline/monitor_authorized_keys and one sshd drop-in (Proxmox's own authorized_keys is a symlink into its cluster filesystem and is left alone), then unmounts and
 # deactivates exactly the volume group it activated. PC401 is not accepted.
 set -euo pipefail
 
@@ -70,13 +70,24 @@ diagnose() {
 }
 [ -d "$MNT/root" ] && [ ! -L "$MNT/root" ] || diagnose "refusing: /root on the installed system is not a plain directory"
 [ ! -L "$MNT/root/.ssh" ] || diagnose "refusing: /root/.ssh is a symlink"
-install -d -m 700 -o root -g root "$MNT/root/.ssh"
-[ -d "$MNT/root/.ssh" ] || diagnose "refusing: /root/.ssh could not be created on the installed root"
-if grep -qxF "$KEY" "$MNT/root/.ssh/authorized_keys" 2>/dev/null; then
+# On Proxmox /root/.ssh/authorized_keys is a symlink to /etc/pve/priv/authorized_keys, a path that exists only while Proxmox's cluster
+# filesystem is running, so offline it dangles and cannot be written. The key therefore goes in a file of its own that sshd is told
+# to read in addition (a drop-in; the Debian sshd_config includes sshd_config.d first). The Proxmox file is left exactly as it is.
+KEYS_REL=etc/baseline/monitor_authorized_keys
+install -d -m 755 -o root -g root "$MNT/etc/baseline"
+if grep -qxF "$KEY" "$MNT/$KEYS_REL" 2>/dev/null; then
   say "the key is already authorized; nothing to do"
 else
-  printf '%s\n' "$KEY" >> "$MNT/root/.ssh/authorized_keys"
-  chmod 600 "$MNT/root/.ssh/authorized_keys"
-  say "key added"
+  printf '%s\n' "$KEY" >> "$MNT/$KEYS_REL"
+  chown root:root "$MNT/$KEYS_REL"; chmod 644 "$MNT/$KEYS_REL"
+  say "key added to /$KEYS_REL"
 fi
-say "authorized keys now:"; cut -d' ' -f1,3- "$MNT/root/.ssh/authorized_keys"
+[ -d "$MNT/etc/ssh/sshd_config.d" ] || { say "refusing: no /etc/ssh/sshd_config.d on the installed system"; exit 1; }
+grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$MNT/etc/ssh/sshd_config" || { say "refusing: sshd_config does not include sshd_config.d/*.conf"; exit 1; }
+printf '%s\n' '# Baseline development monitoring key (authorize-monitor-key). The Proxmox authorized_keys file stays as it is.' \
+  'AuthorizedKeysFile .ssh/authorized_keys /etc/baseline/monitor_authorized_keys' > "$MNT/etc/ssh/sshd_config.d/10-baseline-monitor.conf"
+chmod 644 "$MNT/etc/ssh/sshd_config.d/10-baseline-monitor.conf"
+say "sshd drop-in written; sshd settings that matter here:"
+grep -hiE '^[[:space:]]*(PermitRootLogin|PubkeyAuthentication|AuthorizedKeysFile|StrictModes)' "$MNT/etc/ssh/sshd_config" "$MNT"/etc/ssh/sshd_config.d/*.conf | sed 's/^/    /'
+say "/root/.ssh/authorized_keys on the installed system: $(readlink "$MNT/root/.ssh/authorized_keys" 2>/dev/null || echo 'not a symlink')"
+say "monitor keys now:"; cut -d' ' -f1,3- "$MNT/$KEYS_REL"
