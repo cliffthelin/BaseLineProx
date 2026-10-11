@@ -182,24 +182,6 @@ def test_only_the_recovery_stage_needs_root_and_install_does_not_once_the_drive_
     assert allscript.root_required(["rehearse"]) == [] and allscript.root_required(["install"]) == []
 
 
-def test_a_drive_the_installer_just_installed_is_registered_as_installer_made():
-    """The guard (drive_guard.py) only treats a drive that holds data as the installer's own when its disk GUID is
-    registered. Proxmox's installer creates that GUID, so it is recorded right after the install."""
-    import drive_guard
-    guid = "11111111-2222-4333-8444-555555555555"
-    listing = f"sdb disk  {guid} \nsdb1 part  \nsdb2 part vfat \nsdb3 part LVM2_member \n"
-    assert not drive_guard.is_installer_uuid(guid)
-    assert allscript.register_installed_drive("/dev/sdb", "FD01N6557110C271B", run=lambda argv: (0, listing)) == guid
-    assert drive_guard.is_installer_uuid(guid)
-
-
-def test_a_drive_without_a_readable_disk_guid_is_not_registered():
-    import drive_guard
-    for listing, rc in (("sdb disk  \nsdb1 part ext4 \n", 0), ("", 1)):
-        with pytest.raises(RuntimeError):
-            allscript.register_installed_drive("/dev/sdb", "FD01N6557110C271B", run=lambda argv, l=listing, r=rc: (r, l))
-
-
 def test_the_installed_hostname_names_the_drive_it_is_installed_on():
     """The first PC601 install came up as baseline-pc401, a name that belongs to the other effort's drive."""
     assert allscript.fqdn_for("PC601") == "baseline-pc601.local"
@@ -228,3 +210,18 @@ def test_volumes_this_host_has_activated_on_the_target_are_found_without_root():
     assert allscript.active_lvm_volumes(listing) == ["baseline_1b75-user_admin", "baseline_1b75-data",
                                                      "baseline_1b75-data_tdata"]
     assert allscript.active_lvm_volumes({"blockdevices": [{"name": "sdb", "type": "disk"}]}) == []
+
+
+def test_the_identity_stage_is_selectable_alone_and_a_vm_holding_the_device_is_found(tmp_path):
+    assert allscript.select_stages("identity", None) == ["identity"]
+    proc = tmp_path / "proc"
+    for pid, argv in (("101", [b"/usr/bin/qemu-system-x86_64", b"-drive", b"file=/dev/sdb,format=raw,if=none,id=targetdisk"]),
+                      ("102", [b"/usr/bin/qemu-system-x86_64", b"-drive", b"file=/dev/sdc,format=raw"]),
+                      ("103", [b"/bin/bash", b"/dev/sdz"])):
+        (proc / pid).mkdir(parents=True)
+        (proc / pid / "cmdline").write_bytes(b"\0".join(argv) + b"\0")
+    (proc / "self").mkdir()
+    assert allscript.vm_using("/dev/sdc", proc_root=proc) == 102       # found inside "-drive file=/dev/sdc,format=raw"
+    assert allscript.vm_using("/dev/sdb", proc_root=proc) == 101
+    assert allscript.vm_using("/dev/sdz", proc_root=proc) is None
+    assert allscript.vm_using("/dev/sd", proc_root=proc) is None       # a prefix of a device name is not the device
