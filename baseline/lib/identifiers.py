@@ -230,13 +230,32 @@ def _cross_map():
     return registry
 
 
-def map_external(parent: str, kind: str, name: str, external: str) -> str:
-    """The identifier associated with `external` (a UUID from outside Baseline: a disk, VM or filesystem UUID). The first call picks a
-    random own id and records the pair in the cross-map table; later calls return the same identifier, so the association is stable
-    even though it is not derivable from the inputs. Never derive an external mapping: use `lookup_external`."""
-    external = str(uuid.UUID(external))
+SCHEMES = ("uuid", "serial", "partuuid", "fsuuid", "vguuid", "pvuuid", "luks", "gptguid", "mac", "cdi", "vmid", "machine-id", "other")
+_SCHEME_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@+/-]{0,127}$")
+
+
+def _external_key(external: str, scheme: str) -> str:
+    """The cross-map key `scheme:value`; UUIDs are normalised to lower-case canonical form, every other value is taken as written."""
+    if scheme not in SCHEMES:
+        raise IdentifierError(f"unknown external scheme {scheme!r}; one of {', '.join(SCHEMES)}")
+    if scheme in ("uuid", "partuuid", "fsuuid", "vguuid", "pvuuid", "luks", "gptguid", "cdi", "machine-id"):
+        try:
+            return f"{scheme}:{uuid.UUID(external.removeprefix('GPU-') if scheme == 'cdi' else external)}"
+        except (ValueError, AttributeError, TypeError):
+            raise IdentifierError(f"not a UUID for scheme {scheme!r}: {external!r}") from None
+    if not isinstance(external, str) or not _SCHEME_VALUE.match(external):
+        raise IdentifierError(f"not a valid {scheme} value: {external!r}")
+    return f"{scheme}:{external.lower() if scheme == 'mac' else external}"
+
+
+def map_external(parent: str, kind: str, name: str, external: str, *, scheme: str = "uuid") -> str:
+    """The identifier associated with `external`, a value from outside Baseline (a disk, partition, filesystem, VG, LUKS or GPU UUID, a
+    MAC, a Proxmox VMID, a serial) named by its `scheme`. The first call picks a random own id and records the pair in the cross-map
+    table; later calls return the same identifier, so the association is stable even though it is not derivable from the inputs.
+    Use it for things Baseline did not name itself; things it names itself are minted with `mint` (deterministic)."""
+    key = _external_key(external, scheme)
     registry = _cross_map()
-    found = lookup_external(external)
+    found = lookup_external(external, scheme=scheme)
     if found:
         return found
     _registry()
@@ -245,24 +264,25 @@ def map_external(parent: str, kind: str, name: str, external: str) -> str:
         if registry.get_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL) is None:
             registry.upsert_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL, value={"by": "baseline"},
                                   attributes={"kind": kind, "level": KINDS[kind], "parent": parent, "name": name,
-                                              "layout": VERSION, "special": SPECIAL["external"], "external": external})
-            registry.upsert_entry(CROSS_MAP_TYPE, external, scope=registry.GLOBAL, value={"id": candidate},
-                                  attributes={"id": candidate})
+                                              "layout": VERSION, "special": SPECIAL["external"], "external": key})
+            registry.upsert_entry(CROSS_MAP_TYPE, key, scope=registry.GLOBAL, value={"id": candidate},
+                                  attributes={"id": candidate, "scheme": scheme})
             return candidate
     raise IdentifierError("no free identifier for an external mapping")
 
 
-def lookup_external(external: str) -> str | None:
+def lookup_external(external: str, *, scheme: str = "uuid") -> str | None:
     try:
-        external = str(uuid.UUID(external))
-    except (ValueError, AttributeError, TypeError):
+        key = _external_key(external, scheme)
+    except IdentifierError:
         return None
     registry = _cross_map()
-    entry = registry.get_entry(CROSS_MAP_TYPE, external, scope=registry.GLOBAL)
+    entry = registry.get_entry(CROSS_MAP_TYPE, key, scope=registry.GLOBAL)
     return _attributes(entry).get("id") if entry else None
 
 
 def external_of(guid: str) -> str | None:
+    """The `scheme:value` key an external identifier was recorded under, or None."""
     registry = _cross_map()
     entry = registry.get_entry(REGISTRY_TYPE, guid, scope=registry.GLOBAL)
     return _attributes(entry).get("external") if entry else None

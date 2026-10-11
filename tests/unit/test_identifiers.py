@@ -176,7 +176,24 @@ def test_an_external_uuid_maps_to_a_stable_but_not_derivable_identifier_through_
     first = idn.map_external(host, "vm", "imported-disk", outside)
     assert idn.is_valid(first) and idn.parse(first).special == idn.SPECIAL["external"]
     assert idn.map_external(host, "vm", "imported-disk", outside) == first          # stable once recorded
-    assert idn.lookup_external(outside) == first and idn.external_of(first) == outside
+    assert idn.lookup_external(outside) == first and idn.external_of(first) == "uuid:" + outside
     other = idn.map_external(host, "vm", "other", "11111111-2222-4333-8444-555555555555")
     assert other != first
     assert idn.lookup_external("not-a-uuid") is None
+
+
+def test_every_kind_of_external_identifier_maps_by_its_scheme_and_the_schemes_do_not_collide():
+    host = idn.host_id(LANE, PC601)
+    idn.register_host(host, serial=PC601)
+    same = "9b1d6f0e-3a54-4c1f-8f6e-0a1b2c3d4e5f"
+    part = idn.map_external(host, "hardware", "sda1", same, scheme="partuuid")
+    fs = idn.map_external(host, "hardware", "sda1-fs", same, scheme="fsuuid")
+    assert part != fs and idn.lookup_external(same, scheme="partuuid") == part and idn.lookup_external(same) is None
+    nic = idn.map_external(host, "hardware", "ens3", "AA:BB:CC:00:11:22", scheme="mac")
+    assert idn.lookup_external("aa:bb:cc:00:11:22", scheme="mac") == nic and idn.external_of(nic) == "mac:aa:bb:cc:00:11:22"
+    assert idn.lookup_external("120", scheme="vmid") is None
+    assert idn.map_external(host, "vm", "base", "120", scheme="vmid") == idn.lookup_external("120", scheme="vmid")
+    with pytest.raises(idn.IdentifierError):
+        idn.map_external(host, "hardware", "x", "nope", scheme="partuuid")
+    with pytest.raises(idn.IdentifierError):
+        idn.map_external(host, "hardware", "x", same, scheme="bogus")
