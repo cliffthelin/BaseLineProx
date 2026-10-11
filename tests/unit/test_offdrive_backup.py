@@ -869,3 +869,20 @@ def test_the_kernel_really_stops_a_capped_writer_at_the_budget(tmp_path):
     proc = subprocess.run(ob.capped(writer, 2**20), capture_output=True)
     assert proc.returncode != 0
     assert out.stat().st_size <= 2**20
+
+
+def test_an_image_budget_is_also_capped_to_a_fraction_of_the_source_drive():
+    """A backup of a drive that is about 5% used must never be allowed to approach the drive's own size."""
+    total = 10 * 1024**4
+    source = 512_110_190_592
+    free = 789 * 2**30
+    capped_budget = ob.budget_from(free=free, total=total, source_bytes=source)
+    assert capped_budget == int(source * ob.IMAGE_CAP_FRACTION) < free
+    assert capped_budget < source // 5                                    # far below the drive's size
+    # the destination's own free space still wins when it is the smaller limit
+    tight = 20 * 2**30 + int(total * ob.RESERVE_FRACTION)
+    assert ob.budget_from(free=tight, total=total, source_bytes=source) == 20 * 2**30
+    # without a source size the old behaviour is unchanged
+    assert ob.budget_from(free=free, total=total) == free - int(total * ob.RESERVE_FRACTION)
+    with pytest.raises(ValueError):
+        ob.budget_from(free=free, total=total, source_bytes=0)

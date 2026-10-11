@@ -176,7 +176,7 @@ def test_the_assistant_is_taken_from_cache_first_then_from_the_older_host_locati
     assert allscript.locate_assistant([tmp_path / "none"]) == tmp_path / "none"   # reported missing by preflight
 
 
-def test_only_the_install_stage_needs_root_the_recovery_image_runs_as_the_operator():
-    assert allscript.root_required(["preflight", "recovery"]) == []
-    assert allscript.root_required(["recovery", "cache", "install", "firstboot"]) == ["install"]
-    assert allscript.root_required(["rehearse"]) == []
+def test_only_the_recovery_stage_needs_root_and_install_does_not_once_the_drive_has_no_lvm():
+    assert allscript.root_required(["preflight"]) == []
+    assert allscript.root_required(["recovery", "cache", "install", "firstboot"]) == ["recovery"]
+    assert allscript.root_required(["rehearse"]) == [] and allscript.root_required(["install"]) == []

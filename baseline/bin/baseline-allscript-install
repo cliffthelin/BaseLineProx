@@ -74,7 +74,8 @@ INSTALL_VM = None                                         # the install stage's 
 
 STAGES = ("preflight", "recovery", "cache", "install", "firstboot", "kiosk")
 OPTIONAL_STAGES = ("rehearse",)        # run explicitly: --stage rehearse, then --stage firstboot/kiosk in one go
-ROOT_STAGES = {"install"}              # the recovery image only reads the drive, which the operator's `disk` group already allows
+ROOT_STAGES = {"recovery"}             # imaging needs a complete process-use inspection (drive_recovery.quiesce_source); install does not,
+                                       # once the drive carries no LVM volumes (see deactivate_target_vgs)
 
 
 # --- pure decisions (unit-tested) --------------------------------------------------------------
@@ -262,6 +263,9 @@ def deactivate_target_vgs(r, target):
     if not Path(pv).exists():
         return []
     rows = lvm_rows(r, pv)
+    if rows and os.geteuid() != 0:
+        raise RuntimeError(f"{TARGET_NAME} still carries LVM volumes ({', '.join(x['vg_name'] for x in rows)}); "
+                           "deactivating them needs root: run tools/take-ownership once, or run this stage with sudo")
     for row in rows:
         mapper = "/dev/mapper/" + row["vg_name"].replace("-", "--") + "-"
         mounted = [line for line in Path("/proc/self/mountinfo").read_text().splitlines()
@@ -286,7 +290,7 @@ def stage_preflight(r):
     free = shutil.disk_usage(BACKUP_ROOT).free
     if free < 100 * 1024**3:
         raise RuntimeError(f"less than 100 GiB free in {BACKUP_ROOT}")
-    isos = sorted(p.name for p in OS_ISOS.glob("*.iso")) if OS_ISOS.is_dir() else []
+    isos = select_os_isos([], [p.name for p in OS_ISOS.iterdir() if p.is_file()] if OS_ISOS.is_dir() else [], rehearsal=False)
     import drive_guard
     state = drive_guard.read_drive_state(target["path"])
     formattable = (not state.has_data) or drive_guard.is_installer_uuid(state.ptuuid)

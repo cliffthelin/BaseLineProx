@@ -116,7 +116,7 @@ def create_snapshot(runner, *, serial, destination, allowed_serials, pds_runner=
     # destination's 3% reserve, enforced by the kernel (prlimit --fsize): if the image would outgrow it, the
     # convert fails and the folder stays INCOMPLETE - the destination is never filled either way.
     free, total = offdrive_backup.free_and_total(dest.path)
-    budget = offdrive_backup.budget_from(free=free, total=total)
+    budget = offdrive_backup.budget_from(free=free, total=total, source_bytes=target["size_bytes"])
     folder = Path(dest.path) / ("baseline-recovery-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex)
     folder.mkdir(mode=0o700)
     incomplete = folder / "INCOMPLETE.json"
@@ -135,8 +135,9 @@ def create_snapshot(runner, *, serial, destination, allowed_serials, pds_runner=
         proc = runner.run(argv, timeout=14400)
         if proc.returncode:
             step = argv[argv.index("qemu-img") + 1]
-            limit = (f" (write budget {budget // 2**30} GiB: the image may have outgrown the space the "
-                     f"destination can spare above its 3% reserve)" if step == "convert" else "")
+            limit = (f" (write budget {budget // 2**30} GiB: at most {int(offdrive_backup.IMAGE_CAP_FRACTION * 100)}% of the "
+                     f"drive's size and within the destination's 3% reserve; an image that big means the drive holds far "
+                     f"more non-zero data than expected)" if step == "convert" else "")
             raise RecoveryError(f"recovery image {step} failed{limit}; incomplete output retained: "
                                 f"{proc.stderr.strip()}")
     _offline_disk(runner, serial)

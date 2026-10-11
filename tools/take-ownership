@@ -1,0 +1,69 @@
+#!/bin/bash
+# One-time, operator-run: make a development drive Baseline's own.
+#
+#   sudo tools/take-ownership PC601          # image it (verified, add-only), then clear it
+#   tools/take-ownership PC601 --dry-run     # show what would happen; needs no root and changes nothing
+#
+# Why this exists: baseline's data-protection guard (drive_guard.py, operator rule 2026-10-01) never formats a drive that holds
+# data Baseline did not create, and has no override. So the one-time clearing is done here, by the operator, outside
+# Baseline. It happens only after a recovery image of the drive was made and verified, and it refuses at every step it cannot
+# prove. Once the drive is empty, Baseline stamps it as installer-made and may reinstall it freely from then on.
+set -euo pipefail
+
+declare -A SERIALS=( [PC601]=FD01N6557110C271B )      # only the drive assigned to Claude; PC401 is Codex's and is not listed
+NAME="${1:-}"; MODE="${2:-}"
+[ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: take-ownership PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
+[ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || { echo "unknown option $MODE" >&2; exit 2; }
+SERIAL="${SERIALS[$NAME]}"
+OTHER=MD89N41071210AP4E
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+ALLSCRIPT="$REPO/baseline/bin/baseline-allscript-install"
+JOURNAL="/run/media/cane/CACHE/baseline-build/allscript-$NAME/progress.json"
+say() { echo "[take-ownership] $*"; }
+
+# 1. exactly one disk with this serial, and it is not the other drive or anything the system runs from
+mapfile -t FOUND < <(lsblk -dnpo PATH,SERIAL | awk -v s="$SERIAL" '$2 == s {print $1}')
+[ "${#FOUND[@]}" -eq 1 ] || { say "refusing: ${#FOUND[@]} disks carry serial $SERIAL"; exit 1; }
+DEV="${FOUND[0]}"
+OTHERDEV="$(lsblk -dnpo PATH,SERIAL | awk -v s="$OTHER" '$2 == s {print $1}')"
+[ "$DEV" != "$OTHERDEV" ] || { say "refusing: $DEV is the other drive"; exit 1; }
+while read -r mp; do
+  case "$mp" in
+    /|/boot*|/home*|/usr*|/var*|/etc*|/opt*|/srv*|/mnt/10TB*|/run/media/cane/CACHE*|/mnt/INSTALLER_CACHE*)
+      say "refusing: $DEV carries $mp, which the system uses"; exit 1;;
+  esac
+done < <(lsblk -nro MOUNTPOINTS "$DEV" | tr ' ' '\n' | grep '^/' | sort -u)
+say "$NAME is $DEV (serial $SERIAL):"; lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS "$DEV"
+
+if [ "$MODE" = "--dry-run" ]; then
+  say "dry run: would (1) image $NAME with $ALLSCRIPT --target $NAME --stage recovery and verify it,"
+  say "(2) unmount its filesystems, (3) deactivate its own LVM volume groups, (4) clear its partition table."
+  [ -f "$JOURNAL" ] && say "an earlier recovery is recorded in $JOURNAL" || say "no recovery image recorded yet"
+  exit 0
+fi
+[ "$(id -u)" -eq 0 ] || { say "run with sudo"; exit 1; }
+
+# 2. a verified recovery image first (add-only: a new folder under /mnt/10TB/backup; nothing is deleted)
+say "making and verifying the recovery image of $NAME (this can take a while)..."
+"$ALLSCRIPT" --target "$NAME" --stage recovery
+FOLDER="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['stages']['recovery']['folder'])" "$JOURNAL")"
+[ -d "$FOLDER" ] && [ -f "$FOLDER/manifest.json" -o -n "$(ls "$FOLDER" | head -1)" ] || { say "refusing: no recovery image at $FOLDER"; exit 1; }
+say "verified recovery image: $FOLDER"
+
+# 3. quiesce this host's use of the drive: unmount (never lazy or forced), then deactivate only its own volume groups
+for mp in $(lsblk -nro MOUNTPOINTS "$DEV" | tr ' ' '\n' | grep '^/' | sort -ru); do
+  say "unmounting $mp"; umount "$mp"
+done
+for pv in $(lsblk -nrpo PATH,FSTYPE "$DEV" | awk '$2 == "LVM2_member" {print $1}'); do
+  vg="$(pvs --noheadings -o vg_name --devices "$pv" 2>/dev/null | tr -d ' ')"
+  [ -z "$vg" ] || { say "deactivating volume group $vg on $pv"; vgchange --devices "$pv" -an "$vg"; }
+done
+
+# 4. clear the partition table and signatures; the drive is then empty and Baseline may stamp it as its own
+say "clearing $DEV"
+wipefs -a "$DEV" >/dev/null
+sgdisk --zap-all "$DEV" >/dev/null
+partprobe "$DEV" || true
+udevadm settle
+lsblk -o NAME,SIZE,FSTYPE "$DEV"
+say "done. $NAME is empty and ready; Baseline takes it from here."

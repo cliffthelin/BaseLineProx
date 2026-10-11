@@ -99,14 +99,17 @@ def _snapshot_setup(tmp_path, monkeypatch, *, free, total):
     return recovery, runner
 
 
-def test_the_recovery_image_is_written_under_a_kernel_cap_of_free_space_minus_the_reserve(tmp_path, monkeypatch):
+def test_the_recovery_image_is_written_under_a_kernel_cap_of_a_tenth_of_the_drive_within_free_space(tmp_path, monkeypatch):
     """The real numbers from 2026-10-10: 819.5 GB free on a 10 TB destination. Budgeting the raw 512 GB plus
-    headroom was the old rule; the budget is free minus 3% of the drive, enforced by prlimit."""
+    headroom was the old rule; the budget is free minus 3% of the destination, and never more than a tenth of the drive
+    being imaged (operator rule 2026-10-11: a drive that is about 5% used must not be backed up at its full size)."""
     free, total = 819_542_622_208, 10_000_611_147_776
     recovery, runner = _snapshot_setup(tmp_path, monkeypatch, free=free, total=total)
     folder = recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
-    budget = free - int(total * 0.03)
+    import offdrive_backup as ob
     qemu = [a for a in runner.calls if "qemu-img" in a]
+    budget = int(json.loads((folder / "MANIFEST.json").read_text())["size_bytes"] * ob.IMAGE_CAP_FRACTION)
+    assert budget < free - int(total * 0.03)
     assert qemu[0][:2] == ["prlimit", f"--fsize={budget}"] and qemu[0][2:4] == ["qemu-img", "convert"]
     assert all(a[0] == "qemu-img" for a in qemu[1:])              # check and compare only read: not capped
     assert json.loads((folder / "MANIFEST.json").read_text())["complete"] is True

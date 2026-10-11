@@ -52,6 +52,7 @@ MANIFEST_KIND = "baseline-backup-set"
 SET_RE = re.compile(r"^baseline-\d{8}T\d{6}Z(-\d+)?$")
 
 RESERVE_FRACTION = 0.03        # never leave the drive with less than 3% free
+IMAGE_CAP_FRACTION = 0.10      # a recovery image may never exceed this fraction of the drive it images (about 5% is used)
 HEADROOM = 1.10                # and require 10% more than the estimated size
 MIN_BUDGET_BYTES = 2**30       # a write budget smaller than this is not worth starting
 DEFAULT_MIN_INTERVAL_HOURS = 168
@@ -177,17 +178,25 @@ def _free_and_total(path) -> tuple:
     return st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
 
 
-def budget_from(*, free: int, total: int) -> int:
+def budget_from(*, free: int, total: int, source_bytes: int | None = None) -> int:
     """Bytes a single write may use: the drive's real free space minus its 3% reserve. Never the reserve itself.
 
     This replaces budgeting the worst case up front for writes whose real size is unknown until they finish - a
     compressed qcow2 recovery image of a mostly-empty 512 GB drive is a few GB, yet was charged 512 GB plus 10%
     headroom and refused. The budget is then enforced by the kernel (`capped`), so the reserve holds even if the
-    write turns out larger than hoped: it fails, it never fills the drive."""
+    write turns out larger than hoped: it fails, it never fills the drive.
+
+    `source_bytes` (the size of the drive being imaged) adds a second, tighter limit: IMAGE_CAP_FRACTION of it. The
+    operator's rule (2026-10-11): a backup of a drive that is only about 5% used must not use anything like the full
+    drive size, so an image that would outgrow that stops instead of consuming the backup drive."""
+    if source_bytes is not None and (not isinstance(source_bytes, int) or source_bytes <= 0):
+        raise ValueError(f"source size must be a positive byte count, got {source_bytes!r}")
     budget = free - int(total * RESERVE_FRACTION)
     if budget < MIN_BUDGET_BYTES:
         raise BackupError(f"the backup drive is at or near its 3% reserve ({free // 2**30} GiB free); "
                           "free some up yourself first")
+    if source_bytes is not None:
+        budget = min(budget, int(source_bytes * IMAGE_CAP_FRACTION))
     return budget
 
 
