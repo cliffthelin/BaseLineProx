@@ -45,7 +45,7 @@ def _reset_active_answer_server():
 def test_answer_template_renders_lvm_sizes_as_real_numbers_not_quoted_strings():
     for preset in si.LVM_SIZE_PRESETS.values():
         rendered = si.ANSWER_TEMPLATE.format(
-            fqdn="baseline.local", password_hash="$6$x$y", disk_serial="ABC123", **preset,
+            fqdn="baseline.local", password_hash="$6$x$y", disk_serial="ABC123", root_ssh_keys="", **preset,
         )
         parsed = tomllib.loads(rendered)
         disk_setup = parsed["disk-setup"]
@@ -613,3 +613,16 @@ def test_the_child_identity_reaches_the_first_boot_hook(tmp_path, monkeypatch):
     kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached-binary"
     si.build_and_write_self_installer(**kwargs, offline_cache=cache, child_identity=identity)
     assert seen["identity"] == identity
+
+
+def test_the_answer_file_can_carry_root_ssh_public_keys_and_refuses_anything_else():
+    import pytest
+    import self_installer as si
+    key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOqk3x1nQ0m8c0o5v0y7m1o1pXk3d3lW5v2uYbq0aYtq baseline-monitor"
+    base = dict(fqdn="h.local", password_hash="$6$x", disk_serial="S1", lvm_maxroot=16, lvm_maxvz=30, lvm_swapsize=2)
+    assert "root-ssh-keys" not in si.render_answer(**base)
+    text = si.render_answer(**base, root_ssh_keys=[key])
+    assert f'root-ssh-keys = ["{key}"]' in text and text.index("root-ssh-keys") < text.index("[network]")
+    for bad in ("-----BEGIN OPENSSH PRIVATE KEY-----", "ssh-rsa AAAA" + "B" * 60, key + '"\n[x]', key + "\n" + key, ""):
+        with pytest.raises(ValueError):
+            si.render_answer(**base, root_ssh_keys=[bad])

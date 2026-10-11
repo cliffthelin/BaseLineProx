@@ -42,6 +42,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import re
+
 import drive_setup_acquire as dsa
 import drive_setup_answer as dsan
 import drive_setup_install as dsi
@@ -86,7 +88,7 @@ fqdn = "{fqdn}"
 mailto = "root@baseline.test"
 timezone = "UTC"
 root-password-hashed = "{password_hash}"
-
+{root_ssh_keys}
 [network]
 source = "from-dhcp"
 
@@ -107,8 +109,21 @@ ordering = "network-online"
 """
 
 
-def render_answer(*, fqdn, password_hash, disk_serial, lvm_maxroot, lvm_maxvz, lvm_swapsize, first_boot=False):
-    text = ANSWER_TEMPLATE.format(fqdn=fqdn, password_hash=password_hash, disk_serial=disk_serial,
+_SSH_PUBLIC_KEY = re.compile(r"^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com) [A-Za-z0-9+/=]{40,} ?[^\r\n\"\\]{0,80}$")
+
+
+def check_ssh_public_key(key: str) -> str:
+    """A single-line OpenSSH public key of a modern type; anything else (a private key, an RSA key, extra lines, quotes) is refused."""
+    key = (key or "").strip()
+    if not _SSH_PUBLIC_KEY.match(key):
+        raise ValueError("not a single-line ed25519/ecdsa OpenSSH public key")
+    return key
+
+
+def render_answer(*, fqdn, password_hash, disk_serial, lvm_maxroot, lvm_maxvz, lvm_swapsize, first_boot=False, root_ssh_keys=()):
+    keys = [check_ssh_public_key(k) for k in root_ssh_keys]
+    line = ("root-ssh-keys = [" + ", ".join(f'"{k}"' for k in keys) + "]\n") if keys else ""
+    text = ANSWER_TEMPLATE.format(fqdn=fqdn, password_hash=password_hash, disk_serial=disk_serial, root_ssh_keys=line,
                                   lvm_maxroot=lvm_maxroot, lvm_maxvz=lvm_maxvz, lvm_swapsize=lvm_swapsize)
     return text + (FIRST_BOOT_SECTION if first_boot else "")
 
@@ -265,6 +280,7 @@ def build_and_write_self_installer(
     on_progress=None,
     admin_password: str | None = None,
     offline_cache: Path | None = None, os_share: Path | None = None, child_identity: dict | None = None,
+    root_ssh_keys=(),
 ) -> SelfInstallerResult:
     """`offline_cache` makes the installer self-contained: the ISO then also carries the first-boot hook
     (first_boot_hook.py) and this offline package cache, and the installed system finishes its own
@@ -434,7 +450,7 @@ def build_and_write_self_installer(
     answer_toml = render_answer(
         fqdn=fqdn, password_hash=pw_hash, disk_serial=disk_serial,
         lvm_maxroot=lvm_maxroot, lvm_maxvz=lvm_maxvz, lvm_swapsize=lvm_swapsize,
-        first_boot=first_boot_hook is not None,
+        first_boot=first_boot_hook is not None, root_ssh_keys=root_ssh_keys,
     )
     session_id = secrets.token_urlsafe(24)
     fingerprint = _cert_fingerprint(answer_runner, cert_path)
