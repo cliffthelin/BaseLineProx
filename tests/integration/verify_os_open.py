@@ -30,6 +30,8 @@ def nonblack_fraction(ppm: bytes) -> float:
 def main(image: str, settle_seconds: int = 90) -> int:
     host = baseline_web._vm_host_for({})
     report = {"image": image, "backend": getattr(host, "backend", "QEMU")}
+    listed = {Path(i["path"]).name: i["name"] for i in vm_page.available_isos(host, ISOS)}
+    image = listed.get(image, image)           # the VM page names an image by its Proxmox storage volume
     steps = (("create_iso", {"name": NAME, "iso": image, "disk_gb": 8, "memory_mb": 2048, "cpus": 2}),
              ("start", {"name": NAME, "display": "vnc"}))
     for action, params in steps:
@@ -43,8 +45,11 @@ def main(image: str, settle_seconds: int = 90) -> int:
         shot = Path(tempfile.mkdtemp()) / "screen.ppm"
         record = host._record(NAME) if hasattr(host, "_record") else None
         if record and record.get("vmid"):
-            subprocess.run(["qm", "monitor", str(record["vmid"])], input=f"screendump {shot}\n", text=True,
-                           capture_output=True, timeout=60)
+            try:
+                subprocess.run(["qm", "monitor", str(record["vmid"])], input=f"screendump {shot}\nquit\n", text=True,
+                               capture_output=True, timeout=30)
+            except subprocess.TimeoutExpired:
+                report["screendump"] = "qm monitor did not return"
         if shot.is_file():
             report["screen_nonblack_fraction"] = round(nonblack_fraction(shot.read_bytes()), 3)
     report["opened"] = bool(report.get("running")) and report.get("screen_nonblack_fraction", 0) > 0.02
