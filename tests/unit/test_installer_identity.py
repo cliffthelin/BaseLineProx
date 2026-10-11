@@ -55,17 +55,36 @@ def test_the_identity_starts_with_the_installer_then_the_serials_first_four_then
     assert groups[2] == "271b"                          # last 4 of FD01N6557110C271B
 
 
-def test_serial_characters_that_are_not_hex_digits_fold_into_a_hex_digit_by_a_fixed_rule():
-    groups = ii.child_uuid(LANE, PC401).split("-")      # MD89 ... AP4E: M and P are not hex digits
-    assert groups[1] == "dd89" and groups[2] == "a04e"  # M -> ord % 16 = d, P -> 0; hex digits keep their own value
-    assert ii.serial_nibbles("fd01") == "fd01" and ii.serial_nibbles("FD01") == "fd01"
+def test_non_hex_characters_in_a_serial_are_skipped_and_the_count_is_filled_from_the_hex_ones_that_follow():
+    """MD89N41071210AP4E: M, N and P are not hex digits. Scanning from the front the first four hex characters are D 8 9 4; scanning
+    from the back, the last four are 0 A 4 E."""
+    assert ii.serial_hex("MD89N41071210AP4E", 4) == "d894"
+    assert ii.serial_hex("MD89N41071210AP4E", 4, from_end=True) == "0a4e"
+    groups = ii.child_uuid(LANE, PC401).split("-")
+    assert groups[1] == "d894" and groups[2] == "0a4e"
+    # a serial that is all hex characters at both ends is read as it is written
+    assert ii.serial_hex("FD01N6557110C271B", 4) == "fd01" and ii.serial_hex("FD01N6557110C271B", 4, from_end=True) == "271b"
+    assert ii.serial_hex("fd01", 4) == "fd01"                                   # case does not matter
+
+
+def test_a_serial_with_too_few_hex_characters_is_filled_with_the_reserved_non_hex_value():
+    assert ii.NON_HEX == "0"
+    assert ii.serial_hex("GH1JKL2M", 4) == "1200"                               # two hex characters, then the filler
+    assert ii.serial_hex("GH1JKL2M", 4, from_end=True) == "0012"                # filler first, so the hex ones stay at the end
+    assert ii.serial_hex("GHJKLMNP", 4) == "0000" == ii.serial_hex("GHJKLMNP", 4, from_end=True)
+    assert drive_guard.normalize_guid(ii.child_uuid(LANE, "GHJKLMNP"))          # still a valid UUID
+
+
+def test_the_identity_of_pc601_is_pinned():
+    """A drive's identity must not change: this string is what PC601 carries."""
+    assert ii.child_uuid(LANE, PC601) == "4af8c95a-fd01-271b-b1ae-f19827f945b7"
 
 
 def test_the_rest_carries_a_layout_marker_a_check_and_a_hash_of_the_whole_installer_and_serial():
     groups = ii.child_uuid(LANE, PC601).split("-")
     assert groups[3].startswith(ii.LAYOUT) and len(groups[3]) == 4          # marker + 1 check byte
-    # two drives that share their first and last four characters still differ, through the hash of the full serial
-    a, b = ii.child_uuid(LANE, "ABCD1111WXYZ"), ii.child_uuid(LANE, "ABCD2222WXYZ")
+    # two drives that share their first and last four hex characters still differ, through the hash of the full serial
+    a, b = ii.child_uuid(LANE, "ABCD11WXYZ22EF01"), ii.child_uuid(LANE, "ABCD33WXYZ44EF01")
     assert a.split("-")[:3] == b.split("-")[:3] and a != b and a.split("-")[4] != b.split("-")[4]
 
 

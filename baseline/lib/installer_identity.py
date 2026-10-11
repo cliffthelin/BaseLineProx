@@ -14,10 +14,12 @@ The identity of a drive an installer installed is derived, never generated, and 
     |          the FIRST 4 characters of the drive's serial
     the first 8 hex digits of the installer UUID
 
-A UUID is hex only and serials are not (`MD89N41071210AP4E`), so a serial character that is not a hex digit folds into one by a
-fixed rule (`ord(c) % 16`); hex digits keep their own value. Those two groups are therefore a recognisable hint, not the serial;
-the hash group binds the identity to the exact full serial, so two drives that share their first and last four characters still
-differ. The check byte lets anyone tell which installer lane minted a UUID without knowing the serial (`minted_by`).
+A UUID is hex only and serials are not (`MD89N41071210AP4E`), so non-hex characters are skipped: the first group is the first four HEX
+characters of the serial read from the front, the second the last four hex characters read from the back, kept in their written
+order. If a serial has fewer than four hex characters the count is filled with the reserved value `0` (NON_HEX). Those two groups are
+therefore a recognisable hint, not the serial; the hash group binds the identity to the exact full serial, so two drives that share
+those characters still differ. The check byte lets anyone tell which installer lane minted a UUID without knowing the serial
+(`minted_by`).
 
 The same installer and the same drive therefore always give the same UUID, across any number of reinstalls, and it differs between
 installers and between drives. It is written to the drive's GPT disk identifier (`sgdisk -U`, which changes nothing else) and
@@ -38,6 +40,7 @@ FILE_NAME = "INSTALLER_UUID"        # baseline/INSTALLER_UUID: this lane's pinne
 _SERIAL = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")           # at least 8, so the first and last four characters never overlap
 LAYOUT = "b1"                                                # marker of this layout (Baseline child, version 1)
 _HEX = "0123456789abcdef"
+NON_HEX = "0"                                                # reserved filler when a serial has too few hex characters
 
 
 class IdentityError(RuntimeError):
@@ -61,9 +64,15 @@ def installer_id(directory) -> str:
     return new
 
 
-def serial_nibbles(text: str) -> str:
-    """Each character as one hex digit: a hex digit keeps its own value, any other character folds in as `ord % 16`."""
-    return "".join(c.lower() if c.lower() in _HEX else format(ord(c.upper()) % 16, "x") for c in text)
+def serial_hex(serial: str, count: int, *, from_end: bool = False) -> str:
+    """`count` hex characters of `serial`, skipping every non-hex character: from the front, or the last `count` (kept in written
+    order) when `from_end`. Filled with NON_HEX when the serial has too few; the fill goes where the missing characters would be."""
+    hexes = [c.lower() for c in serial if c.lower() in _HEX]
+    if from_end:
+        taken = hexes[-count:]
+        return NON_HEX * (count - len(taken)) + "".join(taken)
+    taken = hexes[:count]
+    return "".join(taken) + NON_HEX * (count - len(taken))
 
 
 def _check(prefix: str, head: str, tail: str, installer: str) -> str:
@@ -75,7 +84,7 @@ def child_uuid(installer: str, serial: str) -> str:
         raise IdentityError("a drive's identity needs its plain hardware serial, at least 8 characters")
     installer = str(uuid.UUID(installer))
     prefix = installer.replace("-", "")[:8]
-    head, tail = serial_nibbles(serial[:4]), serial_nibbles(serial[-4:])
+    head, tail = serial_hex(serial, 4), serial_hex(serial, 4, from_end=True)
     body = hashlib.sha256(f"{installer}:{serial}".encode()).hexdigest()[:12]
     return f"{prefix}-{head}-{tail}-{LAYOUT}{_check(prefix, head, tail, installer)}-{body}"
 

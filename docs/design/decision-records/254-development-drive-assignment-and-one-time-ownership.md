@@ -91,11 +91,13 @@ the end of the day, one new one per install. Now (`installer_identity.py`, `base
 - A drive's identity is derived, never generated, in the operator's layout: `AAAAAAAA-SSSS-EEEE-Vcc-HHHHHHHHHHHH`: the first 8 hex digits
   of the installer UUID, the first 4 and the last 4 characters of the drive's serial, then a layout marker `b1` with a check byte
   (so a UUID shows which lane minted it without knowing the serial: `minted_by`), then 12 hex digits of
-  sha256(installer UUID : full serial). Serial characters that are not hex digits fold in by a fixed rule (`ord % 16`; hex digits keep
-  their value), so those two groups are a recognisable hint and the hash group binds the identity to the exact serial. The same
-  installer and drive always give the same UUID; it differs between lanes and between drives. PC601's:
-  `4af8c95a-fd01-271b-b1ae-f19827f945b7`. (The first version of this design used a plain uuid5; the layout above replaced it the same
-  day, so the earlier `f337b480-...` PC601 entry is stale.)
+  sha256(installer UUID : full serial). Non-hex serial characters are skipped (operator rule): the first group is the first four hex
+  characters read from the front, the second the last four read from the back, in written order; a serial with too few hex
+  characters is filled with the reserved value `0`. So those two groups are a recognisable hint and the hash group binds the identity
+  to the exact serial. The same installer and drive always give the same UUID; it differs between lanes and between drives. PC601's:
+  `4af8c95a-fd01-271b-b1ae-f19827f945b7`; PC401 would be `4af8c95a-d894-0a4e-b168-...` (`MD89N41071210AP4E`: M, N and P skipped).
+  (The first version of this design used a plain uuid5; the layout replaced it the same day, so the earlier `f337b480-...` PC601
+  entry is stale.)
 - After the installer's VM has exited, success or failure (`finally` in `main`, or `--stage identity` on its own), the disk identifier is set
   to that UUID (`sgdisk -U`, nothing else changes; nothing is written if it already carries it), verified by reading it back from the
   device, and registered against the serial. The registry record outlives any wipe; a reinstall stamps the same UUID again.
