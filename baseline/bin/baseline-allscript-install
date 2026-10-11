@@ -636,15 +636,14 @@ def stage_rehearse(r):
     if work.exists():
         shutil.rmtree(work)
     work.mkdir(parents=True)
-    password = dsan.generate_one_time_password()
-    secret = work / "root-password"; secret.write_bytes(password + b"\n"); secret.chmod(0o600)
+    password = dev_root_password().encode()                # the development password, so the rehearsal VM is reachable like the real drive
     answer = work / "answer.toml"
     answer.write_text(si.render_answer(fqdn="baseline-rehearsal.local",
                                        password_hash=dsan.hash_password_sha512crypt(password, secrets.token_hex(8)),
-                                       disk_serial="BLREHEARSAL01", first_boot=True,
+                                       disk_serial="BLREHEARSAL01", first_boot=True, root_ssh_keys=monitor_keys(),
                                        **si.LVM_SIZE_PRESETS["single-drive"]))
     answer.chmod(0o600)                                    # holds the password hash; the build drive's ACLs widen it
-    hook = fbh.build_hook(REPO, work / "baseline-first-boot", child_identity=child_identity_for("BLREHEARSAL01"))
+    hook = fbh.build_hook(REPO, work / "baseline-first-boot", child_identity=child_identity_for("BLREHEARSAL01"), dev_user=dev_user())
     prepared = dsan.prepare_iso_defensively(
         dsan.RealAnswerRunner(), binary=ASSISTANT, source_iso=SOURCE_ISO, answer_file=answer, fetch_from="iso",
         output_path=work / "answer.iso", tmp_dir=work / "prep-tmp", workspace_root=work, expected_fetch_mode="iso",
@@ -668,7 +667,7 @@ def stage_rehearse(r):
     argv = invocation.argv + ["-display", "none"]
     global INSTALL_VM
     INSTALL_VM = dsi.RealInstallRunner().popen(argv, monitor_socket=work / "monitor.sock")
-    say("rehearsal installing with no network; root password for this disposable VM:", secret)
+    say("rehearsal installing with no network; root and the development login use the development passwords (not shown)")
     watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
     record("rehearse", workspace=str(work))
 
