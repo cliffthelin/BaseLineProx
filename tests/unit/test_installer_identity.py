@@ -40,12 +40,47 @@ def test_a_drives_identity_is_fixed_by_installer_and_serial_alone():
     assert ii.child_uuid(installer, PC601) != ii.child_uuid(installer, PC401)           # aligned to the serial
     assert ii.child_uuid(installer, PC601) != ii.child_uuid(str(uuid.uuid4()), PC601)   # and to the installer
     assert drive_guard.normalize_guid(ii.child_uuid(installer, PC601)) == ii.child_uuid(installer, PC601)
+    assert str(uuid.UUID(ii.child_uuid(installer, PC601))) == ii.child_uuid(installer, PC601)
 
 
-@pytest.mark.parametrize("serial", ["", "bad serial!", "x" * 65])
-def test_a_serial_that_is_not_a_plain_serial_has_no_identity(serial):
+LANE = "4af8c95a-1c9b-437a-a306-c53855d4077f"
+
+
+def test_the_identity_starts_with_the_installer_then_the_serials_first_four_then_its_last_four():
+    """Operator layout (2026-10-11): first 8 of the installer UUID, then the first 4 and the last 4 of the drive's serial."""
+    groups = ii.child_uuid(LANE, PC601).split("-")
+    assert [len(g) for g in groups] == [8, 4, 4, 4, 12]
+    assert groups[0] == "4af8c95a"                      # first 8 of the installer UUID
+    assert groups[1] == "fd01"                          # first 4 of FD01N6557110C271B
+    assert groups[2] == "271b"                          # last 4 of FD01N6557110C271B
+
+
+def test_serial_characters_that_are_not_hex_digits_fold_into_a_hex_digit_by_a_fixed_rule():
+    groups = ii.child_uuid(LANE, PC401).split("-")      # MD89 ... AP4E: M and P are not hex digits
+    assert groups[1] == "dd89" and groups[2] == "a04e"  # M -> ord % 16 = d, P -> 0; hex digits keep their own value
+    assert ii.serial_nibbles("fd01") == "fd01" and ii.serial_nibbles("FD01") == "fd01"
+
+
+def test_the_rest_carries_a_layout_marker_a_check_and_a_hash_of_the_whole_installer_and_serial():
+    groups = ii.child_uuid(LANE, PC601).split("-")
+    assert groups[3].startswith(ii.LAYOUT) and len(groups[3]) == 4          # marker + 1 check byte
+    # two drives that share their first and last four characters still differ, through the hash of the full serial
+    a, b = ii.child_uuid(LANE, "ABCD1111WXYZ"), ii.child_uuid(LANE, "ABCD2222WXYZ")
+    assert a.split("-")[:3] == b.split("-")[:3] and a != b and a.split("-")[4] != b.split("-")[4]
+
+
+def test_a_uuid_can_be_checked_as_minted_by_a_lane_without_knowing_the_serial():
+    mine = ii.child_uuid(LANE, PC601)
+    assert ii.minted_by(mine, LANE)
+    assert not ii.minted_by(mine, "5029a80d-c748-4616-aa08-99ac560f5311")      # the parallel lane did not mint it
+    assert not ii.minted_by(mine.replace("fd01", "fd02", 1), LANE)             # an altered field fails its check
+    assert not ii.minted_by("not-a-uuid", LANE)
+
+
+@pytest.mark.parametrize("serial", ["", "bad serial!", "x" * 65, "SHORT", "1234567"])
+def test_a_serial_that_is_not_a_plain_serial_of_at_least_eight_characters_has_no_identity(serial):
     with pytest.raises(ii.IdentityError):
-        ii.child_uuid(str(uuid.uuid4()), serial)
+        ii.child_uuid(LANE, serial)
 
 
 def _device(initial):

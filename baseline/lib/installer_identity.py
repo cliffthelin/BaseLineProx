@@ -4,14 +4,29 @@ Each installer lane (this one, the parallel effort's) has ONE UUID of its own, p
 first time it is needed and never changed afterwards. A lane keeps its own file when source moves between lanes (`.gitattributes`:
 `merge=ours`), and a test pins that this lane's value differs from the parallel lane's.
 
-The identity of a drive an installer installed is derived, not generated: uuid5(installer UUID, drive serial). The same installer
-and the same drive therefore always give the same UUID, across any number of reinstalls, and it differs between installers and
-between drives. It is written to the drive's GPT disk identifier (`sgdisk -U`, which changes nothing else) and registered in the
-installer registry (drive_guard.py) against the serial. The registry record outlives any wipe of the drive, and a reinstall simply
-stamps the same UUID again, so the identity never changes.
+The identity of a drive an installer installed is derived, never generated, and laid out as a readable control structure
+(operator layout, 2026-10-11):
+
+    AAAAAAAA - SSSS - EEEE - Vcc - HHHHHHHHHHHH
+    |          |      |      |      the first 12 hex digits of sha256(installer UUID : full serial)
+    |          |      |      layout marker V=`b1` (Baseline child, layout 1) + `cc`, a check byte over the first three groups
+    |          |      the LAST 4 characters of the drive's serial
+    |          the FIRST 4 characters of the drive's serial
+    the first 8 hex digits of the installer UUID
+
+A UUID is hex only and serials are not (`MD89N41071210AP4E`), so a serial character that is not a hex digit folds into one by a
+fixed rule (`ord(c) % 16`); hex digits keep their own value. Those two groups are therefore a recognisable hint, not the serial;
+the hash group binds the identity to the exact full serial, so two drives that share their first and last four characters still
+differ. The check byte lets anyone tell which installer lane minted a UUID without knowing the serial (`minted_by`).
+
+The same installer and the same drive therefore always give the same UUID, across any number of reinstalls, and it differs between
+installers and between drives. It is written to the drive's GPT disk identifier (`sgdisk -U`, which changes nothing else) and
+registered in the installer registry (drive_guard.py) against the serial. The registry record outlives any wipe of the drive, and a
+reinstall simply stamps the same UUID again, so the identity never changes.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import uuid
@@ -20,7 +35,9 @@ from pathlib import Path
 import drive_guard
 
 FILE_NAME = "INSTALLER_UUID"        # baseline/INSTALLER_UUID: this lane's pinned installer UUID (each lane keeps its own)
-_SERIAL = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_SERIAL = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")           # at least 8, so the first and last four characters never overlap
+LAYOUT = "b1"                                                # marker of this layout (Baseline child, version 1)
+_HEX = "0123456789abcdef"
 
 
 class IdentityError(RuntimeError):
@@ -44,10 +61,35 @@ def installer_id(directory) -> str:
     return new
 
 
+def serial_nibbles(text: str) -> str:
+    """Each character as one hex digit: a hex digit keeps its own value, any other character folds in as `ord % 16`."""
+    return "".join(c.lower() if c.lower() in _HEX else format(ord(c.upper()) % 16, "x") for c in text)
+
+
+def _check(prefix: str, head: str, tail: str, installer: str) -> str:
+    return hashlib.sha256(f"{prefix}{head}{tail}:{installer}".encode()).hexdigest()[:2]
+
+
 def child_uuid(installer: str, serial: str) -> str:
     if not isinstance(serial, str) or not _SERIAL.match(serial):
-        raise IdentityError("a drive's identity needs its plain hardware serial")
-    return str(uuid.uuid5(uuid.UUID(installer), serial))
+        raise IdentityError("a drive's identity needs its plain hardware serial, at least 8 characters")
+    installer = str(uuid.UUID(installer))
+    prefix = installer.replace("-", "")[:8]
+    head, tail = serial_nibbles(serial[:4]), serial_nibbles(serial[-4:])
+    body = hashlib.sha256(f"{installer}:{serial}".encode()).hexdigest()[:12]
+    return f"{prefix}-{head}-{tail}-{LAYOUT}{_check(prefix, head, tail, installer)}-{body}"
+
+
+def minted_by(guid: str, installer: str) -> bool:
+    """Whether `guid` has this layout and was minted by `installer`'s lane, judged from the UUID alone (no serial needed)."""
+    try:
+        groups = str(uuid.UUID(guid)).split("-")
+        installer = str(uuid.UUID(installer))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    prefix = installer.replace("-", "")[:8]
+    return (groups[0] == prefix and groups[3].startswith(LAYOUT)
+            and groups[3][2:] == _check(prefix, groups[1], groups[2], installer))
 
 
 def _real_run(argv):

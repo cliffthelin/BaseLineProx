@@ -88,8 +88,14 @@ the end of the day, one new one per install. Now (`installer_identity.py`, `base
   parallel lane's `5029a80d-...` is never copied, and a test pins the difference). `.gitattributes` marks the file `merge=ours` (needs
   `git config merge.ours.driver true` once per clone) so a lane keeps its own when source moves between lanes (DR304). A damaged file is
   refused, never silently replaced.
-- A drive's identity is `uuid5(installer UUID, drive serial)`: fixed by the installer and the serial alone, identical across any number
-  of reinstalls, different between installers and between drives. This installer's PC601 identity is `f337b480-e7d7-533f-8a38-6a6af014a614`.
+- A drive's identity is derived, never generated, in the operator's layout: `AAAAAAAA-SSSS-EEEE-Vcc-HHHHHHHHHHHH`: the first 8 hex digits
+  of the installer UUID, the first 4 and the last 4 characters of the drive's serial, then a layout marker `b1` with a check byte
+  (so a UUID shows which lane minted it without knowing the serial: `minted_by`), then 12 hex digits of
+  sha256(installer UUID : full serial). Serial characters that are not hex digits fold in by a fixed rule (`ord % 16`; hex digits keep
+  their value), so those two groups are a recognisable hint and the hash group binds the identity to the exact serial. The same
+  installer and drive always give the same UUID; it differs between lanes and between drives. PC601's:
+  `4af8c95a-fd01-271b-b1ae-f19827f945b7`. (The first version of this design used a plain uuid5; the layout above replaced it the same
+  day, so the earlier `f337b480-...` PC601 entry is stale.)
 - After the installer's VM has exited, success or failure (`finally` in `main`, or `--stage identity` on its own), the disk identifier is set
   to that UUID (`sgdisk -U`, nothing else changes; nothing is written if it already carries it), verified by reading it back from the
   device, and registered against the serial. The registry record outlives any wipe; a reinstall stamps the same UUID again.
