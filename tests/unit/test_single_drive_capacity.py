@@ -74,3 +74,47 @@ def test_installation_profile_reserves_room_for_ubuntu_desktop():
     import self_installer
     profile = self_installer.single_drive_profile(512110190592)
     assert profile['storage']['volumes_gib']['BASELINE'] >= 50
+
+
+# --- grow-on-demand (operator, 2026-10-11: "1 GB each volume only grows if actually used and needed") ----------------------------
+
+GIB = 1024 ** 3
+SMALL = {"lvm_maxroot": 16, "lvm_maxvz": 8, "lvm_swapsize": 2}
+
+
+def _measured(**overrides):
+    required = {v[3]: 0 for v in di.BASELINE_VOLUMES}
+    required.update(INSTALLER_CACHE=6 * GIB, USER_ADMIN=262144, BASELINE=139264)
+    required.update(overrides)
+    return required
+
+
+def test_grow_on_demand_starts_every_role_at_its_measured_need_and_at_least_one_gib():
+    plan = di.single_drive_plan(64 * GIB, host_bytes=30 * GIB, required_bytes=_measured(), grow_on_demand=True)
+    assert plan["capacity_basis"] == "grow-on-demand"
+    assert plan["volumes_gib"]["INSTALLER_CACHE"] == 6
+    assert all(plan["volumes_gib"][label] == 1 for label in plan["volumes_gib"] if label != "INSTALLER_CACHE")
+    assert plan["unallocated_bytes"] > 20 * GIB                 # the rest stays free for volumes to grow into
+
+
+def test_grow_on_demand_still_refuses_a_drive_that_cannot_hold_the_host_the_measured_roles_and_the_growth_reserve():
+    with pytest.raises(ValueError, match="cannot fit"):
+        di.single_drive_plan(40 * GIB, host_bytes=30 * GIB, required_bytes=_measured(), grow_on_demand=True)
+    with pytest.raises(ValueError, match="cannot fit"):
+        di.single_drive_plan(64 * GIB, host_bytes=30 * GIB, required_bytes=_measured(USER_PERSONAL=40 * GIB), grow_on_demand=True)
+
+
+def test_without_grow_on_demand_the_fixed_minimum_plan_is_unchanged_for_the_real_drive():
+    size = 512_110_190_592
+    assert (di.single_drive_plan(size, host_bytes=106 * GIB)
+            == di.single_drive_plan(size, host_bytes=106 * GIB, grow_on_demand=False))
+    assert di.single_drive_plan(size, host_bytes=106 * GIB)["capacity_basis"] == "role-minimums"
+    with pytest.raises(ValueError, match="cannot fit"):
+        di.single_drive_plan(64 * GIB, host_bytes=30 * GIB, required_bytes=_measured())
+
+
+def test_a_grow_profile_uses_the_measured_host_sizes_not_the_real_drive_preset():
+    profile = si.single_drive_profile(64 * GIB, required_bytes=_measured(), grow_on_demand=True, installer_sizes=SMALL,
+                                      host_bytes_measured=28 * GIB)
+    assert profile["installer_sizes"] == SMALL and profile["thin_data_min_bytes"] == 0
+    assert profile["storage"]["host_bytes"] == 30 * GIB

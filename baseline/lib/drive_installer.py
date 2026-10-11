@@ -465,8 +465,13 @@ def single_drive_plan(size_bytes: int, *, host_bytes: int,
                       personas: tuple = DEFAULT_PERSONAS,
                       growth_percent: int = DEFAULT_GROWTH_PERCENT,
                       migration_bytes: int = 0,
-                      required_bytes: dict | None = None, baseline_min_gib: int = 5) -> dict:
+                      required_bytes: dict | None = None, baseline_min_gib: int = 5,
+                      grow_on_demand: bool = False) -> dict:
     """Budget one complete installation, without reallocating existing contents.
+
+    `grow_on_demand` (operator, 2026-10-11: "1 GB each volume only grows if actually used and needed"): every role starts at its measured
+    need, never below 1 GiB, and the rest of the drive stays free in the volume group for volume_growth.py to hand out when a role fills.
+    The role minimums and the proportional split do not apply. Without it the behaviour is exactly the earlier fixed-minimum plan.
 
     host_bytes includes EFI/boot, root/swap, OS pool and its metadata. Callers
     must supply measured/reserved physical bytes, never thin logical capacity.
@@ -480,6 +485,8 @@ def single_drive_plan(size_bytes: int, *, host_bytes: int,
     if type(growth_percent) is not int or not 0 <= growth_percent <= 50:
         raise ValueError("growth_percent must be an integer from 0 to 50")
     growth_bytes = (size_bytes * growth_percent + 99) // 100
+    if grow_on_demand:
+        return _grow_on_demand_plan(size_bytes, host_bytes, growth_bytes, migration_bytes, personas, required_bytes)
     available = size_bytes - host_bytes - growth_bytes - migration_bytes
     if type(baseline_min_gib) is not int or not 5 <= baseline_min_gib <= 4096:
         raise ValueError("BASELINE runtime reservation must be between 5 and 4096 GiB")
@@ -504,6 +511,25 @@ def single_drive_plan(size_bytes: int, *, host_bytes: int,
             "safety_bytes": DEFAULT_SAFETY_MARGIN_BYTES,
             "unallocated_bytes": size_bytes - host_bytes - migration_bytes - sum(sizes.values()) * 1024**3,
             "capacity_basis": "measured-workload" if required_bytes is not None else "role-minimums",
+            "executed": False}
+
+
+def _grow_on_demand_plan(size_bytes, host_bytes, growth_bytes, migration_bytes, personas, required_bytes):
+    labels = [v[3] for v in baseline_volumes_for(personas)]
+    if required_bytes is not None and (not isinstance(required_bytes, dict) or set(required_bytes) != set(labels)
+                                       or any(type(v) is not int or v < 0 for v in required_bytes.values())):
+        raise ValueError("required_bytes must measure every storage role exactly once")
+    gib = 1024 ** 3
+    sizes = {label: max(1, -(-(required_bytes or {}).get(label, 0) // gib)) for label in labels}
+    needed = host_bytes + growth_bytes + migration_bytes + DEFAULT_SAFETY_MARGIN_BYTES + sum(sizes.values()) * gib
+    if size_bytes < needed:
+        raise ValueError("one drive cannot fit host storage, every role's minimum, growth and migration staging; "
+                         "measure suitable slower storage for cold vanilla sources and infrequent templates first")
+    return {"volumes_gib": sizes, "host_bytes": host_bytes,
+            "growth_bytes": growth_bytes, "migration_bytes": migration_bytes,
+            "safety_bytes": DEFAULT_SAFETY_MARGIN_BYTES,
+            "unallocated_bytes": size_bytes - host_bytes - migration_bytes - sum(sizes.values()) * gib,
+            "capacity_basis": "grow-on-demand",
             "executed": False}
 
 

@@ -8,6 +8,12 @@ import self_installer
 
 FORMAT = "baseline-independent-drive-v2"
 LEGACY_FORMAT = "baseline-independent-drive-v1"
+# v3 (operator, 2026-10-11): every role starts at its measured need (at least 1 GiB) and grows when used (volume_growth.py). The policy also
+# records the host allocation it was planned against. v1 and v2 policies on installed drives are rebuilt by exactly the earlier formula.
+GROW_FORMAT = "baseline-independent-drive-v3"
+_BASE_KEYS = {"format", "serial", "size_bytes", "personas", "growth_percent", "migration_bytes", "required_bytes", "bindings",
+              "capacity", "boot_verified"}
+_GROW_KEYS = _BASE_KEYS | {"installer_sizes", "host_bytes"}
 POLICY_PATH = "/mnt/SUBSTRATE/storage-policy.json"
 
 
@@ -16,8 +22,9 @@ class PolicyError(ValueError):
 
 
 def build_policy(*, serial, size_bytes, required_bytes, bindings,
-                 personas=di.DEFAULT_PERSONAS, growth_percent=20, migration_bytes=0, policy_format=FORMAT):
-    if policy_format not in (FORMAT, LEGACY_FORMAT):
+                 personas=di.DEFAULT_PERSONAS, growth_percent=20, migration_bytes=0, policy_format=FORMAT,
+                 installer_sizes=None, host_bytes=None):
+    if policy_format not in (FORMAT, LEGACY_FORMAT, GROW_FORMAT):
         raise PolicyError("unsupported independent-drive policy format")
     if not isinstance(serial, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", serial):
         raise PolicyError("a stable drive serial is required")
@@ -39,28 +46,40 @@ def build_policy(*, serial, size_bytes, required_bytes, bindings,
         if identity != binding["uuid"] or identity in identities or uuid.UUID(identity).int == 0:
             raise PolicyError("role filesystem identities must be canonical, nonzero and distinct")
         identities.add(identity)
+    grow = policy_format == GROW_FORMAT
+    if grow:
+        if (not isinstance(installer_sizes, dict) or set(installer_sizes) != {"lvm_maxroot", "lvm_maxvz", "lvm_swapsize"}
+                or any(type(v) is not int or v < 0 for v in installer_sizes.values())
+                or type(host_bytes) is not int or host_bytes < 0):
+            raise PolicyError("a grow-on-demand policy records the measured host sizes and host allocation")
+    elif installer_sizes is not None or host_bytes is not None:
+        raise PolicyError("only a grow-on-demand policy records measured host sizes")
     try:
         profile = self_installer.single_drive_profile(
             size_bytes, personas=tuple(personas), growth_percent=growth_percent,
             migration_bytes=migration_bytes, required_bytes=required_bytes,
-            reserve_gui_runtime=policy_format == FORMAT)
+            reserve_gui_runtime=policy_format == FORMAT,
+            **({"grow_on_demand": True, "installer_sizes": installer_sizes, "host_bytes_measured": host_bytes} if grow else {}))
     except ValueError as exc:
         raise PolicyError(str(exc)) from None
-    return {"format": policy_format, "serial": serial, "size_bytes": size_bytes,
-            "personas": list(personas), "growth_percent": growth_percent,
-            "migration_bytes": migration_bytes, "required_bytes": dict(required_bytes),
-            "bindings": {k: dict(v) for k, v in bindings.items()},
-            "capacity": profile["storage"], "boot_verified": False}
+    policy = {"format": policy_format, "serial": serial, "size_bytes": size_bytes,
+              "personas": list(personas), "growth_percent": growth_percent,
+              "migration_bytes": migration_bytes, "required_bytes": dict(required_bytes),
+              "bindings": {k: dict(v) for k, v in bindings.items()},
+              "capacity": profile["storage"], "boot_verified": False}
+    if grow:
+        policy.update(installer_sizes=dict(installer_sizes), host_bytes=host_bytes)
+    return policy
 
 
 def validate_policy(policy):
-    if not isinstance(policy, dict) or set(policy) != {
-            "format", "serial", "size_bytes", "personas", "growth_percent", "migration_bytes",
-            "required_bytes", "bindings", "capacity", "boot_verified"} or policy["format"] not in (FORMAT, LEGACY_FORMAT):
+    if (not isinstance(policy, dict) or policy.get("format") not in (FORMAT, LEGACY_FORMAT, GROW_FORMAT)
+            or set(policy) != (_GROW_KEYS if policy["format"] == GROW_FORMAT else _BASE_KEYS)):
         raise PolicyError("invalid independent-drive policy schema")
+    extra = {k: policy[k] for k in ("installer_sizes", "host_bytes")} if policy["format"] == GROW_FORMAT else {}
     rebuilt = build_policy(**{k: policy[k] for k in (
         "serial", "size_bytes", "personas", "growth_percent", "migration_bytes", "required_bytes", "bindings")},
-        policy_format=policy["format"])
+        policy_format=policy["format"], **extra)
     if policy != rebuilt:
         raise PolicyError("policy capacity or verification claims disagree with its measurements")
     return policy

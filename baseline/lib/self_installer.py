@@ -155,7 +155,9 @@ LVM_SIZE_PRESETS = {
 
 def single_drive_profile(size_bytes: int, *, personas=("admin", "personal"),
                           growth_percent: int = 20, migration_bytes: int = 0,
-                          required_bytes: dict | None = None, reserve_gui_runtime: bool = True) -> dict:
+                          required_bytes: dict | None = None, reserve_gui_runtime: bool = True,
+                          grow_on_demand: bool = False, installer_sizes: dict | None = None,
+                          host_bytes_measured: int | None = None) -> dict:
     """Same role/sizing profile for each independent install, never a disk clone.
 
     EFI/GPT/thin metadata have a separate conservative 2-GiB reservation.
@@ -163,13 +165,16 @@ def single_drive_profile(size_bytes: int, *, personas=("admin", "personal"),
     Applying data volumes is a post-install step; this is not boot proof.
     """
     import drive_installer
-    sizes = dict(LVM_SIZE_PRESETS["single-drive"])
+    sizes = dict(installer_sizes or LVM_SIZE_PRESETS["single-drive"])
     boot_reserve = 2 * 1024**3
     host_bytes = sum(sizes.values()) * 1024**3 + boot_reserve
+    if host_bytes_measured is not None:                    # what the installed system actually allocated, plus the boot reserve
+        host_bytes = host_bytes_measured + boot_reserve
     storage = drive_installer.single_drive_plan(
         size_bytes, host_bytes=host_bytes, personas=personas,
         growth_percent=growth_percent, migration_bytes=migration_bytes,
-        required_bytes=required_bytes, baseline_min_gib=50 if reserve_gui_runtime else 5)
+        required_bytes=required_bytes, baseline_min_gib=50 if reserve_gui_runtime else 5,
+        grow_on_demand=grow_on_demand)
     # Proxmox deducts two metadata LVs and one 4-MiB extent from maxvz.
     # Confirmed on the real PC401 and in upstream Proxmox/Install.pm:
     # a 64-GiB maxvz creates 62 GiB minus 4 MiB of physical thin data.
@@ -178,7 +183,7 @@ def single_drive_profile(size_bytes: int, *, personas=("admin", "personal"),
     metadata = min(16 * 1024**3, max(1024**3, data_budget // 100))
     metadata -= metadata % extent
     return {"installer_sizes": sizes, "boot_reserve_bytes": boot_reserve,
-            "thin_data_min_bytes": data_budget - 2 * metadata - extent,
+            "thin_data_min_bytes": 0 if grow_on_demand else data_budget - 2 * metadata - extent,
             "storage": storage, "executed": False, "boot_verified": False}
 
 # Real bug found live, 2026-09-29 (a regression from decision record
