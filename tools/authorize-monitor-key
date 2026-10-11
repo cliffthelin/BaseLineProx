@@ -1,0 +1,73 @@
+#!/bin/bash
+# One-time, operator-run: add the development monitoring SSH key to PC601's installed root, so a run can be watched over SSH.
+#
+#   sudo tools/authorize-monitor-key PC601            # adds the key
+#   tools/authorize-monitor-key PC601 --dry-run       # shows what it would do; needs no root and changes nothing
+#
+# Why this exists: reading or writing the installed system needs its LVM volume group activated, which needs root. The installer now
+# carries the same key (answer file `root-ssh-keys`), so after the next rebuild this is not needed. It touches only PC601 (serial below),
+# only the one root filesystem on it, only /root/.ssh/authorized_keys (appending the key if it is not already there), then unmounts and
+# deactivates exactly the volume group it activated. PC401 is not accepted.
+set -euo pipefail
+
+declare -A SERIALS=( [PC601]=FD01N6557110C271B )
+NAME="${1:-}"; MODE="${2:-}"
+[ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: authorize-monitor-key PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
+[ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || { echo "unknown option $MODE" >&2; exit 2; }
+SERIAL="${SERIALS[$NAME]}"
+KEY_FILE=/run/media/cane/CACHE/baseline-build/ssh/baseline-monitor.pub
+say() { echo "[authorize-monitor-key] $*"; }
+
+[ -f "$KEY_FILE" ] || { say "refusing: $KEY_FILE does not exist"; exit 1; }
+KEY="$(cat "$KEY_FILE")"
+case "$KEY" in ssh-ed25519\ *) ;; *) say "refusing: $KEY_FILE is not an ed25519 public key"; exit 1;; esac
+[ "$(printf '%s\n' "$KEY" | wc -l)" -eq 1 ] || { say "refusing: the key file must be a single line"; exit 1; }
+
+mapfile -t FOUND < <(lsblk -dnpo PATH,SERIAL | awk -v s="$SERIAL" '$2 == s {print $1}')
+[ "${#FOUND[@]}" -eq 1 ] || { say "refusing: ${#FOUND[@]} disks carry serial $SERIAL"; exit 1; }
+DEV="${FOUND[0]}"
+say "$NAME is $DEV (serial $SERIAL)"
+
+if [ "$MODE" = "--dry-run" ]; then
+  say "dry run: would find the LVM volume group whose physical volumes are all on $DEV, activate it, mount its 'root' volume at a temporary"
+  say "directory, append the key ($(printf '%s' "$KEY" | cut -d' ' -f1,3-)) to /root/.ssh/authorized_keys if absent, unmount, deactivate the group."
+  exit 0
+fi
+[ "$(id -u)" -eq 0 ] || { say "needs root: run with sudo (or use --dry-run)"; exit 1; }
+
+# the volume group(s) on this device, and only those: every PV of the group must sit on $DEV
+VG=""
+while read -r vg; do
+  vg="${vg// /}"; [ -n "$vg" ] || continue
+  bad=0
+  while read -r pv; do
+    pv="${pv// /}"; [ -n "$pv" ] || continue
+    case "$pv" in "$DEV"*) ;; *) bad=1;; esac
+  done < <(pvs --noheadings -o pv_name -S "vg_name=$vg")
+  [ "$bad" -eq 0 ] || continue
+  [ -z "$VG" ] || { say "refusing: more than one volume group on $DEV ($VG and $vg); choose by hand"; exit 1; }
+  VG="$vg"
+done < <(pvs --noheadings -o vg_name "$DEV"* 2>/dev/null | sort -u)
+[ -n "$VG" ] || { say "refusing: no volume group lives only on $DEV"; exit 1; }
+say "volume group $VG"
+[ "$(lvs --noheadings -o lv_active "$VG/root" 2>/dev/null | tr -d ' ')" != "active" ] || { say "refusing: $VG/root is already active here; something is using it"; exit 1; }
+
+MNT="$(mktemp -d /tmp/authorize-monitor-key.XXXXXX)"
+cleanup() {
+  mountpoint -q "$MNT" && umount "$MNT" || true
+  rmdir "$MNT" 2>/dev/null || true
+  vgchange -an "$VG" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+vgchange -ay "$VG" >/dev/null
+mount "/dev/$VG/root" "$MNT"
+[ -x "$MNT/usr/bin/pvesh" ] || { say "refusing: $VG/root does not look like a Proxmox root (no usr/bin/pvesh)"; exit 1; }
+install -d -m 700 -o root -g root "$MNT/root/.ssh"
+if grep -qxF "$KEY" "$MNT/root/.ssh/authorized_keys" 2>/dev/null; then
+  say "the key is already authorized; nothing to do"
+else
+  printf '%s\n' "$KEY" >> "$MNT/root/.ssh/authorized_keys"
+  chmod 600 "$MNT/root/.ssh/authorized_keys"
+  say "key added"
+fi
+say "authorized keys now:"; cut -d' ' -f1,3- "$MNT/root/.ssh/authorized_keys"
