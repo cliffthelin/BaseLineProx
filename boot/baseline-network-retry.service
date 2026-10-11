@@ -1,0 +1,12 @@
+[Unit]
+Description=Baseline network retry (re-applies only the change confirmed at first boot; DR247)
+After=networking.service baseline-firstboot.service
+Wants=networking.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-network-retry
+# The installed code is read-only for the service, as for the boot-time DHCP reapply.
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
+RemainAfterExit=no

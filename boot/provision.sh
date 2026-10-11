@@ -101,6 +101,8 @@ cp "$SRC/baseline/lib/repair_rollback.py" /opt/baseline/lib/repair_rollback.py
 cp "$SRC/baseline/lib/firstboot_network_repair.py" /opt/baseline/lib/firstboot_network_repair.py
 cp "$SRC/baseline/bin/baseline-repair-rollback" /opt/baseline/bin/baseline-repair-rollback
 cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline-additive-dhcp-reapply
+cp "$SRC/baseline/bin/baseline-network-retry" /opt/baseline/bin/baseline-network-retry
+cp "$SRC/baseline/lib/network_retry.py" /opt/baseline/lib/network_retry.py
 # Gate E: the real, integrated first-boot authorization state machine
 # (docs/design/decision-records/25) - connects proxmox_detect.py
 # (informational), firstboot_network_repair.py's already-real Gate A
@@ -402,7 +404,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-network-retry /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check
 
 echo "=== Locking the installed code: root-owned, not writable by anyone else ==="
 # Nothing that runs this code may be able to rewrite it (an attacker in a service, or a bug,
@@ -416,6 +418,8 @@ if [ -d /var/lib/baseline ]; then chmod -R go-rwx /var/lib/baseline; fi
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
+cp "$SRC/boot/baseline-network-retry.service" /etc/systemd/system/baseline-network-retry.service
+cp "$SRC/boot/baseline-network-retry.timer" /etc/systemd/system/baseline-network-retry.timer
 cp "$SRC/boot/baseline-persist-bind-mounts.service" /etc/systemd/system/baseline-persist-bind-mounts.service
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
 cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sensors-collect.service
@@ -463,6 +467,7 @@ verify_fail() { echo "VERIFY FAILED: $1" >&2; exit 1; }
 
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
+         /opt/baseline/bin/baseline-network-retry /opt/baseline/lib/network_retry.py \
          /opt/baseline/bin/baseline-sensors-collect \
          /opt/baseline/lib/firstboot_statemachine.py /opt/baseline/lib/firstboot_network_repair.py \
          /opt/baseline/lib/proxmox_detect.py /opt/baseline/lib/diagnostics.py /opt/baseline/lib/setup_intent.py \
@@ -507,13 +512,14 @@ done
 command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
 [ -d /etc/containers/systemd ] || verify_fail "missing /etc/containers/systemd (Quadlet unit directory)"
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
-         baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
+         baseline-network-retry.service baseline-network-retry.timer baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
          baseline-web.service baseline-scripts-inbox.service \
                   baseline-dependency-check.service baseline-dependency-check.timer; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
+         /opt/baseline/bin/baseline-network-retry \
          /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
          /opt/baseline/bin/baseline-persist-bind-mounts \
@@ -540,16 +546,17 @@ systemctl enable baseline-firstboot.service
 systemctl enable baseline-storage-verify.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
+systemctl enable baseline-network-retry.timer
 systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service
 systemctl enable baseline-web.service
 systemctl enable baseline-scripts-inbox.service
 systemctl enable baseline-dependency-check.timer
 
-for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-dependency-check.timer; do
+for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-network-retry.timer baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-dependency-check.timer; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
-echo "PASS: all nine units confirmed enabled."
+echo "PASS: all ten units confirmed enabled."
 
 echo
 echo "Done. Nothing on this tty/session was touched or disabled - this"
