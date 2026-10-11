@@ -51,6 +51,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import references
 import registry
 
 TYPE_ID = "gpu_devices"
@@ -373,6 +374,7 @@ def sync_detected_gpus(runner: Runner) -> list:
                 "modes": [{"mode": m.mode, "available": m.available, "evidence": m.evidence} for m in modes],
             },
         )
+        references.link(TYPE_ID, d.pci_address, kind="hardware", name="gpu-" + d.pci_address)
     return devices
 
 

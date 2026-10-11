@@ -27,10 +27,10 @@ class ReferenceError(ValueError):
     pass
 
 
-def current_host() -> str | None:
+def current_host(path=None) -> str | None:
     """This system's host identifier, or None when it has none (not a Baseline host, or a damaged or foreign file)."""
     try:
-        text = Path(HOST_ID_FILE).read_text().strip()
+        text = Path(path or HOST_ID_FILE).read_text().strip()
     except OSError:
         return None
     try:
@@ -106,3 +106,54 @@ def stamp(record: dict, *, source=None, subject=None) -> dict:
             raise ReferenceError(f"{key} must be a valid identifier of the DR255 layout, got {value!r}")
         out[key] = value
     return out
+
+
+# --- storage roles (DR256) ---------------------------------------------------------------------------------------------------
+
+BOUND_ROLES = frozenset({"SUBSTRATE", "SESSION_TEMP"})      # tied to this host; every other role holds data that moves with its owner
+
+
+def link_roles(labels, *, parent: str | None = None) -> dict:
+    """The identifier of each storage role (volume label) on this host: portable (special 02) for roles that hold data that must outlive the
+    drive (BASELINE, INSTALLER_CACHE, USER_*, APPDATA_*), fixed to the host for SUBSTRATE and SESSION_TEMP. Empty without a host."""
+    parent = parent or current_host()
+    if parent is None:
+        return {}
+    out = {}
+    for label in labels:
+        name = _name(label)
+        if name is None:
+            continue
+        source = {"type": "storage_role", "id": label}
+        out[label] = (identifiers.mint(parent, "substrate", name, source=source) if label in BOUND_ROLES
+                      else identifiers.mint_portable(parent, "substrate", name, source=source))
+    return out
+
+
+def default_role_labels(personas=None) -> list:
+    import drive_installer as di
+    volumes = di.baseline_volumes_for(tuple(personas) if personas is not None else di.DEFAULT_PERSONAS)
+    return [v[3] for v in volumes]
+
+
+def backfill(*, parent: str | None = None) -> dict:
+    """Give every entry that existed before this host had an identifier its reference: naming codes, then the storage roles. Idempotent."""
+    parent = parent or current_host()
+    if parent is None:
+        return {"linked": 0, "reason": "no host identifier"}
+    import naming
+    linked = 0
+    for code in naming.allocated(read_only=True):
+        linked += link_naming(code, parent=parent) is not None
+    roles = link_roles(default_role_labels(), parent=parent)
+    return {"linked": linked + len(roles)}
+
+
+def link_external(kind: str, name: str, value: str, *, scheme: str, parent: str | None = None) -> str | None:
+    """The identifier for a thing known to Baseline only by an outside identifier (a Proxmox VMID, a MAC): mapped once, then stable.
+    None when there is no host to put it under."""
+    parent = parent or current_host()
+    name = _name(name)
+    if parent is None or name is None:
+        return None
+    return identifiers.map_external(parent, kind, name, str(value), scheme=scheme)

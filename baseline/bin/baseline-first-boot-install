@@ -140,6 +140,22 @@ def step_identity(ensure=None, host_id_path=None):
     mark("identity", carried=True, uuid=wanted, serial=serial, device=disks[0])
 
 
+def step_machine(host_id_path=None, read=None):
+    """Record the machine this install is first running on as the installer host, and give the storage roles their identifiers (DR256).
+    Nothing here may stop an install: a profile that cannot be written is logged and retried later by the machine-context check."""
+    import machine_context
+    import references
+    host = references.current_host(host_id_path)
+    if host is None:
+        log("machine: no host identifier yet; the machine profile is recorded at a later boot")
+        mark("machine", recorded=False)
+        return
+    result = machine_context.observe(host, machine_context.read_fingerprint(read or machine_context.file_reader()))
+    roles = references.link_roles(references.default_role_labels(), parent=host)
+    log(f"machine: {result['state']}; {len(roles)} storage roles carry identifiers")
+    mark("machine", recorded=True, state=result["state"], roles=len(roles))
+
+
 def step_storage():
     import repair
     import single_drive_storage as storage
@@ -314,7 +330,7 @@ def step_provision():
     mark("provision")
 
 
-STEPS = [("identity", step_identity), ("storage", step_storage), ("installer", step_installer),
+STEPS = [("identity", step_identity), ("storage", step_storage), ("machine", step_machine), ("installer", step_installer),
          ("os-isos", step_os_isos), ("provision", step_provision)]
 
 

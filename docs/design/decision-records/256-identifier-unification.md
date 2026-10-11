@@ -1,6 +1,6 @@
 # DR256 - One identifier model: global reference, local constant, external identity
 
-Date: 2026-10-11. Status: proposed for operator approval; the library parts are implemented (`identifiers.py`, `references.py`).
+Date: 2026-10-11. Status: approved by the operator 2026-10-11 (all three decisions) and implemented: `identifiers.py`, `references.py`, `machine_context.py`.
 Builds on DR89 (foundation registry), `naming.py` (2026-09-30 direction), DR254/DR255. Requirement from the operator: unify the
 patterns so they are cohesive and optimal, and lose none of the identifiers already discussed.
 
@@ -66,15 +66,36 @@ Rules:
 `00` ordinary; `01` external mapping (non-deterministic); `02` is proposed below; `03-7f` reserved; `80-ff` experiments. Unknown values are
 treated as special, never ordinary.
 
-## Decisions for the operator
+## Decisions (operator, 2026-10-11: approved all three) and what was built
 
-1. **Portable identities.** A persistence store must outlive the drive it sits on, but digits 8-15 of its identifier name a drive. Proposal:
-   special `02` = portable: digits 8-15 are the *origin* hint only; the registry `parent` is the authority and may change on migration;
-   the identifier itself never changes. Without this, a migrated store would need a new identifier, which breaks the "never re-minted" rule.
-2. **Reference kind for role volumes.** Deterministic substrate identifiers per role (`USER_PERSISTENCE`, `INSTALLER_CACHE`, ...) so
-   every storage record can cite them. Adds eight to ten entries per host; no change to labels or fstab.
-3. **Order of the remaining rollout.** gpu_admin, network aliases, vm_host/distro_containers, storage volumes, settings_store, installer_cache,
-   harness_events, then a one-shot `references.backfill()` for entries created before a host id existed.
+1. **Portable identities (special `02`).** `identifiers.mint_portable` is deterministic from its first parent; `reparent` moves it when the
+   data moves to other hardware; the identifier never changes and only portable ones may move.
+2. **Role volumes.** `references.link_roles`: BASELINE, INSTALLER_CACHE, `USER_*`, `APPDATA_*` are portable; SUBSTRATE and SESSION_TEMP are
+   fixed to the host. First boot links them in a new `machine` step after storage.
+3. **Rollout.** Done: naming, gateway routes, drive enrollment, repair events, handoff, GPUs, interface aliases, container VMIDs, storage
+   roles, `references.backfill()`. Remaining: settings_store, installer_cache, harness_events, vm_host.
+
+## A mismatch is a state with behaviours, never a failure (operator direction)
+
+A chain of identifiers that does not match, or has not been set up yet, must not break or deny anything. It selects behaviour.
+`machine_context.py` keeps a profile per machine the drive has run on (registry `machine_profiles`, GLOBAL) and compares the current
+machine's fingerprint (DMI system UUID, board and chassis serial are identity; CPU, memory and so on are parts):
+
+| State | Meaning | Behaviour |
+|---|---|---|
+| `first_machine` | no profile yet | record it as the installer host |
+| `known` | fingerprint matches | note the visit |
+| `changed` | same machine, parts differ | queue a recheck of what depends on those parts |
+| `new_machine` | no profile matches: the drive moved | record a new profile; queue discover-hardware, check installer cache, check app data, check user data (deterministic, due once the substrate is up) and rebuild-vm-config, resolve-incompatibilities (need a helper) |
+| `unreadable` | fingerprint not available | treated as unknown; retry later |
+
+Queued work (`adaptation_tasks`) is released by readiness: deterministic tasks as soon as their own stage is up; anything that cannot be
+settled deterministically waits until substrate, GUI, browser, internet and AI are all up, because that is when something exists to help.
+`defer(task, reason)` marks a task the deterministic code could not settle so it goes to the helper. The old profile is never used as if
+it were the new machine, access is never denied, and the drive builds up as it discovers.
+
+Built: the state model, queue, release rules and the first-boot record. Not built: the executors for each task kind and the boot-time
+service that runs `observe` on every boot; those come next and each task kind fills in against the same queue.
 
 ## Not changed
 

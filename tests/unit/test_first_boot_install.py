@@ -422,3 +422,30 @@ def test_first_boot_without_a_carried_identity_leaves_the_disk_identifier_alone(
     called = []
     installer.step_identity(ensure=lambda *a: called.append(a))
     assert called == []
+
+
+def test_first_boot_records_the_machine_and_links_the_storage_roles_after_storage(tmp_path, monkeypatch):
+    import identifiers as idn
+    installer = _installer()
+    monkeypatch.setattr(installer, "STATE", tmp_path / "state")
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    (tmp_path / "state").mkdir()
+    names = [name for name, _ in installer.STEPS]
+    assert names.index("storage") < names.index("machine") < names.index("installer")
+    host = idn.host_id("4af8c95a-1c9b-437a-a306-c53855d4077f", IDENTITY["serial"])
+    idn.register_host(host, serial=IDENTITY["serial"])
+    (tmp_path / "host-id").write_text(host + "\n")
+    root = tmp_path / "root"
+    (root / "sys/class/dmi/id").mkdir(parents=True)
+    (root / "sys/class/dmi/id/product_uuid").write_text("11111111-2222-4333-8444-555555555555\n")
+    import machine_context
+    installer.step_machine(host_id_path=tmp_path / "host-id", read=machine_context.file_reader(str(root)))
+    assert len(machine_context.load_profiles()) == 1
+
+
+def test_first_boot_without_a_host_identifier_skips_the_machine_record_without_failing(tmp_path, monkeypatch):
+    installer = _installer()
+    monkeypatch.setattr(installer, "STATE", tmp_path / "state")
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    (tmp_path / "state").mkdir()
+    installer.step_machine(host_id_path=tmp_path / "absent")

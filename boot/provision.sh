@@ -397,6 +397,7 @@ cp "$SRC/baseline/lib/cache_learn.py" /opt/baseline/lib/cache_learn.py
 # DR255: hierarchical identifiers (host, substrate, VM, application, hardware), minted on the installed system from their parent
 cp "$SRC/baseline/lib/identifiers.py" /opt/baseline/lib/identifiers.py
 cp "$SRC/baseline/lib/references.py" /opt/baseline/lib/references.py
+cp "$SRC/baseline/lib/machine_context.py" /opt/baseline/lib/machine_context.py
 cp "$SRC/baseline/lib/installer_identity.py" /opt/baseline/lib/installer_identity.py
 cp "$SRC/baseline/bin/baseline-cache-learn" /opt/baseline/bin/baseline-cache-learn
 chmod 755 /opt/baseline/bin/baseline-cache-learn

@@ -197,3 +197,25 @@ def test_every_kind_of_external_identifier_maps_by_its_scheme_and_the_schemes_do
         idn.map_external(host, "hardware", "x", "nope", scheme="partuuid")
     with pytest.raises(idn.IdentifierError):
         idn.map_external(host, "hardware", "x", same, scheme="bogus")
+
+
+def test_a_portable_identifier_is_deterministic_keeps_its_digits_and_can_change_parent():
+    host_a, host_b = idn.host_id(LANE, PC601), idn.host_id(LANE, PC401)
+    idn.register_host(host_a, serial=PC601)
+    idn.register_host(host_b, serial=PC401)
+    store = idn.mint_portable(host_a, "substrate", "USER_PERSISTENCE_ADMIN")
+    assert store == idn.mint_portable(host_a, "substrate", "USER_PERSISTENCE_ADMIN") == idn.child_id(host_a, "substrate", "USER_PERSISTENCE_ADMIN", special=2)
+    assert idn.parse(store).special == idn.SPECIAL["portable"] and idn.is_valid(store)
+    assert store != idn.mint(host_a, "substrate", "USER_PERSISTENCE_ADMIN")
+    idn.reparent(store, host_b)
+    assert idn.descendants(host_b) == [store] and store not in idn.descendants(host_a)
+    assert idn.mint_portable(host_a, "substrate", "USER_PERSISTENCE_ADMIN") == store      # same identifier after the move
+
+
+def test_only_a_portable_identifier_may_change_parent():
+    host_a, host_b = idn.host_id(LANE, PC601), idn.host_id(LANE, PC401)
+    idn.register_host(host_a, serial=PC601)
+    idn.register_host(host_b, serial=PC401)
+    fixed = idn.mint(host_a, "substrate", "SESSION_TEMP")
+    with pytest.raises(idn.IdentifierError):
+        idn.reparent(fixed, host_b)

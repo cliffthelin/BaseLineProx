@@ -20,6 +20,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import references
 import registry
 
 EVENT_LOG = Path("/var/log/baseline/network.events.jsonl")
@@ -131,6 +132,7 @@ def save_alias(ifname: str, alias: str) -> None:
     registry.register_type(ALIASES_TYPE_ID, "Operator-chosen interface display names (network.py)",
                             default_scope=registry.PROTECTED)
     registry.upsert_entry(ALIASES_TYPE_ID, ifname, attributes={}, scope=registry.PROTECTED)
+    references.link(ALIASES_TYPE_ID, ifname, kind="hardware", name="nic-" + ifname)
     alias = alias.strip()
     registry.set_value(ALIASES_TYPE_ID, ifname, alias if alias else None, scope=registry.PROTECTED)
 

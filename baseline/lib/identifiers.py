@@ -17,7 +17,8 @@ hex digits:
 A child is derived from its parent, so it can be minted on the installed system with no installer present. Identifiers are stable: the
 same parent, kind and name always give the same identifier. The check byte is integrity (typos, truncation), not authenticity.
 The last two digits are reserved for special handling. `00` is the ordinary, deterministic identifier. Other values mark identifiers
-that are handled differently; `01` associates the identifier with an external UUID through a separate, non-deterministic cross-map
+that are handled differently; `02` is portable: digits 8-15 are only the origin hint, the registry parent is the authority and may change when the thing
+moves to other hardware (`mint_portable`, `reparent`); the identifier itself never changes. `01` associates the identifier with an external UUID through a separate, non-deterministic cross-map
 table (`map_external`). New special values are added to SPECIAL as they arise; readers treat an unknown value as special, never as ordinary.
 The registry holds one shape for every level, so adding a level never changes it.
 """
@@ -33,7 +34,7 @@ KINDS = {"host": 0, "substrate": 1, "vm": 2, "application": 3, "hardware": 4}
 KIND_NAMES = {number: name for name, number in KINDS.items()}
 LANE_KINDS = {0, 1, 2}                  # these carry the installer lane; applications and hardware do not
 REGISTRY_TYPE = "baseline_identities"
-SPECIAL = {"none": 0x00, "external": 0x01}   # digits 30-31; 02-7f reserved for future handling, 80-ff for experiments
+SPECIAL = {"none": 0x00, "external": 0x01, "portable": 0x02}   # digits 30-31; 03-7f reserved for future handling, 80-ff for experiments
 CROSS_MAP_TYPE = "baseline_external_map"
 NON_HEX = "0"                           # reserved filler when a serial has fewer hex characters than a group needs
 _HEX = "0123456789abcdef"
@@ -230,7 +231,7 @@ def _cross_map():
     return registry
 
 
-SCHEMES = ("uuid", "serial", "partuuid", "fsuuid", "vguuid", "pvuuid", "luks", "gptguid", "mac", "cdi", "vmid", "machine-id", "other")
+SCHEMES = ("uuid", "serial", "partuuid", "fsuuid", "vguuid", "pvuuid", "luks", "gptguid", "mac", "cdi", "vmid", "machine-id", "dmi", "other")
 _SCHEME_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@+/-]{0,127}$")
 
 
@@ -286,3 +287,38 @@ def external_of(guid: str) -> str | None:
     registry = _cross_map()
     entry = registry.get_entry(REGISTRY_TYPE, guid, scope=registry.GLOBAL)
     return _attributes(entry).get("external") if entry else None
+
+
+# --- special handling: portable identities (digits 30-31 = 02) -------------------------------------------------------------
+
+def mint_portable(parent: str, kind: str, name: str, *, source: dict | None = None) -> str:
+    """Like `mint`, for a thing that must outlive the hardware it sits on (a persistence store, application data, a VM's retained state).
+    Deterministic from its first parent, so every rebuild finds the same identifier; afterwards `reparent` moves it."""
+    registry = _registry()
+    parent_entry = registry.get_entry(REGISTRY_TYPE, parent, scope=registry.GLOBAL)
+    serial = _attributes(parent_entry).get("serial") if parent_entry else None
+    candidate = child_id(parent, kind, name, special=SPECIAL["portable"])
+    existing = registry.get_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL)
+    if existing is None:
+        registry.upsert_entry(REGISTRY_TYPE, candidate, scope=registry.GLOBAL, value={"by": "baseline"},
+                              attributes={"kind": kind, "level": KINDS[kind], "serial": serial, "parent": parent, "name": name,
+                                          "layout": VERSION, "special": SPECIAL["portable"], "origin": parent, "source": source})
+    return candidate
+
+
+def reparent(guid: str, new_parent: str) -> None:
+    """Move a portable identifier under another parent (the drive or machine it now lives on). The identifier is unchanged; the registry
+    records the move. Anything not portable keeps its parent for life: refused."""
+    registry = _registry()
+    entry = registry.get_entry(REGISTRY_TYPE, guid, scope=registry.GLOBAL)
+    if entry is None:
+        raise IdentifierError(f"{guid} is not registered")
+    attrs = _attributes(entry)
+    if attrs.get("special") != SPECIAL["portable"] or parse(guid).special != SPECIAL["portable"]:
+        raise IdentifierError("only a portable identifier (special 02) may change parent")
+    if not is_valid(new_parent) or int(_digits(new_parent)[17], 16) not in _PARENTS[attrs["kind"]]:
+        raise IdentifierError("the new parent is not a valid parent for this kind of thing")
+    target = registry.get_entry(REGISTRY_TYPE, new_parent, scope=registry.GLOBAL)
+    registry.upsert_entry(REGISTRY_TYPE, guid, scope=registry.GLOBAL, value=entry.get("value"),
+                          attributes=dict(attrs, parent=new_parent, serial=_attributes(target).get("serial") if target else attrs.get("serial"),
+                                          moved_from=attrs.get("parent")))

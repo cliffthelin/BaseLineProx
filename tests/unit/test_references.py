@@ -137,3 +137,32 @@ def test_a_handoff_manifest_names_its_host(host, tmp_path, monkeypatch):
     monkeypatch.setattr(handoff, "_FILE_SOURCES", [])
     monkeypatch.setattr(handoff, "_AUTHORIZED_KEYS_SRC", str(tmp_path / "none"))
     assert handoff.collect(tmp_path / "s", "lab")["host_ref"] == host
+
+
+def test_storage_roles_get_identifiers_portable_where_the_data_must_move(host):
+    roles = ref.link_roles(["BASELINE", "USER_ADMIN", "APPDATA_ADMIN", "SUBSTRATE", "SESSION_TEMP", "INSTALLER_CACHE"])
+    portable = {l for l, g in roles.items() if idn.parse(g).special == idn.SPECIAL["portable"]}
+    assert portable == {"BASELINE", "USER_ADMIN", "APPDATA_ADMIN", "INSTALLER_CACHE"}
+    assert ref.link_roles(["USER_ADMIN"]) == {"USER_ADMIN": roles["USER_ADMIN"]}
+    assert ref.reference_for("storage_role", "USER_ADMIN") == roles["USER_ADMIN"]
+
+
+def test_backfill_links_what_existed_before_the_host_had_an_identifier(tmp_path, monkeypatch):
+    import naming
+    monkeypatch.setattr(ref, "HOST_ID_FILE", tmp_path / "none")
+    code = naming.allocate("A", "C", "early")
+    assert ref.backfill() == {"linked": 0, "reason": "no host identifier"} and ref.reference_for("naming", code) is None
+    host_id = idn.host_id(LANE, SERIAL)
+    idn.register_host(host_id, serial=SERIAL)
+    assert ref.backfill(parent=host_id)["linked"] >= 1 and ref.reference_for("naming", code)
+    assert ref.backfill(parent=host_id) == ref.backfill(parent=host_id)
+
+
+def test_a_gpu_a_nic_alias_and_a_container_vmid_get_references(host):
+    import network
+    network.save_alias("ens3", "Office Uplink")
+    nic = ref.reference_for(network.ALIASES_TYPE_ID, "ens3")
+    assert nic and idn.parse(nic).kind == "hardware"
+    vm = ref.link_external("vm", "ct-demo", 120, scheme="vmid")
+    assert vm == idn.lookup_external("120", scheme="vmid") and idn.parse(vm).special == idn.SPECIAL["external"]
+    assert ref.link_external("vm", "ct-demo", 120, scheme="vmid") == vm
