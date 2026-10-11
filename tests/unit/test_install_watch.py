@@ -26,7 +26,7 @@ def test_a_drive_that_moved_or_vanished_is_fatal_and_says_where_it_went():
 
 def test_a_healthy_changing_screen_raises_nothing():
     s = watch()
-    for t, d in ((10, "a"), (200, "b"), (400, "c")):
+    for t, d in ((10, "0" * 20), (200, "1" * 20), (400, "0" * 10 + "1" * 10)):
         v = s.tick(float(t), status="running", device_path="/dev/sdb", digest=d)
         assert v.fatal is None and v.alerts == []
 
@@ -56,3 +56,34 @@ def test_recent_usb_disconnects_are_counted_inside_the_window_only():
             "Oct 11 09:00:00 host kernel: usb 2-1: USB disconnect, device number 2\n")
     assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=600) == 1
     assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=86400) == 2
+
+
+def _ppm(path, width=64, height=32, lit_blocks=(), cursor=False):
+    px = bytearray(width * height * 3)
+    for bx, by in lit_blocks:
+        for y in range(by * 16, by * 16 + 16):
+            for x in range(bx * 16, bx * 16 + 16):
+                px[(y * width + x) * 3:(y * width + x) * 3 + 3] = b"\xff\xff\xff"
+    if cursor:      # an 8x14 cursor in the bottom-left block
+        for y in range(18, 32):
+            for x in range(0, 8):
+                px[(y * width + x) * 3:(y * width + x) * 3 + 3] = b"\xff\xff\xff"
+    path.write_bytes(f"P6\n{width} {height}\n255\n".encode() + bytes(px))
+    return path
+
+
+def test_a_blinking_cursor_is_not_a_change_but_new_text_is(tmp_path):
+    idle = w.screen_digest(_ppm(tmp_path / "a.ppm", lit_blocks=[(1, 0)]))
+    blink = w.screen_digest(_ppm(tmp_path / "b.ppm", lit_blocks=[(1, 0)], cursor=True))
+    assert not w.differs(idle, blink)
+    more = w.screen_digest(_ppm(tmp_path / "c.ppm", lit_blocks=[(1, 0), (2, 0), (3, 0), (0, 0)]))
+    assert w.differs(idle, more) and w.screen_digest(tmp_path / "missing.ppm") is None
+
+
+def test_a_cursor_blinking_on_an_idle_prompt_still_counts_as_a_stalled_screen(tmp_path):
+    s = watch(stall_seconds=300)
+    a = w.screen_digest(_ppm(tmp_path / "a.ppm", lit_blocks=[(1, 0)]))
+    b = w.screen_digest(_ppm(tmp_path / "b.ppm", lit_blocks=[(1, 0)], cursor=True))
+    s.tick(1.0, status="running", device_path="/dev/sdb", digest=a)
+    s.tick(100.0, status="running", device_path="/dev/sdb", digest=b)
+    assert "not changed" in s.tick(400.0, status="running", device_path="/dev/sdb", digest=a).alerts[0]

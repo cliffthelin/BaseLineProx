@@ -28,10 +28,35 @@ def parse_status(reply: str) -> str | None:
 
 
 def screen_digest(path) -> str | None:
+    """The screen reduced to a grid of 16x16-pixel blocks, one character per block ('1' where the block has lit pixels), as a string.
+    Compare two with `differs`: a blinking cursor changes one or two blocks, text or progress changes many. (A raw hash changed on every
+    tick of an idle prompt and hid a hang.)"""
     try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    except OSError:
+        data = Path(path).read_bytes()
+        header, rest = data.split(b"\n255\n", 1)
+        width, height = (int(x) for x in header.split()[1:3])
+    except (OSError, ValueError):
         return None
+    block, cells = 16, []
+    for by in range(0, height - block + 1, block):
+        lit = [0] * (width // block)
+        for y in range(by, by + block):
+            line = rest[y * width * 3:(y + 1) * width * 3]
+            for bx in range(width // block):
+                chunk = line[bx * block * 3:(bx + 1) * block * 3]
+                lit[bx] += sum(1 for i in range(0, len(chunk), 3) if chunk[i] or chunk[i + 1] or chunk[i + 2])
+        cells.extend("1" if n > 6 else "0" for n in lit)
+    return "".join(cells)
+
+
+CURSOR_BLOCKS = 2        # a blinking cursor can change at most this many blocks between two looks
+
+
+def differs(a: str | None, b: str | None) -> bool:
+    """Whether two screen digests are different screens (more than a cursor's worth of blocks changed)."""
+    if a is None or b is None or len(a) != len(b):
+        return a != b
+    return sum(1 for x, y in zip(a, b) if x != y) > CURSOR_BLOCKS
 
 
 @dataclass
@@ -71,7 +96,7 @@ class StageWatch:
             v.fatal = (f"the target drive moved from {self.opened_path} to {device_path} (its USB bridge reset); "
                        f"the VM still holds the old node and cannot continue")
             return v
-        if digest is not None and digest != self.last_digest:
+        if digest is not None and differs(digest, self.last_digest):
             self.last_digest, self.last_change = digest, now
         quiet = now - self.last_change
         if quiet >= self.stall_seconds and now - self.last_alert >= self.alert_every:
