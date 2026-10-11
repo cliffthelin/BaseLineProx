@@ -60,6 +60,7 @@ OPERATOR = "cane"                               # owner of the work directory, s
 
 BUILD = Path("/run/media/cane/CACHE/baseline-build")   # build workspace only; nothing installed depends on it
 CACHE_DIR = BUILD / "offline-cache"
+APPS_DIR = BUILD / "apps"                                 # the five applications, prepared on this machine
 OS_OFFER = None                                           # folder of OS images offered to the installer VM
 INSTALL_VM = None                                         # the install stage's KVM session, continued by later stages
 
@@ -116,6 +117,14 @@ def work_dir(name, stages):
     if name is not None:
         return BUILD / f"allscript-{name}"
     return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
+
+
+def cache_status(cache_dir):
+    """missing, built before the applications were carried (without_apps), or complete."""
+    cache_dir = Path(cache_dir)
+    if not (cache_dir / "MANIFEST.json").is_file():
+        return "missing"
+    return "complete" if (cache_dir / "apps").is_dir() else "without_apps"
 
 
 def select_os_isos(requested, available, *, rehearsal, sizes=None):
@@ -297,8 +306,8 @@ def stage_install(r):
                   f"Type  WIPE {SERIAL}  to continue: ")
     if not confirmation_ok(typed, SERIAL):
         raise RuntimeError("not confirmed; nothing was written")
-    if not (CACHE_DIR / "MANIFEST.json").is_file():
-        raise RuntimeError("run the cache stage first; the installer must carry its own packages")
+    if cache_status(CACHE_DIR) != "complete":
+        raise RuntimeError("run the cache stage first; the installer must carry its own packages and applications")
     target = identify(r)
     workspace = WORK / "installer"
     result = si.build_and_write_self_installer(
@@ -352,14 +361,24 @@ def send_keys(text):
 
 
 def stage_cache(r):
-    if (CACHE_DIR / "MANIFEST.json").is_file():
+    status = cache_status(CACHE_DIR)
+    if status == "without_apps":
+        kept = CACHE_DIR.with_name(CACHE_DIR.name + "-before-apps")
+        if kept.exists():
+            raise RuntimeError(f"{kept} already exists; move it away so the older cache is never overwritten")
+        say("the existing cache carries no applications; keeping it as", kept, "and building a complete one")
+        CACHE_DIR.rename(kept)
+        status = "missing"
+    if status == "complete":
         say("offline package cache already built:", CACHE_DIR)
     else:
         sh([REPO / "baseline/bin/baseline-build-offline-cache", "--source-iso", SOURCE_ISO, "--assistant", ASSISTANT,
-            "--workspace", BUILD / "cache-vm", "--output", CACHE_DIR], timeout=7200)
+            "--workspace", BUILD / "cache-vm", "--output", CACHE_DIR, "--apps", APPS_DIR], timeout=14400)
     import offline_cache
+    import application_bundle
     count = offline_cache.verify_manifest(CACHE_DIR, json.loads((CACHE_DIR / "MANIFEST.json").read_text()))
-    record("cache", path=str(CACHE_DIR), files=count)
+    apps = offline_cache.verify_app_bundle(CACHE_DIR, application_bundle.APPS)
+    record("cache", path=str(CACHE_DIR), files=count, apps={a["app"]: a["version"] for a in apps})
 
 
 def offer_os_isos(names):
@@ -387,8 +406,8 @@ def stage_rehearse(r):
     import first_boot_hook as fbh
     import iso_builder as ib
     import self_installer as si
-    if not (CACHE_DIR / "MANIFEST.json").is_file():
-        raise RuntimeError("run the cache stage first")
+    if cache_status(CACHE_DIR) != "complete":
+        raise RuntimeError("run the cache stage first (the cache must carry the applications)")
     work = BUILD / "rehearsal"
     if work.exists():
         shutil.rmtree(work)

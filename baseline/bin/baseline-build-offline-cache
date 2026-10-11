@@ -9,6 +9,9 @@ network access only through the allowlisted package proxy (baseline/lib/installe
   apt-get install --download-only   every package provision.sh installs (offline_cache.provision_packages),
                                     plus Node.js 22 from NodeSource, with all dependencies
   npm install --cache               Claude Code, filling npm's own cache with every tarball it needs
+  apps                              the five applications (VS Code, Spotify, Chrome, ChatGPT, Claude Desktop) prepared with
+                                    `baseline-apps prepare` for Debian 13 (publisher download, pinned sha256, recipe), and
+                                    - in the VM - the dependencies of their packages, so `baseline-apps install` needs no network
 
 The .debs and the npm cache are copied out, indexed (dpkg-scanpackages) and listed in MANIFEST.json. The VM and its
 throwaway credentials are deleted afterwards.
@@ -143,7 +146,7 @@ def ssh(key, command, *, timeout=3600, check=True, stdout=None):
     return proc
 
 
-def collect(key, packages, output):
+def collect(key, packages, output, apps=None):
     proxy_env = f"export http_proxy={GUEST_PROXY} https_proxy={GUEST_PROXY} DEBIAN_FRONTEND=noninteractive;"
     ssh(key, "for f in pve-enterprise.sources ceph.sources; do [ -f /etc/apt/sources.list.d/$f ] && "
              "mv /etc/apt/sources.list.d/$f /etc/apt/sources.list.d/$f.disabled; done; "
@@ -153,6 +156,10 @@ def collect(key, packages, output):
     ssh(key, proxy_env + "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -")
     say("downloading", len(packages), "packages with all dependencies:", " ".join(packages))
     ssh(key, proxy_env + "apt-get clean && apt-get install --download-only -y " + " ".join(packages))
+    if apps is not None:
+        say("collecting the dependencies of the application packages")
+        push(key, apps, "/root/apps")
+        ssh(key, proxy_env + "apt-get install --download-only -y /root/apps/*/source.deb")
     apt_dir = output / "apt"
     apt_dir.mkdir(parents=True)
     with open(output / "apt.tar", "wb") as stream:
@@ -167,6 +174,40 @@ def collect(key, packages, output):
         ssh(key, "tar -C /root -cf - npm-cache", stdout=stream)
     subprocess.run(["tar", "-xf", str(output / "npm.tar"), "-C", str(output)], check=True)
     (output / "npm.tar").unlink()
+
+
+def prepare_apps(folder):
+    """`baseline-apps prepare` for every application on the build machine (which has internet), unless already done.
+    Result: <folder>/<app>/{source.deb|source.tar.gz, recipe.json}."""
+    import application_bundle
+    config = folder / "empty-configuration.json"
+    folder.mkdir(parents=True, exist_ok=True)
+    config.write_text("{}\n")
+    for app in application_bundle.APPS:
+        target = folder / app
+        if (target / "recipe.json").is_file():
+            continue
+        if target.exists():
+            shutil.rmtree(target)             # a previous attempt that never produced a recipe
+        say("preparing", app)
+        proc = subprocess.run([str(REPO / "baseline/bin/baseline-apps"), "prepare", app, str(config), str(target),
+                               "--os", "debian", "--release", "13"], capture_output=True, text=True, timeout=1800)
+        if proc.returncode:
+            raise RuntimeError(f"baseline-apps prepare {app} failed: {proc.stderr.strip()[-600:]}")
+        (target / "recipe.json").write_text(json.dumps(json.loads(proc.stdout)["recipe"], indent=1, sort_keys=True) + "\n")
+
+
+def push(key, folder, destination):
+    """Copy a folder into the builder VM."""
+    ssh(key, f"rm -rf {destination} && mkdir -p {destination}")
+    tar = subprocess.Popen(["tar", "-C", str(folder), "-cf", "-", "."], stdout=subprocess.PIPE)
+    ssh_argv = ["ssh", "-i", str(key), "-p", str(SSH_PORT), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "root@127.0.0.1",
+                f"tar -C {destination} -xf -"]
+    result = subprocess.run(ssh_argv, stdin=tar.stdout, capture_output=True)
+    tar.wait()
+    if result.returncode or tar.returncode:
+        raise RuntimeError(f"copying {folder} into the builder VM failed: {result.stderr.decode()[-500:]}")
 
 
 def index(output):
@@ -191,10 +232,14 @@ def main():
     parser.add_argument("--assistant", type=Path, required=True)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--apps", type=Path, help="build-machine folder for the prepared applications (made if absent); "
+                                                 "without it the cache carries no applications")
     args = parser.parse_args()
     if args.output.exists():
         raise RuntimeError(f"{args.output} already exists; the cache is built fresh, never merged")
     packages = offline_cache.required_packages(REPO)
+    if args.apps is not None:
+        prepare_apps(args.apps)
     work = args.workspace
     work.mkdir(parents=True, exist_ok=True)
     work.chmod(0o700)
@@ -211,7 +256,13 @@ def main():
         if staging.exists():
             shutil.rmtree(staging)
         staging.mkdir(parents=True)
-        collect(key, packages, staging)
+        collect(key, packages, staging, args.apps)
+        if args.apps is not None:
+            import application_bundle
+            shutil.copytree(args.apps, staging / offline_cache.APP_BUNDLE,
+                            ignore=shutil.ignore_patterns("empty-configuration.json"))
+            for item in offline_cache.verify_app_bundle(staging, application_bundle.APPS):
+                say("carried:", item["app"], item["version"], f"{item['bytes'] // 2**20} MiB")
         index(staging)
         os.replace(staging, args.output)
     finally:

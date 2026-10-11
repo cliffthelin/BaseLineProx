@@ -143,3 +143,12 @@ def test_the_rehearsal_offers_only_the_smallest_image_unless_told_otherwise():
     sizes = {"big.iso": 6, "small.iso": 2, "mid.iso": 3}
     assert allscript.select_os_isos([], list(sizes), rehearsal=True, sizes=sizes) == ["small.iso"]
     assert allscript.select_os_isos(["big.iso"], list(sizes), rehearsal=True, sizes=sizes) == ["big.iso"]
+
+
+def test_a_cache_without_the_applications_is_not_a_complete_cache(tmp_path):
+    assert allscript.cache_status(tmp_path / "none") == "missing"
+    (tmp_path / "c").mkdir()
+    (tmp_path / "c/MANIFEST.json").write_text("{}")
+    assert allscript.cache_status(tmp_path / "c") == "without_apps"
+    (tmp_path / "c/apps").mkdir()
+    assert allscript.cache_status(tmp_path / "c") == "complete"

@@ -180,9 +180,17 @@ def step_installer():
     if not (cache / "MANIFEST.json").is_file():
         raise RuntimeError("the installer carries no offline package cache; it cannot finish without internet")
     count = verify_manifest(cache, json.loads((cache / "MANIFEST.json").read_text()))
+    apps = []
+    if (cache / "apps").is_dir():
+        import application_bundle
+        import offline_cache
+        apps = offline_cache.verify_app_bundle(cache, application_bundle.APPS)
+        log("applications carried and verified:", ", ".join(f"{a['app']} {a['version']}" for a in apps))
+    else:
+        log("this installer carries no applications (its cache was built without them)")
     (CACHE / f"{ISO_NAME}.sha256").write_text(f"{digest.hexdigest()}  {ISO_NAME}\n")
     log(f"installer carried: {iso} ({length} bytes, sha256 {digest.hexdigest()}), {count} cached packages verified")
-    mark("installer", iso_sha256=digest.hexdigest(), packages=count)
+    mark("installer", iso_sha256=digest.hexdigest(), packages=count, apps=[a["app"] for a in apps])
 
 
 OS_ISOS = Path("/mnt/INSTALLER_CACHE/isos")
