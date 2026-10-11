@@ -180,3 +180,21 @@ def test_only_the_recovery_stage_needs_root_and_install_does_not_once_the_drive_
     assert allscript.root_required(["preflight"]) == []
     assert allscript.root_required(["recovery", "cache", "install", "firstboot"]) == ["recovery"]
     assert allscript.root_required(["rehearse"]) == [] and allscript.root_required(["install"]) == []
+
+
+def test_a_drive_the_installer_just_installed_is_registered_as_installer_made():
+    """The guard (drive_guard.py) only treats a drive that holds data as the installer's own when its disk GUID is
+    registered. Proxmox's installer creates that GUID, so it is recorded right after the install."""
+    import drive_guard
+    guid = "11111111-2222-4333-8444-555555555555"
+    listing = f"sdb disk  {guid} \nsdb1 part  \nsdb2 part vfat \nsdb3 part LVM2_member \n"
+    assert not drive_guard.is_installer_uuid(guid)
+    assert allscript.register_installed_drive("/dev/sdb", "FD01N6557110C271B", run=lambda argv: (0, listing)) == guid
+    assert drive_guard.is_installer_uuid(guid)
+
+
+def test_a_drive_without_a_readable_disk_guid_is_not_registered():
+    import drive_guard
+    for listing, rc in (("sdb disk  \nsdb1 part ext4 \n", 0), ("", 1)):
+        with pytest.raises(RuntimeError):
+            allscript.register_installed_drive("/dev/sdb", "FD01N6557110C271B", run=lambda argv, l=listing, r=rc: (r, l))

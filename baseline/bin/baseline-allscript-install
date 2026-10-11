@@ -128,6 +128,17 @@ def work_dir(name, stages):
     return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
 
 
+def register_installed_drive(device, serial, *, run=None):
+    """Record the disk GUID Proxmox's installer just created on `device`, so the data-protection guard (drive_guard.py)
+    sees this drive as installer-made on every later run. Returns the GUID; refuses when it cannot be read."""
+    import drive_guard
+    state = drive_guard.read_drive_state(device, run=run)
+    if not state.known or not state.ptuuid:
+        raise RuntimeError(f"cannot read {device}'s disk GUID, so it was not registered as installer-made")
+    drive_guard.register_installer_uuid(state.ptuuid, serial=serial)
+    return drive_guard.normalize_guid(state.ptuuid)
+
+
 def root_required(stages):
     return sorted(set(stages) & ROOT_STAGES)
 
@@ -326,10 +337,9 @@ def stage_install(r):
     drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
     target = identify(r)
     say("deactivated on this host:", deactivate_target_vgs(r, target))
-    typed = input(f"\nThis ERASES {TARGET_NAME} ({SERIAL}, {target['path']}). Recovery image: {folder}\n"
-                  f"Type  WIPE {SERIAL}  to continue: ")
-    if not confirmation_ok(typed, SERIAL):
-        raise RuntimeError("not confirmed; nothing was written")
+    # The authorization is the exact `--confirm-wipe <serial>` on the command line (checked in main), after a verified
+    # recovery image and under the serial lock: an interactive prompt on top of that only blocks unattended runs.
+    say(f"ERASING {TARGET_NAME} ({SERIAL}, {target['path']}); verified recovery image: {folder}")
     if cache_status(CACHE_DIR) != "complete":
         raise RuntimeError("run the cache stage first; the installer must carry its own packages and applications")
     target = identify(r)
@@ -351,6 +361,7 @@ def stage_install(r):
     # authorization. Nothing here reads console text (no OCR, by design): a person or vision-capable agent watches
     # the screendump and records each checkpoint.
     watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
+    say("registered as installer-made:", register_installed_drive(target["path"], SERIAL))
     record("install", workspace=str(workspace))
 
 
