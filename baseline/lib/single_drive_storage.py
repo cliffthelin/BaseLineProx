@@ -268,7 +268,10 @@ def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, g
         raise StorageError("host root/swap/physical thin pool do not meet the single-drive profile") from None
     result = di.ensure_baseline_volumes(bound, vg_name=target["vg_name"], personas=tuple(personas),
         planned_sizes_gib=profile["storage"]["volumes_gib"],
-        reserve_bytes=reserve)
+        reserve_bytes=reserve,
+        # A reinstall lands new volumes on an earlier install's filesystem signatures; those are in unallocated space, owned
+        # by no existing volume, and lvcreate would otherwise refuse (seen on PC601, 2026-10-11).
+        wipe_stale_signatures=True)
     failed = {label: item.detail for label, item in result.items() if not item.ok}
     if failed:
         raise StorageError("role provisioning incomplete; existing data left unformatted: " + json.dumps(failed))

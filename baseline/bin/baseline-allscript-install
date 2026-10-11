@@ -128,6 +128,29 @@ def work_dir(name, stages):
     return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
 
 
+def active_lvm_volumes(listing):
+    """Names of the LVM volumes this host currently has active on the drive, from `lsblk -J` output (readable without root)."""
+    found = []
+
+    def walk(nodes):
+        for node in nodes or []:
+            if node.get("type") == "lvm":
+                found.append(node["name"])
+            walk(node.get("children"))
+    walk(listing.get("blockdevices"))
+    return found
+
+
+def refresh_udev_view(device):
+    """Open `device` for writing and close it, writing nothing: udev's watch then re-probes it. Returns whether it could."""
+    try:
+        os.close(os.open(str(device), os.O_WRONLY))
+    except OSError:
+        return False
+    time.sleep(2)
+    return True
+
+
 def fqdn_for(target_name):
     """Hostname for the install: named after the drive it goes on, so two efforts never share a name on one network."""
     if target_name not in DRIVES:
@@ -292,10 +315,16 @@ def deactivate_target_vgs(r, target):
     pv = target["path"] + "3"
     if not Path(pv).exists():
         return []
+    if os.geteuid() != 0:
+        active = active_lvm_volumes(json.loads(subprocess.run(
+            ["lsblk", "-J", "-o", "NAME,TYPE", target["path"]], capture_output=True, text=True, check=True).stdout))
+        if active:
+            raise RuntimeError(
+                f"this host has {TARGET_NAME}'s LVM volumes active ({len(active)}: {', '.join(active[:3])}...); deactivating them "
+                "needs root. Either run once:  sudo vgchange --devices " + pv + " -an   (for each volume group on it), "
+                "or stop this host activating the drive's volumes at all with an LVM filter (see DR254).")
+        return []
     rows = lvm_rows(r, pv)
-    if rows and os.geteuid() != 0:
-        raise RuntimeError(f"{TARGET_NAME} still carries LVM volumes ({', '.join(x['vg_name'] for x in rows)}); "
-                           "deactivating them needs root: run tools/take-ownership once, or run this stage with sudo")
     for row in rows:
         mapper = "/dev/mapper/" + row["vg_name"].replace("-", "--") + "-"
         mounted = [line for line in Path("/proc/self/mountinfo").read_text().splitlines()
@@ -322,6 +351,7 @@ def stage_preflight(r):
         raise RuntimeError(f"less than 100 GiB free in {BACKUP_ROOT}")
     isos = select_os_isos([], [p.name for p in OS_ISOS.iterdir() if p.is_file()] if OS_ISOS.is_dir() else [], rehearsal=False)
     import drive_guard
+    refresh_udev_view(target["path"])
     state = drive_guard.read_drive_state(target["path"])
     formattable = (not state.has_data) or drive_guard.is_installer_uuid(state.ptuuid)
     say("Proxmox source ISO:", SOURCE_ISO.name, "| assistant present | backup free:", f"{free // 1024**3} GiB")
@@ -355,6 +385,7 @@ def stage_install(r):
         raise RuntimeError(f"run the recovery stage first; nothing is written to {TARGET_NAME} without a verified image")
     drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
     target = identify(r)
+    refresh_udev_view(target["path"])          # the guard reads udev's cache, which an earlier install's VM leaves stale
     say("deactivated on this host:", deactivate_target_vgs(r, target))
     # The authorization is the exact `--confirm-wipe <serial>` on the command line (checked in main), after a verified
     # recovery image and under the serial lock: an interactive prompt on top of that only blocks unattended runs.

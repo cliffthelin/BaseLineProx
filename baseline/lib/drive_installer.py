@@ -229,8 +229,12 @@ def vg_free_bytes_argv(vg_name: str) -> list:
     return ["sudo", "-n", "vgs", "--noheadings", "--units", "b", "--nosuffix", "-o", "vg_free", vg_name]
 
 
-def create_logical_volume_argv(vg_name: str, lv_name: str, size: str) -> list:
-    return ["lvcreate", "-n", lv_name, "-L", size, vg_name]
+def create_logical_volume_argv(vg_name: str, lv_name: str, size: str, *, wipe_stale_signatures: bool = False) -> list:
+    """`wipe_stale_signatures` makes lvcreate wipe a filesystem signature it finds where the new volume lands. That space is
+    unallocated in this volume group, so it belongs to no existing volume; it is only ever leftover from an earlier install
+    of the drive, which otherwise stops the reinstall (lvcreate cannot ask, and refuses). Off by default."""
+    wipe = ["--wipesignatures", "y", "--yes"] if wipe_stale_signatures else []
+    return ["lvcreate", "-n", lv_name, "-L", size, *wipe, vg_name]
 
 
 def format_and_label_argv(lv_path: str, label: str) -> list:
@@ -365,7 +369,7 @@ def is_legacy_name(name: str) -> bool:
 
 
 def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
-                   label: str, mountpoint: str) -> CommandResult:
+                   label: str, mountpoint: str, wipe_stale_signatures: bool = False) -> CommandResult:
     """Idempotent: creates+formats+mounts `lv_name` only if it doesn't
     already exist. An already-existing volume is never reformatted -
     only (re-)mounted if not already mounted, so this is safe to run
@@ -400,7 +404,8 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
                                     f"pre-rename name. Not creating a second volume - rename "
                                     f"it (lvrename + e2label) to adopt it.", created=False)
 
-    create_proc = runner.run(create_logical_volume_argv(vg_name, lv_name, size), timeout=30)
+    create_proc = runner.run(create_logical_volume_argv(vg_name, lv_name, size,
+                                                        wipe_stale_signatures=wipe_stale_signatures), timeout=30)
     if create_proc.returncode != 0:
         return CommandResult(False, f"lvcreate failed: {create_proc.stderr.strip()}")
 
@@ -561,7 +566,7 @@ def compute_adaptive_plan(free_bytes: int, volumes=BASELINE_VOLUMES, *,
 def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                              personas: tuple = DEFAULT_PERSONAS,
                              planned_sizes_gib: dict | None = None,
-                             reserve_bytes: int = 0) -> dict:
+                             reserve_bytes: int = 0, wipe_stale_signatures: bool = False) -> dict:
     """The top-level, idempotent entry point: ensures the three shared
     volumes plus one USER_<PERSONA> volume per `personas`
     all exist on `vg_name`, sizing them adaptively to whatever real
@@ -618,7 +623,8 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                        f"{free_bytes} bytes free, adaptive plan gave 0G real usable space")
             continue
         results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name,
-                                        size=f"{size_gb}G", label=label, mountpoint=mountpoint)
+                                        size=f"{size_gb}G", label=label, mountpoint=mountpoint,
+                                        wipe_stale_signatures=wipe_stale_signatures)
     return results
 
 

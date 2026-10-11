@@ -688,3 +688,30 @@ def test_ensure_volume_refuses_to_create_a_duplicate_beside_an_old_named_one():
     assert result.ok is False
     assert "pre-rename" in result.detail
     assert not any(c[0] == "lvcreate" for c in runner.calls)
+
+
+# --- a reinstall over an earlier install: new volumes may land on stale filesystem signatures -------------------
+
+def test_creating_a_volume_can_wipe_the_stale_signature_lvm_finds_in_free_space_but_not_by_default():
+    assert di.create_logical_volume_argv("pve", "baseline_user", "300G") == [
+        "lvcreate", "-n", "baseline_user", "-L", "300G", "pve"]
+    assert di.create_logical_volume_argv("pve", "baseline_user", "300G", wipe_stale_signatures=True) == [
+        "lvcreate", "-n", "baseline_user", "-L", "300G", "--wipesignatures", "y", "--yes", "pve"]
+
+
+def test_ensure_volume_passes_the_wipe_option_to_lvcreate_only_when_asked():
+    def run(wipe):
+        runner = FakeRunner(command_responses=[(lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n", ""))])
+        di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user", size="300G", label="USER",
+                         mountpoint="/mnt/USER", wipe_stale_signatures=wipe)
+        return next(c for c in runner.calls if c[0] == "lvcreate")
+    assert "--wipesignatures" not in run(False)
+    assert run(True)[-4:] == ["--wipesignatures", "y", "--yes", "pve"]
+
+
+def test_an_existing_volume_is_still_never_touched_by_the_wipe_option():
+    """The option only applies to creating a volume that does not exist; an existing volume is never reformatted."""
+    runner = FakeRunner(command_responses=[(lambda a: "lvs" in a, FakeProc(0, "  pve   baseline_user  \n", ""))])
+    result = di.ensure_volume(runner, vg_name="pve", lv_name="baseline_user", size="300G", label="USER",
+                              mountpoint="/mnt/USER", wipe_stale_signatures=True)
+    assert result.created is False and not any(c[0] in {"lvcreate", "mkfs.ext4"} for c in runner.calls)

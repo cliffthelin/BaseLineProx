@@ -206,3 +206,25 @@ def test_the_installed_hostname_names_the_drive_it_is_installed_on():
     assert allscript.fqdn_for("PC401") == "baseline-pc401.local"
     with pytest.raises(ValueError):
         allscript.fqdn_for("not-a-drive")
+
+
+def test_refreshing_udevs_view_of_a_device_writes_nothing_and_never_raises(tmp_path):
+    """udev re-probes a block device when a writer closes it; the installer's VM leaves its cache blank, which makes the
+    data-protection guard misread a drive Baseline itself installed. Opening for write and closing writes no bytes."""
+    path = tmp_path / "disk.img"
+    path.write_bytes(b"abc" * 1000)
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    assert allscript.refresh_udev_view(path) is True
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+    assert allscript.refresh_udev_view(tmp_path / "missing") is False        # a device it cannot open is only reported
+
+
+def test_volumes_this_host_has_activated_on_the_target_are_found_without_root():
+    listing = {"blockdevices": [{"name": "sdb", "type": "disk", "children": [
+        {"name": "sdb1", "type": "part"},
+        {"name": "sdb3", "type": "part", "children": [
+            {"name": "baseline_1b75-user_admin", "type": "lvm", "mountpoints": [None]},
+            {"name": "baseline_1b75-data", "type": "lvm", "children": [{"name": "baseline_1b75-data_tdata", "type": "lvm"}]}]}]}]}
+    assert allscript.active_lvm_volumes(listing) == ["baseline_1b75-user_admin", "baseline_1b75-data",
+                                                     "baseline_1b75-data_tdata"]
+    assert allscript.active_lvm_volumes({"blockdevices": [{"name": "sdb", "type": "disk"}]}) == []
