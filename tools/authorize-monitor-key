@@ -35,32 +35,24 @@ if [ "$MODE" = "--dry-run" ]; then
 fi
 [ "$(id -u)" -eq 0 ] || { say "needs root: run with sudo (or use --dry-run)"; exit 1; }
 
-# the volume group(s) on this device, and only those: every PV of the group must sit on $DEV
-VG=""
-while read -r vg; do
-  vg="${vg// /}"; [ -n "$vg" ] || continue
-  bad=0
-  while read -r pv; do
-    pv="${pv// /}"; [ -n "$pv" ] || continue
-    case "$pv" in "$DEV"*) ;; *) bad=1;; esac
-  done < <(pvs --noheadings -o pv_name -S "vg_name=$vg")
-  [ "$bad" -eq 0 ] || continue
-  [ -z "$VG" ] || { say "refusing: more than one volume group on $DEV ($VG and $vg); choose by hand"; exit 1; }
-  VG="$vg"
-done < <(pvs --noheadings -o vg_name "$DEV"* 2>/dev/null | sort -u)
-[ -n "$VG" ] || { say "refusing: no volume group lives only on $DEV"; exit 1; }
-say "volume group $VG"
-[ "$(lvs --noheadings -o lv_active "$VG/root" 2>/dev/null | tr -d ' ')" != "active" ] || { say "refusing: $VG/root is already active here; something is using it"; exit 1; }
+# LVM is told to look at this device only. Another volume group on this machine can share the name `pve` (an image file attached as a loop
+# device does), and with the whole system visible LVM warns about duplicates and cannot say which is which; with the filter it sees one.
+LVMCFG="devices { filter = [ \"a|^${DEV}.*|\", \"r|.*|\" ] }"
+mapfile -t VGS < <(pvs --noheadings -o vg_name -S "vg_missing_pv_count=0" --config "$LVMCFG" 2>/dev/null | tr -d ' ' | sort -u | grep -v '^$' || true)
+[ "${#VGS[@]}" -eq 1 ] || { say "refusing: expected one complete volume group on $DEV, found ${#VGS[@]} (${VGS[*]:-none})"; exit 1; }
+VG="${VGS[0]}"
+say "volume group $VG (seen only through $DEV)"
+[ ! -e "/dev/mapper/$VG-root" ] || { say "refusing: /dev/mapper/$VG-root already exists here; something has a volume group named $VG active"; exit 1; }
 
 MNT="$(mktemp -d /tmp/authorize-monitor-key.XXXXXX)"
 cleanup() {
   mountpoint -q "$MNT" && umount "$MNT" || true
   rmdir "$MNT" 2>/dev/null || true
-  vgchange -an "$VG" >/dev/null 2>&1 || true
+  vgchange -an "$VG" --config "$LVMCFG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-vgchange -ay "$VG" >/dev/null
-mount "/dev/$VG/root" "$MNT"
+vgchange -ay "$VG" --config "$LVMCFG" >/dev/null
+mount "/dev/mapper/$VG-root" "$MNT"
 [ -x "$MNT/usr/bin/pvesh" ] || { say "refusing: $VG/root does not look like a Proxmox root (no usr/bin/pvesh)"; exit 1; }
 install -d -m 700 -o root -g root "$MNT/root/.ssh"
 if grep -qxF "$KEY" "$MNT/root/.ssh/authorized_keys" 2>/dev/null; then
