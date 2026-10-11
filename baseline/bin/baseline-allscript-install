@@ -398,6 +398,29 @@ def stage_recovery(r):
     record("recovery", folder=str(folder), manifest=manifest)
 
 
+DEV_PASSWORD_FILE = Path("/run/media/cane/CACHE/baseline-build/dev-root-password")
+
+
+def dev_root_password():
+    """The root password for the installed system during development: read from a private file so it is the same on every rebuild and you
+    can read it (or replace it with one you choose). Created once, with a generated value, if absent; mode 0600 and never printed.
+    The finished product does not use this: it is the development-phase choice (the random one-time password blocked development)."""
+    import secrets
+    if not DEV_PASSWORD_FILE.is_file():
+        DEV_PASSWORD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DEV_PASSWORD_FILE.write_text(secrets.token_urlsafe(18) + "\n")
+        subprocess.run(["setfacl", "-b", str(DEV_PASSWORD_FILE)], capture_output=True)
+        DEV_PASSWORD_FILE.chmod(0o600)
+        say(f"created the development root password file (not shown): {DEV_PASSWORD_FILE}")
+    password = DEV_PASSWORD_FILE.read_text().strip()
+    if len(password) < 12 or any(c in password for c in "\r\n\x00"):
+        raise RuntimeError(f"{DEV_PASSWORD_FILE} must hold one line of at least 12 characters")
+    if DEV_PASSWORD_FILE.stat().st_mode & 0o077:
+        raise RuntimeError(f"{DEV_PASSWORD_FILE} is readable by others; run: chmod 600 {DEV_PASSWORD_FILE}")
+    say(f"using the development root password from {DEV_PASSWORD_FILE} (not shown)")
+    return password
+
+
 MONITOR_KEY = Path("/run/media/cane/CACHE/baseline-build/ssh/baseline-monitor.pub")
 
 
@@ -451,7 +474,7 @@ def stage_install(r):
         iso_builder_runner=ib.RealIsoBuilderRunner(), install_runner=dsi.RealInstallRunner(),
         workspace=workspace, repo_root=REPO, assistant_binary=ASSISTANT, proxmox_source_iso=SOURCE_ISO,
         fqdn=fqdn_for(TARGET_NAME), memory_mb=8192, on_progress=lambda line: say(line),
-        offline_cache=CACHE_DIR, os_share=OS_OFFER, child_identity=child_identity_for(SERIAL), root_ssh_keys=monitor_keys(),
+        offline_cache=CACHE_DIR, os_share=OS_OFFER, child_identity=child_identity_for(SERIAL), root_ssh_keys=monitor_keys(), admin_password=dev_root_password(),
         **si.LVM_SIZE_PRESETS["single-drive"])
     say(result.outcome + ":", result.detail)
     if result.outcome != "applied" or result.qemu_process is None:

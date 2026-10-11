@@ -233,3 +233,20 @@ def test_the_self_check_passes_on_this_tree_and_names_a_module_that_lost_its_exp
     import pytest
     with pytest.raises(RuntimeError, match="no_such_function"):
         allscript.self_check()
+
+
+def test_the_development_root_password_is_created_once_private_and_never_printed(tmp_path, monkeypatch, capsys):
+    import os
+    monkeypatch.setattr(allscript, "DEV_PASSWORD_FILE", tmp_path / "pw")
+    first = allscript.dev_root_password()
+    assert len(first) >= 12 and (tmp_path / "pw").stat().st_mode & 0o777 == 0o600
+    assert allscript.dev_root_password() == first                       # stable across rebuilds
+    assert first not in capsys.readouterr().out                          # never echoed
+    (tmp_path / "pw").write_text("short\n")
+    import pytest
+    with pytest.raises(RuntimeError):
+        allscript.dev_root_password()
+    (tmp_path / "pw").write_text("a-long-enough-password\n")
+    os.chmod(tmp_path / "pw", 0o644)
+    with pytest.raises(RuntimeError):
+        allscript.dev_root_password()

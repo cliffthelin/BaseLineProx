@@ -2,6 +2,7 @@
 # One-time, operator-run: add the development monitoring SSH key to PC601's installed root, so a run can be watched over SSH.
 #
 #   sudo tools/authorize-monitor-key PC601            # adds the key
+#   sudo tools/authorize-monitor-key PC601 --with-password   # also sets root's password to the development one (see below)
 #   tools/authorize-monitor-key PC601 --dry-run       # shows what it would do; needs no root and changes nothing
 #
 # Why this exists: reading or writing the installed system needs its LVM volume group activated, which needs root. The installer now
@@ -13,7 +14,8 @@ set -euo pipefail
 declare -A SERIALS=( [PC601]=FD01N6557110C271B )
 NAME="${1:-}"; MODE="${2:-}"
 [ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: authorize-monitor-key PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
-[ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || { echo "unknown option $MODE" >&2; exit 2; }
+[ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || [ "$MODE" = "--with-password" ] || { echo "unknown option $MODE" >&2; exit 2; }
+PWFILE=/run/media/cane/CACHE/baseline-build/dev-root-password
 SERIAL="${SERIALS[$NAME]}"
 KEY_FILE=/run/media/cane/CACHE/baseline-build/ssh/baseline-monitor.pub
 say() { echo "[authorize-monitor-key] $*"; }
@@ -90,4 +92,12 @@ chmod 644 "$MNT/etc/ssh/sshd_config.d/10-baseline-monitor.conf"
 say "sshd drop-in written; sshd settings that matter here:"
 grep -hiE '^[[:space:]]*(PermitRootLogin|PubkeyAuthentication|AuthorizedKeysFile|StrictModes)' "$MNT/etc/ssh/sshd_config" "$MNT"/etc/ssh/sshd_config.d/*.conf | sed 's/^/    /'
 say "/root/.ssh/authorized_keys on the installed system: $(readlink "$MNT/root/.ssh/authorized_keys" 2>/dev/null || echo 'not a symlink')"
+if [ "$MODE" = "--with-password" ]; then
+  [ -f "$PWFILE" ] || { say "refusing: $PWFILE does not exist (the installer creates it; or create it with one line of 12+ characters, mode 600)"; exit 1; }
+  [ "$(stat -c %a "$PWFILE")" = "600" ] || { say "refusing: $PWFILE must be mode 600"; exit 1; }
+  [ "$(wc -l < "$PWFILE")" -le 1 ] && [ "$(wc -c < "$PWFILE")" -ge 13 ] || { say "refusing: $PWFILE must be one line of at least 12 characters"; exit 1; }
+  HASH="$(openssl passwd -6 -stdin < "$PWFILE")"
+  printf 'root:%s\n' "$HASH" | chpasswd -R "$MNT" -e
+  say "root password on the installed system set from $PWFILE (not shown)"
+fi
 say "monitor keys now:"; cut -d' ' -f1,3- "$MNT/$KEYS_REL"
