@@ -482,3 +482,35 @@ def test_an_offered_image_folder_is_a_read_only_share_not_a_drive(tmp_path):
     assert shared.device_inventory["no_other_drives"] is True
     assert shared.device_inventory["shares"] == [f"{tmp_path / 'offer'} (read-only 9p share, tag baseline-isos)"]
     assert "shares" not in plain.device_inventory
+
+
+# --- clearing stale signatures at the start and end of a target (real files; nothing opens a device) -----------
+
+def test_the_start_and_end_of_a_target_are_zeroed_and_the_middle_is_left_alone(tmp_path):
+    """A drive that held an earlier Proxmox install keeps its LVM label and metadata inside the old partitions even after
+    its partition table is cleared; the installer then finds the old volume group, activates it and cannot create its own
+    physical volume (seen on PC601, 2026-10-11)."""
+    size, head, tail = 10 * 2**20, 4 * 2**20, 1 * 2**20
+    path = tmp_path / "disk.img"
+    path.write_bytes(b"\xff" * size)
+    di.zero_head_and_tail(path, size_bytes=size, head_bytes=head, tail_bytes=tail)
+    data = path.read_bytes()
+    assert data[:head] == b"\0" * head and data[-tail:] == b"\0" * tail
+    assert data[head:-tail] == b"\xff" * (size - head - tail) and len(data) == size
+
+
+def test_a_target_whose_size_is_not_the_validated_size_is_never_touched(tmp_path):
+    path = tmp_path / "disk.img"
+    path.write_bytes(b"\xff" * 4096)
+    with pytest.raises(ValueError, match="size"):
+        di.zero_head_and_tail(path, size_bytes=8192, head_bytes=1024, tail_bytes=1024)
+    assert path.read_bytes() == b"\xff" * 4096
+
+
+def test_the_ranges_may_not_overlap_or_exceed_the_device(tmp_path):
+    path = tmp_path / "disk.img"
+    path.write_bytes(b"\xff" * 4096)
+    for head, tail in ((4096, 1), (3000, 3000), (0, 0)):
+        with pytest.raises(ValueError):
+            di.zero_head_and_tail(path, size_bytes=4096, head_bytes=head, tail_bytes=tail)
+    assert path.read_bytes() == b"\xff" * 4096

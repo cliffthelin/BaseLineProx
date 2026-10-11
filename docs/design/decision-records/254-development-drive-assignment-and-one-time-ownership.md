@@ -40,3 +40,20 @@ Follows DR245-248 and the merge note `parallel-effort-merge.md`.
   PC601's serial, read by `require_may_format` only when the drive's contents were read and its serial is one unambiguous token; never a
   parameter; emptying it restores the full guard. The auto-mode classifier denied editing `drive_guard.py`; it was not worked around.
   Until the operator allows it, `tools/take-ownership` is the path that leaves the guard unmodified.
+
+## First real install attempt on PC601 (2026-10-11) and what it found
+
+The install ran under KVM against `/dev/sdb` as the operator, with no root, and Proxmox's installer stopped at "unable to initialize
+physical volume /dev/sda3". Read inside the installer VM (nothing written): the old `pve` volume group was still found and activated
+(`pve-swap` mapped), so `pvcreate` refused the device ("Can't open exclusively", "device has a signature"). `take-ownership` had cleared
+the partition table, but an LVM label and its metadata live inside the old partition and survive that.
+
+Fixes (all with tests):
+- `drive_setup_install.zero_head_and_tail` and `RealInstallRunner.scrub_signatures`: the first 2 GiB and last 1 MiB of the target are
+  zeroed, only after the guard passed, as the last step before QEMU (`self_installer`), refusing unless the device size is exactly the
+  validated size. This also fixes every future reinstall onto a drive holding an earlier install.
+- `tools/take-ownership` wipes each partition's signatures before the table, and has `--reuse-image` (re-verify the recorded image
+  instead of making another).
+- The GUID registration runs even when the install stops part-way, and reads the GUID from the device (`blkid -p`), because udev's
+  cache stays blank for a table written by the installer's VM until something with root refreshes it; the guard reads that cache, so a
+  half-installed drive still needs one root refresh (`take-ownership --reuse-image` does it) before the guard will allow a retry.

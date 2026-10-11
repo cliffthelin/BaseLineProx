@@ -482,6 +482,13 @@ def build_and_write_self_installer(
         progress("A previous run's install process is still using this workspace - stopping it first...")
         install_runner.kill_process_using_path(monitor_socket)
 
+    # Last step before the installer boots, reachable only after the data-protection guard passed for this device: clear
+    # the start and end of the drive so an earlier install's LVM label cannot stop the installer creating its own.
+    scrub = getattr(install_runner, "scrub_signatures", None)
+    if scrub is not None:
+        progress(f"Clearing stale LVM and partition signatures at the start and end of {device_path}...")
+        scrub(device_path, target["size_bytes"])
+
     progress(f"Launching the real automated install under QEMU against {device_path}...")
     invocation = dsi.build_sparse_install_invocation(
         target_image=Path(device_path), prepared_iso=final_iso,

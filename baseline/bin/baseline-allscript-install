@@ -128,15 +128,27 @@ def work_dir(name, stages):
     return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
 
 
+def probe_disk_guid(device):
+    """The GPT disk GUID read straight from the device (`blkid -p`), not from udev's cache, which stays blank for a table the
+    installer's VM just wrote until something with root refreshes it."""
+    proc = subprocess.run(["blkid", "-p", "-o", "value", "-s", "PTUUID", str(device)], capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
 def register_installed_drive(device, serial, *, run=None):
-    """Record the disk GUID Proxmox's installer just created on `device`, so the data-protection guard (drive_guard.py)
-    sees this drive as installer-made on every later run. Returns the GUID; refuses when it cannot be read."""
+    """Record the disk GUID Proxmox's installer created on `device`, so the data-protection guard (drive_guard.py) sees this
+    drive as installer-made. Returns the GUID; refuses when it cannot be read. With `run` given (tests) the GUID comes from
+    that lsblk output; otherwise it is probed from the device itself."""
     import drive_guard
-    state = drive_guard.read_drive_state(device, run=run)
-    if not state.known or not state.ptuuid:
+    if run is not None:
+        state = drive_guard.read_drive_state(device, run=run)
+        guid = state.ptuuid if state.known else None
+    else:
+        guid = probe_disk_guid(device)
+    if not guid:
         raise RuntimeError(f"cannot read {device}'s disk GUID, so it was not registered as installer-made")
-    drive_guard.register_installer_uuid(state.ptuuid, serial=serial)
-    return drive_guard.normalize_guid(state.ptuuid)
+    drive_guard.register_installer_uuid(guid, serial=serial)
+    return drive_guard.normalize_guid(guid)
 
 
 def root_required(stages):
@@ -360,8 +372,15 @@ def stage_install(r):
     # (storage, installer carried onto INSTALLER_CACHE, offline provision), then reboots into first-boot
     # authorization. Nothing here reads console text (no OCR, by design): a person or vision-capable agent watches
     # the screendump and records each checkpoint.
-    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
-    say("registered as installer-made:", register_installed_drive(target["path"], SERIAL))
+    try:
+        watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
+    finally:
+        # Registered even when the install stops part-way: whatever is on the drive now was written by Baseline's installer,
+        # and an unregistered table would make the data-protection guard refuse the retry.
+        try:
+            say("registered as installer-made:", register_installed_drive(target["path"], SERIAL))
+        except RuntimeError as exc:
+            say("not registered:", exc)
     record("install", workspace=str(workspace))
 
 

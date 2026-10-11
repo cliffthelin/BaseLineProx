@@ -91,7 +91,39 @@ class InstallProcess:
         raise NotImplementedError
 
 
+def zero_head_and_tail(path, *, size_bytes: int, head_bytes: int, tail_bytes: int) -> None:
+    """Overwrite the first `head_bytes` and last `tail_bytes` of `path` with zeros, refusing unless its real size is exactly
+    `size_bytes` (the size the safety gate validated) and the two ranges are positive, disjoint and inside it.
+
+    Why: Proxmox's installer cannot create its LVM physical volume on a drive that still carries an earlier install's LVM
+    label and volume-group metadata, which survive clearing the partition table because they live inside the old
+    partitions. Zeroing the start covers the old BIOS-boot and EFI partitions and the start of the LVM partition; the end
+    removes the backup GPT, so no tool can restore the old table from it. Only ever called after the data-protection guard
+    has passed for this exact device."""
+    if head_bytes <= 0 or tail_bytes <= 0 or head_bytes + tail_bytes >= size_bytes:
+        raise ValueError("head and tail ranges must be positive, disjoint and inside the device")
+    chunk = 8 * 2**20
+    fd = os.open(str(path), os.O_WRONLY)
+    try:
+        actual = os.lseek(fd, 0, os.SEEK_END)
+        if actual != size_bytes:
+            raise ValueError(f"device size {actual} is not the validated size {size_bytes}; nothing was written")
+        for start, length in ((0, head_bytes), (size_bytes - tail_bytes, tail_bytes)):
+            os.lseek(fd, start, os.SEEK_SET)
+            remaining = length
+            while remaining:
+                step = min(chunk, remaining)
+                os.write(fd, b"\0" * step)
+                remaining -= step
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 class RealInstallRunner(InstallRunner):
+    def scrub_signatures(self, path, size_bytes, head_bytes=2 * 2**30, tail_bytes=2**20):
+        zero_head_and_tail(path, size_bytes=size_bytes, head_bytes=head_bytes, tail_bytes=tail_bytes)
+
     def run(self, argv, timeout=30, cwd=None):
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,

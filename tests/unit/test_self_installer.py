@@ -550,3 +550,48 @@ def test_server_host_defaults_to_the_guestfwd_forwarded_address():
 
 def test_minimal_substrate_leaves_room_for_the_real_gui_browser_and_updates():
     assert si.LVM_SIZE_PRESETS["minimal"]["lvm_maxroot"] >= 16
+
+
+def test_stale_signatures_are_scrubbed_only_after_the_guard_passes_and_before_qemu_starts(tmp_path, monkeypatch):
+    """A drive that held an earlier Proxmox install must have its old LVM label cleared before the installer boots,
+    or the installer cannot create its own volume group (PC601, 2026-10-11). The scrub is the last step before QEMU and
+    can only be reached once the data-protection guard has passed for the device."""
+    import drive_guard
+    import drive_setup_install as dsi
+    import iso_builder as ib
+
+    class _StopAfterPopen(Exception):
+        pass
+
+    order = []
+    monkeypatch.setattr(drive_guard, "require_may_format", lambda *a, **k: order.append("guard"))
+    monkeypatch.setattr(dsan, "prepare_iso_defensively",
+                         lambda *a, **k: dsan.PrepareIsoOutcome(ok=True, output_path=Path("/ws/answer-embedded.iso")))
+    monkeypatch.setattr(ib, "build_current_iso",
+                         lambda *a, **k: ib.IsoBuildResult(ok=True, output_path=Path("/ws/final.iso")))
+    monkeypatch.setattr(dsi, "build_sparse_install_invocation",
+                         lambda **k: dsi.QemuInvocation(argv=["qemu-system-x86_64"]))
+    monkeypatch.setattr(dsan, "SessionState", lambda *a, **k: (_ for _ in ()).throw(_StopAfterPopen()))
+    kwargs = _ready_kwargs(tmp_path)
+    kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached-binary"
+    runner = kwargs["install_runner"]
+    runner.scripted_popen_process = FakeInstallProcess()
+    runner.scrub_signatures = lambda path, size: order.append(("scrub", path, size))
+    real_popen = runner.popen
+    runner.popen = lambda *a, **k: (order.append("qemu"), real_popen(*a, **k))[1]
+    with pytest.raises(_StopAfterPopen):
+        si.build_and_write_self_installer(**kwargs)
+    assert order[0] == "guard" and order[-1] == "qemu" and order[-2][0] == "scrub"
+    assert order[-2][1] == "/dev/sdd" and isinstance(order[-2][2], int) and order[-2][2] > 0
+
+
+def test_a_drive_the_guard_refuses_is_never_scrubbed(tmp_path, monkeypatch):
+    import drive_guard
+    calls = []
+    def refuse(*a, **k):
+        raise drive_guard.DataProtectionError("refused: holds data")
+    monkeypatch.setattr(drive_guard, "require_may_format", refuse)
+    kwargs = _ready_kwargs(tmp_path)
+    kwargs["install_runner"].scrub_signatures = lambda *a: calls.append(a)
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "refused" and calls == []

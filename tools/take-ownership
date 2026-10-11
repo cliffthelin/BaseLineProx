@@ -2,6 +2,7 @@
 # One-time, operator-run: make a development drive Baseline's own.
 #
 #   sudo tools/take-ownership PC601          # image it (verified, add-only), then clear it
+#   sudo tools/take-ownership PC601 --reuse-image   # clear it again using the verified image already recorded (no re-imaging)
 #   tools/take-ownership PC601 --dry-run     # show what would happen; needs no root and changes nothing
 #
 # Why this exists: baseline's data-protection guard (drive_guard.py, operator rule 2026-10-01) never formats a drive that holds
@@ -13,7 +14,7 @@ set -euo pipefail
 declare -A SERIALS=( [PC601]=FD01N6557110C271B )      # only the drive assigned to Claude; PC401 is Codex's and is not listed
 NAME="${1:-}"; MODE="${2:-}"
 [ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: take-ownership PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
-[ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || { echo "unknown option $MODE" >&2; exit 2; }
+[ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || [ "$MODE" = "--reuse-image" ] || { echo "unknown option $MODE" >&2; exit 2; }
 SERIAL="${SERIALS[$NAME]}"
 OTHER=MD89N41071210AP4E
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -43,11 +44,23 @@ if [ "$MODE" = "--dry-run" ]; then
 fi
 [ "$(id -u)" -eq 0 ] || { say "run with sudo"; exit 1; }
 
-# 2. a verified recovery image first (add-only: a new folder under /mnt/10TB/backup; nothing is deleted)
-say "making and verifying the recovery image of $NAME (this can take a while)..."
-"$ALLSCRIPT" --target "$NAME" --stage recovery
-FOLDER="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['stages']['recovery']['folder'])" "$JOURNAL")"
-[ -d "$FOLDER" ] && [ -f "$FOLDER/manifest.json" -o -n "$(ls "$FOLDER" | head -1)" ] || { say "refusing: no recovery image at $FOLDER"; exit 1; }
+# 2. a verified recovery image first (add-only: a new folder under /mnt/10TB/backup; nothing is deleted). With --reuse-image the
+#    image already recorded for this drive is re-verified (checksum and identity) instead of making another.
+if [ "$MODE" = "--reuse-image" ]; then
+  FOLDER="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['stages']['recovery']['folder'])" "$JOURNAL")"
+  say "re-verifying the recorded recovery image $FOLDER ..."
+  python3 - "$REPO" "$FOLDER" "$SERIAL" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1] + "/baseline/lib")
+import drive_recovery, repair
+drive_recovery.verify_snapshot(repair.RealRunner(), sys.argv[2], expected_serial=sys.argv[3])
+PY
+else
+  say "making and verifying the recovery image of $NAME (this can take a while)..."
+  "$ALLSCRIPT" --target "$NAME" --stage recovery
+  FOLDER="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['stages']['recovery']['folder'])" "$JOURNAL")"
+fi
+[ -d "$FOLDER" ] && [ -f "$FOLDER/MANIFEST.json" ] || { say "refusing: no verified recovery image at $FOLDER"; exit 1; }
 say "verified recovery image: $FOLDER"
 
 # 3. quiesce this host's use of the drive: unmount (never lazy or forced), then deactivate only its own volume groups
@@ -59,8 +72,12 @@ for pv in $(lsblk -nrpo PATH,FSTYPE "$DEV" | awk '$2 == "LVM2_member" {print $1}
   [ -z "$vg" ] || { say "deactivating volume group $vg on $pv"; vgchange --devices "$pv" -an "$vg"; }
 done
 
-# 4. clear the partition table and signatures; the drive is then empty and Baseline may stamp it as its own
+# 4. clear the signatures inside every partition (an LVM label survives clearing the partition table and later stops
+#    the installer creating its own volume group), then the partition table; the drive is then empty
 say "clearing $DEV"
+for part in $(lsblk -nrpo PATH,TYPE "$DEV" | awk '$2 == "part" {print $1}'); do
+  wipefs -a "$part" >/dev/null
+done
 wipefs -a "$DEV" >/dev/null
 sgdisk --zap-all "$DEV" >/dev/null
 partprobe "$DEV" || true
