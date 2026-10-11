@@ -1,9 +1,10 @@
 #!/bin/bash
-# Development-phase login: make the Linux user named in /etc/baseline/dev-user.hash ("name:sha512crypt-hash"), give it that password,
+# (Kept in /etc/baseline-dev, not /etc/baseline: persist_bind_mounts mounts persistent storage over /etc/baseline at boot, which would hide it.)
+# Development-phase login: make the Linux user named in /etc/baseline-dev/dev-user.hash ("name:sha512crypt-hash"), give it that password,
 # and make it a Proxmox Administrator so it can use the web login (Linux PAM realm). Safe to run on every boot; does nothing if the
 # file is absent. Written only for development: the hash file is root-only and holds a hash, never the password.
 set -euo pipefail
-FILE=/etc/baseline/dev-user.hash
+FILE=/etc/baseline-dev/dev-user.hash
 [ -f "$FILE" ] || exit 0
 line="$(head -n 1 "$FILE")"
 NAME="${line%%:*}"; HASH="${line#*:}"

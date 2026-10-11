@@ -41,6 +41,11 @@ OUT="$OUTDIR/$NAME-$(date +%Y%m%dT%H%M%S).txt"
   section "root listing"; ls -la --time-style=long-iso "$MNT/etc/baseline" "$MNT/var/lib/baseline" "$MNT/var/log/baseline" 2>&1 | head -80
   show etc/baseline/host-id etc/hostname etc/network/interfaces etc/hosts
   section "interfaces.d"; ls -la "$MNT/etc/network/interfaces.d" 2>&1 | head; for f in "$MNT"/etc/network/interfaces.d/*; do [ -f "$f" ] && { echo "--- $f"; head -c 4000 "$f"; }; done
+  section "development login: files, passwd entry, unit link"
+  ls -la "$MNT/etc/baseline-dev" 2>&1 | head; grep -E '^(baseline|root):' "$MNT/etc/passwd" 2>&1 | cut -d: -f1,3,4,6,7
+  ls -la "$MNT/etc/systemd/system/multi-user.target.wants/baseline-dev-user.service" "$MNT/usr/local/sbin/baseline-dev-user" 2>&1
+  section "bridge-port log and the interfaces backup files"; ls -la "$MNT"/etc/network/interfaces.baseline-bridge-port.* 2>&1 | head -3; cat "$MNT/var/log/baseline/bridge-port.log" 2>&1 | tail -5
+  section "pveproxy access log (login attempts) and auth log, tails"; tail -n 15 "$MNT/var/log/pveproxy/access.log" 2>&1; tail -n 15 "$MNT/var/log/auth.log" 2>&1
   section "persistent journal present?"; ls -ld "$MNT/var/log/journal" 2>&1
   if [ -d "$MNT/var/log/journal" ]; then
     section "journal: boots"; journalctl --directory="$MNT/var/log/journal" --list-boots --no-pager 2>&1 | tail -8

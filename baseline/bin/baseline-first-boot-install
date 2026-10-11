@@ -164,7 +164,7 @@ def step_dev_user(write_to=None, systemd=True):
         log("dev-user: none carried")
         mark("dev-user", carried=False)
         return
-    target = Path(write_to or "/etc/baseline/dev-user.hash")
+    target = Path(write_to or "/etc/baseline-dev/dev-user.hash")
     target.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:

@@ -1,6 +1,6 @@
 [Unit]
 Description=Baseline development login (Linux user and Proxmox Administrator)
-ConditionPathExists=/etc/baseline/dev-user.hash
+ConditionPathExists=/etc/baseline-dev/dev-user.hash
 After=pve-cluster.service pvedaemon.service pveproxy.service network-online.target
 Wants=pve-cluster.service
 
