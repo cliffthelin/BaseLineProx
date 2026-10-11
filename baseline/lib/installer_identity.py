@@ -1,7 +1,8 @@
 """Identity of an installer and of the drives it installs.
 
-Each installer (this checkout, the parallel effort's checkout) has ONE UUID of its own, created the first time it is needed and kept
-in an untracked file in the checkout's git directory, so it is never committed, never merged, and two installers cannot share one.
+Each installer lane (this one, the parallel effort's) has ONE UUID of its own, pinned in `baseline/INSTALLER_UUID`. It is created the
+first time it is needed and never changed afterwards. A lane keeps its own file when source moves between lanes (`.gitattributes`:
+`merge=ours`), and a test pins that this lane's value differs from the parallel lane's.
 
 The identity of a drive an installer installed is derived, not generated: uuid5(installer UUID, drive serial). The same installer
 and the same drive therefore always give the same UUID, across any number of reinstalls, and it differs between installers and
@@ -18,7 +19,7 @@ from pathlib import Path
 
 import drive_guard
 
-FILE_NAME = "baseline-installer-id"
+FILE_NAME = "INSTALLER_UUID"        # baseline/INSTALLER_UUID: this lane's pinned installer UUID (each lane keeps its own)
 _SERIAL = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
@@ -27,7 +28,7 @@ class IdentityError(RuntimeError):
 
 
 def installer_id(directory) -> str:
-    """This installer's UUID, created on first use in `directory` (a checkout's git directory) and never changed afterwards.
+    """This lane's installer UUID, created on first use in `directory` (the checkout's `baseline/` folder) and never changed afterwards.
     A damaged file is refused: replacing it would silently change the identity of every drive this installer installed."""
     path = Path(directory) / FILE_NAME
     if path.is_file():

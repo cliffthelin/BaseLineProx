@@ -84,9 +84,10 @@ signature should not be wiped, should be stored aligned to the serial number of 
 
 Before this, every install left a new random disk GUID (Proxmox's installer) that was registered as it stood: six registry entries by
 the end of the day, one new one per install. Now (`installer_identity.py`, `baseline-allscript-install`):
-- Each installer has one UUID of its own, created on first use and kept in an untracked file in its checkout's git directory
-  (`.git/baseline-installer-id`), so it is never committed or merged and two installers cannot share one. A damaged file is refused,
-  never silently replaced.
+- Each installer lane has one UUID of its own, pinned in `baseline/INSTALLER_UUID` (this lane: `4af8c95a-1c9b-437a-a306-c53855d4077f`; the
+  parallel lane's `5029a80d-...` is never copied, and a test pins the difference). `.gitattributes` marks the file `merge=ours` (needs
+  `git config merge.ours.driver true` once per clone) so a lane keeps its own when source moves between lanes (DR304). A damaged file is
+  refused, never silently replaced.
 - A drive's identity is `uuid5(installer UUID, drive serial)`: fixed by the installer and the serial alone, identical across any number
   of reinstalls, different between installers and between drives. This installer's PC601 identity is `f337b480-e7d7-533f-8a38-6a6af014a614`.
 - After the installer's VM has exited, success or failure (`finally` in `main`, or `--stage identity` on its own), the disk identifier is set

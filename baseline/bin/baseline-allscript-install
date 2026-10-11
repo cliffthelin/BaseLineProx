@@ -159,10 +159,8 @@ def fqdn_for(target_name):
 
 
 def identity_directory():
-    """The directory that holds this installer's own identity file: the checkout's git directory (untracked, per clone)."""
-    out = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--git-common-dir"], capture_output=True, text=True, check=True)
-    path = Path(out.stdout.strip())
-    return path if path.is_absolute() else (REPO / path).resolve()
+    """The folder that holds this lane's pinned installer UUID (baseline/INSTALLER_UUID)."""
+    return REPO / "baseline"
 
 
 def vm_using(device, *, proc_root="/proc"):

@@ -98,3 +98,27 @@ def test_a_failing_sgdisk_is_reported_and_nothing_is_registered():
         ii.stamp_child_identity("/dev/sdb", PC601, installer, run=lambda argv: (1, "cannot write"),
                                 probe=lambda device: "11111111-2222-4333-8444-555555555555")
     assert not drive_guard.is_installer_uuid(ii.child_uuid(installer, PC601))
+
+
+# --- the lane's own pinned installer UUID (baseline/INSTALLER_UUID) -----------------------------------------------
+
+CODEX_LANE_UUID = "5029a80d-c748-4616-aa08-99ac560f5311"           # the parallel lane's value: never copied into this one
+CLAUDE_LANE_UUID = "4af8c95a-1c9b-437a-a306-c53855d4077f"          # this lane's value; every drive it installed derives from it
+
+
+def test_this_lanes_pinned_installer_uuid_is_its_own_and_never_the_parallel_lanes():
+    from pathlib import Path
+    pinned = (Path(__file__).resolve().parents[2] / "baseline" / ii.FILE_NAME).read_text().strip()
+    assert str(uuid.UUID(pinned)) == pinned
+    assert pinned == CLAUDE_LANE_UUID                              # changing it changes every drive's identity: a conscious edit
+    assert pinned != CODEX_LANE_UUID
+
+
+def test_the_same_serial_gets_a_different_identity_in_each_lane():
+    assert ii.child_uuid(CLAUDE_LANE_UUID, PC601) != ii.child_uuid(CODEX_LANE_UUID, PC601)
+
+
+def test_a_merge_keeps_the_receiving_lanes_own_uuid_file():
+    from pathlib import Path
+    attributes = (Path(__file__).resolve().parents[2] / ".gitattributes").read_text().splitlines()
+    assert any(line.split()[:2] == ["baseline/INSTALLER_UUID", "merge=ours"] for line in attributes)
