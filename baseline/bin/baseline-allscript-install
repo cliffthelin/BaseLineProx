@@ -643,7 +643,25 @@ def stage_session_kiosk(r):
     record("kiosk", screenshot=str(WORK / "kiosk.png"), qemu_exit=code)
 
 
+REQUIRED_EXPORTS = {"identifiers": ("host_id", "child_id", "mint", "IdentifierError"), "installer_identity": ("child_uuid", "installer_id"),
+                    "references": ("link", "current_host"), "machine_context": ("observe", "assess"), "install_watch": ("StageWatch",)}
+
+
+def self_check():
+    """Before anything slow or destructive: every library this run depends on imports and exports what it uses. A shared working tree can
+    be changed under a running session (on 2026-10-11 identifiers.py was replaced by a one-line stub, and the run only found out after
+    building the installer); this finds that in a second."""
+    import importlib
+    for module, names in REQUIRED_EXPORTS.items():
+        loaded = importlib.import_module(module)
+        missing = [n for n in names if not hasattr(loaded, n)]
+        if missing:
+            raise RuntimeError(f"{loaded.__file__} is missing {', '.join(missing)}: the working tree has been changed or is damaged; "
+                               f"compare it with git (git diff HEAD -- {Path(loaded.__file__).name}) before running")
+
+
 def main():
+    self_check()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--stage", help="run only this stage")
     parser.add_argument("--from", dest="start", help="run this stage and every later one")

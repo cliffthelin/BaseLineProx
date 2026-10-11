@@ -225,3 +225,11 @@ def test_the_identity_stage_is_selectable_alone_and_a_vm_holding_the_device_is_f
     assert allscript.vm_using("/dev/sdb", proc_root=proc) == 101
     assert allscript.vm_using("/dev/sdz", proc_root=proc) is None
     assert allscript.vm_using("/dev/sd", proc_root=proc) is None       # a prefix of a device name is not the device
+
+
+def test_the_self_check_passes_on_this_tree_and_names_a_module_that_lost_its_exports(tmp_path, monkeypatch):
+    allscript.self_check()
+    monkeypatch.setitem(allscript.REQUIRED_EXPORTS, "identifiers", ("no_such_function",))
+    import pytest
+    with pytest.raises(RuntimeError, match="no_such_function"):
+        allscript.self_check()
