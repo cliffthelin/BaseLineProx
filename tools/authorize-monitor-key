@@ -54,7 +54,24 @@ trap cleanup EXIT
 vgchange -ay "$VG" --config "$LVMCFG" >/dev/null
 mount "/dev/mapper/$VG-root" "$MNT"
 [ -x "$MNT/usr/bin/pvesh" ] || { say "refusing: $VG/root does not look like a Proxmox root (no usr/bin/pvesh)"; exit 1; }
+# Read-only look first: /root must be a real directory on this filesystem. If it is a symlink (or missing) writing "through" it would land
+# somewhere else on this machine or in a place the installed system never reads, so show what is there and stop.
+diagnose() {
+  say "$1"
+  say "--- $MNT/root and its surroundings (read-only) ---"
+  ls -ld "$MNT/root" "$MNT/root/.ssh" 2>&1 | sed 's/^/    /'
+  [ -L "$MNT/root" ] && say "    /root is a symlink to: $(readlink "$MNT/root")"
+  [ -L "$MNT/root/.ssh" ] && say "    /root/.ssh is a symlink to: $(readlink "$MNT/root/.ssh")"
+  ls -la "$MNT/root" 2>&1 | head -20 | sed 's/^/    /'
+  say "--- fstab lines mentioning root, home, persist, USER ---"
+  grep -iE "root|home|persist|USER" "$MNT/etc/fstab" 2>&1 | sed 's/^/    /' | head -12
+  findmnt -no TARGET,SOURCE,OPTIONS "$MNT" 2>&1 | sed 's/^/    /'
+  exit 1
+}
+[ -d "$MNT/root" ] && [ ! -L "$MNT/root" ] || diagnose "refusing: /root on the installed system is not a plain directory"
+[ ! -L "$MNT/root/.ssh" ] || diagnose "refusing: /root/.ssh is a symlink"
 install -d -m 700 -o root -g root "$MNT/root/.ssh"
+[ -d "$MNT/root/.ssh" ] || diagnose "refusing: /root/.ssh could not be created on the installed root"
 if grep -qxF "$KEY" "$MNT/root/.ssh/authorized_keys" 2>/dev/null; then
   say "the key is already authorized; nothing to do"
 else
