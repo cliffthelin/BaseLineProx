@@ -43,7 +43,7 @@ def screendump(vmid, path: Path) -> None:
                 raise ValueError(f"{command['execute']}: {reply['error'].get('desc', reply['error'])}")
 
 
-def main(image: str, settle_seconds: int = 90) -> int:
+def main(image: str, max_seconds: int = 600) -> int:
     host = baseline_web._vm_host_for({})
     report = {"image": image, "backend": getattr(host, "backend", "QEMU")}
     listed = {Path(i["path"]).name: i["name"] for i in vm_page.available_isos(host, ISOS)}
@@ -56,17 +56,21 @@ def main(image: str, settle_seconds: int = 90) -> int:
         if not result.get("ok"):
             break
     else:
-        time.sleep(settle_seconds)
-        report["running"] = bool(host.status(NAME).get("running"))
-        shot = Path(tempfile.mkdtemp()) / "screen.ppm"
+        deadline = time.monotonic() + max_seconds
         record = host._record(NAME) if hasattr(host, "_record") else None
-        if record and record.get("vmid"):
-            try:
-                screendump(record["vmid"], shot)
-            except (OSError, ValueError) as exc:
-                report["screendump"] = str(exc)
-        if shot.is_file():
-            report["screen_nonblack_fraction"] = round(nonblack_fraction(shot.read_bytes()), 3)
+        shot = Path(tempfile.mkdtemp()) / "screen.ppm"
+        while True:
+            time.sleep(15)
+            report["running"] = bool(host.status(NAME).get("running"))
+            if record and record.get("vmid"):
+                try:
+                    screendump(record["vmid"], shot)
+                    report["screen_nonblack_fraction"] = round(nonblack_fraction(shot.read_bytes()), 3)
+                except (OSError, ValueError) as exc:
+                    report["screendump"] = str(exc)
+            if (report["running"] and report.get("screen_nonblack_fraction", 0) > 0.02) or time.monotonic() > deadline:
+                break
+        report["seconds_to_open"] = round(max_seconds - (deadline - time.monotonic()))
     report["opened"] = bool(report.get("running")) and report.get("screen_nonblack_fraction", 0) > 0.02
     Path("/var/log/baseline-os-open.json").write_text(json.dumps(report, indent=1))
     print("OS-OPEN " + json.dumps(report))

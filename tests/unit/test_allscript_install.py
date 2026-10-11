@@ -198,3 +198,11 @@ def test_a_drive_without_a_readable_disk_guid_is_not_registered():
     for listing, rc in (("sdb disk  \nsdb1 part ext4 \n", 0), ("", 1)):
         with pytest.raises(RuntimeError):
             allscript.register_installed_drive("/dev/sdb", "FD01N6557110C271B", run=lambda argv, l=listing, r=rc: (r, l))
+
+
+def test_the_installed_hostname_names_the_drive_it_is_installed_on():
+    """The first PC601 install came up as baseline-pc401, a name that belongs to the other effort's drive."""
+    assert allscript.fqdn_for("PC601") == "baseline-pc601.local"
+    assert allscript.fqdn_for("PC401") == "baseline-pc401.local"
+    with pytest.raises(ValueError):
+        allscript.fqdn_for("not-a-drive")

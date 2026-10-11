@@ -128,6 +128,13 @@ def work_dir(name, stages):
     return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
 
 
+def fqdn_for(target_name):
+    """Hostname for the install: named after the drive it goes on, so two efforts never share a name on one network."""
+    if target_name not in DRIVES:
+        raise ValueError(f"unknown target {target_name!r}")
+    return f"baseline-{target_name.lower()}.local"
+
+
 def probe_disk_guid(device):
     """The GPT disk GUID read straight from the device (`blkid -p`), not from udev's cache, which stays blank for a table the
     installer's VM just wrote until something with root refreshes it."""
@@ -361,7 +368,7 @@ def stage_install(r):
         pds_runner=pds.Runner(), acquire_runner=dsa.RealAcquireRunner(), answer_runner=dsan.RealAnswerRunner(),
         iso_builder_runner=ib.RealIsoBuilderRunner(), install_runner=dsi.RealInstallRunner(),
         workspace=workspace, repo_root=REPO, assistant_binary=ASSISTANT, proxmox_source_iso=SOURCE_ISO,
-        fqdn="baseline-pc401.local", memory_mb=8192, on_progress=lambda line: say(line),
+        fqdn=fqdn_for(TARGET_NAME), memory_mb=8192, on_progress=lambda line: say(line),
         offline_cache=CACHE_DIR, os_share=OS_OFFER, **si.LVM_SIZE_PRESETS["single-drive"])
     say(result.outcome + ":", result.detail)
     if result.outcome != "applied" or result.qemu_process is None:
