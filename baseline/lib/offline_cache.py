@@ -39,9 +39,11 @@ def required_packages(repo_root) -> list:
     diagnostic tools (firstboot_statemachine.DIAGNOSTIC_PACKAGES) - both read from the code, never copied."""
     import firstboot_statemachine
     import application_bundle
+    import installer_cache
     names = provision_packages((Path(repo_root) / "boot/provision.sh").read_text())
     runtime = application_bundle.runtime_plan({"arch": "amd64", "os": "debian", "release": "13"})["packages"]
-    return names + [p for p in firstboot_statemachine.DIAGNOSTIC_PACKAGES + runtime if p not in names]
+    wanted = list(firstboot_statemachine.DIAGNOSTIC_PACKAGES) + runtime + list(installer_cache.firmware_packages())
+    return names + [p for p in dict.fromkeys(wanted) if p not in names]
 
 
 APP_BUNDLE = "apps"
@@ -90,6 +92,30 @@ def verify_manifest(root, manifest: dict) -> int:
     if bad:
         raise RuntimeError(f"carried files fail their checksums: {bad[:5]}")
     return len(manifest)
+
+
+def seed_debs(seeds) -> list:
+    """Every package already on hand: `<seed>/apt/*.deb` (an earlier cache, or the drive's carried one) and
+    `<seed>/*.deb` (a flat folder), earlier seeds first, one file per package file name."""
+    found = {}
+    for seed in map(Path, seeds):
+        for folder in (seed / "apt", seed):
+            for deb in sorted(folder.glob("*.deb")) if folder.is_dir() else []:
+                found.setdefault(deb.name, deb)
+    return sorted(found.values(), key=lambda p: p.name)
+
+
+def seed_apps(target, seeds) -> list:
+    """Copy into `target` each application an earlier cache already carries (recipe + archive) and `target` lacks."""
+    import shutil
+    target = Path(target)
+    reused = []
+    for seed in map(Path, seeds):
+        for folder in sorted((seed / APP_BUNDLE).glob("*")) if (seed / APP_BUNDLE).is_dir() else []:
+            if (folder / "recipe.json").is_file() and not (target / folder.name).exists():
+                shutil.copytree(folder, target / folder.name)
+                reused.append(folder.name)
+    return reused
 
 
 def verify_carried(root) -> int:

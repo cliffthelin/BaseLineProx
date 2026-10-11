@@ -127,6 +127,14 @@ def cache_status(cache_dir):
     return "complete" if (cache_dir / "apps").is_dir() else "without_apps"
 
 
+def cache_seeds(installer_cache, earlier):
+    """What a cache build starts from before downloading anything: earlier caches, the volume's own package and
+    firmware folders (installer_cache.py's layout), and the cache this machine's own drive carried and learned."""
+    candidates = [*map(Path, earlier), Path(installer_cache) / "packages", Path(installer_cache) / "firmware",
+                  Path(installer_cache) / "installer/expanded/baseline-cache"]
+    return [p for p in candidates if p.is_dir()]
+
+
 def select_os_isos(requested, available, *, rehearsal, sizes=None):
     """Which OS install images the installer offers to the drive. Default: every .iso except the Proxmox installer
     (already carried); the rehearsal defaults to the smallest one so it stays quick."""
@@ -372,8 +380,12 @@ def stage_cache(r):
     if status == "complete":
         say("offline package cache already built:", CACHE_DIR)
     else:
+        earlier = sorted(BUILD.glob(CACHE_DIR.name + "-before-*"))
+        seeds = cache_seeds(OS_ISOS.parent, earlier)
+        say("seeding the build from:", ", ".join(map(str, seeds)) or "nothing yet; everything is downloaded")
         sh([REPO / "baseline/bin/baseline-build-offline-cache", "--source-iso", SOURCE_ISO, "--assistant", ASSISTANT,
-            "--workspace", BUILD / "cache-vm", "--output", CACHE_DIR, "--apps", APPS_DIR], timeout=14400)
+            "--workspace", BUILD / "cache-vm", "--output", CACHE_DIR, "--apps", APPS_DIR,
+            *[arg for seed in seeds for arg in ("--seed", seed)]], timeout=14400)
     import offline_cache
     import application_bundle
     count = offline_cache.verify_manifest(CACHE_DIR, json.loads((CACHE_DIR / "MANIFEST.json").read_text()))

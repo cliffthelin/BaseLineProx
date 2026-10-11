@@ -218,6 +218,11 @@ _IMAGES = (
 )
 
 
+def firmware_packages() -> tuple:
+    """The driver and firmware packages the catalog declares (CPU microcode, Wi-Fi firmware)."""
+    return tuple(name for name, _label, _setting in _FIRMWARE)
+
+
 def _diagnostic_packages() -> tuple:
     try:
         import firstboot_statemachine as fsm

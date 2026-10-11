@@ -152,3 +152,14 @@ def test_a_cache_without_the_applications_is_not_a_complete_cache(tmp_path):
     assert allscript.cache_status(tmp_path / "c") == "without_apps"
     (tmp_path / "c/apps").mkdir()
     assert allscript.cache_status(tmp_path / "c") == "complete"
+
+
+def test_a_rebuild_is_seeded_from_every_cache_that_exists(tmp_path):
+    root = tmp_path / "INSTALLER_CACHE"
+    (root / "packages").mkdir(parents=True)
+    (root / "installer/expanded/baseline-cache").mkdir(parents=True)
+    older = tmp_path / "offline-cache-before-apps"
+    older.mkdir()
+    seeds = allscript.cache_seeds(root, [older, tmp_path / "gone"])
+    assert seeds == [older, root / "packages", root / "installer/expanded/baseline-cache"]
+    assert allscript.cache_seeds(tmp_path / "nothing", []) == []

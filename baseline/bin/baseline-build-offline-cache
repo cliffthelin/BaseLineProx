@@ -13,6 +13,10 @@ network access only through the allowlisted package proxy (baseline/lib/installe
                                     `baseline-apps prepare` for Debian 13 (publisher download, pinned sha256, recipe), and
                                     - in the VM - the dependencies of their packages, so `baseline-apps install` needs no network
 
+Read-through: `--seed` folders (an earlier cache, the drive's own carried/learned cache, a flat folder of .debs) pre-fill the
+VM's package and npm caches and the prepared applications, so only what is missing is downloaded; the new cache keeps
+everything it was seeded with. Drivers (CPU microcode, Wi-Fi firmware: installer_cache.firmware_packages) are carried too.
+
 The .debs and the npm cache are copied out, indexed (dpkg-scanpackages) and listed in MANIFEST.json. The VM and its
 throwaway credentials are deleted afterwards.
 
@@ -146,16 +150,24 @@ def ssh(key, command, *, timeout=3600, check=True, stdout=None):
     return proc
 
 
-def collect(key, packages, output, apps=None):
+def collect(key, packages, output, apps=None, seeds=()):
     proxy_env = f"export http_proxy={GUEST_PROXY} https_proxy={GUEST_PROXY} DEBIAN_FRONTEND=noninteractive;"
     ssh(key, "for f in pve-enterprise.sources ceph.sources; do [ -f /etc/apt/sources.list.d/$f ] && "
              "mv /etc/apt/sources.list.d/$f /etc/apt/sources.list.d/$f.disabled; done; "
              f"printf 'Acquire::http::Proxy \"{GUEST_PROXY}\";\\nAcquire::https::Proxy \"{GUEST_PROXY}\";\\n' "
              "> /etc/apt/apt.conf.d/99baseline-cache-proxy")
+    # Drivers (microcode, Wi-Fi firmware) live in Debian's non-free-firmware component.
+    ssh(key, "for f in /etc/apt/sources.list.d/debian.sources; do [ -f $f ] && "
+             "sed -i '/^Types: deb/,/^$/ { /^Components:/ { /non-free-firmware/! s/$/ non-free-firmware/ } }' $f; done; true")
     say("adding NodeSource 22 (the same repository provision.sh uses online)")
     ssh(key, proxy_env + "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -")
     say("downloading", len(packages), "packages with all dependencies:", " ".join(packages))
-    ssh(key, proxy_env + "apt-get clean && apt-get install --download-only -y " + " ".join(packages))
+    ssh(key, "apt-get clean")
+    debs = offline_cache.seed_debs(seeds)
+    if debs:
+        say("seeding the builder with", len(debs), "packages already on hand; only what is missing is downloaded")
+        push_debs(key, debs, "/var/cache/apt/archives")
+    ssh(key, proxy_env + "apt-get install --download-only -y " + " ".join(packages))
     if apps is not None:
         say("collecting the dependencies of the application packages")
         push(key, apps, "/root/apps")
@@ -167,7 +179,12 @@ def collect(key, packages, output, apps=None):
     subprocess.run(["tar", "-xf", str(output / "apt.tar"), "-C", str(apt_dir)], check=True)
     (output / "apt.tar").unlink()
     say("filling npm's cache with Claude Code")
-    ssh(key, proxy_env + "apt-get install -y nodejs && rm -rf /root/npm-cache && "
+    npm_seed = next((seed for seed in map(Path, seeds) if (seed / "npm-cache").is_dir()), None)
+    ssh(key, "rm -rf /root/npm-cache")
+    if npm_seed is not None:
+        say("seeding npm's cache from", npm_seed / "npm-cache")
+        _stream_into_vm(key, ["tar", "-C", str(npm_seed), "-cf", "-", "npm-cache"], "/root")
+    ssh(key, proxy_env + "apt-get install -y nodejs && "
              f"npm install -g --cache /root/npm-cache --proxy {GUEST_PROXY} --https-proxy {GUEST_PROXY} "
              "@anthropic-ai/claude-code")
     with open(output / "npm.tar", "wb") as stream:
@@ -197,17 +214,31 @@ def prepare_apps(folder):
         (target / "recipe.json").write_text(json.dumps(json.loads(proc.stdout)["recipe"], indent=1, sort_keys=True) + "\n")
 
 
-def push(key, folder, destination):
-    """Copy a folder into the builder VM."""
-    ssh(key, f"rm -rf {destination} && mkdir -p {destination}")
-    tar = subprocess.Popen(["tar", "-C", str(folder), "-cf", "-", "."], stdout=subprocess.PIPE)
+def _stream_into_vm(key, tar_argv, destination):
+    tar = subprocess.Popen(tar_argv, stdout=subprocess.PIPE)
     ssh_argv = ["ssh", "-i", str(key), "-p", str(SSH_PORT), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
                 "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "root@127.0.0.1",
                 f"tar -C {destination} -xf -"]
     result = subprocess.run(ssh_argv, stdin=tar.stdout, capture_output=True)
     tar.wait()
     if result.returncode or tar.returncode:
-        raise RuntimeError(f"copying {folder} into the builder VM failed: {result.stderr.decode()[-500:]}")
+        raise RuntimeError(f"copying into the builder VM ({destination}) failed: {result.stderr.decode()[-500:]}")
+
+
+def push(key, folder, destination):
+    """Copy a folder into the builder VM."""
+    ssh(key, f"rm -rf {destination} && mkdir -p {destination}")
+    _stream_into_vm(key, ["tar", "-C", str(folder), "-cf", "-", "."], destination)
+
+
+def push_debs(key, debs, destination):
+    """Copy package files into the builder VM (grouped by folder so the command line stays short)."""
+    ssh(key, f"mkdir -p {destination}")
+    by_folder = {}
+    for deb in debs:
+        by_folder.setdefault(deb.parent, []).append(deb.name)
+    for folder, names in by_folder.items():
+        _stream_into_vm(key, ["tar", "-C", str(folder), "-cf", "-", *names], destination)
 
 
 def index(output):
@@ -232,6 +263,11 @@ def main():
     parser.add_argument("--assistant", type=Path, required=True)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--seed", type=Path, action="append", default=[],
+                        help="a folder to fill the cache from before downloading anything (repeatable): an earlier "
+                             "cache, the drive's own installer cache, or a folder of .debs")
+    parser.add_argument("--refresh-apps", action="store_true",
+                        help="download the applications again instead of reusing prepared ones")
     parser.add_argument("--apps", type=Path, help="build-machine folder for the prepared applications (made if absent); "
                                                  "without it the cache carries no applications")
     args = parser.parse_args()
@@ -239,6 +275,9 @@ def main():
         raise RuntimeError(f"{args.output} already exists; the cache is built fresh, never merged")
     packages = offline_cache.required_packages(REPO)
     if args.apps is not None:
+        if not args.refresh_apps:
+            for app in offline_cache.seed_apps(args.apps, args.seed):
+                say("reusing the prepared", app, "from a seed")
         prepare_apps(args.apps)
     work = args.workspace
     work.mkdir(parents=True, exist_ok=True)
@@ -256,7 +295,7 @@ def main():
         if staging.exists():
             shutil.rmtree(staging)
         staging.mkdir(parents=True)
-        collect(key, packages, staging, args.apps)
+        collect(key, packages, staging, args.apps, args.seed)
         if args.apps is not None:
             import application_bundle
             shutil.copytree(args.apps, staging / offline_cache.APP_BUNDLE,

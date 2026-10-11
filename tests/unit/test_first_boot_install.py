@@ -304,3 +304,38 @@ def test_a_missing_application_is_named_not_skipped(tmp_path):
     _app_bundle(tmp_path, apps=("chrome",))
     with pytest.raises(RuntimeError, match="spotify"):
         offline_cache.verify_app_bundle(tmp_path, apps=("chrome", "spotify"))
+
+
+def test_the_drivers_the_catalog_declares_are_carried_too():
+    import installer_cache
+    import offline_cache
+    names = installer_cache.firmware_packages()
+    assert {"amd64-microcode", "intel-microcode", "firmware-realtek", "firmware-mediatek"} <= set(names)
+    packages = offline_cache.required_packages(REPO)
+    for name in names:
+        assert name in packages, name
+
+
+def test_a_rebuild_is_seeded_from_every_earlier_cache_without_duplicates(tmp_path):
+    import offline_cache
+    for folder, names in (("old/apt", ["a_1_amd64.deb", "b_1_amd64.deb"]), ("drive", ["b_1_amd64.deb", "c_1_all.deb"]),
+                          ("flat", ["d_1_amd64.deb"])):
+        (tmp_path / folder).mkdir(parents=True)
+        for name in names:
+            (tmp_path / folder / name).write_bytes(f"{folder}/{name}".encode())
+    (tmp_path / "old/apt/notes.txt").write_text("not a package")
+    seeds = offline_cache.seed_debs([tmp_path / "old", tmp_path / "drive", tmp_path / "flat", tmp_path / "missing"])
+    assert [p.name for p in seeds] == ["a_1_amd64.deb", "b_1_amd64.deb", "c_1_all.deb", "d_1_amd64.deb"]
+    assert (tmp_path / "old/apt/b_1_amd64.deb") in seeds          # the first seed that has a file wins
+    assert offline_cache.seed_apps(tmp_path / "none", [tmp_path / "old"]) == []
+
+
+def test_applications_already_prepared_in_a_seed_are_reused_not_downloaded_again(tmp_path):
+    import offline_cache
+    _app_bundle(tmp_path / "seed", apps=("chrome", "spotify"))
+    target = tmp_path / "prepared"
+    (target / "chrome").mkdir(parents=True)                       # already there: never touched
+    (target / "chrome/recipe.json").write_text("{}")
+    reused = offline_cache.seed_apps(target, [tmp_path / "seed"])
+    assert reused == ["spotify"] and (target / "spotify/source.deb").is_file()
+    assert (target / "chrome/recipe.json").read_text() == "{}"
