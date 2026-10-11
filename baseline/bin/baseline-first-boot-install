@@ -4,6 +4,8 @@
   1. storage    lay out Baseline's role volumes from this drive's free space (single_drive_storage first-boot mode)
   2. installer  copy the exact installer ISO and its expanded environment (source + offline package cache) into
                 INSTALLER_CACHE/installer, verified by checksum, so this drive can rebuild itself with no other media
+  2b. os-isos   copy the OS install images the installer VM offers (read-only share) into INSTALLER_CACHE/isos,
+                verified against sums computed where they were offered; what does not fit is skipped by name
   3. packages   point apt and npm only at the drive's own offline package cache - no internet is used
   4. provision  boot/provision.sh from the carried source
   5. complete   record completion and reboot into the first-boot authorization screen
@@ -91,7 +93,8 @@ def log(*parts):
 
 def run(argv, **kwargs):
     log("running:", " ".join(str(a) for a in argv))
-    return subprocess.run([str(a) for a in argv], check=True, **kwargs)
+    kwargs.setdefault("check", True)
+    return subprocess.run([str(a) for a in argv], **kwargs)
 
 
 def done(step):
@@ -182,6 +185,37 @@ def step_installer():
     mark("installer", iso_sha256=digest.hexdigest(), packages=count)
 
 
+OS_ISOS = Path("/mnt/INSTALLER_CACHE/isos")
+OS_ISO_RESERVE = 2 * 1024**3               # always left free on INSTALLER_CACHE
+
+
+def step_os_isos():
+    """Carry the offered OS images. Never stops the installation: a missing offer or a bad image is logged and
+    recorded, and the drive simply carries fewer OS choices."""
+    import os_isos
+    run(["modprobe", "9pnet_virtio"], check=False)
+    with tempfile.TemporaryDirectory(prefix="baseline-offer-") as mnt:
+        mounted = subprocess.run(["mount", "-t", "9p", "-o", "trans=virtio,version=9p2000.L,ro",
+                                  os_isos.SHARE_TAG, mnt], capture_output=True, text=True)
+        if mounted.returncode != 0:
+            log("os-isos: no OS images are offered by this installer; the drive carries none:",
+                mounted.stderr.strip()[-120:])
+            mark("os-isos", offered=False)
+            return
+        try:
+            report = os_isos.carry(Path(mnt), OS_ISOS, reserve_bytes=OS_ISO_RESERVE)
+        except (OSError, RuntimeError, ValueError) as exc:
+            log("os-isos: OS images NOT carried:", exc)
+            mark("os-isos", offered=True, error=str(exc))
+            return
+        finally:
+            run(["umount", mnt], check=False)
+    for kind in ("carried", "already", "skipped"):
+        for item in report[kind]:
+            log(f"os-isos: {kind}:", item["name"], item.get("reason", ""))
+    mark("os-isos", offered=True, **{kind: [i["name"] for i in report[kind]] for kind in report})
+
+
 def offline_environment():
     """apt and npm configured to use only the drive's own offline cache for this run."""
     cache = CACHE / EXPANDED / MEDIA_CACHE
@@ -228,7 +262,8 @@ def main():
         # first-boot unit remove its pending flag, so this is how any leftover loop ends.
         log("installation already complete on this drive; nothing to do, not rebooting")
         return
-    for step, function in (("storage", step_storage), ("installer", step_installer), ("provision", step_provision)):
+    for step, function in (("storage", step_storage), ("installer", step_installer), ("os-isos", step_os_isos),
+                           ("provision", step_provision)):
         if done(step):
             log(f"{step}: already complete")
             continue

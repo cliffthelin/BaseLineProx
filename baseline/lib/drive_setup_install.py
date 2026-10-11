@@ -209,7 +209,7 @@ def build_sparse_install_invocation(
     serial_log: Path, memory_mb: int = 3072, smp: int = 2,
     restrict_network: bool = True, monitor_socket: Path | None = None,
     guestfwd_host: str | None = None, guestfwd_port: int | None = None,
-    target_serial: str | None = None,
+    target_serial: str | None = None, share_dir: Path | None = None,
 ) -> QemuInvocation:
     """Sparse-file-only, guestfwd/restrict-isolated networking, no
     other drives, no host block-device paths - matching decision
@@ -311,6 +311,9 @@ def build_sparse_install_invocation(
             "-smbios", f"type=1,product={smbios_product}",
             "-serial", f"file:{serial_log}",
         ]
+    if share_dir is not None:
+        # OS install images offered to the installed system (os_isos.py): a read-only file share, not a drive.
+        argv += ["-virtfs", f"local,path={share_dir},mount_tag=baseline-isos,security_model=none,readonly=on"]
     if monitor_socket is not None:
         argv += ["-display", "none", "-monitor", f"unix:{monitor_socket},server,nowait"]
 
@@ -326,6 +329,8 @@ def build_sparse_install_invocation(
         "no_other_drives": True,
         "no_host_block_device_paths": True,
     }
+    if share_dir is not None:
+        device_inventory["shares"] = [f"{share_dir} (read-only 9p share, tag baseline-isos)"]
     return QemuInvocation(argv=argv, device_inventory=device_inventory)
 
 

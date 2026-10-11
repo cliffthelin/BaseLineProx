@@ -469,3 +469,16 @@ def test_capture_live_screendump_png_reads_the_real_written_file_and_cleans_up(t
     png_bytes = di.capture_live_screendump_png(monitor_socket, tmp_path=written_ppm, timeout=1.0)
     assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
     assert not written_ppm.exists()  # the temp PPM is cleaned up after conversion
+
+
+def test_an_offered_image_folder_is_a_read_only_share_not_a_drive(tmp_path):
+    base = dict(target_image=tmp_path / "t.img", prepared_iso=tmp_path / "i.iso", mac="52:54:00:00:00:01",
+                smbios_product="x", serial_log=tmp_path / "s.log")
+    plain = di.build_sparse_install_invocation(**base)
+    assert "-virtfs" not in plain.argv
+    shared = di.build_sparse_install_invocation(**base, share_dir=tmp_path / "offer")
+    spec = shared.argv[shared.argv.index("-virtfs") + 1]
+    assert spec == f"local,path={tmp_path / 'offer'},mount_tag=baseline-isos,security_model=none,readonly=on"
+    assert shared.device_inventory["no_other_drives"] is True
+    assert shared.device_inventory["shares"] == [f"{tmp_path / 'offer'} (read-only 9p share, tag baseline-isos)"]
+    assert "shares" not in plain.device_inventory
