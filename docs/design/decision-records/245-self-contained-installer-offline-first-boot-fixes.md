@@ -5,7 +5,7 @@ Date: 2026-10-10
 Number provisional: two agents write decision records in this tree concurrently (DR244 landed while this work
 was in progress). Renumber at merge if 245 is taken.
 
-Branch `claude/whats-left-fixes`, worktree `/run/media/cane/CACHE/claude-whats-left`, based on shared-tree HEAD
+Branch `claude/whats-left-fixes`, repo `/run/media/cane/CACHE/baseline_repo`, based on shared-tree HEAD
 `f5fede6` plus snapshot `0c9a679` of that tree's uncommitted work at 02:49 (not authored here).
 
 ## Context

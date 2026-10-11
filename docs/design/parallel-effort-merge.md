@@ -1,7 +1,7 @@
 # Merging the parallel (Codex) effort into this branch
 
 Date: 2026-10-11. Two efforts pursue the same result separately: this branch (`claude/whats-left-fixes`, in the standalone
-repo `/run/media/cane/CACHE/baseline_project`) and a parallel effort working in the shared tree on the Seagate drive.
+repo `/run/media/cane/CACHE/baseline_repo`) and a parallel effort working in the shared tree on the Seagate drive.
 Operator direction: take what is useful from either, end with the best of both. This note records what was reviewed, what
 was adopted, what was not, and where the two collide. The Seagate tree was only read.
 
