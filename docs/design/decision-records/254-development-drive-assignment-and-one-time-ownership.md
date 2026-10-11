@@ -76,3 +76,29 @@ Evidence: PC601 installed three times by the script as the operator with no root
 reached CONFIRM, committed offline and showed the Proxmox login. On the first successful install: all six OS images carried and
 registered, `APPS-OFFLINE ... ok: true` for all five applications, and the Ubuntu 26.04 desktop image booted in a nested VM (screen
 99.9% non-black). Host-side finding: the 14 active `baseline_1b75c1a556ee-*` volumes on this machine belong to PC401, not PC601.
+
+## Installer and drive identity (operator direction, 2026-10-11)
+
+"The host installer should be different between Codex and Claude. Each installer should make its own UUID for children installs; that
+signature should not be wiped, should be stored aligned to the serial number of the drive, and should not keep changing."
+
+Before this, every install left a new random disk GUID (Proxmox's installer) that was registered as it stood: six registry entries by
+the end of the day, one new one per install. Now (`installer_identity.py`, `baseline-allscript-install`):
+- Each installer has one UUID of its own, created on first use and kept in an untracked file in its checkout's git directory
+  (`.git/baseline-installer-id`), so it is never committed or merged and two installers cannot share one. A damaged file is refused,
+  never silently replaced.
+- A drive's identity is `uuid5(installer UUID, drive serial)`: fixed by the installer and the serial alone, identical across any number
+  of reinstalls, different between installers and between drives. This installer's PC601 identity is `f337b480-e7d7-533f-8a38-6a6af014a614`.
+- After the installer's VM has exited, success or failure (`finally` in `main`, or `--stage identity` on its own), the disk identifier is set
+  to that UUID (`sgdisk -U`, nothing else changes; nothing is written if it already carries it), verified by reading it back from the
+  device, and registered against the serial. The registry record outlives any wipe; a reinstall stamps the same UUID again.
+
+Checked on the real drive: stamping after the install does not disturb the installed system. A first boot check failed
+(`baseline-storage-verify` and everything depending on it), but that was the check, not the stamp: it attached the disk as virtio-blk,
+which never reports a serial, while an installed system verifies its drive by serial. `build_postinstall_boot_invocation(target_serial=)`
+presents it like the install does (virtio-scsi + scsi-hd with the serial); then PC601 boots to the kiosk with the stamped identifier.
+The installed storage policy binds filesystem, PV and VG identities and the serial, not the disk identifier.
+
+Left as they were: the four random PC601 entries registered before this change. They are harmless (they only let the guard recognise
+partitions an earlier run of this installer wrote) and can be removed on request. The parallel effort's installer will derive different
+UUIDs for the same serial because its installer UUID differs; both register in the same host registry, keyed by UUID with the serial.
