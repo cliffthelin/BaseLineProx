@@ -343,3 +343,79 @@ def test_applications_already_prepared_in_a_seed_are_reused_not_downloaded_again
     reused = offline_cache.seed_apps(target, [tmp_path / "seed"])
     assert reused == ["spotify"] and (target / "spotify/source.deb").is_file()
     assert (target / "chrome/recipe.json").read_text() == "{}"
+
+
+# --- the child identity is carried into first boot, which sets the disk identifier before it records anything --------------
+
+IDENTITY = {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "FD01N6557110C271B"}
+
+
+def test_a_hook_without_an_identity_is_unchanged(tmp_path):
+    hook = fbh.build_hook(REPO, tmp_path / "hook").read_text()
+    assert "BASELINE_CHILD" not in hook and hook.rstrip().endswith('exec /usr/bin/python3 "$dest/baseline/bin/baseline-first-boot-install"')
+
+
+def test_a_hook_with_an_identity_hands_it_to_the_installer_and_is_still_valid_shell(tmp_path):
+    path = fbh.build_hook(REPO, tmp_path / "hook", child_identity=IDENTITY)
+    last = path.read_text().rstrip().splitlines()[-1]
+    assert last == ('exec env BASELINE_CHILD_UUID=4af8c95a-fd01-271b-b1ae-f19827f945b7 BASELINE_CHILD_SERIAL=FD01N6557110C271B '
+                    '/usr/bin/python3 "$dest/baseline/bin/baseline-first-boot-install"')
+    assert subprocess.run(["sh", "-n", str(path)], capture_output=True).returncode == 0
+    assert path.stat().st_size < fbh.PROXMOX_HOOK_LIMIT
+
+
+@pytest.mark.parametrize("identity", [
+    {"uuid": "x; rm -rf /", "serial": "FD01N6557110C271B"},
+    {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "bad serial; id"},
+    {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "SHORT"},
+    {"uuid": "4AF8C95A-FD01-271B-B1AE-F19827F945B7", "serial": "FD01N6557110C271B"},
+    {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7"},
+    {},
+])
+def test_an_identity_that_is_not_a_plain_uuid_and_serial_is_never_written_into_a_script(tmp_path, identity):
+    with pytest.raises(fbh.HookError):
+        fbh.build_hook(REPO, tmp_path / "hook", child_identity=identity)
+
+
+def test_the_disk_carrying_the_serial_is_found_exactly_once():
+    listing = "/dev/sda FD01N6557110C271B\n/dev/sdb MD89N41071210AP4E\n/dev/loop0 \n"
+    assert _installer().disks_with_serial(listing, "FD01N6557110C271B") == ["/dev/sda"]
+    assert _installer().disks_with_serial(listing, "NOT-THERE-1") == []
+    assert _installer().disks_with_serial(listing + "/dev/sdc FD01N6557110C271B\n", "FD01N6557110C271B") == ["/dev/sda", "/dev/sdc"]
+
+
+def test_first_boot_sets_the_identifier_on_the_one_disk_with_that_serial_before_anything_else(tmp_path, monkeypatch):
+    installer = _installer()
+    calls = []
+    monkeypatch.setenv("BASELINE_CHILD_UUID", IDENTITY["uuid"])
+    monkeypatch.setenv("BASELINE_CHILD_SERIAL", IDENTITY["serial"])
+    monkeypatch.setattr(installer, "STATE", tmp_path / "state")
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    (tmp_path / "state").mkdir()
+    monkeypatch.setattr(installer, "list_disks", lambda: "/dev/sda FD01N6557110C271B\n/dev/sdb MD89N41071210AP4E\n")
+    installer.step_identity(ensure=lambda device, wanted: calls.append((device, wanted)))
+    assert calls == [("/dev/sda", IDENTITY["uuid"])]
+    assert [name for name, _ in installer.STEPS][:2] == ["identity", "storage"]
+
+
+def test_first_boot_refuses_when_the_serial_is_on_no_disk_or_on_two(tmp_path, monkeypatch):
+    installer = _installer()
+    monkeypatch.setenv("BASELINE_CHILD_UUID", IDENTITY["uuid"])
+    monkeypatch.setenv("BASELINE_CHILD_SERIAL", IDENTITY["serial"])
+    monkeypatch.setattr(installer, "STATE", tmp_path)
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    for listing in ("/dev/sdb MD89N41071210AP4E\n", "/dev/sda FD01N6557110C271B\n/dev/sdc FD01N6557110C271B\n"):
+        monkeypatch.setattr(installer, "list_disks", lambda l=listing: l)
+        with pytest.raises(RuntimeError):
+            installer.step_identity(ensure=lambda *a: None)
+
+
+def test_first_boot_without_a_carried_identity_leaves_the_disk_identifier_alone(tmp_path, monkeypatch):
+    installer = _installer()
+    monkeypatch.delenv("BASELINE_CHILD_UUID", raising=False)
+    monkeypatch.delenv("BASELINE_CHILD_SERIAL", raising=False)
+    monkeypatch.setattr(installer, "STATE", tmp_path)
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    called = []
+    installer.step_identity(ensure=lambda *a: called.append(a))
+    assert called == []

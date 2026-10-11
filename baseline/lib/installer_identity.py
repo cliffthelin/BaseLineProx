@@ -112,16 +112,57 @@ def probe_disk_guid(device) -> str:
     return proc.stdout.strip().lower() if proc.returncode == 0 else ""
 
 
-def stamp_child_identity(device, serial: str, installer: str, *, run=None, probe=None) -> str:
-    """Make `device` carry its stable identity and register it against `serial`. Returns the UUID. Writes nothing when the drive
-    already carries it. Only ever called once the installer's VM has exited, so nothing else is writing the partition table."""
+def ensure_disk_guid(device, wanted: str, *, run=None, probe=None) -> str:
+    """Make `device` carry `wanted` as its GPT disk identifier (`sfdisk --disk-id`: part of util-linux, so present on the installed
+    system as well as on the host; it changes nothing else) and read it back. Writes nothing when it already carries it."""
     run, probe = run or _real_run, probe or probe_disk_guid
-    wanted = child_uuid(installer, serial)
     if (probe(device) or "").lower() != wanted:
-        code, output = run(["sgdisk", "-U", wanted, str(device)])
+        code, output = run(["sfdisk", "--disk-id", str(device), wanted])
         if code != 0:
-            raise IdentityError(f"sgdisk could not set the disk identifier on {device}: {output.strip()[:200]}")
+            raise IdentityError(f"sfdisk could not set the disk identifier on {device}: {output.strip()[:200]}")
         if (probe(device) or "").lower() != wanted:
-            raise IdentityError(f"the disk identifier on {device} did not take; it was not registered")
+            raise IdentityError(f"the disk identifier on {device} did not take")
+    return wanted
+
+
+def is_layout_uuid(guid: str) -> bool:
+    """Whether `guid` has this layout (the marker in its fourth group): minted by some lane's installer, not random or older."""
+    try:
+        return str(uuid.UUID(guid)).split("-")[3].startswith(LAYOUT)
+    except (ValueError, AttributeError, TypeError, IndexError):
+        return False
+
+
+def legacy_entries(serial: str) -> list:
+    """Registered identities for `serial` that do not have this layout: random ones an installer's own disk got, and the
+    first-version uuid5 ones. Identities with the layout (any lane's) are never listed."""
+    import registry
+    entries = registry.list_entries(drive_guard.REGISTRY_TYPE, scope=registry.GLOBAL, read_only=True)
+    found = []
+    for guid, entry in entries.items():
+        attributes = entry.get("attributes", entry) if isinstance(entry, dict) else {}
+        if attributes.get("serial") == serial and not is_layout_uuid(guid):
+            found.append(guid)
+    return sorted(found)
+
+
+def retire_legacy_entries(serial: str, replaced_by: str) -> list:
+    """Replace the older registered identities of `serial` by the deterministic one (recorded as an event on it)."""
+    import registry
+    retired = legacy_entries(serial)
+    if retired:
+        registry.record_event(drive_guard.REGISTRY_TYPE, replaced_by, "migrated", {"retired": retired}, scope=registry.GLOBAL)
+        for guid in retired:
+            registry.delete_entry(drive_guard.REGISTRY_TYPE, guid, scope=registry.GLOBAL)
+    return retired
+
+
+def stamp_child_identity(device, serial: str, installer: str, *, run=None, probe=None) -> str:
+    """Make `device` carry its stable identity, register it against `serial`, and retire the older identities registered for that
+    serial. Returns the UUID. Writes nothing to the drive when it already carries it (first boot normally set it already). Only called
+    once the installer's VM has exited, so nothing else is writing the partition table."""
+    wanted = child_uuid(installer, serial)
+    ensure_disk_guid(device, wanted, run=run, probe=probe)
     drive_guard.register_installer_uuid(wanted, serial=serial)
+    retire_legacy_entries(serial, wanted)
     return wanted

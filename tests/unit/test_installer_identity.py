@@ -107,8 +107,8 @@ def _device(initial):
 
     def run(argv):
         state["calls"].append(list(argv))
-        if argv[0] == "sgdisk" and argv[1] == "-U":
-            state["guid"] = argv[2]
+        if argv[0] == "sfdisk" and argv[1] == "--disk-id":
+            state["guid"] = argv[3]
         return 0, ""
 
     def probe(device):
@@ -121,7 +121,7 @@ def test_stamping_sets_the_drives_disk_identifier_and_registers_it_against_the_s
     wanted = ii.child_uuid(installer, PC601)
     state, run, probe = _device("0b9adfbf-7213-4792-81e6-9fe668b01c57")           # what Proxmox's installer generated
     assert ii.stamp_child_identity("/dev/sdb", PC601, installer, run=run, probe=probe) == wanted
-    assert state["calls"] == [["sgdisk", "-U", wanted, "/dev/sdb"]]
+    assert state["calls"] == [["sfdisk", "--disk-id", "/dev/sdb", wanted]]
     assert drive_guard.is_installer_uuid(wanted)
 
 
@@ -146,9 +146,9 @@ def test_a_stamp_that_does_not_stick_is_never_registered():
     assert not drive_guard.is_installer_uuid(wanted)
 
 
-def test_a_failing_sgdisk_is_reported_and_nothing_is_registered():
+def test_a_failing_sfdisk_is_reported_and_nothing_is_registered():
     installer = str(uuid.uuid4())
-    with pytest.raises(ii.IdentityError, match="sgdisk"):
+    with pytest.raises(ii.IdentityError, match="sfdisk"):
         ii.stamp_child_identity("/dev/sdb", PC601, installer, run=lambda argv: (1, "cannot write"),
                                 probe=lambda device: "11111111-2222-4333-8444-555555555555")
     assert not drive_guard.is_installer_uuid(ii.child_uuid(installer, PC601))
@@ -176,3 +176,22 @@ def test_a_merge_keeps_the_receiving_lanes_own_uuid_file():
     from pathlib import Path
     attributes = (Path(__file__).resolve().parents[2] / ".gitattributes").read_text().splitlines()
     assert any(line.split()[:2] == ["baseline/INSTALLER_UUID", "merge=ours"] for line in attributes)
+
+
+# --- migrating the older registry entries ---------------------------------------------------------------------------------
+
+def test_older_entries_for_the_same_serial_are_retired_when_the_deterministic_identity_is_registered():
+    import registry
+    legacy = ["0b9adfbf-7213-4792-81e6-9fe668b01c57", "f337b480-e7d7-533f-8a38-6a6af014a614"]    # random and first-version uuid5
+    for guid in legacy:
+        drive_guard.register_installer_uuid(guid, serial=PC601)
+    drive_guard.register_installer_uuid("a40a7971-2f3a-4cc1-972b-5c57bac8d29f", serial=PC401)         # another drive: untouched
+    other_lane = ii.child_uuid("5029a80d-c748-4616-aa08-99ac560f5311", PC601)                       # another lane's identity: untouched
+    drive_guard.register_installer_uuid(other_lane, serial=PC601)
+    wanted = ii.child_uuid(LANE, PC601)
+    state, run, probe = _device(wanted)
+    ii.stamp_child_identity("/dev/sdb", PC601, LANE, run=run, probe=probe)
+    entries = registry.list_entries(drive_guard.REGISTRY_TYPE, scope=registry.GLOBAL, read_only=True)
+    assert wanted in entries and other_lane in entries and "a40a7971-2f3a-4cc1-972b-5c57bac8d29f" in entries
+    assert not any(guid in entries for guid in legacy)
+    assert ii.legacy_entries(PC601) == []                                 # nothing older is left for this serial

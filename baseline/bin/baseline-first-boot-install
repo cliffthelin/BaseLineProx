@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Finish a Baseline installation on the installed system itself, offline. Started once by the first-boot hook.
 
+  0. identity   set the GPT disk identifier to the identity the installer carried (installer_identity: derived from the installer UUID and
+                the drive's serial), before anything below records the drive; nothing happens when no identity was carried
   1. storage    lay out Baseline's role volumes from this drive's free space (single_drive_storage first-boot mode)
   2. installer  copy the exact installer ISO and its expanded environment (source + offline package cache) into
                 INSTALLER_CACHE/installer, verified by checksum, so this drive can rebuild itself with no other media
@@ -104,6 +106,34 @@ def done(step):
 def mark(step, **facts):
     STATE.mkdir(parents=True, exist_ok=True)
     (STATE / step).write_text(json.dumps(dict(facts, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n")
+
+
+def list_disks():
+    return subprocess.run(["lsblk", "-dnpo", "PATH,SERIAL"], capture_output=True, text=True, check=True).stdout
+
+
+def disks_with_serial(listing, serial):
+    """Device paths in `lsblk -dnpo PATH,SERIAL` output whose serial is exactly `serial`."""
+    return [fields[0] for fields in (line.split() for line in listing.splitlines()) if len(fields) == 2 and fields[1] == serial]
+
+
+def step_identity(ensure=None):
+    """Set the disk identifier before storage is laid out, so every record made from here on (storage bindings, the host install
+    record) already carries the final value and nothing has to change it afterwards."""
+    wanted, serial = os.environ.get("BASELINE_CHILD_UUID"), os.environ.get("BASELINE_CHILD_SERIAL")
+    if not wanted or not serial:
+        log("identity: no child identity was carried; the disk identifier is left as the installer made it")
+        mark("identity", carried=False)
+        return
+    if ensure is None:
+        import installer_identity
+        ensure = installer_identity.ensure_disk_guid
+    disks = disks_with_serial(list_disks(), serial)
+    if len(disks) != 1:
+        raise RuntimeError(f"expected exactly one disk with serial {serial} to carry the identity, found {len(disks)}")
+    ensure(disks[0], wanted)
+    log(f"identity: disk identifier of {disks[0]} (serial {serial}) is {wanted}")
+    mark("identity", carried=True, uuid=wanted, serial=serial, device=disks[0])
 
 
 def step_storage():
@@ -280,6 +310,10 @@ def step_provision():
     mark("provision")
 
 
+STEPS = [("identity", step_identity), ("storage", step_storage), ("installer", step_installer),
+         ("os-isos", step_os_isos), ("provision", step_provision)]
+
+
 def main():
     if os.geteuid() != 0:
         raise SystemExit("run as root (the first-boot hook does)")
@@ -288,8 +322,7 @@ def main():
         # first-boot unit remove its pending flag, so this is how any leftover loop ends.
         log("installation already complete on this drive; nothing to do, not rebooting")
         return
-    for step, function in (("storage", step_storage), ("installer", step_installer), ("os-isos", step_os_isos),
-                           ("provision", step_provision)):
+    for step, function in STEPS:
         if done(step):
             log(f"{step}: already complete")
             continue

@@ -595,3 +595,21 @@ def test_a_drive_the_guard_refuses_is_never_scrubbed(tmp_path, monkeypatch):
     kwargs["install_runner"].scrub_signatures = lambda *a: calls.append(a)
     result = si.build_and_write_self_installer(**kwargs)
     assert result.outcome == "refused" and calls == []
+
+
+def test_the_child_identity_reaches_the_first_boot_hook(tmp_path, monkeypatch):
+    import first_boot_hook as fbh
+    seen = {}
+
+    def fake_build(repo_root, output, *, child_identity=None):
+        seen["identity"] = child_identity
+        raise fbh.HookError("stop here: only the argument is being checked")
+    monkeypatch.setattr(fbh, "build_hook", fake_build)
+    kwargs = _ready_kwargs(tmp_path)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "MANIFEST.json").write_text("{}")
+    identity = {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "FD01N6557110C271B"}
+    kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached-binary"
+    si.build_and_write_self_installer(**kwargs, offline_cache=cache, child_identity=identity)
+    assert seen["identity"] == identity

@@ -13,11 +13,31 @@ BASELINE_HOOK_DEST overrides the destination and BASELINE_HOOK_EXTRACT_ONLY=1 st
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 INSTALLER = "baseline/bin/baseline-first-boot-install"
 MEDIA_SOURCE = "baseline-src"          # iso_builder.ISO_TARGET_DIR without the leading slash
 PROXMOX_HOOK_LIMIT = 1024 * 1024       # prepare-iso: "Maximum file size for first-boot executable file is 1 MiB"
+
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_SERIAL = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")
+
+
+def _exec_line(child_identity):
+    """The last line of the hook. With a child identity (installer_identity: the UUID the drive must carry, and its hardware serial)
+    both are handed to the installer as environment variables; they are checked here so nothing but plain characters can reach a
+    shell script."""
+    plain = f'exec /usr/bin/python3 "$dest/{INSTALLER}"'
+    if child_identity is None:
+        return plain
+    if (not isinstance(child_identity, dict) or set(child_identity) != {"uuid", "serial"}
+            or not isinstance(child_identity["uuid"], str) or not _UUID.match(child_identity["uuid"])
+            or not isinstance(child_identity["serial"], str) or not _SERIAL.match(child_identity["serial"])):
+        raise HookError("a child identity must be a lowercase UUID and a plain hardware serial of at least 8 characters")
+    return (f"exec env BASELINE_CHILD_UUID={child_identity['uuid']} BASELINE_CHILD_SERIAL={child_identity['serial']} "
+            f'/usr/bin/python3 "$dest/{INSTALLER}"')
+
 
 HOOK = f"""#!/bin/sh
 # Baseline first-boot hook: copy the installer carried on the attached medium and finish the installation.
@@ -46,7 +66,7 @@ if [ -n "$mnt" ]; then umount "$mnt"; rmdir "$mnt"; fi
 rm -rf "$dest"
 mv "$staging" "$dest"
 [ "${{BASELINE_HOOK_EXTRACT_ONLY:-0}}" = "1" ] && exit 0
-exec /usr/bin/python3 "$dest/{INSTALLER}"
+@EXEC@
 """
 
 
@@ -54,15 +74,16 @@ class HookError(RuntimeError):
     pass
 
 
-def build_hook(repo_root, output_path) -> Path:
+def build_hook(repo_root, output_path, *, child_identity=None) -> Path:
     repo_root, output_path = Path(repo_root), Path(output_path)
     if not (repo_root / INSTALLER).is_file() or not (repo_root / "boot/provision.sh").is_file():
         raise HookError(f"{repo_root} does not contain the on-target installer and provision.sh")
-    if len(HOOK.encode()) >= PROXMOX_HOOK_LIMIT:
+    hook = HOOK.replace("@EXEC@", _exec_line(child_identity))
+    if len(hook.encode()) >= PROXMOX_HOOK_LIMIT:
         raise HookError("the first-boot hook exceeds Proxmox's 1 MiB limit")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(output_path.name + ".tmp")
-    temporary.write_text(HOOK)
+    temporary.write_text(hook)
     os.chmod(temporary, 0o755)
     os.replace(temporary, output_path)
     return output_path
