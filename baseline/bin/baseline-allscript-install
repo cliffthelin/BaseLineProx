@@ -533,7 +533,7 @@ def write_status(**fields):
     path.write_text(json.dumps(dict(fields, updated=time.strftime("%H:%M:%S")), indent=1))
 
 
-def watch(checkpoint, description, *, opened_path=None):
+def watch(checkpoint, description, *, opened_path=None, volume=None):
     """Refresh the session screendump until the named checkpoint file is created by whoever is watching it. Every tick it checks the VM's own
     state, that the target drive is still at the node QEMU opened, whether the screen is changing, and the stage's time limit; it prints a
     heartbeat each minute and fails at once on anything fatal (a paused VM or a moved drive is not something to wait out)."""
@@ -545,7 +545,7 @@ def watch(checkpoint, description, *, opened_path=None):
     started = time.monotonic()
     stage = iw.StageWatch(stage=checkpoint, opened_path=opened_path or "", started=started,
                           limit_seconds=STAGE_LIMIT_MINUTES.get(checkpoint, 60) * 60)
-    last_beat = -1e9
+    last_beat, last_bytes, last_bytes_time = -1e9, None, time.monotonic()
     while not done.exists():
         if INSTALL_VM.poll() is not None:
             raise RuntimeError(f"the installation VM exited ({INSTALL_VM.poll()}) before: {description}")
@@ -563,7 +563,10 @@ def watch(checkpoint, description, *, opened_path=None):
             say(f"ALERT [{checkpoint}] {alert}{hint}")
         if now - last_beat >= HEARTBEAT_SECONDS:
             last_beat = now
-            say(f"[watch {checkpoint}] {int((now - started) // 60)} min, vm={status}, drive={device or opened_path or 'n/a'}, "
+            written = iw.bytes_written(volume or opened_path) if (volume or opened_path) else None
+            speed = iw.throughput_line(last_bytes, written, now - last_bytes_time)
+            last_bytes, last_bytes_time = written, now
+            say(f"[watch {checkpoint}] {int((now - started) // 60)} min, vm={status}, drive={device or opened_path or 'n/a'}, {speed}, "
                 f"screen {'changing' if now - stage.last_change < 60 else f'unchanged {int((now - stage.last_change) // 60)} min'}")
             write_status(stage=checkpoint, vm=status, drive=device, minutes=int((now - started) // 60), waiting_for=str(done))
         if verdict.fatal:
@@ -668,7 +671,7 @@ def stage_rehearse(r):
     global INSTALL_VM
     INSTALL_VM = dsi.RealInstallRunner().popen(argv, monitor_socket=work / "monitor.sock")
     say("rehearsal installing with no network; root and the development login use the development passwords (not shown)")
-    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)")
+    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)", volume=disk)
     record("rehearse", workspace=str(work))
 
 

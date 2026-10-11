@@ -87,3 +87,14 @@ def test_a_cursor_blinking_on_an_idle_prompt_still_counts_as_a_stalled_screen(tm
     s.tick(1.0, status="running", device_path="/dev/sdb", digest=a)
     s.tick(100.0, status="running", device_path="/dev/sdb", digest=b)
     assert "not changed" in s.tick(400.0, status="running", device_path="/dev/sdb", digest=a).alerts[0]
+
+
+def test_bytes_written_reads_an_image_file_and_the_throughput_line_reports_rate(tmp_path):
+    image = tmp_path / "disk.raw"
+    with open(image, "wb") as f:
+        f.truncate(1 << 30)                      # sparse: nothing allocated yet
+        f.seek(0); f.write(b"x" * (8 << 20))
+    assert 8 << 20 <= w.bytes_written(image) < 64 << 20
+    assert w.bytes_written(tmp_path / "missing") is None
+    assert w.throughput_line(0, 6_000_000_000, 60) == "written 5.6 GiB, 100 MB/s"
+    assert w.throughput_line(None, 2 ** 30, 60) == "written 1.0 GiB" and w.throughput_line(1, None, 60) == "written: unknown"

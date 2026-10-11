@@ -123,3 +123,25 @@ def usb_disconnects(journal_text: str, *, year: int, now_epoch: float, window_se
         if 0 <= now_epoch - stamp <= window_seconds:
             count += 1
     return count
+
+
+def bytes_written(volume) -> int | None:
+    """Bytes written to `volume` so far, without root: for a block device the kernel's own counter (/sys/block/<name>/stat, field 7, in
+    512-byte sectors, since it appeared); for an image file the space actually allocated. None when it cannot be read."""
+    path = Path(volume)
+    try:
+        if path.is_block_device():
+            return int(Path(f"/sys/block/{path.name}/stat").read_text().split()[6]) * 512
+        return path.stat().st_blocks * 512
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def throughput_line(previous, current, seconds) -> str:
+    """'written 21.0 GiB, 108 MB/s since the last look', or just the total when there is no earlier reading."""
+    if current is None:
+        return "written: unknown"
+    total = f"written {current / 2**30:.1f} GiB"
+    if previous is None or seconds <= 0 or current < previous:
+        return total
+    return f"{total}, {(current - previous) / seconds / 1e6:.0f} MB/s"
