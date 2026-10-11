@@ -97,3 +97,18 @@ def test_the_iso_storage_is_added_once_and_a_conflicting_one_is_refused(tmp_path
     assert os_isos.storage_add_argv(same, root) is None
     with pytest.raises(RuntimeError):
         os_isos.storage_add_argv([{"storage": os_isos.ISO_STORAGE, "type": "dir", "path": "/elsewhere"}], root)
+
+
+def test_an_image_that_does_not_fit_asks_for_room_once_and_is_skipped_if_none_comes(tmp_path):
+    import hashlib
+    import os_isos
+    source, dest = tmp_path / "offer", tmp_path / "isos"
+    source.mkdir()
+    (source / "a.iso").write_bytes(b"x" * 4096)
+    (source / os_isos.SUMS).write_text(f"{hashlib.sha256(b'x' * 4096).hexdigest()}  a.iso\n")
+    asked = []
+    report = os_isos.carry(source, dest, reserve_bytes=1 << 60, make_room=asked.append)       # more reserve than any disk has
+    assert asked == [4096 + (1 << 60)] and [i["name"] for i in report["skipped"]] == ["a.iso"] and report["carried"] == []
+    asked.clear()
+    report = os_isos.carry(source, dest, reserve_bytes=0, make_room=asked.append)
+    assert asked == [] and [i["name"] for i in report["carried"]] == ["a.iso"]

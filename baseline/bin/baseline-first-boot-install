@@ -190,7 +190,7 @@ def step_storage():
             if list(argv[:2]) == ["sudo", "-n"]:
                 argv = argv[2:]
             return super().run(argv, timeout=timeout)
-    result = storage.provision_first_boot(Root(), required_bytes=FIRST_BOOT_BYTES)
+    result = storage.provision_first_boot(Root(), required_bytes=FIRST_BOOT_BYTES, grow_on_demand=True)
     log("storage:", json.dumps({"created": result["created_roles"], "serial": result["serial"]}))
     mark("storage", created=result["created_roles"])
 
@@ -219,6 +219,27 @@ def installer_media():
     return found[0]
 
 
+def grow_for(needed_free_bytes, label="INSTALLER_CACHE"):
+    """Make sure `label` has this much free, extending the volume (and its filesystem) from the drive's unallocated space. Returns False,
+    and logs why, when it cannot: the caller then skips or stops what it was about to copy instead of running out of space."""
+    import repair
+    import volume_growth
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    try:
+        done = volume_growth.ensure_room(Root(), label, int(needed_free_bytes))
+    except volume_growth.GrowthError as exc:
+        log(f"growth: {label} cannot make {int(needed_free_bytes) / 1024**3:.1f} GiB of room:", exc)
+        return False
+    if done:
+        log(f"growth: {label} extended by {done['add_gib']} GiB for a copy that needs {int(needed_free_bytes) / 1024**3:.1f} GiB free")
+    return True
+
+
 def step_installer():
     """Carry the installer onto this drive: the exact ISO and its expanded environment, both verified."""
     device = installer_media()
@@ -227,6 +248,8 @@ def step_installer():
     with open(device, "rb") as source:
         length = iso_length(source)
         source.seek(0)
+        if not grow_for(length + 512 * 1024**2):
+            raise RuntimeError("the drive has no room for the installer ISO")
         partial = iso.with_suffix(".partial")
         digest = hashlib.sha256()
         with open(partial, "wb") as out:
@@ -244,6 +267,10 @@ def step_installer():
     with tempfile.TemporaryDirectory(prefix="baseline-media-") as mnt:
         run(["mount", "-o", "ro", device, mnt])
         try:
+            carried = sum(f.stat().st_size for name in (MEDIA_SOURCE, MEDIA_CACHE) if (Path(mnt) / name).is_dir()
+                          for f in (Path(mnt) / name).rglob("*") if f.is_file())
+            if not grow_for(carried + 512 * 1024**2):
+                raise RuntimeError("the drive has no room for the installer's expanded environment")
             for name in (MEDIA_SOURCE, MEDIA_CACHE):
                 if (Path(mnt) / name).is_dir():
                     if (expanded / name).exists():
@@ -298,7 +325,7 @@ def step_os_isos():
             mark("os-isos", offered=False)
             return
         try:
-            report = os_isos.carry(Path(mnt), OS_ISOS, reserve_bytes=OS_ISO_RESERVE)
+            report = os_isos.carry(Path(mnt), OS_ISOS, reserve_bytes=OS_ISO_RESERVE, make_room=grow_for)
         except (OSError, RuntimeError, ValueError) as exc:
             log("os-isos: OS images NOT carried:", exc)
             mark("os-isos", offered=True, error=str(exc))

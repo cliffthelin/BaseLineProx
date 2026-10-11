@@ -1,0 +1,10 @@
+[Unit]
+Description=Baseline: grow role volumes that are nearly full
+After=local-fs.target baseline-persist-bind-mounts.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-volume-growth
+# The installed code is read-only for the service, as for the other Baseline units.
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1

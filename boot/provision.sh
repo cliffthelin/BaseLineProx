@@ -110,6 +110,9 @@ cp "$SRC/baseline/bin/baseline-network-retry" /opt/baseline/bin/baseline-network
 cp "$SRC/baseline/lib/network_retry.py" /opt/baseline/lib/network_retry.py
 cp "$SRC/baseline/bin/baseline-bridge-port" /opt/baseline/bin/baseline-bridge-port
 cp "$SRC/baseline/lib/bridge_port.py" /opt/baseline/lib/bridge_port.py
+cp "$SRC/baseline/bin/baseline-volume-growth" /opt/baseline/bin/baseline-volume-growth
+cp "$SRC/baseline/lib/volume_growth.py" /opt/baseline/lib/volume_growth.py
+chmod +x /opt/baseline/bin/baseline-volume-growth
 chmod +x /opt/baseline/bin/baseline-bridge-port
 # Gate E: the real, integrated first-boot authorization state machine
 # (docs/design/decision-records/25) - connects proxmox_detect.py
@@ -437,6 +440,8 @@ cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
 cp "$SRC/boot/baseline-network-retry.service" /etc/systemd/system/baseline-network-retry.service
 cp "$SRC/boot/baseline-bridge-port.service" /etc/systemd/system/baseline-bridge-port.service
+cp "$SRC/boot/baseline-volume-growth.service" /etc/systemd/system/baseline-volume-growth.service
+cp "$SRC/boot/baseline-volume-growth.timer" /etc/systemd/system/baseline-volume-growth.timer
 cp "$SRC/boot/baseline-network-retry.timer" /etc/systemd/system/baseline-network-retry.timer
 cp "$SRC/boot/baseline-persist-bind-mounts.service" /etc/systemd/system/baseline-persist-bind-mounts.service
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
@@ -565,6 +570,7 @@ systemctl enable baseline-storage-verify.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 systemctl enable baseline-bridge-port.service
+systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-network-retry.timer
 systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service

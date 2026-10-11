@@ -250,7 +250,25 @@ def provision_target(runner, *, expected_serial, root_mount, required_bytes,
                         personas=personas, growth_percent=growth_percent)
 
 
-def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, growth_percent):
+def measure_host(runner, target, personas):
+    """What Proxmox's installer actually made on this drive (grow-on-demand plans from this, not from a preset): root, swap and thin-data
+    sizes in whole GiB, and the bytes the host holds in the volume group (everything allocated except the Baseline role volumes)."""
+    vg = target["vg_name"]
+    rows = _json_command(runner, ["lvs", "--reportformat", "json", "--units", "b", "--nosuffix", "-o", "lv_name,lv_size", vg])
+    stats = _json_command(runner, ["vgs", "--reportformat", "json", "--units", "b", "--nosuffix", "-o", "vg_size,vg_free", vg])
+    try:
+        sizes = {row["lv_name"]: int(row["lv_size"]) for row in rows["report"][0]["lv"]}
+        group = stats["report"][0]["vg"][0]
+        allocated = int(group["vg_size"]) - int(group["vg_free"])
+        installer = {"lvm_maxroot": sizes["root"] // 1024**3, "lvm_swapsize": sizes["swap"] // 1024**3,
+                     "lvm_maxvz": sizes["data"] // 1024**3}
+    except (KeyError, IndexError, TypeError, ValueError):
+        raise StorageError("the installed host volumes could not be measured") from None
+    role_bytes = sum(sizes.get(v[0], 0) for v in di.baseline_volumes_for(tuple(personas)))
+    return installer, allocated - role_bytes
+
+
+def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, growth_percent, grow=None):
     """Shared by the offline and first-boot modes: create the role volumes, then persist identity and policy."""
     expected_serial = target["serial"]
     volumes = di.baseline_volumes_for(tuple(personas))
@@ -284,8 +302,9 @@ def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, g
         if mounted.returncode or mounted.stdout.strip() != identity:
             raise StorageError("provisioned role is not mounted from its expected filesystem")
         bindings[label] = {"serial": expected_serial, "uuid": identity}
+    extra = ({"policy_format": storage_policy.GROW_FORMAT, "installer_sizes": grow[0], "host_bytes": grow[1]} if grow else {})
     policy = storage_policy.build_policy(serial=expected_serial, size_bytes=target["size_bytes"],
-        required_bytes=required_bytes, bindings=bindings, personas=personas, growth_percent=growth_percent)
+        required_bytes=required_bytes, bindings=bindings, personas=personas, growth_percent=growth_percent, **extra)
     mount_labels = {v[4]: v[3] for v in volumes}
     lines = bound.read_text(di.FSTAB_PATH).splitlines() if bound.path_exists(di.FSTAB_PATH) else []
     retained = []
@@ -348,7 +367,7 @@ def running_target(runner):
     return inspect_target(runner, expected_serial=serial_of_root_disk(ancestry), root_mount="/")
 
 
-def provision_first_boot(runner, *, required_bytes, personas=di.DEFAULT_PERSONAS, growth_percent=20):
+def provision_first_boot(runner, *, required_bytes, personas=di.DEFAULT_PERSONAS, growth_percent=20, grow_on_demand=False):
     """Lay out Baseline's role volumes from the installed system's own first boot (self-contained installer).
 
     Only free VG space is used; only volumes created by this run are formatted, so an existing role is never
@@ -359,13 +378,15 @@ def provision_first_boot(runner, *, required_bytes, personas=di.DEFAULT_PERSONAS
             or any(type(value) is not int or value < 0 for value in required_bytes.values())):
         raise StorageError("complete nonnegative role measurements are required before provisioning")
     target = running_target(runner)
+    grow = measure_host(runner, target, personas) if grow_on_demand else None
     profile = self_installer.single_drive_profile(target["size_bytes"], personas=tuple(personas),
-        growth_percent=growth_percent, required_bytes=required_bytes)
+        growth_percent=growth_percent, required_bytes=required_bytes,
+        **({"grow_on_demand": True, "installer_sizes": grow[0], "host_bytes_measured": grow[1]} if grow else {}))
     reserve = profile["storage"]["growth_bytes"] + profile["storage"]["safety_bytes"]
     bound = RunningRunner(runner, target)
     bound._guard()
     return _apply_roles(bound, target, profile=profile, reserve=reserve, required_bytes=required_bytes,
-                        personas=personas, growth_percent=growth_percent)
+                        personas=personas, growth_percent=growth_percent, grow=grow)
 
 
 def reconcile_proxmox_storage(runner):

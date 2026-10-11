@@ -64,8 +64,9 @@ def build_offer(source: Path, names: list, offer: Path) -> Path:
     return offer
 
 
-def carry(source: Path, dest: Path, *, reserve_bytes: int) -> dict:
-    """Copy each offered image that fits (leaving `reserve_bytes` free), verified against the offered sums."""
+def carry(source: Path, dest: Path, *, reserve_bytes: int, make_room=None) -> dict:
+    """Copy each offered image that fits (leaving `reserve_bytes` free), verified against the offered sums. When an image does not fit and
+    `make_room(bytes_that_must_be_free)` is given (volume growth), it is asked once for that image before the image is skipped."""
     source, dest = Path(source), Path(dest)
     if not (source / SUMS).is_file():
         raise RuntimeError(f"the offered folder has no {SUMS}; nothing can be verified, so nothing is carried")
@@ -81,6 +82,8 @@ def carry(source: Path, dest: Path, *, reserve_bytes: int) -> dict:
         if target.is_file() and target.stat().st_size == size and _sha256(target) == expected:
             report["already"].append({"name": name, "bytes": size, "sha256": expected})
             continue
+        if shutil.disk_usage(dest).free - size < reserve_bytes and make_room is not None:
+            make_room(size + reserve_bytes)
         if shutil.disk_usage(dest).free - size < reserve_bytes:
             report["skipped"].append({"name": name, "reason": f"not enough space ({size} bytes needed, "
                                       f"{reserve_bytes} kept free)"})
