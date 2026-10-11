@@ -39,6 +39,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "baseline/lib"))
 import drive_setup_answer as dsan  # noqa: E402
 import drive_setup_install as dsi  # noqa: E402
+import installer_cache  # noqa: E402,F401
 import offline_cache  # noqa: E402
 
 PROXY = REPO / "baseline/lib/installer_package_proxy.py"
@@ -168,6 +169,9 @@ def collect(key, packages, output, apps=None, seeds=()):
         say("seeding the builder with", len(debs), "packages already on hand; only what is missing is downloaded")
         push_debs(key, debs, "/var/cache/apt/archives")
     ssh(key, proxy_env + "apt-get install --download-only -y " + " ".join(packages))
+    # Drivers are chosen per machine, so every one is carried even when this VM's own base already has it installed
+    # (apt would otherwise download nothing for it).
+    ssh(key, proxy_env + "apt-get install --reinstall --download-only -y " + " ".join(installer_cache.firmware_packages()))
     if apps is not None:
         say("collecting the dependencies of the application packages")
         push(key, apps, "/root/apps")
