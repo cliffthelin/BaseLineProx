@@ -74,7 +74,7 @@ INSTALL_VM = None                                         # the install stage's 
 
 STAGES = ("preflight", "recovery", "cache", "install", "firstboot", "kiosk")
 OPTIONAL_STAGES = ("rehearse",)        # run explicitly: --stage rehearse, then --stage firstboot/kiosk in one go
-ROOT_STAGES = {"recovery", "install"}
+ROOT_STAGES = {"install"}              # the recovery image only reads the drive, which the operator's `disk` group already allows
 
 
 # --- pure decisions (unit-tested) --------------------------------------------------------------
@@ -125,6 +125,10 @@ def work_dir(name, stages):
     if name is not None:
         return BUILD / f"allscript-{name}"
     return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
+
+
+def root_required(stages):
+    return sorted(set(stages) & ROOT_STAGES)
 
 
 def cache_status(cache_dir):
@@ -515,7 +519,7 @@ def main():
         say(f"target {TARGET_NAME} ({SERIAL}); protected for this run: {PROTECTED}; work folder {WORK}")
     if "install" in stages and not wipe_authorized(CONFIRMED_WIPE):
         raise RuntimeError(f"the install stage erases {TARGET_NAME}: add  --confirm-wipe {SERIAL}")
-    needs_root = sorted(set(stages) & ROOT_STAGES)
+    needs_root = root_required(stages)
     if needs_root and os.geteuid() != 0:
         raise RuntimeError(f"stages {', '.join(needs_root)} need root: run with sudo")
     WORK.mkdir(mode=0o750, parents=True, exist_ok=True)

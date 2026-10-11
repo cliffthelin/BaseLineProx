@@ -174,3 +174,9 @@ def test_the_assistant_is_taken_from_cache_first_then_from_the_older_host_locati
     on_cache.write_text("y")
     assert allscript.locate_assistant([on_cache, on_host]) == on_cache
     assert allscript.locate_assistant([tmp_path / "none"]) == tmp_path / "none"   # reported missing by preflight
+
+
+def test_only_the_install_stage_needs_root_the_recovery_image_runs_as_the_operator():
+    assert allscript.root_required(["preflight", "recovery"]) == []
+    assert allscript.root_required(["recovery", "cache", "install", "firstboot"]) == ["install"]
+    assert allscript.root_required(["rehearse"]) == []
