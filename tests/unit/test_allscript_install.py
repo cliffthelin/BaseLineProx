@@ -269,3 +269,9 @@ def test_the_development_user_travels_as_a_hash_only_and_the_file_must_be_privat
     (tmp_path / "dev-user").write_text("Bad Name:password\n")
     with pytest.raises(RuntimeError):
         allscript.dev_user()
+
+
+def test_the_rehearsal_vm_disk_is_small_and_leaves_room_for_the_baseline_volumes():
+    assert 32 * 2**30 <= allscript.REHEARSAL_DISK_BYTES <= 128 * 2**30 < allscript.SIZE
+    used = (allscript.REHEARSAL_LVM["lvm_maxroot"] + allscript.REHEARSAL_LVM["lvm_maxvz"] + allscript.REHEARSAL_LVM["lvm_swapsize"]) * 2**30
+    assert allscript.REHEARSAL_DISK_BYTES - used >= 24 * 2**30

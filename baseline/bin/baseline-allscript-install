@@ -51,6 +51,8 @@ sys.path.insert(0, str(REPO / "baseline/lib"))
 
 DRIVES = {"PC401": "MD89N41071210AP4E", "PC601": "FD01N6557110C271B"}   # both 512110190592-byte SK hynix NVMe
 SIZE = 512110190592
+REHEARSAL_DISK_BYTES = 64 * 2**30     # the rehearsal VM's virtual disk: a sparse file, far smaller than the real drives it stands in for
+REHEARSAL_LVM = dict(lvm_maxroot=16, lvm_maxvz=8, lvm_swapsize=2)   # leaves most of the 64 GiB free for first boot's Baseline volumes
 TARGET_NAME = None                    # chosen per run by select_target(); there is deliberately no default
 SERIAL = None                         # the chosen target's serial
 PROTECTED = None                      # the other drive's serial: never a target in this run
@@ -644,7 +646,7 @@ def stage_rehearse(r):
     answer.write_text(si.render_answer(fqdn="baseline-rehearsal.local",
                                        password_hash=dsan.hash_password_sha512crypt(password, secrets.token_hex(8)),
                                        disk_serial="BLREHEARSAL01", first_boot=True, root_ssh_keys=monitor_keys(),
-                                       **si.LVM_SIZE_PRESETS["single-drive"]))
+                                       **REHEARSAL_LVM))
     answer.chmod(0o600)                                    # holds the password hash; the build drive's ACLs widen it
     hook = fbh.build_hook(REPO, work / "baseline-first-boot", child_identity=child_identity_for("BLREHEARSAL01"), dev_user=dev_user())
     prepared = dsan.prepare_iso_defensively(
@@ -661,7 +663,7 @@ def stage_rehearse(r):
         raise RuntimeError(f"ISO build failed: {[c for c in built.postconditions if not c.ok]}")
     disk = work / "disk.raw"
     with open(disk, "wb") as stream:
-        stream.truncate(SIZE)                                  # sparse, same size as either SK hynix target
+        stream.truncate(REHEARSAL_DISK_BYTES)                  # sparse; only what the install writes takes space
     invocation = dsi.build_sparse_install_invocation(
         target_image=disk, prepared_iso=work / "installer.iso", mac="52:54:00:ba:5e:7e",
         smbios_product="baseline-rehearsal", serial_log=work / "serial.log", memory_mb=8192, smp=4,
