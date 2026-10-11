@@ -514,3 +514,14 @@ def test_the_ranges_may_not_overlap_or_exceed_the_device(tmp_path):
         with pytest.raises(ValueError):
             di.zero_head_and_tail(path, size_bytes=4096, head_bytes=head, tail_bytes=tail)
     assert path.read_bytes() == b"\xff" * 4096
+
+
+def test_a_disk_only_boot_can_present_the_drive_with_its_real_serial_like_the_install_did(tmp_path):
+    """An installed system verifies its drive by serial; a virtio-blk disk never reports one (ID_SERIAL_SHORT), so a boot check
+    that must pass that verification attaches the disk as the install did: virtio-scsi + scsi-hd with the serial."""
+    base = dict(target_image=tmp_path / "t.img", mac="52:54:00:00:00:01", smbios_product="x", serial_log=tmp_path / "s.log")
+    plain = di.build_postinstall_boot_invocation(**base)
+    assert not any("scsi-hd" in a for a in plain.argv)
+    scsi = di.build_postinstall_boot_invocation(**base, target_serial="FD01N6557110C271B")
+    assert "scsi-hd,drive=targetdisk,bus=targetscsi.0,serial=FD01N6557110C271B" in scsi.argv
+    assert not any(a == "-cdrom" for a in scsi.argv)                    # still no installer media

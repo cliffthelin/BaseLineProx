@@ -369,15 +369,24 @@ def build_sparse_install_invocation(
 def build_postinstall_boot_invocation(
     *, target_image: Path, mac: str, smbios_product: str, serial_log: Path,
     memory_mb: int = 3072, smp: int = 2, restrict_network: bool = True,
-    monitor_socket: Path | None = None,
+    monitor_socket: Path | None = None, target_serial: str | None = None,
 ) -> QemuInvocation:
     """Disk-only boot, no CD-ROM at all - the installer media is never
     left attached, so it cannot be silently re-entered (decision
-    record 04's confirmed defect in the naive approach)."""
+    record 04's confirmed defect in the naive approach).
+
+    `target_serial` presents the drive as virtio-scsi + scsi-hd with that serial, exactly as the install did: an installed
+    system verifies its drive by serial, which a plain virtio-blk disk never reports."""
+    if target_serial:
+        drive = ["-drive", f"file={target_image},format=raw,if=none,id=targetdisk,cache=none",
+                 "-device", "virtio-scsi-pci,id=targetscsi",
+                 "-device", f"scsi-hd,drive=targetdisk,bus=targetscsi.0,serial={target_serial}"]
+    else:
+        drive = ["-drive", f"file={target_image},format=raw,if=virtio,cache=none"]
     argv = [
         "qemu-system-x86_64",
         "-enable-kvm", "-cpu", "host", "-m", str(memory_mb), "-smp", str(smp),
-        "-drive", f"file={target_image},format=raw,if=virtio,cache=none",
+        *drive,
         "-boot", "order=c",
         "-nic", f"user,restrict={'on' if restrict_network else 'off'},mac={mac}",
         "-smbios", f"type=1,product={smbios_product}",
@@ -386,7 +395,8 @@ def build_postinstall_boot_invocation(
     if monitor_socket is not None:
         argv += ["-monitor", f"unix:{monitor_socket},server,nowait"]
     device_inventory = {
-        "drives": [f"file={target_image.name},format=raw,if=virtio (installed target, no installer media attached)"],
+        "drives": [f"file={target_image.name}, {'virtio-scsi + scsi-hd, serial set' if target_serial else 'if=virtio'} "
+                   "(installed target, no installer media attached)"],
         "network": f"user (SLIRP), restrict={'on' if restrict_network else 'off'}, mac={mac}",
         "no_cdrom_attached": True,
     }
