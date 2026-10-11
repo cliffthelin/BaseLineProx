@@ -168,20 +168,19 @@ def build_real_server(*, bind_host: str = "0.0.0.0", bind_port: int = 8200,
     return httpd
 
 
-def resolve_paths(environ, runner=None) -> tuple:
-    """(data_path, inbox_dir). Explicit environment wins (development);
-    otherwise the ACTIVE persona's own volume, resolved exactly as
-    baseline-scripts-inbox-gate resolves it. Never a /tmp fallback for a
-    real deployment: the auth store must not land on the substrate."""
-    data_path = environ.get("BASELINE_SCRIPTS_INBOX_DATA")
-    inbox_dir = environ.get("BASELINE_SCRIPTS_INBOX_DIR")
-    if data_path and inbox_dir:
-        return data_path, inbox_dir
+def resolve_paths(env, *, runner=None, **resolver_options) -> tuple:
+    """(auth store, inbox folder) for the server. Both set explicitly in `env` (local development) are used as given;
+    neither set means the validated active persistence volume, the same one baseline-scripts-inbox-gate checks
+    (scripts_inbox.persistent_paths_for_active_user). Setting only one is refused rather than guessed."""
+    data, inbox = env.get("BASELINE_SCRIPTS_INBOX_DATA"), env.get("BASELINE_SCRIPTS_INBOX_DIR")
+    if data and inbox:
+        return data, inbox
+    if data or inbox:
+        raise ValueError("set both BASELINE_SCRIPTS_INBOX_DATA and BASELINE_SCRIPTS_INBOX_DIR, or neither")
     if runner is None:
         from repair import RealRunner
         runner = RealRunner()
-    paths = si.active_persona_paths(runner)
-    return data_path or paths["data_path"], inbox_dir or paths["inbox_dir"]
+    return si.persistent_paths_for_active_user(runner, **resolver_options)
 
 
 def main() -> int:

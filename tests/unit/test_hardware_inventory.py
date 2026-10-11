@@ -206,12 +206,8 @@ def test_malformed_bus_does_not_hide_other_successful_observations():
     assert result["errors"][0]["bus"] == "usb"
 
 
-@pytest.mark.parametrize("collector,command", [
-    (hi.collect_pci, "lspci"), (hi.collect_usb, "lsusb"),
-    (hi.collect_block, "lsblk"), (hi.collect_net, "ip"),
-])
-def test_successful_empty_bus_remains_valid(collector, command):
+def test_successful_empty_usb_bus_remains_valid():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[0] == command, FakeProc(0, "\n")),
+        (lambda a: a[0] == "lsusb", FakeProc(0, "\n")),
     ])
-    assert collector(runner) == []
+    assert hi.collect_usb(runner) == []

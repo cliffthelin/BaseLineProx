@@ -425,17 +425,48 @@ def unmount_all_redirects(runner: Runner, *, persona: str | None = None) -> list
     return results
 
 
-def get_active_persona(runner: Runner, *, default: str = DEFAULT_PERSONA) -> str:
+def get_active_persona(runner: Runner, *, default: str = DEFAULT_PERSONA,
+                       marker_path: str = ACTIVE_PERSONA_MARKER_PATH) -> str:
     """Reads the real, durable marker of which persona is currently
     the active one - lives on the shared BASELINE volume (never
     persona-scoped by construction), so it survives every switch.
     Falls back to `default` only when no marker has ever been written
     yet (a fresh install, or a caller that has never called
     `switch_active_persona`)."""
-    if not runner.path_exists(ACTIVE_PERSONA_MARKER_PATH):
+    if not runner.path_exists(marker_path):
         return default
-    content = runner.read_text(ACTIVE_PERSONA_MARKER_PATH).strip()
+    content = runner.read_text(marker_path).strip()
     return content or default
+
+
+def active_user_mountpoint(
+        runner: Runner, *,
+        independent_marker_path: str = "/etc/baseline/independent-drive.json",
+        policy_path: str | None = None,
+        active_persona_marker_path: str = ACTIVE_PERSONA_MARKER_PATH) -> str:
+    """Resolve the persistence mount used by the currently active persona.
+
+    Independent-drive installs have separate USER_<PERSONA> volumes. Their
+    active persona must be present in the validated on-disk role policy;
+    otherwise a consumer must fail closed instead of writing to a different
+    persona or the legacy USER path. Older single-volume installations keep
+    the established /mnt/USER location.
+    """
+    if not runner.path_exists(independent_marker_path):
+        return MOUNT_POINT
+    try:
+        import storage_policy
+        policy = storage_policy.load_policy(runner, path=policy_path or storage_policy.POLICY_PATH)
+        persona = get_active_persona(runner, marker_path=active_persona_marker_path)
+        if persona not in policy["personas"]:
+            raise PersistenceObservationError(
+                f"active persona {persona!r} is not enrolled in the independent-drive policy")
+        return user_mountpoint_for(persona)
+    except PersistenceObservationError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise PersistenceObservationError(
+            f"independent-drive persona policy could not be verified: {exc}") from exc
 
 
 def set_active_persona(runner: Runner, persona: str) -> None:

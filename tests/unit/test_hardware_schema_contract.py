@@ -75,3 +75,21 @@ def test_a_schema_section_may_never_contain_a_nested_list():
     raw[2] = {"CPU": [{"model": "Test CPU", "cpus": 8}, ["stray"]]}
     with pytest.raises(hardware.HardwareInventoryError, match="CPU section has an invalid shape"):
         hardware.normalize(raw)
+
+
+def test_real_inxi_repositories_are_rendered_not_dropped():
+    raw = _valid_minimal_inxi() + [{
+        "Repos": [
+            {"Packages": 3543, "pm": "dpkg"},
+            ["Active apt repo: https://archive.example/ubuntu"],
+        ],
+    }]
+    hardware._validate_raw(raw)
+    rows = [r for r in hardware.full_inventory(raw) if r["group"] == "Repos"]
+    assert {r["label"]: r for r in rows}["Repository 1"]["fields"] == {
+        "repository": "Active apt repo: https://archive.example/ubuntu"}
+
+
+def test_a_repository_entry_that_is_not_all_strings_is_still_refused():
+    with pytest.raises(hardware.HardwareInventoryError, match="invalid shape"):
+        hardware._validate_raw(_valid_minimal_inxi() + [{"Repos": [["Active repo", 7]]}])

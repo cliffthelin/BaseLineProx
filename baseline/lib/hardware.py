@@ -224,10 +224,20 @@ def full_inventory(raw):
     adjacent items rather than one merged record per device - this stays
     faithful to that rather than guessing at how to re-pair them."""
     rows = []
+    repository_number = 0
     for entry in raw:
         for key, items in entry.items():
             group = _clean_key(key)
             for i, item in enumerate(items):
+                if group == "Repos" and isinstance(item, list):
+                    # inxi lists each apt sources file's raw repository lines as a nested list of strings (Repos, -r)
+                    for line in item:
+                        if not line:
+                            continue
+                        repository_number += 1
+                        rows.append({"group": group, "label": f"Repository {repository_number}", "detail": line,
+                                     "fields": {"repository": line}})
+                    continue
                 if not isinstance(item, dict):
                     continue
                 fields = _item_fields(item)

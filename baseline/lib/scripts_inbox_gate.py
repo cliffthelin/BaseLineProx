@@ -1,38 +1,49 @@
 """ExecStartPre gate for baseline-scripts-inbox.service - refuses to
-start the scripts inbox CRUD server until the ACTIVE persona's
-USER_<PERSONA> volume is actually mounted, so a script pushed before that
-lands on the real persistent volume rather than silently writing through
-to the disposable substrate. Reuses persist_bind_mounts.is_mounted
-unchanged, the exact same real-kernel-state check ensure_redirect already
-relies on for the same reason (decision record 62's own established
-concern, applied here to a different consumer of the same mountpoint).
-
-Which volume is resolved by scripts_inbox.active_persona_paths, the same
-function the server uses, so the gate and the server always agree.
+start the scripts inbox CRUD server until USER is actually
+mounted, so a script pushed before that lands on the real persistent
+volume rather than silently writing through to the disposable
+substrate. Reuses persist_bind_mounts.is_mounted unchanged, the exact
+same real-kernel-state check ensure_redirect already relies on for the
+same reason (decision record 62's own established concern, applied
+here to a different consumer of the same mountpoint).
 """
 from __future__ import annotations
 
 import sys
 
 import persist_bind_mounts as pbm
-import scripts_inbox as si
 
 from repair import RealRunner
 
 
-def check(runner) -> int:
-    return 0 if pbm.is_mounted(runner, si.active_persona_paths(runner)["mountpoint"]) else 1
+def check(runner, *, independent_marker_path="/etc/baseline/independent-drive.json",
+          policy_path=None, active_persona_marker_path=pbm.ACTIVE_PERSONA_MARKER_PATH,
+          mount_table_path="/proc/self/mounts") -> int:
+    try:
+        mountpoint = pbm.active_user_mountpoint(
+            runner, independent_marker_path=independent_marker_path,
+            policy_path=policy_path,
+            active_persona_marker_path=active_persona_marker_path,
+        )
+        return 0 if pbm.is_mounted(runner, mountpoint, mount_table_path=mount_table_path) else 1
+    except (OSError, RuntimeError, ValueError):
+        return 1
 
 
 def main(runner=None) -> int:
     if runner is None:
         runner = RealRunner()
-    rc = check(runner)
-    if rc != 0:
-        paths = si.active_persona_paths(runner)
-        print(f"[baseline-scripts-inbox-gate] {paths['mountpoint']} (active persona "
-              f"{paths['persona']!r}) is not mounted - refusing to start the scripts inbox server.",
+    try:
+        mountpoint = pbm.active_user_mountpoint(runner)
+        mounted = pbm.is_mounted(runner, mountpoint)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"[baseline-scripts-inbox-gate] cannot verify active persistence mount: {exc}",
               file=sys.stderr)
+        return 1
+    rc = 0 if mounted else 1
+    if rc != 0:
+        print(f"[baseline-scripts-inbox-gate] {mountpoint} is not mounted - "
+              "refusing to start the scripts inbox server.", file=sys.stderr)
     return rc
 
 

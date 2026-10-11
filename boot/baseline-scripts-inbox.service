@@ -14,9 +14,7 @@ ReadOnlyPaths=/opt/baseline
 Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure
 RestartSec=5
-# Store and inbox are resolved at start from the ACTIVE persona's USER_<PERSONA> volume
-# (scripts_inbox.active_persona_paths), the same function the gate uses. Hardcoding the
-# singular /mnt/USER here made the gate refuse forever on every persona install.
+Environment=BASELINE_SCRIPTS_INBOX_USE_ACTIVE_PERSISTENCE=1
 StandardOutput=journal
 StandardError=journal
 

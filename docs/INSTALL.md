@@ -1855,3 +1855,27 @@ The full current unit suite passed **3412 tests**. See
 This establishes actual virtual GUI/browser/configuration/rebuild acceptance.
 Physical native cold boot and the broader isolation/integration queue remain open;
 no physical drive was written during this continuation.
+
+## Self-contained all-script installer — DR245-248
+
+`baseline/bin/baseline-allscript-install` builds an installer that carries everything its build needs and finishes the
+installation on the target by itself, with no internet and nothing attached but the ISO. Stages: `preflight`, `recovery`,
+`cache`, `install`, `firstboot`, `kiosk`; `--stage rehearse` runs the same installer end to end against a blank sparse disk
+under KVM (no root, no physical drive).
+
+- `cache` builds the drive's installer cache once (`baseline-build-offline-cache`): packages with all dependencies
+  (provision.sh's, first-boot diagnostics, the applications' runtime, drivers: CPU microcode and Wi-Fi firmware), npm's cache for
+  Claude Code, and the five applications prepared with `baseline-apps prepare` (VS Code, Spotify, Chrome, ChatGPT, Claude
+  Desktop). It reads through earlier caches (`--seed`) and downloads only what is missing.
+- `install` / `--stage rehearse` offer the cache and OS images (`--os-iso NAME`, repeatable) to the installer VM. The installed
+  system's first boot (`baseline-first-boot-install`) lays out storage, copies the exact installer ISO and its expanded
+  environment onto INSTALLER_CACHE, copies and verifies the offered OS images (registered as the Proxmox ISO storage
+  `baseline-isos`), and provisions from the carried repository.
+- After CONFIRM, first boot installs its diagnostic tools from that repository when the network does not verify, commits, and the
+  kiosk shows Proxmox. `baseline-network-retry.timer` then re-applies only the change that was confirmed, until it verifies.
+- The drive's cache learns: packages apt downloads are kept in it (`LEARNED.json`), so a rebuild finds them there.
+- Proofs on the offline rehearsal VM: `tests/integration/verify_os_open.py` (opens a carried OS through the web app's VM code)
+  and `tests/integration/verify_apps_offline.py` (runtime and all five applications install offline and pass preflight).
+
+The real PC401 run needs the operator's own `sudo` command and a drive cleared by the operator. Merge status with the
+parallel effort: [parallel-effort-merge.md](design/parallel-effort-merge.md).

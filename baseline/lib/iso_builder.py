@@ -47,7 +47,7 @@ class IsoBuilderRunner:
     def makedirs(self, path: Path) -> None:
         raise NotImplementedError
 
-    def copytree(self, src: Path, dst: Path) -> None:
+    def copytree(self, src: Path, dst: Path, *, ignore=None) -> None:
         raise NotImplementedError
 
     def copy_file(self, src: Path, dst: Path) -> None:
@@ -84,8 +84,8 @@ class RealIsoBuilderRunner(IsoBuilderRunner):
     def makedirs(self, path):
         Path(path).mkdir(parents=True, exist_ok=True)
 
-    def copytree(self, src, dst):
-        shutil.copytree(str(src), str(dst))
+    def copytree(self, src, dst, *, ignore=None):
+        shutil.copytree(str(src), str(dst), ignore=ignore)
 
     def copy_file(self, src, dst):
         shutil.copy2(str(src), str(dst))
@@ -179,13 +179,9 @@ def stage_baseline_source(runner: IsoBuilderRunner, *, repo_root: Path, staging_
     earlier, failed attempt."""
     runner.remove_tree(staging_dir)
     runner.makedirs(staging_dir)
-    runner.copytree(repo_root / "boot", staging_dir / "boot")
-    runner.copytree(repo_root / "baseline", staging_dir / "baseline")
-    runner.copytree(repo_root / "packaging", staging_dir / "packaging")
-    runner.copytree(repo_root / "automation", staging_dir / "automation")
-    runner.copytree(repo_root / "docs", staging_dir / "docs")
-    runner.copytree(repo_root / "tests", staging_dir / "tests")
-    runner.copytree(repo_root / "tools", staging_dir / "tools")
+    ignore_generated = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".pytest_cache", ".mypy_cache")
+    for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
+        runner.copytree(repo_root / name, staging_dir / name, ignore=ignore_generated)
     runner.copy_file(repo_root / "README.md", staging_dir / "README.md")
     runner.copy_file(repo_root / "AGENTS.md", staging_dir / "AGENTS.md")
 
