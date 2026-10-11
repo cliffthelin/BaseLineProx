@@ -116,4 +116,14 @@ if [ "$MODE" = "--with-password" ] && [ -f "$DEVUSER" ]; then
   ln -sf /etc/systemd/system/baseline-dev-user.service "$MNT/etc/systemd/system/multi-user.target.wants/baseline-dev-user.service"
   say "development login '$DNAME' set up: it is created on the drive's next boot as a Linux user and a Proxmox Administrator (realm: Linux PAM)"
 fi
+if [ "$MODE" = "--with-password" ]; then
+  # the network step (ADR 0001): a bridge whose NIC does not exist on the machine the drive is booted on is pointed at the NIC that does
+  install -d -m 755 "$MNT/opt/baseline/bin" "$MNT/opt/baseline/lib" "$MNT/etc/systemd/system/sysinit.target.wants"
+  install -m 755 "$REPO/baseline/bin/baseline-bridge-port" "$MNT/opt/baseline/bin/baseline-bridge-port"
+  install -m 644 "$REPO/baseline/lib/bridge_port.py" "$MNT/opt/baseline/lib/bridge_port.py"
+  install -m 644 "$REPO/boot/baseline-bridge-port.service" "$MNT/etc/systemd/system/baseline-bridge-port.service"
+  ln -sf /etc/systemd/system/baseline-bridge-port.service "$MNT/etc/systemd/system/sysinit.target.wants/baseline-bridge-port.service"
+  say "network step installed: on the next boot a bridge whose NIC is missing is pointed at the one wired NIC with a link"
+  say "bridge-ports now in the installed config:"; grep -n "bridge-ports" "$MNT/etc/network/interfaces" | sed 's/^/    /'
+fi
 say "monitor keys now:"; cut -d' ' -f1,3- "$MNT/$KEYS_REL"

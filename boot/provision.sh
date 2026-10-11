@@ -108,6 +108,9 @@ cp "$SRC/baseline/bin/baseline-repair-rollback" /opt/baseline/bin/baseline-repai
 cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline-additive-dhcp-reapply
 cp "$SRC/baseline/bin/baseline-network-retry" /opt/baseline/bin/baseline-network-retry
 cp "$SRC/baseline/lib/network_retry.py" /opt/baseline/lib/network_retry.py
+cp "$SRC/baseline/bin/baseline-bridge-port" /opt/baseline/bin/baseline-bridge-port
+cp "$SRC/baseline/lib/bridge_port.py" /opt/baseline/lib/bridge_port.py
+chmod +x /opt/baseline/bin/baseline-bridge-port
 # Gate E: the real, integrated first-boot authorization state machine
 # (docs/design/decision-records/25) - connects proxmox_detect.py
 # (informational), firstboot_network_repair.py's already-real Gate A
@@ -433,6 +436,7 @@ echo "=== Staging systemd units (not yet activated - see verification/activation
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
 cp "$SRC/boot/baseline-network-retry.service" /etc/systemd/system/baseline-network-retry.service
+cp "$SRC/boot/baseline-bridge-port.service" /etc/systemd/system/baseline-bridge-port.service
 cp "$SRC/boot/baseline-network-retry.timer" /etc/systemd/system/baseline-network-retry.timer
 cp "$SRC/boot/baseline-persist-bind-mounts.service" /etc/systemd/system/baseline-persist-bind-mounts.service
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
@@ -560,6 +564,7 @@ systemctl enable baseline-firstboot.service
 systemctl enable baseline-storage-verify.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
+systemctl enable baseline-bridge-port.service
 systemctl enable baseline-network-retry.timer
 systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service
