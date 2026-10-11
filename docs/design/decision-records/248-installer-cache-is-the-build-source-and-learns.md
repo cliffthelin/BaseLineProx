@@ -51,7 +51,9 @@ file; an unrecorded or altered file is refused). First boot and the repository c
 - npm rewrote a cacache index inside the carried repository during provisioning (first boot then refused it); npm now
   works in a scratch copy and the carried repository is only read.
 - the build VM's own installed packages are not downloaded (apt sees them installed): `amd64-microcode` was missing;
-  drivers are now fetched with `--reinstall`. Not yet re-verified by a rebuild.
+  drivers are now fetched with `--reinstall`. Re-verified by a rebuild (2026-10-11): 375 packages, 412 files verify, all four driver
+  packages carried (`amd64-microcode`, `intel-microcode`, `firmware-realtek`, `firmware-mediatek`); the rebuild reused 374 packages from
+  its seeds and downloaded only the one that was missing.
 
 ## Not proven / open
 
@@ -60,4 +62,5 @@ file; an unrecorded or altered file is refused). First boot and the repository c
 - launching an application (needs a display) was not tried; preflight only.
 - `installer_cache.py`'s inventory page still scans only `isos/packages/firmware/...`; it does not yet count what the
   carried repository holds.
-- a rebuilt cache with the `amd64-microcode` fix, and the real PC401 run.
+- the real install run on PC601 (this branch's development-phase target; PC401 belongs to the parallel effort), which needs the
+  operator's own `sudo` command and PC601's mounted EFI partition unmounted first.
