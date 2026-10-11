@@ -264,7 +264,7 @@ def build_and_write_self_installer(
     memory_mb: int = 3072,
     on_progress=None,
     admin_password: str | None = None,
-    offline_cache: Path | None = None,
+    offline_cache: Path | None = None, os_share: Path | None = None,
 ) -> SelfInstallerResult:
     """`offline_cache` makes the installer self-contained: the ISO then also carries the first-boot hook
     (first_boot_hook.py) and this offline package cache, and the installed system finishes its own
@@ -489,7 +489,7 @@ def build_and_write_self_installer(
         serial_log=workspace / "serial.log", memory_mb=memory_mb,
         monitor_socket=monitor_socket,
         guestfwd_host=server_host, guestfwd_port=server_port,
-        target_serial=disk_serial,
+        target_serial=disk_serial, share_dir=os_share,
     )
     process = install_runner.popen(invocation.argv, monitor_socket=monitor_socket)
 

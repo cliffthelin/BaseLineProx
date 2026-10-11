@@ -127,3 +127,19 @@ def test_a_checkpoint_left_by_an_earlier_run_is_cleared_before_waiting(tmp_path)
     allscript.clear_stale_checkpoint(stale)
     assert not stale.exists()
     allscript.clear_stale_checkpoint(stale)          # nothing to clear is not an error
+
+
+def test_os_images_offered_by_default_are_every_iso_except_the_proxmox_installer_itself():
+    available = ["ubuntu.iso", "proxmox-ve-source.iso", "fyde.ova", "notes.txt", "mx.iso"]
+    assert allscript.select_os_isos([], available, rehearsal=False) == ["mx.iso", "ubuntu.iso"]
+    assert allscript.select_os_isos(["ubuntu.iso"], available, rehearsal=False) == ["ubuntu.iso"]
+    with pytest.raises(ValueError):
+        allscript.select_os_isos(["missing.iso"], available, rehearsal=False)
+    with pytest.raises(ValueError):
+        allscript.select_os_isos(["proxmox-ve-source.iso"], available, rehearsal=False)
+
+
+def test_the_rehearsal_offers_only_the_smallest_image_unless_told_otherwise():
+    sizes = {"big.iso": 6, "small.iso": 2, "mid.iso": 3}
+    assert allscript.select_os_isos([], list(sizes), rehearsal=True, sizes=sizes) == ["small.iso"]
+    assert allscript.select_os_isos(["big.iso"], list(sizes), rehearsal=True, sizes=sizes) == ["big.iso"]

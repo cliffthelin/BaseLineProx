@@ -60,6 +60,7 @@ OPERATOR = "cane"                               # owner of the work directory, s
 
 BUILD = Path("/run/media/cane/CACHE/baseline-build")   # build workspace only; nothing installed depends on it
 CACHE_DIR = BUILD / "offline-cache"
+OS_OFFER = None                                           # folder of OS images offered to the installer VM
 INSTALL_VM = None                                         # the install stage's KVM session, continued by later stages
 
 STAGES = ("preflight", "recovery", "cache", "install", "firstboot", "kiosk")
@@ -115,6 +116,20 @@ def work_dir(name, stages):
     if name is not None:
         return BUILD / f"allscript-{name}"
     return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
+
+
+def select_os_isos(requested, available, *, rehearsal, sizes=None):
+    """Which OS install images the installer offers to the drive. Default: every .iso except the Proxmox installer
+    (already carried); the rehearsal defaults to the smallest one so it stays quick."""
+    candidates = sorted(n for n in available if n.endswith(".iso") and n != "proxmox-ve-source.iso")
+    if requested:
+        missing = [n for n in requested if n not in candidates]
+        if missing:
+            raise ValueError(f"not an OS image in {OS_ISOS}: {', '.join(missing)}")
+        return list(requested)
+    if rehearsal and candidates:
+        return [min(candidates, key=lambda n: (sizes or {}).get(n, 0))]
+    return candidates
 
 
 def confirmation_ok(typed, serial):
@@ -292,7 +307,7 @@ def stage_install(r):
         iso_builder_runner=ib.RealIsoBuilderRunner(), install_runner=dsi.RealInstallRunner(),
         workspace=workspace, repo_root=REPO, assistant_binary=ASSISTANT, proxmox_source_iso=SOURCE_ISO,
         fqdn="baseline-pc401.local", memory_mb=8192, on_progress=lambda line: say(line),
-        offline_cache=CACHE_DIR, **si.LVM_SIZE_PRESETS["single-drive"])
+        offline_cache=CACHE_DIR, os_share=OS_OFFER, **si.LVM_SIZE_PRESETS["single-drive"])
     say(result.outcome + ":", result.detail)
     if result.outcome != "applied" or result.qemu_process is None:
         raise RuntimeError(f"the installer refused or did not launch; {TARGET_NAME} was not written by this stage")
@@ -347,6 +362,19 @@ def stage_cache(r):
     record("cache", path=str(CACHE_DIR), files=count)
 
 
+def offer_os_isos(names):
+    """Hard-link the chosen images (plus sums) next to INSTALLER_CACHE/isos; the installer VM shares that folder."""
+    import os_isos
+    global OS_OFFER
+    OS_OFFER = os_isos.build_offer(OS_ISOS, names, OS_ISOS.parent / ".baseline-offer")
+    say("offering OS images to the installed system:", ", ".join(names))
+
+
+def withdraw_os_offer():
+    if OS_OFFER is not None:
+        shutil.rmtree(OS_OFFER, ignore_errors=True)
+
+
 def stage_rehearse(r):
     """The same self-contained installer, run against a blank sparse disk the size of the SK hynix targets with NO network.
 
@@ -392,7 +420,8 @@ def stage_rehearse(r):
     invocation = dsi.build_sparse_install_invocation(
         target_image=disk, prepared_iso=work / "installer.iso", mac="52:54:00:ba:5e:7e",
         smbios_product="baseline-rehearsal", serial_log=work / "serial.log", memory_mb=8192, smp=4,
-        restrict_network=True, monitor_socket=work / "monitor.sock", target_serial="BLREHEARSAL01")
+        restrict_network=True, monitor_socket=work / "monitor.sock", target_serial="BLREHEARSAL01",
+        share_dir=OS_OFFER)
     argv = invocation.argv + ["-display", "none"]
     global INSTALL_VM
     INSTALL_VM = dsi.RealInstallRunner().popen(argv, monitor_socket=work / "monitor.sock")
@@ -422,6 +451,7 @@ def stage_session_kiosk(r):
     INSTALL_VM.send_monitor_command("system_powerdown")
     code = INSTALL_VM.wait(timeout=600)
     say(f"{TARGET_NAME or 'the rehearsal VM'} shut down cleanly after the kiosk was shown; QEMU exit", code)
+    withdraw_os_offer()
     record("kiosk", screenshot=str(WORK / "kiosk.png"), qemu_exit=code)
 
 
@@ -431,6 +461,9 @@ def main():
     parser.add_argument("--from", dest="start", help="run this stage and every later one")
     parser.add_argument("--target", choices=sorted(DRIVES),
                         help="the drive this run may touch; the other is protected. No default.")
+    parser.add_argument("--os-iso", action="append", default=[], metavar="NAME",
+                        help="an image in /mnt/INSTALLER_CACHE/isos to carry onto the drive (repeatable); "
+                             "default: every .iso (the rehearsal: the smallest)")
     parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
                         help="authorize erasing the target (after its verified recovery image); its exact serial")
     args = parser.parse_args()
@@ -448,6 +481,14 @@ def main():
         raise RuntimeError(f"stages {', '.join(needs_root)} need root: run with sudo")
     WORK.mkdir(mode=0o750, parents=True, exist_ok=True)
     _give_to_operator(WORK)
+    if {"install", "rehearse"} & set(stages):
+        available = [p.name for p in OS_ISOS.iterdir() if p.is_file()] if OS_ISOS.is_dir() else []
+        sizes = {n: (OS_ISOS / n).stat().st_size for n in available}
+        names = select_os_isos(args.os_iso, available, rehearsal="rehearse" in stages, sizes=sizes)
+        if names:
+            offer_os_isos(names)
+        else:
+            say("no OS images in", OS_ISOS, "- the drive will carry none")
     r = runner()
     functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,
                  "rehearse": stage_rehearse, "install": stage_install, "firstboot": stage_session_firstboot,
