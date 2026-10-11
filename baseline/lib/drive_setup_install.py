@@ -197,11 +197,22 @@ class _RealInstallProcess(InstallProcess):
             except socket.timeout:
                 pass
             s.sendall((command + "\n").encode())
-            time.sleep(0.3)
-            try:
-                return s.recv(65536).decode("utf-8", errors="replace")
-            except socket.timeout:
-                return ""
+            # The monitor echoes the command with cursor escapes, then the reply, then a fresh "(qemu) " prompt: read until that
+            # prompt follows the reply (a fixed short sleep returned only the echo for `info status`).
+            deadline = time.monotonic() + timeout
+            data = b""
+            while time.monotonic() < deadline:
+                try:
+                    chunk = s.recv(65536)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                data += chunk
+                text = data.decode("utf-8", errors="replace")
+                if text.rstrip().endswith("(qemu)") and "\n" in text.split(command, 1)[-1]:
+                    break
+            return data.decode("utf-8", errors="replace")
         finally:
             s.close()
 

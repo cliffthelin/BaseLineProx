@@ -505,7 +505,8 @@ def watch(checkpoint, description, *, opened_path=None):
         device = device_now() if opened_path else ""        # rehearsals run on an image file with no drive to watch
         verdict = stage.tick(now, status=status, device_path=device, digest=iw.screen_digest(shot))
         for alert in verdict.alerts:
-            say(f"ALERT [{checkpoint}] {alert}; if this is the prompt you are waiting for: touch {done}")
+            hint = f"; if this is the prompt you are waiting for: touch {done}" if "screen" in alert else ""
+            say(f"ALERT [{checkpoint}] {alert}{hint}")
         if now - last_beat >= HEARTBEAT_SECONDS:
             last_beat = now
             say(f"[watch {checkpoint}] {int((now - started) // 60)} min, vm={status}, drive={device or opened_path or 'n/a'}, "
