@@ -7,7 +7,7 @@ anything. Prints one JSON line and writes /var/log/baseline-os-open.json. Not ru
 Proxmox host and KVM.
 """
 import json
-import subprocess
+import socket
 import sys
 import tempfile
 import time
@@ -25,6 +25,22 @@ NAME = "os-open-check"
 def nonblack_fraction(ppm: bytes) -> float:
     header, rest = ppm.split(b"\n255\n", 1)
     return sum(1 for b in rest[::97] if b > 16) / max(1, len(rest[::97]))
+
+
+def screendump(vmid, path: Path) -> None:
+    """Ask the VM's own QMP socket (Proxmox keeps one per VM) for a PPM of its screen."""
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.settimeout(30)
+        sock.connect(f"/var/run/qemu-server/{vmid}.qmp")
+        stream = sock.makefile("rw")
+        stream.readline()                                    # greeting
+        for command in ({"execute": "qmp_capabilities"},
+                        {"execute": "screendump", "arguments": {"filename": str(path)}}):
+            stream.write(json.dumps(command) + "\n")
+            stream.flush()
+            reply = json.loads(stream.readline())
+            if "error" in reply:
+                raise ValueError(f"{command['execute']}: {reply['error'].get('desc', reply['error'])}")
 
 
 def main(image: str, settle_seconds: int = 90) -> int:
@@ -46,10 +62,9 @@ def main(image: str, settle_seconds: int = 90) -> int:
         record = host._record(NAME) if hasattr(host, "_record") else None
         if record and record.get("vmid"):
             try:
-                subprocess.run(["qm", "monitor", str(record["vmid"])], input=f"screendump {shot}\nquit\n", text=True,
-                               capture_output=True, timeout=30)
-            except subprocess.TimeoutExpired:
-                report["screendump"] = "qm monitor did not return"
+                screendump(record["vmid"], shot)
+            except (OSError, ValueError) as exc:
+                report["screendump"] = str(exc)
         if shot.is_file():
             report["screen_nonblack_fraction"] = round(nonblack_fraction(shot.read_bytes()), 3)
     report["opened"] = bool(report.get("running")) and report.get("screen_nonblack_fraction", 0) > 0.02
