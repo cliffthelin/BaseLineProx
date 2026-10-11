@@ -38,8 +38,34 @@ def required_packages(repo_root) -> list:
     """Everything an offline install needs from apt: provision.sh's packages, then first-boot authorization's own
     diagnostic tools (firstboot_statemachine.DIAGNOSTIC_PACKAGES) - both read from the code, never copied."""
     import firstboot_statemachine
+    import application_bundle
     names = provision_packages((Path(repo_root) / "boot/provision.sh").read_text())
-    return names + [p for p in firstboot_statemachine.DIAGNOSTIC_PACKAGES if p not in names]
+    runtime = application_bundle.runtime_plan({"arch": "amd64", "os": "debian", "release": "13"})["packages"]
+    return names + [p for p in firstboot_statemachine.DIAGNOSTIC_PACKAGES + runtime if p not in names]
+
+
+APP_BUNDLE = "apps"
+
+
+def verify_app_bundle(root, apps) -> list:
+    """Every carried application: `<root>/apps/<app>/recipe.json` plus its archive, checked against the recipe's
+    pinned sha256 (the checksum `baseline-apps install` itself re-checks). Names what is missing; never skips."""
+    import json
+    root = Path(root)
+    report, missing = [], []
+    for app in apps:
+        folder = root / APP_BUNDLE / app
+        archives = [p for p in (folder / "source.deb", folder / "source.tar.gz") if p.is_file()]
+        if not (folder / "recipe.json").is_file() or len(archives) != 1:
+            missing.append(app)
+            continue
+        recipe = json.loads((folder / "recipe.json").read_text())
+        if sha256(archives[0]) != recipe["source"]["sha256"]:
+            raise RuntimeError(f"{app}: the carried archive does not match its recipe's pinned checksum")
+        report.append({"app": app, "version": recipe["source"]["version"], "bytes": archives[0].stat().st_size})
+    if missing:
+        raise RuntimeError(f"the carried application bundle lacks: {', '.join(missing)}")
+    return report
 
 
 def sha256(path) -> str:

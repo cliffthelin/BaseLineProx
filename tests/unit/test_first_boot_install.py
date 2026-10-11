@@ -262,3 +262,45 @@ def test_provision_keeps_npm_logs_out_of_the_carried_cache():
     assert '--cache "$BASELINE_PACKAGE_CACHE/npm-cache"' in line
     block = text[text.index(line):text.index(line) + 200]
     assert "--logs-dir /var/log/baseline-npm" in block
+
+
+def test_the_cache_also_carries_the_runtime_packages_the_applications_need():
+    import application_bundle
+    import offline_cache
+    packages = offline_cache.required_packages(REPO)
+    runtime = application_bundle.runtime_plan({"arch": "amd64", "os": "debian", "release": "13"})["packages"]
+    for name in runtime:
+        assert name in packages, name
+    assert len(packages) == len(set(packages))
+
+
+def _app_bundle(root, apps=("chrome", "spotify")):
+    import hashlib
+    import json
+    for app in apps:
+        folder = root / "apps" / app
+        folder.mkdir(parents=True)
+        data = f"payload of {app}".encode()
+        (folder / "source.deb").write_bytes(data)
+        (folder / "recipe.json").write_text(json.dumps({
+            "app": app, "configuration": {}, "format": "baseline.application-build/v1",
+            "platform": {"arch": "amd64", "os": "debian", "release": "13"},
+            "source": {"medium": "deb", "package": app, "sha256": hashlib.sha256(data).hexdigest(),
+                       "url": f"https://example.invalid/{app}.deb", "version": "1.0"}}))
+
+
+def test_each_carried_application_is_checked_against_its_recipes_pinned_checksum(tmp_path):
+    import offline_cache
+    _app_bundle(tmp_path)
+    report = offline_cache.verify_app_bundle(tmp_path, apps=("chrome", "spotify"))
+    assert [r["app"] for r in report] == ["chrome", "spotify"] and report[0]["bytes"] == len(b"payload of chrome")
+    (tmp_path / "apps/chrome/source.deb").write_bytes(b"tampered")
+    with pytest.raises(RuntimeError):
+        offline_cache.verify_app_bundle(tmp_path, apps=("chrome", "spotify"))
+
+
+def test_a_missing_application_is_named_not_skipped(tmp_path):
+    import offline_cache
+    _app_bundle(tmp_path, apps=("chrome",))
+    with pytest.raises(RuntimeError, match="spotify"):
+        offline_cache.verify_app_bundle(tmp_path, apps=("chrome", "spotify"))
