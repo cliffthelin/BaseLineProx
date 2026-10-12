@@ -15,7 +15,8 @@ from pathlib import Path
 
 SHARE_TAG = "baseline-isos"
 SUMS = "SHA256SUMS"
-ISO_STORAGE = "baseline-isos"          # the Proxmox storage through which the web app lists the carried images
+ISO_STORAGE = "installer-cache"        # INSTALLER_CACHE as a Proxmox storage (ids are lowercase), through which the web app lists the carried images
+LEGACY_ISO_STORAGE = "baseline-isos"   # the name earlier builds registered for the same folder: not a volume, so it is replaced
 _SUM_LINE = re.compile(r"^([0-9a-f]{64}) [ *](.+)$")
 _CHUNK = 8 * 1024 ** 2
 

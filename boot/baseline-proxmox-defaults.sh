@@ -28,6 +28,13 @@ storage() {  # id path content
 
 if [ "${1:-}" = nag ]; then nag; exit 0; fi
 
+# INSTALLER_CACHE was once registered as `baseline-isos`, a name that is not a volume's. Same folder, the volume's own name.
+if pvesm status 2>/dev/null | awk 'NR>1{print $1}' | grep -qx baseline-isos && ! pvesm status 2>/dev/null | awk 'NR>1{print $1}' | grep -qx installer-cache; then
+    pvesm remove baseline-isos >/dev/null 2>&1 && \
+    pvesm add dir installer-cache --path /mnt/INSTALLER_CACHE --content iso --is_mountpoint /mnt/INSTALLER_CACHE >/dev/null 2>&1 && \
+    say "storage baseline-isos renamed installer-cache"
+fi
+
 # The Baseline roles as Proxmox storages. USER_ADMIN holds the substrate's private data: backups only, never VM disks.
 storage user-admin       /mnt/USER_ADMIN       backup
 storage user-personal    /mnt/USER_PERSONAL    images,backup

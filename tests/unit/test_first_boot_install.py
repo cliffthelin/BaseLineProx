@@ -479,3 +479,22 @@ def test_the_hook_carries_a_development_user_only_if_it_is_a_name_and_a_sha512cr
     for bad in ("baseline:CTEST1!", "Bad:" + good.split(":", 1)[1], good + "'; rm -rf /", "baseline:$6$x$short", ""):
         with pytest.raises(fbh.HookError):
             fbh._exec_line(None, bad)
+
+
+def test_the_installer_cache_storage_is_named_for_the_volume_and_the_old_name_is_replaced(tmp_path, monkeypatch):
+    """Operator, 2026-10-12: `baseline-isos` is not a volume. The same folder is registered as `installer-cache`, the old entry removed."""
+    import json
+    import os_isos
+    installer = _installer()
+    root = tmp_path / "INSTALLER_CACHE"
+    (root / "isos").mkdir(parents=True)
+    monkeypatch.setattr(installer, "OS_ISOS", root / "isos")
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    commands = []
+    monkeypatch.setattr(installer, "run", lambda argv, **kw: commands.append(list(argv)))
+    listing = json.dumps([{"storage": "baseline-isos", "type": "dir", "path": str(root)}])
+    monkeypatch.setattr(installer.subprocess, "run", lambda *a, **k: __import__("subprocess").CompletedProcess(a, 0, listing, ""))
+    installer.register_iso_storage()
+    assert os_isos.ISO_STORAGE == "installer-cache"
+    assert commands[0] == ["pvesm", "remove", "baseline-isos"]
+    assert commands[1][:4] == ["pvesm", "add", "dir", "installer-cache"] and str(root) in commands[1]

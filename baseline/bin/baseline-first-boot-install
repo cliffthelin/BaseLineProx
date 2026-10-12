@@ -344,7 +344,12 @@ def register_iso_storage():
     os_isos.link_iso_folder(OS_ISOS.parent)
     listing = subprocess.run(["pvesh", "get", "/storage", "--output-format", "json"], capture_output=True, text=True,
                              check=True).stdout
-    argv = os_isos.storage_add_argv(json.loads(listing), OS_ISOS.parent)
+    definitions = json.loads(listing)
+    legacy = next((d for d in definitions if d.get("storage") == os_isos.LEGACY_ISO_STORAGE), None)
+    if legacy is not None and Path(legacy.get("path", "")).resolve() == OS_ISOS.parent.resolve():
+        run(["pvesm", "remove", os_isos.LEGACY_ISO_STORAGE])      # the same folder under a name that is not a volume's
+        definitions = [d for d in definitions if d is not legacy]
+    argv = os_isos.storage_add_argv(definitions, OS_ISOS.parent)
     if argv is not None:
         run(argv)
     log("os-isos: registered", OS_ISOS.parent, "as Proxmox ISO storage", os_isos.ISO_STORAGE)
