@@ -45,7 +45,11 @@ _BRIDGE_PORTS = re.compile(r"^([ \t]*bridge[-_]ports[ \t]+)[^#\r\n]+", re.MULTIL
 def _without_bridge_port_names(after):
     """The proposed file with the NIC names on `bridge-ports` lines blanked. bridge_port.py (ADR 0001) legitimately points a bridge at the
     NIC the drive finds on a new machine; that must not make the confirmed change look like a different one. Nothing else is ignored."""
-    return _BRIDGE_PORTS.sub(r"\1<nic>", after) if isinstance(after, str) else after
+    if isinstance(after, str):
+        return _BRIDGE_PORTS.sub(r"\1<nic>", after)
+    if isinstance(after, (list, tuple)):                      # the diagnosis carries the proposed file as a list of lines
+        return [_without_bridge_port_names(line) for line in after]
+    return after
 
 
 def same_change(authorized: dict, diagnosis: dict) -> bool:

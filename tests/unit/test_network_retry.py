@@ -158,3 +158,13 @@ def test_a_bridge_port_renamed_by_the_new_machine_step_is_still_the_confirmed_ch
     other_target = dict(same, target="vmbr1")
     for changed in (other_address, other_stanza, other_target):
         assert not nr.same_change(authorized, changed)
+
+
+def test_the_proposal_as_a_list_of_lines_gets_the_same_bridge_port_treatment():
+    import network_retry as nr
+    lines = ["iface vmbr0 inet6 static", "        address fec0::1/64", "        bridge-ports {nic}", "iface vmbr0 inet dhcp"]
+    authorized = {"mode": "additive", "target": "vmbr0", "diff": {"after": [l.format(nic="ens3") for l in lines]}}
+    renamed = {"needs_repair": True, "mode": "additive", "target": "vmbr0", "diff": {"after": [l.format(nic="enp0s3") for l in lines]}}
+    different = {"needs_repair": True, "mode": "additive", "target": "vmbr0",
+                 "diff": {"after": [l.format(nic="enp0s3").replace("inet dhcp", "inet static") for l in lines]}}
+    assert nr.same_change(authorized, renamed) and not nr.same_change(authorized, different)
