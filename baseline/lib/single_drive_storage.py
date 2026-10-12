@@ -112,6 +112,22 @@ def _backing_disk(runner, source, serial):
     return next(iter(disks))
 
 
+def current_device_name(source, sysfs="/sys/class/block"):
+    """The device-mapper name a mounted volume has NOW. The kernel keeps reporting a mount under the name it was mounted with, so after a
+    live volume-group rename (host_layout.name_the_volume_group_for_drive) findmnt still says /dev/mapper/pve-root, which LVM no longer
+    knows. The /dev link left for the old name resolves to the device node; its present name is in sysfs. Anything else is returned as is."""
+    try:
+        node = os.path.basename(os.path.realpath(source))
+        if node.startswith("dm-"):
+            with open(os.path.join(sysfs, node, "dm", "name")) as handle:
+                name = handle.read().strip()
+            if name:
+                return "/dev/mapper/" + name
+    except (OSError, TypeError, ValueError):
+        pass
+    return source
+
+
 def inspect_target(runner, *, expected_serial, root_mount):
     if not isinstance(expected_serial, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", expected_serial):
         raise StorageError("a selected hardware serial is required")
@@ -130,7 +146,7 @@ def inspect_target(runner, *, expected_serial, root_mount):
             or mounts[0].get("target") != root_mount or mounts[0].get("fstype") != "ext4"
             or not mounts[0].get("uuid")):
         raise StorageError("target root is not one mounted ext4 filesystem with known identity")
-    root = mounts[0]
+    root = {**mounts[0], "source": current_device_name(mounts[0].get("source"))}
     if _backing_disk(runner, root.get("source"), expected_serial) != disk.get("name"):
         raise StorageError("target root is on a different device")
     root_lvs = _json_command(runner, ["sudo", "-n", "lvs", "--reportformat", "json",
@@ -363,7 +379,7 @@ class RunningRunner(OfflineRunner):
 def running_target(runner):
     mounts = _json_command(runner, ["findmnt", "-J", "--mountpoint", "/", "-o", "TARGET,SOURCE,FSTYPE,UUID"])
     try:
-        source = mounts["filesystems"][0]["source"]
+        source = current_device_name(mounts["filesystems"][0]["source"])
     except (KeyError, IndexError, TypeError):
         raise StorageError("the running root has no identifiable source") from None
     ancestry = _json_command(runner, ["lsblk", "-s", "-J", "-p", "-o", "NAME,TYPE,SERIAL", source])

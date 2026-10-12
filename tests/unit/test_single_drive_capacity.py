@@ -133,3 +133,16 @@ def test_ensure_volumes_accepts_one_gib_roles_only_in_grow_on_demand_mode(monkey
     assert all(not item.ok and "minimum" in item.detail for item in refused.values())
     accepted = di.ensure_baseline_volumes(runner, planned_sizes_gib=sizes, reserve_bytes=10 * GIB, grow_on_demand=True)
     assert all(item.ok for item in accepted.values())
+
+
+def test_a_renamed_group_is_found_by_the_device_node_behind_the_old_name(tmp_path):
+    import single_drive_storage as sds
+    sysfs = tmp_path / "sys"
+    (sysfs / "dm-0" / "dm").mkdir(parents=True)
+    (sysfs / "dm-0" / "dm" / "name").write_text("baseline_abc-root\n")
+    node = tmp_path / "dm-0"
+    node.write_text("")
+    link = tmp_path / "pve-root"
+    link.symlink_to(node)
+    assert sds.current_device_name(str(link), sysfs=str(sysfs)) == "/dev/mapper/baseline_abc-root"
+    assert sds.current_device_name("/dev/mapper/nowhere-root", sysfs=str(sysfs)) == "/dev/mapper/nowhere-root"
