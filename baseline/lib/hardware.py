@@ -109,11 +109,24 @@ def _explicit_tty_stdin():
         return None
 
 
+def _inxi_stdin():
+    """(fd, fds_to_close) giving inxi a terminal on stdin: our own controlling tty when there is one, otherwise a fresh pseudo-terminal, so
+    inxi also works from a service or an SSH command with no terminal (it otherwise refuses with the IRC-client message)."""
+    tty = _explicit_tty_stdin()
+    if tty is not None:
+        return tty, [tty]
+    try:
+        master, slave = os.openpty()
+    except OSError:
+        return None, []
+    return slave, [slave, master]
+
+
 def collect(timeout: int = 15):
     """Run inxi, return (cleaned_raw, error|None)."""
     fd, path = tempfile.mkstemp(prefix="baseline_hw_", suffix=".json")
     os.close(fd)
-    tty_fd = _explicit_tty_stdin()
+    tty_fd, to_close = _inxi_stdin()
     try:
         proc = subprocess.run(
             ["inxi", "-Fmrsiaxxxz", "--output", "json", "--output-file", path],
@@ -128,9 +141,9 @@ def collect(timeout: int = 15):
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return None, str(e)
     finally:
-        if tty_fd is not None:
+        for fd in to_close:
             try:
-                os.close(tty_fd)
+                os.close(fd)
             except OSError:
                 pass
         try:

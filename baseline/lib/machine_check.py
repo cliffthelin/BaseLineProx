@@ -20,7 +20,7 @@ import machine_context as mc
 import references
 
 STATE_DIR = Path("/var/lib/baseline/machines")
-CACHE_ROOT = Path("/mnt/INSTALLER_CACHE/expanded/baseline-cache")
+CACHE_ROOT = Path("/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache")          # where first boot carried the expanded installer cache
 HARNESS_ENV = Path("/etc/baseline/harness.env")
 
 
