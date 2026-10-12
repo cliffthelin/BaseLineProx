@@ -1,15 +1,14 @@
-"""No formatting a drive that holds data unless the Baseline installer made it (operator instruction 2026-10-01).
+"""Protect populated drives and keep destructive actions inside each installer lane (DR300).
 
 A drive "has data" if it carries any partition, filesystem, LVM or encrypted volume. A blank drive, or one whose
 partition table is empty, has none. A drive whose state cannot be read is treated as HAVING data, because the safe
 mistake is refusing.
 
-A drive counts as installer-made only if its GPT disk GUID is one the installer generated and registered. The
-installer stamps a fresh GUID (`sgdisk -U`, which changes nothing but the disk identifier) and records it in the
-registry; the check compares the drive's current GUID to the registry. A drive that holds data and does not carry
-such a GUID can NEVER be formatted by Baseline. There is no override: `require_may_format` has no parameter that
-relaxes it, and neither a human confirmation (hitl.py) nor a standing approval can skip it, because a refused
-request never even reaches a confirmation.
+A drive normally counts as installer-made only if its GPT disk GUID is one the installer generated and registered.
+Each pinned installer lane also has one explicit development serial: Claude's UUID maps to PC601 and Codex's UUID
+maps to PC401. The exact serial is checked with `lsblk`; the other lane's serial is refused before the empty-disk
+or installer-UUID paths. Missing/invalid lane identity enables neither development lock. These are source policy,
+not caller parameters.
 
 Adopting a drive that predates this rule (`stamp_installer_identity`) is non-destructive and is limited to a drive
 that is empty or whose every partition is one of Baseline's own volumes, so stamping cannot be used to launder a
@@ -21,10 +20,38 @@ import re
 import subprocess
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import registry
 
 REGISTRY_TYPE = "installer_drives"
+# Each installer lane is pinned to its own target. This checkout's UUID chooses
+# one serial; the other known lane target is always protected in this lane.
+_LANE_SERIALS = {
+    "4af8c95a-1c9b-437a-a306-c53855d4077f": "FD01N6557110C271B",  # Claude / PC601
+    "5029a80d-c748-4616-aa08-99ac560f5311": "MD89N41071210AP4E",  # Codex / PC401
+}
+
+
+def _locked_serials_for(installer_uuid: str | None) -> frozenset[str]:
+    try:
+        canonical = str(uuid.UUID(installer_uuid)) if installer_uuid else None
+    except ValueError:
+        canonical = None
+    serial = _LANE_SERIALS.get(canonical)
+    return frozenset({serial}) if serial else frozenset()
+
+
+def _installer_lane_uuid() -> str | None:
+    path = Path(__file__).resolve().parent.parent / "INSTALLER_UUID"
+    try:
+        return str(uuid.UUID(path.read_text(encoding="ascii").strip()))
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+DEVELOPMENT_LOCKED_SERIALS = _locked_serials_for(_installer_lane_uuid())
+OTHER_LANE_PROTECTED_SERIALS = frozenset(_LANE_SERIALS.values()) - DEVELOPMENT_LOCKED_SERIALS
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 # Partition names Baseline itself creates, including the older names that real drives still carry.
 _OWN_LABEL_RE = re.compile(r"^(BASELINE|INSTALLER_CACHE|SESSION_TEMP|SUBSTRATE(_PERSISTENCE)?|USER(_[A-Z0-9_]+)?|"
@@ -142,9 +169,19 @@ def is_installer_uuid(guid) -> bool:
 
 
 def require_may_format(device_path: str, *, run=None) -> None:
-    """Raises DataProtectionError unless the drive is empty or carries an installer-generated UUID. Takes no
-    option that relaxes it."""
+    """Raises DataProtectionError unless the drive is empty, installer-owned, or explicitly serial-locked."""
     state = read_drive_state(device_path, run=run)
+    serial_reader = run or _default_run
+    try:
+        rc, output = serial_reader(["lsblk", "-dn", "-o", "SERIAL", device_path])
+    except Exception:  # noqa: BLE001 - inability to identify the target keeps the guard closed
+        rc, output = 1, ""
+    serials = output.splitlines() if isinstance(output, str) else []
+    serial = serials[0].strip() if rc == 0 and len(serials) == 1 else None
+    if serial in OTHER_LANE_PROTECTED_SERIALS:
+        raise DataProtectionError(f"refused: {device_path} belongs to the other installer lane ({serial}); no override")
+    if state.known and serial in DEVELOPMENT_LOCKED_SERIALS:
+        return None
     if not state.has_data:
         return None
     if state.known and state.ptuuid and is_installer_uuid(state.ptuuid):
