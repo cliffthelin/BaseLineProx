@@ -15,7 +15,7 @@ GATED_GET = ["/recovery", "/admin", "/settings", "/api/export-config", "/no-such
 
 @pytest.fixture
 def server(tmp_path):
-    runner = FakeRunner()
+    runner = FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"})
     srv = sw.build_real_server(bind_host="127.0.0.1", bind_port=0, data_path=tmp_path / "store.json", runner=runner)
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()

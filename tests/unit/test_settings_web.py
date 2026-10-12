@@ -386,7 +386,7 @@ def test_recovery_view_hands_off_when_no_runner_is_configured():
 
 def test_recovery_view_needs_no_session_at_all():
     from fake_runner import FakeRunner
-    result = sw.handle_recovery_view(FakeRunner(), personas=("admin", "personal"))
+    result = sw.handle_recovery_view(FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"}), personas=("admin", "personal"))
     assert result.outcome == "applied"
     assert result.body["personas_missing"] == ["admin", "personal"]
 
@@ -409,7 +409,7 @@ def test_recovery_exit_hands_off_when_no_runner_is_configured():
 
 def test_recovery_exit_refuses_without_a_real_read_write_persona():
     from fake_runner import FakeRunner
-    result = sw.handle_recovery_exit(FakeRunner(), personas=("admin",), now=1000.0)
+    result = sw.handle_recovery_exit(FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"}), personas=("admin",), now=1000.0)
     assert result.outcome == "refused"
 
 

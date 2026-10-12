@@ -162,7 +162,7 @@ def _req(port, method, path, cookie=None, body=b"", headers=None):
 def _web_case(**over):
     sessions = sw.SessionStore()
     token = sessions.create("root", now=1700000000.0).token
-    c = _RealServerCase(_base_deps(sessions=sessions, runner=FakeRunner(), **over))
+    c = _RealServerCase(_base_deps(sessions=sessions, runner=FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"}), **over))
     c.cookie = token
     return c
 

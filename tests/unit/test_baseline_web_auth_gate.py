@@ -37,7 +37,7 @@ def _request(port, method, path, cookie=None, body=b""):
 
 @pytest.fixture
 def case():
-    runner = FakeRunner()
+    runner = FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"})
     c = _RealServerCase(_base_deps(runner=runner))
     c.runner = runner
     yield c
@@ -103,7 +103,7 @@ def _recovery_case(verify=lambda pw: pw == "right"):
     import admin_elevation
     sessions = sw.SessionStore()
     token = sessions.create("root", now=1700000000.0).token
-    runner = FakeRunner()
+    runner = FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"})
     c = _RealServerCase(_base_deps(sessions=sessions, runner=runner,
                                    recovery_store=admin_elevation.ElevationStore(),
                                    recovery_verify_fn=verify))

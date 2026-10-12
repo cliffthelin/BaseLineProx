@@ -2199,7 +2199,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     configuration_html = sw.render_configuration_sections({key:settings[key] for key in ('drivers','proxmox','_live_interfaces') if key in settings})
                 import hardware_inventory
                 module_packages = {}
-                for category, devices in hardware_inventory.group_pci((state.get('inventory') or {}).get('pci',[])).items():
+                for category, devices in hardware_inventory.group_pci((state.get('inventory') or {}).get('pci') or []).items():
                     driver_sections[category] = hc.render_driver_controls(runner,devices,target,module_packages)
                 packages = hardware_tabs.package_state(runner)
             except (RuntimeError,vh.VmError,OSError) as exc:

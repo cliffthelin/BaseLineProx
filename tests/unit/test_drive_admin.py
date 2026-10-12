@@ -588,7 +588,7 @@ def test_switch_persona_reuses_persist_bind_mounts_directly():
 # -- apply_volume_mode ----------------------------------------------------------
 
 def test_apply_volume_mode_refuses_when_not_mounted():
-    runner = FakeRunner()
+    runner = FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw,nosuid 0 0\n"})     # readable, and BASELINE is not in it
     result = da.apply_volume_mode(runner, label="BASELINE")
     assert result.ok is False
     assert "not currently mounted" in result.detail
