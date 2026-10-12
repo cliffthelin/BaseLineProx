@@ -181,6 +181,26 @@ def step_dev_user(write_to=None, systemd=True):
     mark("dev-user", carried=True, user=value.split(":", 1)[0])
 
 
+def step_volume_group():
+    """The host's volume group takes this drive's own name before any role volume is created or mounted: two Baseline drives attached to one
+    machine must never share the installer's name `pve`. Done first, so every volume mounted afterwards is mounted under its final name
+    (a filesystem mounted before the rename cannot be resized online: fsadm refuses renamed devices)."""
+    import repair
+    import single_drive_storage as storage
+    import host_layout
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    runner = Root()
+    target = storage.running_target(runner)
+    named = host_layout.name_the_volume_group_for_drive(runner, serial=target["serial"], vg=target["vg_name"], vg_uuid=target["vg_uuid"])
+    log("volume-group:", json.dumps(named))
+    mark("volume-group", renamed=named["renamed"], name=named["name"])
+
+
 def step_host_volumes():
     """Express the host's own volumes in the agreed role names (DR257): swap lives in SESSION_TEMP, not in a volume of its own."""
     import repair
@@ -194,10 +214,7 @@ def step_host_volumes():
             return super().run(argv, timeout=timeout)
     runner = Root()
     target = storage.running_target(runner)
-    named = host_layout.name_the_volume_group_for_drive(runner, serial=target["serial"], vg=target["vg_name"], vg_uuid=target["vg_uuid"])
-    target = storage.running_target(runner)
-    done = {"vg_renamed": named["renamed"], "vg_name": named["name"]}
-    done.update(host_layout.move_swap_to_session_temp(runner, target["vg_name"]))
+    done = host_layout.move_swap_to_session_temp(runner, target["vg_name"])
     done.update(host_layout.name_the_pool_for_session_temp(runner, target["vg_name"]))
     log("host-volumes:", json.dumps(done))
     mark("host-volumes", **done)
@@ -404,7 +421,7 @@ def step_provision():
     mark("provision")
 
 
-STEPS = [("identity", step_identity), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("installer", step_installer),
+STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("installer", step_installer),
          ("os-isos", step_os_isos), ("provision", step_provision), ("dev-user", step_dev_user)]
 
 

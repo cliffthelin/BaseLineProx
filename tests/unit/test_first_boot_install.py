@@ -397,7 +397,7 @@ def test_first_boot_sets_the_identifier_on_the_one_disk_with_that_serial_before_
     installer.step_identity(ensure=lambda device, wanted: calls.append((device, wanted)), host_id_path=host_file)
     assert calls == [("/dev/sda", IDENTITY["uuid"])]
     assert host_file.read_text() == IDENTITY["uuid"] + "\n"        # the backbone reference components read
-    assert [name for name, _ in installer.STEPS][:2] == ["identity", "storage"]
+    assert [name for name, _ in installer.STEPS][:3] == ["identity", "volume-group", "storage"]   # the group is named before any role volume is mounted
 
 
 def test_first_boot_refuses_when_the_serial_is_on_no_disk_or_on_two(tmp_path, monkeypatch):
