@@ -182,19 +182,16 @@ def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: st
                 done["files"].append(name)
     if done["renamed"] or done["files"]:
         _run(runner, ["update-initramfs", "-u", "-k", "all"], timeout=900)
-        # grub-probe resolves the root by the name the kernel mounted it under, which the live rename has just removed: the old name is
-        # given back as a link for the length of the run. It still writes that old name into the configuration, so the file is rewritten
-        # again afterwards - which is what the next boot reads. Regeneration is best effort; the rewritten file is what is required.
+        # The kernel keeps reporting the running root under the name it was mounted with, which the live rename has just removed, so
+        # grub-probe, findmnt and lsblk cannot resolve it until the next boot. The old name is given back as a link in /dev (a tmpfs: it is
+        # gone at the next boot, when the root is mounted under its new name). grub-probe still writes the old name into the configuration,
+        # so the file is rewritten again afterwards - which is what the next boot reads. Regeneration is best effort; the rewritten file
+        # is what is required.
         link = Path(f"/dev/mapper/{vg}-root")
-        made = vg != new and not link.exists() and Path(f"/dev/mapper/{new}-root").exists()
-        if made:
+        if vg != new and not link.exists() and Path(f"/dev/mapper/{new}-root").exists():
             link.symlink_to(f"{new}-root")
-        try:
-            argv = ["proxmox-boot-tool", "refresh"] if Path(BOOT_TOOL_UUIDS).is_file() else ["update-grub"]
-            done["regenerated"] = runner.run(argv, timeout=600).returncode == 0
-        finally:
-            if made:
-                link.unlink()
+        argv = ["proxmox-boot-tool", "refresh"] if Path(BOOT_TOOL_UUIDS).is_file() else ["update-grub"]
+        done["regenerated"] = runner.run(argv, timeout=600).returncode == 0
         if vg != new and Path(grub_config).is_file():
             _rewrite(Path(grub_config), vg, new)
             if f"/dev/mapper/{vg}-" in Path(grub_config).read_text():
