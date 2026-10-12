@@ -113,10 +113,21 @@ def usb_bus_of(sysfs_path: str):
     return m.group(1) if m else None
 
 
-def usb_disconnects(journal_text: str, *, year: int, now_epoch: float, window_seconds: float, bus=None) -> int:
-    """How many USB disconnects the kernel logged in the last `window_seconds` (from `journalctl -k` text). With `bus`, only disconnects on
-    that bus count: a keyboard hub that re-enumerates every two minutes on another controller says nothing about the drive's bridge
-    (it held up a PC601 rebuild for 30 minutes on 2026-10-12)."""
+def usb_port_of(sysfs_path: str):
+    """The USB port path of the device a block device is behind (e.g. "2-3", "2-5.1.4"), from its resolved sysfs path, or None."""
+    m = re.search(r"/(\d+-\d+(?:\.\d+)*):\d+\.\d+/", str(sysfs_path))
+    return m.group(1) if m else None
+
+
+def _related_ports(a: str, b: str) -> bool:
+    """The same port, or one is a hub above the other: a disconnect there takes the drive with it. A sibling port is not related."""
+    return a == b or a.startswith(b + ".") or b.startswith(a + ".")
+
+
+def usb_disconnects(journal_text: str, *, year: int, now_epoch: float, window_seconds: float, bus=None, port=None) -> int:
+    """How many USB disconnects the kernel logged in the last `window_seconds` (from `journalctl -k` text). With `port`, only disconnects
+    of that port, a hub above it or a device below it count; with `bus`, only that bus. A hub that re-enumerates every two minutes
+    elsewhere says nothing about the drive's own bridge (it held up a PC601 rebuild for 30 minutes on 2026-10-12)."""
     import calendar
     import time
     count = 0
@@ -125,8 +136,12 @@ def usb_disconnects(journal_text: str, *, year: int, now_epoch: float, window_se
         if not m:
             continue
         if bus is not None:
-            port = re.match(r"^.*kernel: usb (\S+):", line)
-            if port is None or port.group(1).removeprefix("usb").split("-")[0] != str(bus):
+            seen = re.match(r"^.*kernel: usb (\S+):", line)
+            if seen is None or seen.group(1).removeprefix("usb").split("-")[0] != str(bus):
+                continue
+        if port is not None:
+            seen = re.match(r"^.*kernel: usb (\S+):", line)
+            if seen is None or not _related_ports(seen.group(1), str(port)):
                 continue
         try:
             stamp = time.mktime(time.strptime(f"{year} {m['stamp']}", "%Y %b %d %H:%M:%S"))

@@ -109,3 +109,15 @@ def test_only_disconnects_on_the_drives_own_usb_bus_count():
     assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=900, bus="6") == 0
     assert w.usb_bus_of("/sys/devices/pci0000:00/0000:0d:00.3/usb4/4-2/4-2:1.0/host9/block/sdh") == "4"
     assert w.usb_bus_of("/sys/devices/pci0000:00/nvme/nvme0n1") is None
+
+
+def test_only_the_drives_own_port_and_the_hubs_above_it_count():
+    now = time.mktime(time.strptime("2026 Oct 12 17:10:00", "%Y %b %d %H:%M:%S"))
+    text = ("Oct 12 17:08:03 host kernel: usb 2-5: USB disconnect, device number 1\n"       # the bounced port: a sibling of 2-3
+            "Oct 12 17:08:03 host kernel: usb 2-5.1.4: USB disconnect, device number 2\n"
+            "Oct 12 17:09:00 host kernel: usb 2-3: USB disconnect, device number 3\n"       # the drive's own bridge
+            "Oct 12 17:09:30 host kernel: usb 2-5.2: USB disconnect, device number 4\n")
+    assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=900, port="2-3") == 1
+    assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=900, port="2-5.2") == 2      # its own, and the hub above it
+    assert w.usb_port_of("/sys/devices/pci0000:00/0000:0a:00.0/usb2/2-3/2-3:1.0/host9/target9:0:0/block/sdi") == "2-3"
+    assert w.usb_port_of("/sys/devices/pci0000:00/0000:0a:00.0/usb2/2-5/2-5.2/2-5.2:1.0/host9/block/sdi") == "2-5.2"
