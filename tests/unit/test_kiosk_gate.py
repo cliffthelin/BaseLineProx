@@ -45,8 +45,8 @@ def test_kiosk_browser_requires_retained_appdata_and_storage_gate():
     from pathlib import Path
     root=Path(__file__).resolve().parents[2]
     unit=(root/'boot/baseline-kiosk.service').read_text()
-    assert 'RequiresMountsFor=/mnt/APPDATA_ADMIN' in unit
-    assert '--user-data-dir=/mnt/APPDATA_ADMIN/chromium/kiosk' in unit
+    assert 'RequiresMountsFor=/mnt/USER_ADMIN' in unit
+    assert '--user-data-dir=/mnt/USER_ADMIN/chromium/kiosk' in unit
     provision=(root/'boot/provision.sh').read_text()
     gate_loop=provision.split('for storage_unit in ',1)[1].split('; do',1)[0]
     assert 'baseline-kiosk.service' in gate_loop

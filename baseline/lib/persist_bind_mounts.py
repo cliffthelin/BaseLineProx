@@ -95,6 +95,11 @@ REDIRECT_PATHS = {
     "/etc/baseline": "etc-baseline",
     "/var/lib/baseline": "var-lib-baseline",
     "/var/log/baseline": "var-log-baseline",
+    # DR257: personal data belongs on USER_ADMIN, never in SUBSTRATE. These are whole directories that nothing writes before the
+    # persistence volume is mounted, so a bind mount is safe for them (a single file such as /etc/shadow is not: tools replace it by rename).
+    "/root": "root",
+    "/home": "home",
+    "/etc/baseline-dev": "etc-baseline-dev",
 }
 
 

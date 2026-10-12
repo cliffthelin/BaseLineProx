@@ -66,3 +66,9 @@ Historical DR117 GUI proof used older source and a transient kiosk service, so i
 cannot substitute for this final acceptance. No physical drive changed or operator
 credential handled in this increment. INSTALL, checklist and handoff are updated;
 DR117 remains append-only history.
+
+## Update 2026-10-11 (DR257)
+
+The host Chromium kiosk profile moved from `/mnt/APPDATA_ADMIN/chromium/kiosk` to `/mnt/USER_ADMIN/chromium/kiosk`. The kiosk browser is part of
+SUBSTRATE (the publishable build); its profile holds cookies and Proxmox login tickets, which are personal data and belong on USER_ADMIN, never
+in SUBSTRATE or application data. The start-up mount requirement follows (`RequiresMountsFor=/mnt/USER_ADMIN`).

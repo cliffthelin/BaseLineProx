@@ -572,3 +572,10 @@ def test_a_persona_volume_mounts_by_a_label_that_actually_fits_on_disk():
         label = pbm.user_label_for(persona)
         assert len(label) <= 16
         assert f"LABEL={label} " in pbm.user_mount_fstab_line(persona)
+
+
+def test_personal_directories_are_redirected_onto_the_persistence_volume_and_a_single_file_never_is():
+    assert {"/root", "/home", "/etc/baseline-dev"} <= set(pbm.REDIRECT_PATHS)
+    # a bind mount cannot cover a single file that tools replace by rename (/etc/shadow): only directories are listed
+    assert all(not p.endswith(("shadow", "hostname", "machine-id", "interfaces")) for p in pbm.REDIRECT_PATHS)
+    assert len(set(pbm.REDIRECT_PATHS.values())) == len(pbm.REDIRECT_PATHS)
