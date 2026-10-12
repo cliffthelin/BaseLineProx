@@ -12,12 +12,17 @@ import sensors_collect as sc
 import sensors_history as sh
 
 
+# collect_volume_usage reads the mount table strictly (a failed read must never look like "no mounts"), so every scripted runner answers
+# findmnt with a valid, empty mount table unless a test says otherwise.
+FINDMNT_EMPTY = [(lambda a: a[:1] == ["findmnt"], FakeProc(0, json.dumps({"filesystems": []}), ""))]
+
+
 def make_db():
     return sh.open_db(":memory:")
 
 
 def script_no_hardware(runner):
-    runner.command_responses = [
+    runner.command_responses = FINDMNT_EMPTY + [
         (lambda a: a[:1] == ["sensors"], FakeProc(0, "{}", "")),
         (lambda a: a[:2] == ["nvme", "list"], FakeProc(0, json.dumps({"Devices": []}), "")),
         (lambda a: a[:2] == ["smartctl", "--scan-open"], FakeProc(0, json.dumps({"devices": []}), "")),
@@ -40,7 +45,7 @@ def test_collect_once_records_real_sensor_reading():
             "Package id 0": {"temp1_input": 45.0},
         }
     })
-    runner.command_responses = [
+    runner.command_responses = FINDMNT_EMPTY + [
         (lambda a: a[:1] == ["sensors"], FakeProc(0, sensors_payload, "")),
         (lambda a: a[:2] == ["nvme", "list"], FakeProc(0, json.dumps({"Devices": []}), "")),
         (lambda a: a[:2] == ["smartctl", "--scan-open"], FakeProc(0, json.dumps({"devices": []}), "")),
@@ -56,7 +61,7 @@ def test_collect_once_records_nvme_temperature_and_wear():
     runner = FakeRunner()
     list_payload = json.dumps({"Devices": [{"DevicePath": "/dev/nvme0n1", "ModelNumber": "X", "Firmware": "1.0"}]})
     smart_payload = json.dumps({"temperature": 38, "percentage_used": 5})
-    runner.command_responses = [
+    runner.command_responses = FINDMNT_EMPTY + [
         (lambda a: a[:1] == ["sensors"], FakeProc(0, "{}", "")),
         (lambda a: a[:2] == ["nvme", "list"], FakeProc(0, list_payload, "")),
         (lambda a: a[:2] == ["nvme", "smart-log"], FakeProc(0, smart_payload, "")),
@@ -75,7 +80,7 @@ def test_collect_once_records_smart_temperature():
     runner = FakeRunner()
     scan_payload = json.dumps({"devices": [{"name": "/dev/sda", "type": "sat"}]})
     detail_payload = json.dumps({"model_name": "ST1000", "temperature": {"current": 32}})
-    runner.command_responses = [
+    runner.command_responses = FINDMNT_EMPTY + [
         (lambda a: a[:1] == ["sensors"], FakeProc(0, "{}", "")),
         (lambda a: a[:2] == ["nvme", "list"], FakeProc(0, json.dumps({"Devices": []}), "")),
         (lambda a: a[:2] == ["smartctl", "--scan-open"], FakeProc(0, scan_payload, "")),
@@ -117,7 +122,10 @@ def test_collect_once_records_real_volume_usage_samples():
         "         1B-blocks         Used    Avail Use%\n"
         " 53687091200  10737418240 42949672960  20%\n"
     )
+    import drive_installer
+    every_volume_mounted = json.dumps({"filesystems": [{"target": v[4]} for v in drive_installer.baseline_volumes_for()]})
     runner.command_responses = [
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, every_volume_mounted, "")),
         (lambda a: a[:1] == ["sensors"], FakeProc(0, "{}", "")),
         (lambda a: a[:2] == ["nvme", "list"], FakeProc(0, json.dumps({"Devices": []}), "")),
         (lambda a: a[:2] == ["smartctl", "--scan-open"], FakeProc(0, json.dumps({"devices": []}), "")),
@@ -207,3 +215,17 @@ def test_collect_once_records_an_attempt_even_when_no_samples_result():
     assert sh.get_last_attempt(conn, "nvme") == 1700000000.0
     assert sh.get_last_attempt(conn, "smart") == 1700000000.0
     assert sh.get_last_attempt(conn, "volume") == 1700000000.0
+
+
+def test_a_failed_volume_read_costs_the_other_sources_nothing():
+    runner = FakeRunner()
+    sensors_payload = json.dumps({"coretemp-isa-0000": {"Adapter": "ISA adapter", "Package id 0": {"temp1_input": 45.0}}})
+    runner.command_responses = [
+        (lambda a: a[:1] == ["findmnt"], FakeProc(1, "", "findmnt failed")),
+        (lambda a: a[:1] == ["sensors"], FakeProc(0, sensors_payload, "")),
+        (lambda a: a[:2] == ["nvme", "list"], FakeProc(0, json.dumps({"Devices": []}), "")),
+        (lambda a: a[:2] == ["smartctl", "--scan-open"], FakeProc(0, json.dumps({"devices": []}), "")),
+    ]
+    conn = make_db()
+    assert sc.collect_once(runner, conn, now=1700000000.0) >= 1
+    assert sh.query_history(conn, source="volume", key="BASELINE/percent_used", since_ts=0) == []
