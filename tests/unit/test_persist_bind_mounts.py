@@ -110,25 +110,38 @@ def test_ensure_user_volume_mounted_reports_a_real_failure_when_every_fallback_i
 # already exists elsewhere), then a local, adaptively-sized self-install
 # only when nothing is found anywhere. -----------------------------
 
+def lsblk(*devices):
+    """What `lsblk --json --paths --output NAME,LABEL,TYPE` prints: (name, label) pairs as partitions of one disk."""
+    import json
+    return json.dumps({"blockdevices": [{"name": "/dev/sdb", "label": None, "type": "disk",
+                                         "children": [{"name": n, "label": label, "type": "part"} for n, label in devices]}]})
+
+
+def is_lsblk(args):
+    return args[:1] == ["lsblk"]
+
+
 def test_discover_persistence_device_finds_a_real_device():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["blkid"], FakeProc(0, "/dev/sdb1\n", "")),
+        (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "USER")), "")),
     ])
     assert pbm.discover_persistence_device(runner) == "/dev/sdb1"
 
 
 def test_discover_persistence_device_returns_none_when_not_found():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
+        (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "OTHER")), "")),
     ])
     assert pbm.discover_persistence_device(runner) is None
 
 
-def test_discover_persistence_device_returns_none_for_empty_output():
-    runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["blkid"], FakeProc(0, "", "")),
-    ])
-    assert pbm.discover_persistence_device(runner) is None
+def test_an_empty_or_failed_inventory_is_an_error_never_a_not_found():
+    """A failed observation must not authorize creating a second persistence volume (see discover_device_by_label)."""
+    import pytest
+    for proc in (FakeProc(0, "", ""), FakeProc(2, "", "lsblk failed"), FakeProc(0, '{"blockdevices": []}', "")):
+        runner = FakeRunner(command_responses=[(is_lsblk, proc)])
+        with pytest.raises(pbm.PersistenceObservationError):
+            pbm.discover_persistence_device(runner)
 
 
 def test_ensure_user_volume_mounted_mounts_a_discovered_device_directly_rather_than_creating_a_duplicate():
@@ -140,7 +153,7 @@ def test_ensure_user_volume_mounted_mounts_a_discovered_device_directly_rather_t
         files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER" in a, FakeProc(1, "", "not found by label")),
-            (lambda a: a[:1] == ["blkid"], FakeProc(0, "/dev/sdb1\n", "")),
+            (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "USER")), "")),
             (lambda a: a[:1] == ["mount"] and a[1] == "/dev/sdb1", FakeProc(0, "", "")),
         ],
     )
@@ -156,7 +169,7 @@ def test_ensure_user_volume_mounted_self_installs_locally_when_nothing_found_any
         files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER" in a, FakeProc(1, "", "not found")),
-            (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
+            (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "OTHER")), "")),
             (lambda a: "vgs" in a, FakeProc(0, "64424509440\n", "")),  # 60GiB free
             (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n", "")),
         ],
