@@ -76,8 +76,11 @@ def test_missing_os_is_visible_and_explicit_recovery_runs_through_durable_web_jo
         c.close()
 
 
-def test_retained_backup_and_new_name_restore_are_available_through_durable_jobs(tmp_path):
+def test_retained_backup_and_new_name_restore_are_available_through_durable_jobs(tmp_path, monkeypatch):
     from test_container_backup import ScriptedRun
+    import container_backup as cb
+    real = cb.resolve_destination            # the real boot drive's identity is not available to a test; supply one, as test_container_backup does
+    monkeypatch.setattr(cb, 'resolve_destination', lambda path, run=None: real(path, run=run, boot_serial='TestBootSerial'))
     c,h=case(tmp_path)
     dest=tmp_path/'separate';dest.mkdir()
     c.server.deps['container_backup_run']=ScriptedRun(dest)
