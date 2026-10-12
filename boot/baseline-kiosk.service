@@ -1,7 +1,7 @@
 [Unit]
 Description=Baseline kiosk GUI (Track A3) - Chromium onto Proxmox's own web UI
 Conflicts=getty@tty3.service
-After=getty@tty3.service network-online.target baseline-firstboot.service pveproxy.service
+After=getty@tty3.service network-online.target baseline-firstboot.service pveproxy.service baseline-storage-verify.service baseline-persist-bind-mounts.service
 Wants=network-online.target
 RequiresMountsFor=/mnt/USER_ADMIN
 Requires=pveproxy.service
@@ -13,8 +13,11 @@ ExecStartPre=/usr/bin/chvt 3
 RuntimeDirectory=cage-kiosk
 RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/cage -s -- /usr/bin/chromium --kiosk --user-data-dir=/mnt/USER_ADMIN/chromium/kiosk --no-sandbox --disable-gpu --ozone-platform=wayland --ignore-certificate-errors https://localhost:8006
-Restart=on-failure
+# A kiosk is always up: restart it whenever it stops, for any reason (cage exits cleanly when its browser exits, and the gate may refuse
+# once at boot while storage verification is still running), and never give up. Found on PC601, 2026-10-12: one start at boot, then nothing.
+Restart=always
 RestartSec=5
+StartLimitIntervalSec=0
 Environment=XDG_RUNTIME_DIR=/run/cage-kiosk
 Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
 Environment=LIBSEAT_BACKEND=builtin

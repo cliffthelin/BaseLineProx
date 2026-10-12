@@ -80,3 +80,11 @@ def test_kiosk_activates_its_gui_terminal_after_the_readiness_gate():
         if line.strip().startswith('apt-get install '):
             packages.update(shlex.split(line)[2:])
     assert 'kbd' in packages
+
+
+def test_the_kiosk_unit_always_restarts_and_waits_for_storage_verification_and_the_persistence_redirects():
+    from pathlib import Path
+    unit = (Path(__file__).resolve().parents[2] / "boot/baseline-kiosk.service").read_text()
+    assert "Restart=always" in unit and "StartLimitIntervalSec=0" in unit and "Restart=on-failure" not in unit
+    after = next(line for line in unit.splitlines() if line.startswith("After="))
+    assert "baseline-storage-verify.service" in after and "baseline-persist-bind-mounts.service" in after
