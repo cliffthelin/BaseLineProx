@@ -1,5 +1,16 @@
 # Installing BaselineOS on real hardware
 
+## Installer-lane drive locks — 2026-10-11 (DR300)
+
+The data-protection guard maps each pinned installer UUID to its assigned
+development serial: Codex to PC401 (`MD89N41071210AP4E`) and Claude to PC601
+(`FD01N6557110C271B`). An exact `lsblk` serial check enables only the current
+lane's drive and refuses the other lane's drive before empty-disk or
+installer-UUID allowances. Failed or ambiguous observations do not grant the
+development exception. The current checkout is Claude's lane; PC401 boot,
+GUI, network, firewall, internet, and workload readiness remain unverified.
+See [DR300](design/decision-records/300-pc401-serial-bound-development-drive-lock.md).
+
 ## Current platform source included in rebuilt installer ISO — 2026-10-10 (DR243)
 
 Built `iso_build/BaselineOS-platform-20261010.iso` from the publisher's
