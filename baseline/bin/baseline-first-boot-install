@@ -194,7 +194,10 @@ def step_host_volumes():
             return super().run(argv, timeout=timeout)
     runner = Root()
     target = storage.running_target(runner)
-    done = host_layout.move_swap_to_session_temp(runner, target["vg_name"])
+    named = host_layout.name_the_volume_group_for_drive(runner, serial=target["serial"], vg=target["vg_name"], vg_uuid=target["vg_uuid"])
+    target = storage.running_target(runner)
+    done = {"vg_renamed": named["renamed"], "vg_name": named["name"]}
+    done.update(host_layout.move_swap_to_session_temp(runner, target["vg_name"]))
     done.update(host_layout.name_the_pool_for_session_temp(runner, target["vg_name"]))
     log("host-volumes:", json.dumps(done))
     mark("host-volumes", **done)

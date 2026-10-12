@@ -145,3 +145,58 @@ def test_a_thin_session_temp_is_created_as_a_thin_volume_in_the_pool_not_a_thick
     assert di.create_logical_volume_argv("pve", "baseline_session_temp", "62G", thin_pool="data") == [
         "lvcreate", "-n", "baseline_session_temp", "-V", "62G", "--thinpool", "data", "pve"]
     assert di.create_logical_volume_argv("pve", "baseline_user_admin", "1G") == ["lvcreate", "-n", "baseline_user_admin", "-L", "1G", "pve"]
+
+
+def test_the_group_name_is_the_drives_own_and_matches_the_offline_isolation():
+    import single_drive_storage as sds
+    import hashlib
+    assert hl.volume_group_name_for("FD01N6557110C271B") == "baseline_" + hashlib.sha256(b"FD01N6557110C271B").hexdigest()[:12]
+    assert hl.volume_group_name_for("FD01N6557110C271B") != hl.volume_group_name_for("MD89N41071210AP4E")
+    with pytest.raises(hl.LayoutError):
+        hl.volume_group_name_for("bad serial")
+    assert hasattr(sds, "isolate_volume_group")
+
+
+def test_only_paths_that_name_the_group_are_rewritten():
+    text = "/dev/pve/root / ext4 errors=remount-ro 0 1\nroot=/dev/mapper/pve-root ro\n# pve data\nUUID=abc /mnt/X ext4 defaults 0 2\n"
+    out = hl.text_with_group_renamed(text, "pve", "baseline_x")
+    assert "/dev/baseline_x/root" in out and "/dev/mapper/baseline_x-root" in out
+    assert "# pve data" in out and "UUID=abc" in out and "/dev/pve/" not in out
+
+
+class GroupRunner(FakeRunner):
+    def __init__(self, other=""):
+        super().__init__()
+        self.other = other
+
+    def run(self, argv, timeout=10):
+        self.calls.append(list(argv))
+        if argv[:1] == ["vgs"]:
+            return FakeProc(0, self.other, "")
+        return FakeProc(0, "", "")
+
+
+def test_the_group_is_renamed_by_uuid_files_follow_and_the_boot_loader_is_regenerated(tmp_path, monkeypatch):
+    fstab = tmp_path / "fstab"
+    fstab.write_text(PC601_FSTAB)
+    monkeypatch.setattr(hl, "BOOT_TOOL_UUIDS", str(tmp_path / "absent"))
+    runner = GroupRunner()
+    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1", name_files=(str(fstab),))
+    new = hl.volume_group_name_for("FD01N6557110C271B")
+    assert done == {"renamed": True, "files": [str(fstab)], "name": new}
+    order = [c[0] for c in runner.calls if c[0] in {"vgrename", "update-initramfs", "update-grub"}]
+    assert order == ["vgrename", "update-initramfs", "update-grub"]
+    assert ["vgrename", "U-1", new] in runner.calls
+    assert f"/dev/{new}/root / ext4" in fstab.read_text() and "/dev/pve/" not in fstab.read_text()
+
+
+def test_a_second_run_changes_nothing_and_a_name_owned_by_another_group_is_refused(tmp_path):
+    new = hl.volume_group_name_for("FD01N6557110C271B")
+    fstab = tmp_path / "fstab"
+    fstab.write_text(PC601_FSTAB.replace("/dev/pve/", f"/dev/{new}/"))
+    runner = GroupRunner()
+    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg=new, vg_uuid="U-1", name_files=(str(fstab),))
+    assert done == {"renamed": False, "files": [], "name": new} and runner.calls == []
+    with pytest.raises(hl.LayoutError):
+        hl.name_the_volume_group_for_drive(GroupRunner(other="U-OTHER\n"), serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1",
+                                           name_files=(str(fstab),))

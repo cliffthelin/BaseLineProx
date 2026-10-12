@@ -100,3 +100,11 @@ def test_missing_dhcp_command_is_not_reported_as_a_missing_offer(monkeypatch):
     assert result["stage"] == "command_error"
     assert "command not found" in result["detail"]
     assert calls[-1][0] == "timeout"
+
+
+def test_bonding_masters_file_is_not_an_interface(tmp_path):
+    # /sys/class/net/bonding_masters is a plain file whenever the bonding module is loaded (seen on PC601, 2026-10-12: errno 20).
+    (tmp_path / "bonding_masters").write_text("")
+    (tmp_path / "lo").mkdir()
+    (tmp_path / "enp1s0").mkdir()
+    assert tether.find_tether_candidates(base=tmp_path) == []

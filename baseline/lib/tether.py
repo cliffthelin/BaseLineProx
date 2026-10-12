@@ -36,8 +36,8 @@ def _path_exists(path: Path) -> bool:
 TETHER_DRIVERS = {"ipheth", "rndis_host", "cdc_ether", "cdc_ncm"}
 
 
-def _driver_name(ifname: str):
-    driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
+def _driver_name(ifname: str, base=None):
+    driver_link = (Path("/sys/class/net") if base is None else Path(base)) / ifname / "device" / "driver"
     try:
         return driver_link.resolve(strict=True).name
     except FileNotFoundError:
@@ -46,11 +46,11 @@ def _driver_name(ifname: str):
         raise TetherProbeError(f"cannot inspect driver for {ifname}: {exc}") from exc
 
 
-def find_tether_candidates(known_at_boot=frozenset()):
+def find_tether_candidates(known_at_boot=frozenset(), base=None):
     """Net interfaces bound to a known phone-tether driver. `known_at_boot`
     is accepted for backward compatibility but no longer used to exclude
     anything - driver identity is a reliable signal on its own."""
-    base = Path("/sys/class/net")
+    base = Path("/sys/class/net") if base is None else Path(base)
     if not _path_exists(base):
         raise TetherProbeError(f"network interface inventory is unavailable at {base}")
     out = []
@@ -59,9 +59,11 @@ def find_tether_candidates(known_at_boot=frozenset()):
     except OSError as exc:
         raise TetherProbeError(f"cannot enumerate network interfaces: {exc}") from exc
     for entry in entries:
+        if not entry.is_dir():
+            continue  # bonding_masters is a plain file whenever the bonding module is loaded
         if _path_exists(entry / "bridge"):
             continue
-        if _driver_name(entry.name) in TETHER_DRIVERS:
+        if _driver_name(entry.name, base) in TETHER_DRIVERS:
             out.append(entry.name)
     return out
 
