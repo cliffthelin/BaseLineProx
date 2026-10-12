@@ -22,6 +22,18 @@ for f in pve-enterprise.sources ceph.sources; do
         mv "/etc/apt/sources.list.d/$f" "/etc/apt/sources.list.d/$f.disabled"
     fi
 done
+# The Proxmox VE no-subscription repository is the one an unsubscribed host can use. It is written after the update above so an
+# offline install (APT_CONFIG pointing only at the drive's cache) never reaches for it; a normal `apt update` on a connected host does.
+codename="$(. /etc/os-release; echo "${VERSION_CODENAME:-trixie}")"
+if [ ! -f /etc/apt/sources.list.d/pve-no-subscription.sources ] && [ -f /usr/share/keyrings/proxmox-archive-keyring.gpg ]; then
+    cat > /etc/apt/sources.list.d/pve-no-subscription.sources <<PVE_NO_SUB
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: $codename
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+PVE_NO_SUB
+fi
 apt-get update
 
 echo "=== Installing base packages ==="
@@ -576,6 +588,13 @@ systemctl enable baseline-firstboot.service
 systemctl enable baseline-storage-verify.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
+# smartd exits 17 ("no SMART devices to monitor") on a machine whose drives are all USB bridges or virtual; that is not a failure.
+mkdir -p /etc/systemd/system/smartmontools.service.d
+cat > /etc/systemd/system/smartmontools.service.d/baseline.conf <<'SMARTD_DROPIN'
+[Service]
+SuccessExitStatus=17
+SMARTD_DROPIN
+systemctl daemon-reload
 systemctl enable baseline-bridge-port.service
 systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-machine-check.timer
