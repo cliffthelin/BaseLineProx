@@ -112,6 +112,9 @@ cp "$SRC/baseline/bin/baseline-bridge-port" /opt/baseline/bin/baseline-bridge-po
 cp "$SRC/baseline/lib/bridge_port.py" /opt/baseline/lib/bridge_port.py
 cp "$SRC/baseline/bin/baseline-volume-growth" /opt/baseline/bin/baseline-volume-growth
 cp "$SRC/baseline/lib/volume_growth.py" /opt/baseline/lib/volume_growth.py
+cp "$SRC/baseline/bin/baseline-machine-check" /opt/baseline/bin/baseline-machine-check
+cp "$SRC/baseline/lib/machine_check.py" /opt/baseline/lib/machine_check.py
+chmod +x /opt/baseline/bin/baseline-machine-check
 chmod +x /opt/baseline/bin/baseline-volume-growth
 chmod +x /opt/baseline/bin/baseline-bridge-port
 # Gate E: the real, integrated first-boot authorization state machine
@@ -442,6 +445,8 @@ cp "$SRC/boot/baseline-network-retry.service" /etc/systemd/system/baseline-netwo
 cp "$SRC/boot/baseline-bridge-port.service" /etc/systemd/system/baseline-bridge-port.service
 cp "$SRC/boot/baseline-volume-growth.service" /etc/systemd/system/baseline-volume-growth.service
 cp "$SRC/boot/baseline-volume-growth.timer" /etc/systemd/system/baseline-volume-growth.timer
+cp "$SRC/boot/baseline-machine-check.service" /etc/systemd/system/baseline-machine-check.service
+cp "$SRC/boot/baseline-machine-check.timer" /etc/systemd/system/baseline-machine-check.timer
 cp "$SRC/boot/baseline-network-retry.timer" /etc/systemd/system/baseline-network-retry.timer
 cp "$SRC/boot/baseline-persist-bind-mounts.service" /etc/systemd/system/baseline-persist-bind-mounts.service
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
@@ -571,6 +576,7 @@ systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 systemctl enable baseline-bridge-port.service
 systemctl enable baseline-volume-growth.timer
+systemctl enable baseline-machine-check.timer
 systemctl enable baseline-network-retry.timer
 systemctl enable baseline-sensors-collect.timer
 systemctl enable baseline-kiosk.service

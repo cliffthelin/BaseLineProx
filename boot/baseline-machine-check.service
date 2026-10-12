@@ -1,0 +1,10 @@
+[Unit]
+Description=Baseline: which machine is this, and what does that ask for (DR256)
+After=local-fs.target baseline-persist-bind-mounts.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-machine-check
+# The installed code is read-only for the service, as for the other Baseline units.
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1

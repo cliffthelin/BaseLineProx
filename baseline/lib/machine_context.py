@@ -27,8 +27,9 @@ PROFILES = "machine_profiles"
 TASKS = "adaptation_tasks"
 STAGES = ("substrate", "gui", "browser", "internet", "ai")        # readiness stages, in the order they come up
 # fingerprint keys that say *which machine* (identity) versus parts that can change on the same machine (components)
-IDENTITY_KEYS = ("system_uuid", "board_serial", "chassis_serial")
+IDENTITY_KEYS = ("system_uuid", "board_serial", "chassis_serial", "nic_macs")
 COMPONENT_KEYS = ("cpu_model", "memory_gib", "gpus", "nics", "storage_controllers")
+DMI_IDENTITY_KEYS = ("system_uuid", "board_serial", "chassis_serial")
 
 
 class ContextError(ValueError):
@@ -43,17 +44,46 @@ def _registry():
     return registry
 
 
-def file_reader(root: str = "/"):
-    """A `read(path)` over real files below `root` (so recovery or a lab can point it at a mounted tree)."""
-    from pathlib import Path
-    base = Path(root)
+class FileReader:
+    """`read(path)` and `listdir(path)` over real files below `root` (so recovery or a lab can point it at a mounted tree)."""
+    def __init__(self, root: str = "/"):
+        from pathlib import Path
+        self._base = Path(root)
 
-    def read(path):
+    def __call__(self, path):
         try:
-            return (base / path.lstrip("/")).read_text()
+            return (self._base / path.lstrip("/")).read_text()
         except OSError:
             return None
-    return read
+
+    def listdir(self, path):
+        try:
+            return sorted(p.name for p in (self._base / path.lstrip("/")).iterdir())
+        except OSError:
+            return []
+
+    def isdir(self, path):
+        return (self._base / path.lstrip("/")).is_dir()
+
+
+def file_reader(root: str = "/"):
+    return FileReader(root)
+
+
+def _nic_macs(read) -> str | None:
+    """MAC addresses of the physical wired NICs (a real device behind them; not bridges, wireless or virtual), sorted and joined."""
+    listdir = getattr(read, "listdir", None)
+    if listdir is None:
+        return None
+    macs = []
+    for name in listdir("/sys/class/net"):
+        base = f"/sys/class/net/{name}"
+        if name == "lo" or not read.isdir(base + "/device") or read.isdir(base + "/bridge") or read.isdir(base + "/wireless"):
+            continue
+        mac = (read(base + "/address") or "").strip().lower()
+        if mac and mac != "00:00:00:00:00:00":
+            macs.append(mac)
+    return ",".join(sorted(macs)) or None
 
 
 def _cpu_model(text):
@@ -85,6 +115,10 @@ def read_fingerprint(read, extra: dict | None = None) -> dict:
              "chassis_serial": get(dmi + "chassis_serial"), "board_name": get(dmi + "board_name"),
              "cpu_model": _cpu_model(read("/proc/cpuinfo")),
              "memory_gib": _memory_gib(read("/proc/meminfo"))}
+    macs = _nic_macs(read)
+    if macs:
+        # With a firmware identity the NICs are just parts of this machine; without one (a VM, an unusual board) they are the identity.
+        found["nics" if any(found.get(k) for k in DMI_IDENTITY_KEYS) else "nic_macs"] = macs
     found.update(extra or {})
     return {k: v for k, v in found.items() if v}
 
