@@ -280,10 +280,11 @@ def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, g
         rows = host["report"][0]["lv"]
         sizes = {row["lv_name"]: int(row["lv_size"]) for row in rows}
         attributes = {row["lv_name"]: row["lv_attr"] for row in rows}
-        if len(sizes) != len(rows) or not attributes["data"].startswith("t"):raise ValueError
+        pool_lv = "data" if "data" in sizes else host_layout.POOL_NAME      # renamed once it became SESSION_TEMP's pool
+        if len(sizes) != len(rows) or not attributes[pool_lv].startswith("t"):raise ValueError
         for name, key in (("root", "lvm_maxroot"), ("swap", "lvm_swapsize")):
             if sizes[name] < profile["installer_sizes"][key] * 1024**3:raise ValueError
-        if sizes["data"] < profile["thin_data_min_bytes"]:raise ValueError
+        if sizes[pool_lv] < profile["thin_data_min_bytes"]:raise ValueError
     except (KeyError, IndexError, TypeError, ValueError):
         raise StorageError("host root/swap/physical thin pool do not meet the single-drive profile") from None
     result = di.ensure_baseline_volumes(bound, vg_name=target["vg_name"], personas=tuple(personas),
@@ -402,9 +403,18 @@ def reconcile_proxmox_storage(runner):
     verified = storage_policy.verify_runtime(runner)
     target = inspect_target(runner, expected_serial=verified['serial'], root_mount='/')
     expected = target['vg_name']
-    argv = ['pvesh', 'get', '/storage/local-lvm', '--output-format', 'json']
-    config = _json_command(runner, argv)
-    if config.get('type') != 'lvmthin' or config.get('thinpool') != 'data':
+    # The guest storage is SESSION_TEMP's thin pool (DR257); a drive installed before that still has Proxmox's `local-lvm` on `data`.
+    storage_id, pool = host_layout.GUEST_STORAGE, host_layout.POOL_NAME
+    argv = ['pvesh', 'get', f'/storage/{storage_id}', '--output-format', 'json']
+    try:
+        config = _json_command(runner, argv)
+        if config.get('storage') != storage_id:         # not the entry asked for: this drive predates the rename
+            raise StorageError('guest storage is not session-temp')
+    except StorageError:
+        storage_id, pool = 'local-lvm', 'data'
+        argv = ['pvesh', 'get', f'/storage/{storage_id}', '--output-format', 'json']
+        config = _json_command(runner, argv)
+    if config.get('type') != 'lvmthin' or config.get('thinpool') != pool:
         raise StorageError('installer storage type/pool changed; refusing reconciliation')
     if config.get('vgname') != expected:
         if config.get('vgname') != 'pve':
@@ -419,19 +429,19 @@ def reconcile_proxmox_storage(runner):
         # Repeat serial/root/PV/VG inspection immediately before config mutation.
         if inspect_target(runner, expected_serial=verified['serial'], root_mount='/') != target:
             raise StorageError('selected root/VG identity changed')
-        script = '''my $name = shift @ARGV;
+        script = '''my ($id, $pool, $name) = @ARGV;
 PVE::Storage::lock_storage_config(sub {
     my $cfg = PVE::Storage::config();
-    my $s = $cfg->{ids}->{'local-lvm'};
+    my $s = $cfg->{ids}->{$id};
     die "storage changed" unless $s && $s->{type} eq 'lvmthin'
-        && $s->{thinpool} eq 'data' && $s->{vgname} eq 'pve';
+        && $s->{thinpool} eq $pool && $s->{vgname} eq 'pve';
     $s->{vgname} = $name;
     PVE::Storage::write_config($cfg);
 });'''
-        proc = runner.run(['perl', '-MPVE::Storage', '-e', script, expected], timeout=30)
+        proc = runner.run(['perl', '-MPVE::Storage', '-e', script, storage_id, pool, expected], timeout=30)
         if proc.returncode:
             raise StorageError('native locked storage reconciliation failed')
     actual = _json_command(runner, argv)
-    if actual.get('vgname') != expected or actual.get('type') != 'lvmthin' or actual.get('thinpool') != 'data':
+    if actual.get('vgname') != expected or actual.get('type') != 'lvmthin' or actual.get('thinpool') != pool:
         raise StorageError('native storage binding did not verify')
     return {'state': 'native_storage_verified', 'serial': verified['serial'], 'vg_name': expected}
