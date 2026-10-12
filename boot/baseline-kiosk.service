@@ -19,7 +19,7 @@ RuntimeDirectoryMode=0700
 # A real browser window (tabs, address bar, bookmarks bar), not a locked kiosk page: Proxmox's web GUI and Baseline open as two tabs, and the
 # machine's own screen can reach any other page. Cage gives the one window the whole screen. The profile is on USER_ADMIN, so the
 # browser's own settings (and Proxmox's colour theme, which it keeps in the browser) are kept between boots.
-ExecStart=/usr/bin/cage -s -- /usr/bin/chromium --user-data-dir=/mnt/USER_ADMIN/chromium/kiosk --no-sandbox --disable-gpu --ozone-platform=wayland --ignore-certificate-errors --no-first-run --disable-session-crashed-bubble https://localhost:8006 http://localhost:8100
+ExecStart=/usr/bin/cage -s -- /usr/bin/chromium --user-data-dir=/mnt/USER_ADMIN/chromium/kiosk --no-sandbox --disable-gpu --ozone-platform=wayland --ignore-certificate-errors --test-type --no-first-run --disable-session-crashed-bubble https://localhost:8006 http://localhost:8100
 # A kiosk is always up: restart it whenever it stops, for any reason (cage exits cleanly when its browser exits, and the gate may refuse
 # once at boot while storage verification is still running), and never give up. Found on PC601, 2026-10-12: one start at boot, then nothing.
 Restart=always
