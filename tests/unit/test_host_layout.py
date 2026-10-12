@@ -180,10 +180,14 @@ def test_the_group_is_renamed_by_uuid_files_follow_and_the_boot_loader_is_regene
     fstab = tmp_path / "fstab"
     fstab.write_text(PC601_FSTAB)
     monkeypatch.setattr(hl, "BOOT_TOOL_UUIDS", str(tmp_path / "absent"))
+    grub = tmp_path / "grub.cfg"
+    grub.write_text("linux /boot/vmlinuz root=/dev/mapper/pve-root ro quiet\nset root='lvm/pve-root'\n")
     runner = GroupRunner()
-    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1", name_files=(str(fstab),))
+    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1", name_files=(str(fstab),),
+                                              grub_config=str(grub))
     new = hl.volume_group_name_for("FD01N6557110C271B")
-    assert done == {"renamed": True, "files": [str(fstab)], "name": new}
+    assert done == {"renamed": True, "files": [str(fstab), str(grub)], "name": new, "regenerated": True}
+    assert grub.read_text() == f"linux /boot/vmlinuz root=/dev/mapper/{new}-root ro quiet\nset root='lvm/{new}-root'\n"
     order = [c[0] for c in runner.calls if c[0] in {"vgrename", "update-initramfs", "update-grub"}]
     assert order == ["vgrename", "update-initramfs", "update-grub"]
     assert ["vgrename", "U-1", new] in runner.calls
@@ -195,8 +199,9 @@ def test_a_second_run_changes_nothing_and_a_name_owned_by_another_group_is_refus
     fstab = tmp_path / "fstab"
     fstab.write_text(PC601_FSTAB.replace("/dev/pve/", f"/dev/{new}/"))
     runner = GroupRunner()
-    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg=new, vg_uuid="U-1", name_files=(str(fstab),))
+    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg=new, vg_uuid="U-1", name_files=(str(fstab),),
+                                              grub_config=str(tmp_path / "none"))
     assert done == {"renamed": False, "files": [], "name": new} and runner.calls == []
     with pytest.raises(hl.LayoutError):
         hl.name_the_volume_group_for_drive(GroupRunner(other="U-OTHER\n"), serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1",
-                                           name_files=(str(fstab),))
+                                           name_files=(str(fstab),), grub_config=str(tmp_path / "none"))

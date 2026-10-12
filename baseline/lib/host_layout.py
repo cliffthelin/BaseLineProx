@@ -136,6 +136,7 @@ def name_the_pool_for_session_temp(runner, vg: str, *, conf: str = LVM_LOCAL_CON
 # PC601 with PC401 attached, 2026-10-12: EXT-fs errors, root remounted read-only). The group is renamed by its UUID to a name derived from
 # the drive's serial, and everything that names it is rewritten before the boot loader is regenerated.
 NAME_FILES = ("/etc/fstab", "/etc/default/grub", "/etc/kernel/cmdline", "/etc/initramfs-tools/conf.d/resume")
+GRUB_CONFIG = "/boot/grub/grub.cfg"
 BOOT_TOOL_UUIDS = "/etc/kernel/proxmox-boot-uuids"
 
 
@@ -148,10 +149,23 @@ def volume_group_name_for(serial: str) -> str:
 
 def text_with_group_renamed(text: str, old: str, new: str) -> str:
     """Every path form that names the group: /dev/<vg>/<lv> and /dev/mapper/<vg>-<lv> (nothing else is touched)."""
-    return text.replace(f"/dev/{old}/", f"/dev/{new}/").replace(f"/dev/mapper/{old}-", f"/dev/mapper/{new}-")
+    return (text.replace(f"/dev/{old}/", f"/dev/{new}/").replace(f"/dev/mapper/{old}-", f"/dev/mapper/{new}-")
+            .replace(f"lvm/{old}-", f"lvm/{new}-"))
 
 
-def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: str, name_files=NAME_FILES) -> dict:
+def _rewrite(path: Path, old: str, new: str) -> bool:
+    text = path.read_text()
+    rewritten = text_with_group_renamed(text, old, new)
+    if rewritten == text:
+        return False
+    temporary = path.with_name(path.name + ".baseline-new")
+    temporary.write_text(rewritten)
+    os.chmod(temporary, path.stat().st_mode & 0o777)
+    temporary.replace(path)
+    return True
+
+
+def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: str, name_files=NAME_FILES, grub_config=GRUB_CONFIG) -> dict:
     """Idempotent. Renames the root's volume group (by UUID, so a second group of the same name cannot be the one renamed), rewrites the files
     that name it, then rebuilds the initramfs and the boot loader. Returns {"renamed", "files", "name"}."""
     new = volume_group_name_for(serial)
@@ -162,22 +176,27 @@ def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: st
             raise LayoutError(f"the name {new} already belongs to another volume group")
         _run(runner, ["vgrename", vg_uuid, new])
         done["renamed"] = True
-    for name in name_files:
-        path = Path(name)
-        if not path.is_file():
-            continue
-        text = path.read_text()
-        rewritten = text_with_group_renamed(text, vg, new) if vg != new else text
-        if rewritten != text:
-            temporary = Path(name + ".baseline-new")
-            temporary.write_text(rewritten)
-            os.chmod(temporary, path.stat().st_mode & 0o777)
-            temporary.replace(path)
-            done["files"].append(name)
+    if vg != new:
+        for name in (*name_files, grub_config):
+            if Path(name).is_file() and _rewrite(Path(name), vg, new):
+                done["files"].append(name)
     if done["renamed"] or done["files"]:
         _run(runner, ["update-initramfs", "-u", "-k", "all"], timeout=900)
-        if Path(BOOT_TOOL_UUIDS).is_file():
-            _run(runner, ["proxmox-boot-tool", "refresh"], timeout=600)
-        else:
-            _run(runner, ["update-grub"], timeout=300)
+        # grub-probe resolves the root by the name the kernel mounted it under, which the live rename has just removed: the old name is
+        # given back as a link for the length of the run. It still writes that old name into the configuration, so the file is rewritten
+        # again afterwards - which is what the next boot reads. Regeneration is best effort; the rewritten file is what is required.
+        link = Path(f"/dev/mapper/{vg}-root")
+        made = vg != new and not link.exists() and Path(f"/dev/mapper/{new}-root").exists()
+        if made:
+            link.symlink_to(f"{new}-root")
+        try:
+            argv = ["proxmox-boot-tool", "refresh"] if Path(BOOT_TOOL_UUIDS).is_file() else ["update-grub"]
+            done["regenerated"] = runner.run(argv, timeout=600).returncode == 0
+        finally:
+            if made:
+                link.unlink()
+        if vg != new and Path(grub_config).is_file():
+            _rewrite(Path(grub_config), vg, new)
+            if f"/dev/mapper/{vg}-" in Path(grub_config).read_text():
+                raise LayoutError("the boot configuration still names the old volume group")
     return done
