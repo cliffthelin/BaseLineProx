@@ -98,3 +98,14 @@ def test_bytes_written_reads_an_image_file_and_the_throughput_line_reports_rate(
     assert w.bytes_written(tmp_path / "missing") is None
     assert w.throughput_line(0, 6_000_000_000, 60) == "written 5.6 GiB, 100 MB/s"
     assert w.throughput_line(None, 2 ** 30, 60) == "written 1.0 GiB" and w.throughput_line(1, None, 60) == "written: unknown"
+
+
+def test_only_disconnects_on_the_drives_own_usb_bus_count():
+    now = time.mktime(time.strptime("2026 Oct 12 15:50:00", "%Y %b %d %H:%M:%S"))
+    text = ("Oct 12 15:47:03 host kernel: usb 2-5.1: USB disconnect, device number 116\n"      # a keyboard hub on another controller
+            "Oct 12 15:48:00 host kernel: usb 4-2: USB disconnect, device number 2\n")          # the drive's own bridge
+    assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=900) == 2
+    assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=900, bus="4") == 1
+    assert w.usb_disconnects(text, year=2026, now_epoch=now, window_seconds=900, bus="6") == 0
+    assert w.usb_bus_of("/sys/devices/pci0000:00/0000:0d:00.3/usb4/4-2/4-2:1.0/host9/block/sdh") == "4"
+    assert w.usb_bus_of("/sys/devices/pci0000:00/nvme/nvme0n1") is None

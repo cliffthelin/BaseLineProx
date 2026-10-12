@@ -454,12 +454,20 @@ def monitor_keys():
     return (MONITOR_KEY.read_text().strip(),)
 
 
-def require_stable_bridge(window_seconds=900):
+def iw_bus_of(device_path):
+    import install_watch as iw
+    try:
+        return iw.usb_bus_of(os.path.realpath(f"/sys/block/{Path(device_path).name}"))
+    except OSError:
+        return None
+
+
+def require_stable_bridge(window_seconds=900, bus=None):
     """An install writes for an hour; a USB bridge that dropped off the bus a few minutes ago will do it again. Refuse to start until the
     kernel has logged no USB disconnect for `window_seconds`, saying what it saw."""
     import install_watch as iw
     text = subprocess.run(["journalctl", "-k", "--since", "-30min", "--no-pager"], capture_output=True, text=True).stdout
-    seen = iw.usb_disconnects(text, year=time.localtime().tm_year, now_epoch=time.time(), window_seconds=window_seconds)
+    seen = iw.usb_disconnects(text, year=time.localtime().tm_year, now_epoch=time.time(), window_seconds=window_seconds, bus=bus)
     if seen:
         raise RuntimeError(f"the kernel logged {seen} USB disconnect(s) in the last {window_seconds // 60} minutes; the drive's bridge is "
                            f"unstable. Check the cable and port (or move to a USB 3 port that is not shared) and run again after it has been quiet")
@@ -478,8 +486,8 @@ def stage_install(r):
     if not folder:
         raise RuntimeError(f"run the recovery stage first; nothing is written to {TARGET_NAME} without a verified image")
     drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
-    require_stable_bridge()
     target = identify(r)
+    require_stable_bridge(bus=iw_bus_of(target["path"]))
     refresh_udev_view(target["path"])          # the guard reads udev's cache, which an earlier install's VM leaves stale
     say("deactivated on this host:", deactivate_target_vgs(r, target))
     # The authorization is the exact `--confirm-wipe <serial>` on the command line (checked in main), after a verified

@@ -107,8 +107,16 @@ class StageWatch:
         return v
 
 
-def usb_disconnects(journal_text: str, *, year: int, now_epoch: float, window_seconds: float) -> int:
-    """How many USB disconnects the kernel logged in the last `window_seconds` (from `journalctl -k` text)."""
+def usb_bus_of(sysfs_path: str):
+    """The USB bus number a block device sits on, from its resolved sysfs path (.../usb4/4-2/...), or None when it is not USB."""
+    m = re.search(r"/usb(\d+)/", str(sysfs_path))
+    return m.group(1) if m else None
+
+
+def usb_disconnects(journal_text: str, *, year: int, now_epoch: float, window_seconds: float, bus=None) -> int:
+    """How many USB disconnects the kernel logged in the last `window_seconds` (from `journalctl -k` text). With `bus`, only disconnects on
+    that bus count: a keyboard hub that re-enumerates every two minutes on another controller says nothing about the drive's bridge
+    (it held up a PC601 rebuild for 30 minutes on 2026-10-12)."""
     import calendar
     import time
     count = 0
@@ -116,6 +124,10 @@ def usb_disconnects(journal_text: str, *, year: int, now_epoch: float, window_se
         m = USB_DISCONNECT.match(line)
         if not m:
             continue
+        if bus is not None:
+            port = re.match(r"^.*kernel: usb (\S+):", line)
+            if port is None or port.group(1).removeprefix("usb").split("-")[0] != str(bus):
+                continue
         try:
             stamp = time.mktime(time.strptime(f"{year} {m['stamp']}", "%Y %b %d %H:%M:%S"))
         except ValueError:
