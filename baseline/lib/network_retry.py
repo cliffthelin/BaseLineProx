@@ -116,6 +116,15 @@ def attempt(state_dir: Path, *, discover_fn, diagnose_fn, link_up_fn, repair_fn)
     return finish("applied_failed", result.detail or str(result.refusal_code))
 
 
+def carrier_up(path: Path) -> bool:
+    """True only when the kernel says the link is up. Reading `carrier` of an interface that is administratively down raises EINVAL
+    (seen on PC601's laptop, 2026-10-12: the retry service crashed with a traceback every five minutes)."""
+    try:
+        return path.read_text().strip() == "1"
+    except OSError:
+        return False
+
+
 def main() -> int:
     import firstboot_network_repair as fbnr
     import network
@@ -125,8 +134,7 @@ def main() -> int:
     runner = repair.RealRunner()
 
     def link_up() -> bool:
-        return any(Path(f"/sys/class/net/{nic}/carrier").read_text().strip() == "1"
-                   for nic in network._physical_nics() if Path(f"/sys/class/net/{nic}/carrier").exists())
+        return any(carrier_up(Path(f"/sys/class/net/{nic}/carrier")) for nic in network._physical_nics())
 
     def repair_it(mode: str, target: str):
         function = repair.reset_interface_to_dhcp if mode == "replace" else repair_additive.add_dhcp_to_bridge

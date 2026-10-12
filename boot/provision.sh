@@ -459,6 +459,8 @@ cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
 cp "$SRC/boot/baseline-network-retry.service" /etc/systemd/system/baseline-network-retry.service
 cp "$SRC/boot/baseline-bridge-port.service" /etc/systemd/system/baseline-bridge-port.service
+cp "$SRC/boot/baseline-bridge-port-retry.service" /etc/systemd/system/baseline-bridge-port-retry.service
+cp "$SRC/boot/baseline-bridge-port-retry.timer" /etc/systemd/system/baseline-bridge-port-retry.timer
 cp "$SRC/boot/baseline-volume-growth.service" /etc/systemd/system/baseline-volume-growth.service
 cp "$SRC/boot/baseline-volume-growth.timer" /etc/systemd/system/baseline-volume-growth.timer
 cp "$SRC/boot/baseline-machine-check.service" /etc/systemd/system/baseline-machine-check.service
@@ -617,10 +619,27 @@ DPkg::Post-Invoke { "/opt/baseline/bin/baseline-proxmox-defaults nag >/dev/null 
 APT_HOOK
 /opt/baseline/bin/baseline-proxmox-defaults || true
 systemctl enable baseline-bridge-port.service
+systemctl enable baseline-bridge-port-retry.timer
 systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-machine-check.timer
 systemctl enable baseline-network-retry.timer
 systemctl enable baseline-sensors-collect.timer
+# Unit files are data: copied from the source tree they kept its execute bit, which systemd warns about at every boot.
+chmod 644 /etc/systemd/system/baseline*.service /etc/systemd/system/baseline*.timer 2>/dev/null || true
+# The browser's bookmarks bar: where Proxmox's tools and Baseline are, visible on every page.
+mkdir -p /etc/chromium/policies/managed
+cat > /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
+{
+  "BookmarkBarEnabled": true,
+  "ManagedBookmarks": [
+    {"toplevel_name": "Baseline"},
+    {"name": "Proxmox VE (VMs, containers, storage, firewall)", "url": "https://localhost:8006"},
+    {"name": "Baseline (drive, apps, settings)", "url": "http://localhost:8100"}
+  ],
+  "HomepageLocation": "https://localhost:8006",
+  "ShowHomeButton": true
+}
+CHROMIUM_POLICY
 systemctl enable baseline-kiosk.service
 systemctl enable baseline-web.service
 systemctl enable baseline-scripts-inbox.service

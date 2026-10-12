@@ -168,3 +168,14 @@ def test_the_proposal_as_a_list_of_lines_gets_the_same_bridge_port_treatment():
     different = {"needs_repair": True, "mode": "additive", "target": "vmbr0",
                  "diff": {"after": [l.format(nic="enp0s3").replace("inet dhcp", "inet static") for l in lines]}}
     assert nr.same_change(authorized, renamed) and not nr.same_change(authorized, different)
+
+
+def test_an_unreadable_carrier_file_is_not_a_link(tmp_path):
+    """Reading `carrier` of an administratively-down interface raises EINVAL; the retry service used to die with a traceback on it."""
+    import network_retry as nr
+    up, down = tmp_path / "up", tmp_path / "down"
+    up.write_text("1\n")
+    down.mkdir()                      # reading a directory raises OSError, as EINVAL does
+    assert nr.carrier_up(up) is True
+    assert nr.carrier_up(down) is False
+    assert nr.carrier_up(tmp_path / "absent") is False

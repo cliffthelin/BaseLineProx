@@ -6,4 +6,7 @@ sys.path.insert(0, "/opt/baseline/lib")
 import bridge_port  # noqa: E402
 
 if __name__ == "__main__":
-    print(bridge_port.run())
+    # `--retry` is the periodic run on a machine that is already up: a cable plugged in after boot gets the bridge its port, and the
+    # change is applied at once (the boot-time run happens before networking and only edits the file).
+    retry = "--retry" in sys.argv[1:]
+    print(bridge_port.run(wait_seconds=3.0, reload=True) if retry else bridge_port.run())

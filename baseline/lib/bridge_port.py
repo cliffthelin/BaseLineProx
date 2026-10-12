@@ -99,7 +99,7 @@ def _bring_up(names):
         subprocess.run(["ip", "link", "set", name, "up"], capture_output=True)
 
 
-def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring_up=True, wait_seconds=15.0, log=None, now=time.time) -> dict:
+def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring_up=True, wait_seconds=15.0, log=None, now=time.time, reload=False) -> dict:
     """Find the machine's wired NICs, give links a few seconds to come up, decide, rewrite (with a backup) when it is unambiguous."""
     interfaces, text = Path(interfaces), Path(interfaces).read_text()
     nics = wired_nics(sys_net)
@@ -130,6 +130,9 @@ def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring
             temporary.chmod(interfaces.stat().st_mode & 0o777)
             temporary.replace(interfaces)
             result["backup"] = str(backup)
+            if reload:                         # networking is already up (the boot-time run is before it): apply the change now
+                done = subprocess.run(["ifreload", "-a"], capture_output=True, text=True)
+                result["reloaded"] = done.returncode == 0
     result.update(wired=nics, time=int(now()))
     path = Path(log) if log else LOG
     try:
