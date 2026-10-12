@@ -121,6 +121,7 @@ cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline
 cp "$SRC/baseline/bin/baseline-network-retry" /opt/baseline/bin/baseline-network-retry
 cp "$SRC/baseline/lib/network_retry.py" /opt/baseline/lib/network_retry.py
 cp "$SRC/baseline/bin/baseline-bridge-port" /opt/baseline/bin/baseline-bridge-port
+cp "$SRC/boot/baseline-proxmox-defaults.sh" /opt/baseline/bin/baseline-proxmox-defaults
 cp "$SRC/baseline/lib/bridge_port.py" /opt/baseline/lib/bridge_port.py
 cp "$SRC/baseline/bin/baseline-volume-growth" /opt/baseline/bin/baseline-volume-growth
 cp "$SRC/baseline/lib/volume_growth.py" /opt/baseline/lib/volume_growth.py
@@ -130,6 +131,7 @@ cp "$SRC/baseline/lib/machine_check.py" /opt/baseline/lib/machine_check.py
 chmod +x /opt/baseline/bin/baseline-machine-check
 chmod +x /opt/baseline/bin/baseline-volume-growth
 chmod +x /opt/baseline/bin/baseline-bridge-port
+chmod +x /opt/baseline/bin/baseline-proxmox-defaults
 # Gate E: the real, integrated first-boot authorization state machine
 # (docs/design/decision-records/25) - connects proxmox_detect.py
 # (informational), firstboot_network_repair.py's already-real Gate A
@@ -594,7 +596,26 @@ cat > /etc/systemd/system/smartmontools.service.d/baseline.conf <<'SMARTD_DROPIN
 [Service]
 SuccessExitStatus=17
 SMARTD_DROPIN
+# smartd 7.5 aborted with heap corruption ("malloc(): unaligned tcache chunk") right after "does not support NVMe Self-tests, ignoring -l
+# selftest" on a laptop's internal NVMe (PC601 on a Dell Latitude 5290, 2026-10-12). The stock DEVICESCAN line implies -a, which includes
+# the self-test directives; health, attributes and the error log are asked for explicitly instead.
+if [ -f /etc/smartd.conf ] && grep -qE '^DEVICESCAN -d removable -n standby -m root -M exec /usr/share/smartmontools/smartd-runner$' /etc/smartd.conf; then
+    sed -i -E 's|^DEVICESCAN -d removable -n standby -m root -M exec |DEVICESCAN -d removable -n standby -H -f -l error -m root -M exec |' /etc/smartd.conf
+fi
+# The drive itself sits behind a USB-NVMe bridge. With UAS (the fast USB mode) the host controller stalled the command queue
+# ("Transfer event ... for unknown stream ring", commands aged 61 s, resets): the root filesystem went read-only and the machine froze
+# (PC601 on two machines, 2026-10-12). These bridges are told to use plain usb-storage instead, which every controller handles.
+cat > /etc/modprobe.d/baseline-usb-storage.conf <<'USB_QUIRKS'
+# Baseline: no UAS for USB-NVMe bridges that stall the xHCI stream rings (Realtek RTL9210/RTL9220, JMicron JMS583).
+options usb-storage quirks=0bda:9210:u,0bda:9220:u,152d:0583:u
+USB_QUIRKS
+update-initramfs -u -k all || true
 systemctl daemon-reload
+# Proxmox as a fresh host should show it; the subscription notice comes back with a package upgrade, so the hook removes it again.
+cat > /etc/apt/apt.conf.d/99baseline-proxmox-defaults <<'APT_HOOK'
+DPkg::Post-Invoke { "/opt/baseline/bin/baseline-proxmox-defaults nag >/dev/null 2>&1 || true"; };
+APT_HOOK
+/opt/baseline/bin/baseline-proxmox-defaults || true
 systemctl enable baseline-bridge-port.service
 systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-machine-check.timer

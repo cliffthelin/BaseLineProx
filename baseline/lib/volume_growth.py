@@ -9,6 +9,8 @@ touches a volume that is not a Baseline role, never takes the last GiB of the gr
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import drive_installer as di
 
@@ -16,6 +18,7 @@ GIB = 1024 ** 3
 THRESHOLD = 0.80          # a volume this full wants more room
 HEADROOM = 1.5            # grown to this multiple of what it holds now
 KEEP_FREE = 1 * GIB       # the volume group always keeps this much unallocated
+FILESYSTEM_OVERHEAD = 1.08   # ext4: 5% reserved blocks plus metadata come out of every extension
 
 
 class GrowthError(RuntimeError):
@@ -52,10 +55,12 @@ def plan(rows: list, vg_free_bytes: int, *, threshold: float = THRESHOLD, headro
 def room_needed(row: dict, needed_bytes: int, vg_free_bytes: int) -> dict | None:
     """The extension that gives `row` at least `needed_bytes` of free space, or None when it already has it. Refuses (GrowthError) when the
     group, or the volume's ceiling, cannot provide it: a copy must never start that cannot finish."""
-    free = row["size_bytes"] - row["used_bytes"]
+    # What the filesystem reports as available, not volume size minus used: ext4 keeps 5% reserved and some metadata, so growing by exactly
+    # the shortfall left every large copy a few hundred MiB short (PC601, 2026-10-12: five of six OS images skipped for space).
+    free = row.get("available_bytes", row["size_bytes"] - row["used_bytes"])
     if free >= needed_bytes:
         return None
-    add = _ceil_gib(needed_bytes - free)
+    add = _ceil_gib((needed_bytes - free) * FILESYSTEM_OVERHEAD)
     if add > max(vg_free_bytes - KEEP_FREE, 0) // GIB:
         raise GrowthError(f"{row['label']} needs {add} GiB more but the volume group has only {max(vg_free_bytes - KEEP_FREE, 0) // GIB} GiB unallocated")
     if row["size_bytes"] // GIB + add > row["max_gib"]:
@@ -79,9 +84,28 @@ def _json(runner, argv):
         raise GrowthError(f"{argv[0]} could not be read") from None
 
 
+def _current_name(source: str) -> str:
+    """The present device-mapper name behind a mount source (the kernel keeps the name a volume was mounted under after a live rename)."""
+    try:
+        node = os.path.basename(os.path.realpath(source))
+        if node.startswith("dm-"):
+            return "/dev/mapper/" + Path(f"/sys/class/block/{node}/dm/name").read_text().strip()
+    except OSError:
+        pass
+    return source
+
+
 def volume_group(runner) -> str:
-    rows = _json(runner, ["lvs", "--reportformat", "json", "-o", "vg_name,lv_name"])["report"][0]["lv"]
-    groups = {r["vg_name"] for r in rows if r["lv_name"] == "root"}
+    """The volume group of the RUNNING root. Another Baseline drive attached to this machine has a `root` volume of its own; identifying the
+    group by 'the one that has a root volume' fails the moment two drives are attached (PC601 with a USB stick, 2026-10-12)."""
+    mounted = runner.run(["findmnt", "-n", "-o", "SOURCE", "--mountpoint", "/"], timeout=15)
+    source = _current_name(mounted.stdout.strip()) if mounted.returncode == 0 and mounted.stdout.strip() else ""
+    if source.startswith("/dev/"):
+        rows = _json(runner, ["lvs", "--reportformat", "json", "-o", "vg_name,lv_name", source])["report"][0]["lv"]
+        groups = {r["vg_name"] for r in rows if r["lv_name"] == "root"}
+    else:
+        rows = _json(runner, ["lvs", "--reportformat", "json", "-o", "vg_name,lv_name"])["report"][0]["lv"]
+        groups = {r["vg_name"] for r in rows if r["lv_name"] == "root"}
     if len(groups) != 1:
         raise GrowthError("the volume group holding the host root could not be identified")
     return groups.pop()
@@ -100,7 +124,8 @@ def collect(runner, vg: str, personas=di.DEFAULT_PERSONAS) -> tuple:
         usage = di.parse_df_output(proc.stdout) if proc.returncode == 0 else None
         if usage is None:
             continue
-        rows.append({"label": label, "name": name, "size_bytes": sizes[name], "used_bytes": usage["used_bytes"], "max_gib": max_gib})
+        rows.append({"label": label, "name": name, "size_bytes": sizes[name], "used_bytes": usage["used_bytes"],
+                     "available_bytes": usage["available_bytes"], "max_gib": max_gib})
     return rows, free
 
 

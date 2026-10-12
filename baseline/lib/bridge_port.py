@@ -30,9 +30,31 @@ def wired_nics(sys_net) -> list:
             continue
         if (entry / "bridge").exists() or (entry / "wireless").exists() or (entry / "phy80211").exists():
             continue
+        if _not_ethernet(entry):
+            continue
         if (entry / "device").exists():
             out.append(entry.name)
     return out
+
+
+def _not_ethernet(entry: Path) -> bool:
+    """A cellular modem (wwan), wireless, bridge, VLAN or bond is a network device with a device behind it, but never the wired uplink.
+    PC601 on a Dell Latitude (2026-10-12) bridged the modem `wwp0s20f0u2i12` because it already reported a carrier, while the ethernet
+    port beside it had no link yet."""
+    if entry.name.startswith(("ww", "wl")):
+        return True
+    try:
+        kind = dict(line.split("=", 1) for line in (entry / "uevent").read_text().splitlines() if "=" in line).get("DEVTYPE", "")
+    except OSError:
+        return False
+    return kind in {"wwan", "wlan", "bridge", "vlan", "bond"}
+
+
+def _on_usb(sys_net, name) -> bool:
+    try:
+        return "/usb" in str((Path(sys_net) / name / "device").resolve())
+    except OSError:
+        return False
 
 
 def carrier(sys_net, name):
@@ -77,7 +99,7 @@ def _bring_up(names):
         subprocess.run(["ip", "link", "set", name, "up"], capture_output=True)
 
 
-def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring_up=True, wait_seconds=8.0, log=None, now=time.time) -> dict:
+def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring_up=True, wait_seconds=15.0, log=None, now=time.time) -> dict:
     """Find the machine's wired NICs, give links a few seconds to come up, decide, rewrite (with a backup) when it is unambiguous."""
     interfaces, text = Path(interfaces), Path(interfaces).read_text()
     nics = wired_nics(sys_net)
@@ -87,12 +109,18 @@ def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring
     else:
         if bring_up:
             _bring_up(nics)
+        # Wait the whole window unless every NIC already has its link: the first NIC to report a carrier is not necessarily the only one
+        # that will, and an ethernet port takes a few seconds to negotiate after it is brought up.
         deadline = time.monotonic() + wait_seconds
         while True:
             linked = [n for n in nics if carrier(sys_net, n)]
-            if linked or time.monotonic() >= deadline:
+            if len(linked) == len(nics) or time.monotonic() >= deadline:
                 break
             time.sleep(0.5)
+        if len(linked) > 1:                       # a docked laptop: the machine's own port and a dock's USB adapter; the own port is the uplink
+            internal = [n for n in linked if not _on_usb(sys_net, n)]
+            if len(internal) == 1:
+                linked = internal
         result = plan(text, present, linked)
         if result["action"] == "rewrite":
             backup = interfaces.with_name(interfaces.name + f".baseline-bridge-port.{int(now())}")

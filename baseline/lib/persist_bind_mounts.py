@@ -160,6 +160,23 @@ def is_mounted_read_write(runner: Runner, path: str, *, mount_table_path: str = 
     return False
 
 
+def _fstab_routes_mountpoint(runner: Runner, mountpoint: str, *, fstab_path: str = FSTAB_PATH) -> bool:
+    """True when fstab already has a live entry for this mountpoint, by any device spec. A second entry for one mountpoint makes
+    systemd-fstab-generator fail ("Duplicate entry in /etc/fstab"), and a LABEL= entry is ambiguous when two Baseline drives are
+    attached (both carry USER_ADMIN): the role volumes are routed by UUID at first boot and that entry is the authority."""
+    try:
+        content = runner.read_text(fstab_path)
+    except FileNotFoundError:
+        return False
+    except Exception as exc:
+        raise PersistenceObservationError(f"cannot inspect {fstab_path}: {exc}") from exc
+    for existing in content.splitlines():
+        fields = existing.split()
+        if fields and not existing.lstrip().startswith("#") and len(fields) >= 2 and fields[1] == mountpoint:
+            return True
+    return False
+
+
 def _fstab_has_line(runner: Runner, line: str, *, fstab_path: str = FSTAB_PATH) -> bool:
     try:
         content = runner.read_text(fstab_path)
@@ -312,7 +329,7 @@ def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg
                                f"failed: {local_result.detail}")
 
     line = user_mount_fstab_line(persona)
-    if not _fstab_has_line(runner, line):
+    if not _fstab_has_line(runner, line) and not _fstab_routes_mountpoint(runner, mountpoint):
         runner.append_text(FSTAB_PATH, line)
 
     return ApplyResult(True, f"{label} mounted at {mountpoint}")

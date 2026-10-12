@@ -37,7 +37,7 @@ def test_growth_stops_at_a_roles_own_ceiling():
 def test_room_needed_extends_for_a_large_copy_and_refuses_one_that_cannot_finish():
     cache = row("INSTALLER_CACHE", 6, 5)
     assert vg.room_needed(cache, GIB // 2, 100 * GIB) is None
-    assert vg.room_needed(cache, 28 * GIB, 100 * GIB) == {"label": "INSTALLER_CACHE", "name": "installer_cache", "add_gib": 27}
+    assert vg.room_needed(cache, 28 * GIB, 100 * GIB) == {"label": "INSTALLER_CACHE", "name": "installer_cache", "add_gib": 30}   # 27 GiB short, plus ext4 overhead
     with pytest.raises(vg.GrowthError, match="unallocated"):
         vg.room_needed(cache, 28 * GIB, 20 * GIB)
     with pytest.raises(vg.GrowthError, match="ceiling"):
@@ -49,3 +49,28 @@ def test_the_extension_command_resizes_the_volume_and_its_filesystem_together_an
     for bad in (0, -1, 1.5, "2"):
         with pytest.raises(vg.GrowthError):
             vg.lvextend_argv("pve", "x", bad)
+
+
+def test_the_running_roots_group_is_chosen_when_another_drive_also_has_a_root_volume():
+    """Two Baseline drives attached: both groups hold a `root`. The running one is the group behind the mounted root."""
+    import json
+    from fake_runner import FakeProc, FakeRunner
+
+    class Runner(FakeRunner):
+        def run(self, argv, timeout=10):
+            self.calls.append(list(argv))
+            if argv[0] == "findmnt":
+                return FakeProc(0, "/dev/mapper/baseline_aaaa-root\n", "")
+            if argv[0] == "lvs" and argv[-1] == "/dev/mapper/baseline_aaaa-root":
+                return FakeProc(0, json.dumps({"report": [{"lv": [{"vg_name": "baseline_aaaa", "lv_name": "root"}]}]}), "")
+            return FakeProc(1, "", "unexpected")
+
+    assert vg.volume_group(Runner()) == "baseline_aaaa"
+
+
+def test_room_is_computed_from_what_the_filesystem_reports_available_with_its_overhead():
+    """The volume was 'big enough' by size minus used, but ext4 reports less available: the copy then failed for a few hundred MiB."""
+    cache = dict(row("INSTALLER_CACHE", 10, 6), available_bytes=3 * GIB)          # size - used says 4 GiB; the filesystem says 3
+    item = vg.room_needed(cache, 5 * GIB, 100 * GIB)
+    assert item["add_gib"] == 3                                                  # (5 - 3) * 1.08 = 2.16 -> 3
+    assert vg.room_needed(dict(cache, available_bytes=6 * GIB), 5 * GIB, 100 * GIB) is None

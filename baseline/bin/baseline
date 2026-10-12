@@ -612,7 +612,11 @@ class BaselineApp(App):
         # it, it just stops being the visible console until switched
         # back (see /etc/profile.d/baseline-return.sh for the return
         # trip, installed by provision.sh).
-        subprocess.run(["chvt", "2"], check=False)
+        #
+        # "Proxmox" means Proxmox's web GUI, which the kiosk shows on tty3 (baseline-kiosk.service). The tty2 shell is only the fallback
+        # for a machine whose kiosk is not running (operator, 2026-10-12: the Proxmox key landed on a terminal, not the GUI).
+        kiosk = subprocess.run(["systemctl", "is-active", "--quiet", "baseline-kiosk.service"], check=False).returncode == 0
+        subprocess.run(["chvt", "3" if kiosk else "2"], check=False)
 
     def _active_tabbed_content(self):
         # "tab" is bound with priority=True so it's checked App-down

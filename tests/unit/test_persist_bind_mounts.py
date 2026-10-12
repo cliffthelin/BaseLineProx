@@ -579,3 +579,14 @@ def test_personal_directories_are_redirected_onto_the_persistence_volume_and_a_s
     # a bind mount cannot cover a single file that tools replace by rename (/etc/shadow): only directories are listed
     assert all(not p.endswith(("shadow", "hostname", "machine-id", "interfaces")) for p in pbm.REDIRECT_PATHS)
     assert len(set(pbm.REDIRECT_PATHS.values())) == len(pbm.REDIRECT_PATHS)
+
+
+def test_a_role_already_routed_by_uuid_gets_no_second_label_entry():
+    """PC601 (2026-10-12): LABEL=USER_ADMIN was appended beside the first-boot UUID entry; systemd-fstab-generator failed on every boot, and a
+    label is ambiguous with two Baseline drives attached."""
+    runner = FakeRunner()
+    runner.files["/etc/fstab"] = "UUID=5811e548-87af-4dd3-b6ea-3b93ae7c9749 /mnt/USER_ADMIN ext4 defaults,nosuid,nodev 0 2\n"
+    assert pbm._fstab_routes_mountpoint(runner, "/mnt/USER_ADMIN")
+    assert not pbm._fstab_routes_mountpoint(runner, "/mnt/USER_PERSONAL")
+    runner.files["/etc/fstab"] = "# UUID=x /mnt/USER_ADMIN ext4 defaults 0 2\n"
+    assert not pbm._fstab_routes_mountpoint(runner, "/mnt/USER_ADMIN")

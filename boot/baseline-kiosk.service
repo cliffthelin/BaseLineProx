@@ -10,6 +10,8 @@ Requires=pveproxy.service
 Type=simple
 ExecStartPre=/opt/baseline/bin/baseline-kiosk-gate
 ExecStartPre=/usr/bin/chvt 3
+# Cage takes the foreground only once it runs; the console on tty1 must not be what stays on screen.
+ExecStartPost=/usr/bin/chvt 3
 RuntimeDirectory=cage-kiosk
 RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/cage -s -- /usr/bin/chromium --kiosk --user-data-dir=/mnt/USER_ADMIN/chromium/kiosk --no-sandbox --disable-gpu --ozone-platform=wayland --ignore-certificate-errors https://localhost:8006

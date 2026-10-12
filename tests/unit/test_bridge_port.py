@@ -80,3 +80,27 @@ def test_a_comment_and_line_endings_survive_and_a_glob_port_is_left_alone():
     assert out == "iface vmbr0 inet manual\r\n    bridge-ports enp5s0 # uplink\r\n"
     assert bp.plan("bridge-ports en*\n", {"enp5s0"}, ["enp5s0"])["action"] == "none"
     assert bp.plan("bridge-ports none\n", {"enp5s0"}, ["enp5s0"])["action"] == "none"
+
+
+def test_a_cellular_modem_is_never_the_uplink_even_when_it_reports_a_link_first(tmp_path):
+    """PC601 on a Latitude 5290 (2026-10-12): the WWAN device was bridged and the real ethernet port stayed without a bridge."""
+    root = sysnet(tmp_path, {"enp0s31f6": True, "wwp0s20f0u2i12": True})
+    (root / "wwp0s20f0u2i12" / "uevent").write_text("DEVTYPE=wwan\n")
+    assert bp.wired_nics(root) == ["enp0s31f6"]
+    interfaces = tmp_path / "interfaces"
+    interfaces.write_text(INTERFACES)
+    result = bp.run(interfaces, root, bring_up=False, wait_seconds=0, log=tmp_path / "log", now=lambda: 1000)
+    assert result["action"] == "rewrite" and result["nic"] == "enp0s31f6"
+
+
+def test_a_docked_laptop_uses_its_own_port_not_the_docks_usb_adapter(tmp_path):
+    root = sysnet(tmp_path, {"enp0s31f6": True})
+    usb = tmp_path / "usbtree" / "usb2" / "2-4"
+    usb.mkdir(parents=True)
+    (root / "enxd8d09057dda4").mkdir()
+    (root / "enxd8d09057dda4" / "device").symlink_to(usb)
+    (root / "enxd8d09057dda4" / "carrier").write_text("1\n")
+    interfaces = tmp_path / "interfaces"
+    interfaces.write_text(INTERFACES)
+    result = bp.run(interfaces, root, bring_up=False, wait_seconds=0, log=tmp_path / "log", now=lambda: 1000)
+    assert result["action"] == "rewrite" and result["nic"] == "enp0s31f6"
