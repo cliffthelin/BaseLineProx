@@ -65,6 +65,39 @@ Still on the volume that is to become SUBSTRATE, and personal or machine-specifi
 
 Spin-up applies base + user overlay + app overlay; a kept session and a fresh one therefore give the same result.
 
+## Does Proxmox support this? Tested, 2026-10-11 (PC601, writes discarded)
+
+The layering above needs nothing outside Proxmox. On the real PC601 each role volume was registered as a plain directory storage
+(`pvesm add dir ... --content images`) and one VM was created that Proxmox accepted and started:
+
+| Layer | Placed on | Proxmox view |
+|---|---|---|
+| Base OS | an ISO in INSTALLER_CACHE (already Proxmox ISO storage `baseline-isos`) | `ide2` CD-ROM |
+| Session disk | qcow2 on SESSION_TEMP | `scsi0` |
+| User overlay | qcow2 on USER_<PERSONA> (USER_DATA) | `scsi1` |
+| App overlay | qcow2 on APPDATA_<PERSONA> (APP_DATA) | `scsi2` |
+
+Proxmox then manages these as ordinary VM disks (snapshots, backup, console). What it does not do, and Baseline must:
+
+- **Merge the layers inside the guest.** Proxmox attaches disks; the guest OS must combine them. This is OS-specific: Ubuntu's live ISO has a
+  persistence mechanism, the other carried images (MX, CachyOS, NixOS, omarchy, jrescue) differ or need a first-boot step. It is the real limit
+  on "the same result fresh or kept", so a per-OS adapter is part of the work.
+- **Hold the association** user x OS -> app-data tree (kept in USER_DATA) and attach the right disks through Proxmox's API.
+- **Bound virtual size.** A qcow2 may claim more space than its role volume has (a 1 GiB disk on a 974 MiB volume works while sparse); virtual
+  disk sizes must be capped to what the volume can grow to (volume_growth.py), or the disk fails late.
+
+## Naming of things that run
+
+Not everything is a VM image, so no umbrella term such as "Baseline VM image" is used. The kinds are:
+
+- **Things Proxmox runs:** a VM image (ISO or disk) and an LXC template. Containers already follow this pattern in the repo: an immutable
+  template, a disposable OS layer, and retained `/home`, `/root`, `/data` folders that survive a rebuild.
+- **Applications packaged as Flatpak, AppImage, Snap, Nix or OCI images:** not Proxmox objects; they run inside a VM or container and keep
+  their data in APP_DATA.
+
+naming.py already encodes this with a medium letter (V VM, L LXC, C OCI, F Flatpak, A AppImage, S Snap, N Nix, D deb, I ISO), and the
+identifier scheme (DR255) already has the kinds `vm` (a VM or a container) and `application`. Those terms stay.
+
 ## Proposed defaults for SESSION_TEMP (for discussion)
 
 Keep it `noexec` (it holds disk images, not programs the host runs). Remove the 50 GiB ceiling and let volume growth extend it on demand.
