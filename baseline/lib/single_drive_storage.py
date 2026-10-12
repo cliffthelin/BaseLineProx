@@ -12,6 +12,7 @@ import physical_device_safety as pds
 import repair
 import drive_installer as di
 import self_installer
+import host_layout
 import storage_policy
 
 
@@ -258,17 +259,18 @@ def measure_host(runner, target, personas):
     stats = _json_command(runner, ["vgs", "--reportformat", "json", "--units", "b", "--nosuffix", "-o", "vg_size,vg_free", vg])
     try:
         sizes = {row["lv_name"]: int(row["lv_size"]) for row in rows["report"][0]["lv"]}
+        pool_size = sizes["data"] if "data" in sizes else sizes[host_layout.POOL_NAME]      # Proxmox calls it `data`; once renamed it carries SESSION_TEMP's name
         group = stats["report"][0]["vg"][0]
         allocated = int(group["vg_size"]) - int(group["vg_free"])
         installer = {"lvm_maxroot": sizes["root"] // 1024**3, "lvm_swapsize": sizes["swap"] // 1024**3,
-                     "lvm_maxvz": sizes["data"] // 1024**3}
+                     "lvm_maxvz": pool_size // 1024**3}
     except (KeyError, IndexError, TypeError, ValueError):
         raise StorageError("the installed host volumes could not be measured") from None
     role_bytes = sum(sizes.get(v[0], 0) for v in di.baseline_volumes_for(tuple(personas)))
     return installer, allocated - role_bytes
 
 
-def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, growth_percent, grow=None):
+def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, growth_percent, grow=None, thin_roles=None):
     """Shared by the offline and first-boot modes: create the role volumes, then persist identity and policy."""
     expected_serial = target["serial"]
     volumes = di.baseline_volumes_for(tuple(personas))
@@ -289,7 +291,7 @@ def _apply_roles(bound, target, *, profile, reserve, required_bytes, personas, g
         reserve_bytes=reserve,
         # A reinstall lands new volumes on an earlier install's filesystem signatures; those are in unallocated space, owned
         # by no existing volume, and lvcreate would otherwise refuse (seen on PC601, 2026-10-11).
-        wipe_stale_signatures=True, grow_on_demand=bool(grow))
+        wipe_stale_signatures=True, grow_on_demand=bool(grow), thin_roles=thin_roles)
     failed = {label: item.detail for label, item in result.items() if not item.ok}
     if failed:
         raise StorageError("role provisioning incomplete; existing data left unformatted: " + json.dumps(failed))
@@ -385,8 +387,10 @@ def provision_first_boot(runner, *, required_bytes, personas=di.DEFAULT_PERSONAS
     reserve = profile["storage"]["growth_bytes"] + profile["storage"]["safety_bytes"]
     bound = RunningRunner(runner, target)
     bound._guard()
+    # SESSION_TEMP is the thin pool's own volume (DR257): thin, so it takes space only as it is written, and sized to the pool's capacity
+    thin_roles = {"SESSION_TEMP": {"pool": "data", "virtual_gib": grow[0]["lvm_maxvz"]}} if grow else None
     return _apply_roles(bound, target, profile=profile, reserve=reserve, required_bytes=required_bytes,
-                        personas=personas, growth_percent=growth_percent, grow=grow)
+                        personas=personas, growth_percent=growth_percent, grow=grow, thin_roles=thin_roles)
 
 
 def reconcile_proxmox_storage(runner):

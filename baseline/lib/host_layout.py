@@ -16,6 +16,15 @@ GIB = 1024 ** 3
 SWAP_FILE = "/mnt/SESSION_TEMP/swapfile"
 SWAP_SIZE_GIB = 4
 FSTAB = "/etc/fstab"
+POOL_NAME = "baseline_session_temp_pool"       # Proxmox's `data` thin pool, renamed: the pool is SESSION_TEMP's (DR257)
+GUEST_STORAGE = "session-temp"                 # the Proxmox storage id for VM and container disks (it was `local-lvm`)
+LVM_LOCAL_CONF = "/etc/lvm/lvmlocal.conf"
+AUTOEXTEND = """# Baseline (DR257): extend the SESSION_TEMP thin pool from the volume group's free space before it fills.
+activation {
+    thin_pool_autoextend_threshold = 80
+    thin_pool_autoextend_percent = 20
+}
+"""
 
 
 class LayoutError(RuntimeError):
@@ -62,7 +71,8 @@ def move_swap_to_session_temp(runner, vg: str, *, size_gib: int = SWAP_SIZE_GIB,
     if not swap_file_active(runner, path):
         volume_growth.ensure_room(runner, "SESSION_TEMP", size_gib * GIB + GIB // 4)
         if not Path(path).exists():
-            _run(runner, ["fallocate", "-l", f"{size_gib}G", path])
+            # Written, not fallocated: SESSION_TEMP is a thin volume, and swap must never find its blocks missing from a full pool.
+            _run(runner, ["dd", "if=/dev/zero", f"of={path}", "bs=1M", f"count={size_gib * 1024}", "conv=fsync", "status=none"], timeout=1800)
             os.chmod(path, 0o600)
             _run(runner, ["mkswap", path])
         _run(runner, ["swapon", path])
@@ -79,4 +89,40 @@ def move_swap_to_session_temp(runner, vg: str, *, size_gib: int = SWAP_SIZE_GIB,
         temporary.chmod(0o644)
         temporary.replace(fstab)
         done["fstab"] = True
+    return done
+
+
+def pool_present(runner, vg: str, name: str) -> bool:
+    proc = runner.run(["lvs", "--noheadings", "-o", "lv_name", f"{vg}/{name}"], timeout=30)
+    return proc.returncode == 0 and proc.stdout.strip() == name
+
+
+def storage_ids(runner) -> set:
+    proc = runner.run(["pvesm", "status"], timeout=60)
+    rows = [line.split() for line in proc.stdout.splitlines()[1:] if line.split()]
+    return {row[0] for row in rows} if proc.returncode == 0 else set()
+
+
+def name_the_pool_for_session_temp(runner, vg: str, *, conf: str = LVM_LOCAL_CONF) -> dict:
+    """Idempotent. Renames Proxmox's `data` thin pool to SESSION_TEMP's pool name, replaces the `local-lvm` storage with `session-temp` (the
+    volumes in the pool are untouched; only the storage entry is replaced), and has LVM extend the pool automatically before it fills."""
+    done = {"renamed_pool": False, "registered_storage": False, "autoextend": False}
+    if pool_present(runner, vg, "data") and not pool_present(runner, vg, POOL_NAME):
+        _run(runner, ["lvrename", vg, "data", POOL_NAME])
+        done["renamed_pool"] = True
+    if not pool_present(runner, vg, POOL_NAME):
+        raise LayoutError(f"the thin pool {POOL_NAME} does not exist on {vg}")
+    ids = storage_ids(runner)
+    if "local-lvm" in ids:
+        _run(runner, ["pvesm", "remove", "local-lvm"])
+    if GUEST_STORAGE not in ids:
+        _run(runner, ["pvesm", "add", "lvmthin", GUEST_STORAGE, "--vgname", vg, "--thinpool", POOL_NAME, "--content", "rootdir,images"])
+        done["registered_storage"] = True
+    path = Path(conf)
+    if not path.exists() or AUTOEXTEND not in path.read_text():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle:
+            handle.write(AUTOEXTEND)
+        done["autoextend"] = True
+    _run(runner, ["lvchange", "--monitor", "y", f"{vg}/{POOL_NAME}"])
     return done

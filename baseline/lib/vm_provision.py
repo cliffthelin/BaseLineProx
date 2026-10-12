@@ -32,7 +32,9 @@ from repair import Runner
 
 
 DEFAULT_BRIDGE = "vmbr0"
-DEFAULT_VM_STORAGE = "local-lvm"
+import host_layout  # noqa: E402
+
+DEFAULT_VM_STORAGE = host_layout.GUEST_STORAGE     # the SESSION_TEMP thin pool (it was `local-lvm`)
 # SUPERSEDED as of decision record 46/47 (2026-09-26): named a Proxmox
 # storage backend ("baseline-persist") that assumed an LVM-thin pool
 # on /dev/sdb - that drive is now plain ext4 (USER/

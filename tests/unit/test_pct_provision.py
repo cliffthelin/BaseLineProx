@@ -16,7 +16,7 @@ def test_create_ct_argv_shape():
         "--hostname", "util-1",
         "--memory", "512",
         "--cores", "1",
-        "--rootfs", "local-lvm:4",
+        "--rootfs", f"{ctp.DEFAULT_STORAGE}:4",
         "--net0", "name=eth0,bridge=vmbr0,ip=dhcp",
         "--unprivileged", "1",
     ]

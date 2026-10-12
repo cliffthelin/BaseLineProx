@@ -54,8 +54,8 @@ def test_the_new_swap_is_on_before_the_old_one_is_removed_and_fstab_follows(tmp_
     monkeypatch.setattr(os, "chmod", lambda *a, **k: None)
     runner = Recording()
     done = hl.move_swap_to_session_temp(runner, "pve", path=str(swapfile), fstab=str(fstab))
-    order = [c[0] for c in runner.calls if c[0] in {"fallocate", "mkswap", "swapon", "swapoff", "lvremove"} and "--noheadings" not in c]
-    assert order == ["fallocate", "mkswap", "swapon", "swapoff", "lvremove"]
+    order = [c[0] for c in runner.calls if c[0] in {"dd", "mkswap", "swapon", "swapoff", "lvremove"} and "--noheadings" not in c]
+    assert order == ["dd", "mkswap", "swapon", "swapoff", "lvremove"]
     assert done == {"created_file": True, "removed_volume": True, "fstab": True}
     text = fstab.read_text()
     assert "/dev/pve/swap" not in text and f"{swapfile} none swap sw 0 0" in text
@@ -80,7 +80,7 @@ def test_a_rerun_after_everything_is_done_changes_nothing(tmp_path):
     done = hl.move_swap_to_session_temp(runner, "pve", path=swapfile, fstab=str(fstab))
     assert done == {"created_file": False, "removed_volume": False, "fstab": False}
     assert fstab.read_text() == before
-    assert not any(c[0] in {"fallocate", "mkswap", "swapoff", "lvremove"} for c in runner.calls)
+    assert not any(c[0] in {"dd", "mkswap", "swapoff", "lvremove"} for c in runner.calls)
 
 
 def test_first_boot_moves_swap_after_the_roles_exist_and_before_the_installer_is_copied():
@@ -92,3 +92,56 @@ def test_first_boot_moves_swap_after_the_roles_exist_and_before_the_installer_is
     loader.exec_module(module)
     names = [n for n, _ in module.STEPS]
     assert names.index("storage") < names.index("host-volumes") < names.index("installer")
+
+
+# --- SESSION_TEMP's thin pool (operator, 2026-10-11: "Data is session_temp") -------------------------------------------------------
+
+class PoolRunner(FakeRunner):
+    """Scripted lvs/pvesm answers for the pool rename; everything is recorded in order."""
+    def __init__(self, *, pools=("data",), storages=("local", "local-lvm")):
+        super().__init__()
+        self.pools, self.storages = set(pools), list(storages)
+
+    def run(self, argv, timeout=10):
+        self.calls.append(list(argv))
+        if argv[:1] == ["lvs"]:
+            name = argv[-1].split("/")[-1]
+            return FakeProc(0 if name in self.pools else 5, name + "\n" if name in self.pools else "", "")
+        if argv[:2] == ["pvesm", "status"]:
+            return FakeProc(0, "Name Type Status\n" + "".join(f"{s} dir active\n" for s in self.storages), "")
+        if argv[:2] == ["lvrename", "pve"]:
+            self.pools.discard(argv[2]); self.pools.add(argv[3])
+        return FakeProc(0, "", "")
+
+
+def test_the_data_pool_is_renamed_and_local_lvm_is_replaced_by_the_session_temp_storage(tmp_path):
+    runner = PoolRunner()
+    done = hl.name_the_pool_for_session_temp(runner, "pve", conf=str(tmp_path / "lvmlocal.conf"))
+    cmds = [c[:2] for c in runner.calls if c[0] in {"lvrename", "pvesm", "lvchange"} and c[1] != "status"]
+    assert cmds == [["lvrename", "pve"], ["pvesm", "remove"], ["pvesm", "add"], ["lvchange", "--monitor"]]
+    add = next(c for c in runner.calls if c[:2] == ["pvesm", "add"])
+    assert add[2:] == ["lvmthin", hl.GUEST_STORAGE, "--vgname", "pve", "--thinpool", hl.POOL_NAME, "--content", "rootdir,images"]
+    assert done == {"renamed_pool": True, "registered_storage": True, "autoextend": True}
+    assert "thin_pool_autoextend_threshold = 80" in (tmp_path / "lvmlocal.conf").read_text()
+
+
+def test_the_pool_rename_is_idempotent_and_never_repeats_the_autoextend_setting(tmp_path):
+    conf = tmp_path / "lvmlocal.conf"
+    conf.write_text(hl.AUTOEXTEND)
+    runner = PoolRunner(pools=(hl.POOL_NAME,), storages=("local", hl.GUEST_STORAGE))
+    done = hl.name_the_pool_for_session_temp(runner, "pve", conf=str(conf))
+    assert done == {"renamed_pool": False, "registered_storage": False, "autoextend": False}
+    assert conf.read_text().count("thin_pool_autoextend_threshold") == 1
+    assert not any(c[0] == "lvrename" or c[:2] in (["pvesm", "add"], ["pvesm", "remove"]) for c in runner.calls)
+
+
+def test_it_refuses_when_there_is_no_pool_at_all(tmp_path):
+    with pytest.raises(hl.LayoutError, match="does not exist"):
+        hl.name_the_pool_for_session_temp(PoolRunner(pools=()), "pve", conf=str(tmp_path / "c"))
+
+
+def test_a_thin_session_temp_is_created_as_a_thin_volume_in_the_pool_not_a_thick_one():
+    import drive_installer as di
+    assert di.create_logical_volume_argv("pve", "baseline_session_temp", "62G", thin_pool="data") == [
+        "lvcreate", "-n", "baseline_session_temp", "-V", "62G", "--thinpool", "data", "pve"]
+    assert di.create_logical_volume_argv("pve", "baseline_user_admin", "1G") == ["lvcreate", "-n", "baseline_user_admin", "-L", "1G", "pve"]

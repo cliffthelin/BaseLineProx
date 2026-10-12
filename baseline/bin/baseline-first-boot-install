@@ -195,6 +195,7 @@ def step_host_volumes():
     runner = Root()
     target = storage.running_target(runner)
     done = host_layout.move_swap_to_session_temp(runner, target["vg_name"])
+    done.update(host_layout.name_the_pool_for_session_temp(runner, target["vg_name"]))
     log("host-volumes:", json.dumps(done))
     mark("host-volumes", **done)
 

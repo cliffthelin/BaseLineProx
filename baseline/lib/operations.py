@@ -65,8 +65,8 @@ OPERATIONS = {
         {"dry_run": False, "force": False}, True),
     "backup_guests": Operation(
         "backup_guests",
-        "Add a new set holding a vzdump backup of each Proxmox VM and container that has a disk on the PC601's "
-        "local-lvm. REAL-011: split/external guest storage and live disk recovery are not covered by this selector. Only ever adds "
+        "Add a new set holding a vzdump backup of each Proxmox VM and container that has a disk on the guest "
+        "storage (SESSION_TEMP). REAL-011: split/external guest storage and live disk recovery are not covered by this selector. Only ever adds "
         "files; deletes and overwrites nothing. `dry_run` lists what would be dumped without writing.",
         {"dry_run": False}, True),
     "backup_verify": Operation(

@@ -229,11 +229,14 @@ def vg_free_bytes_argv(vg_name: str) -> list:
     return ["sudo", "-n", "vgs", "--noheadings", "--units", "b", "--nosuffix", "-o", "vg_free", vg_name]
 
 
-def create_logical_volume_argv(vg_name: str, lv_name: str, size: str, *, wipe_stale_signatures: bool = False) -> list:
+def create_logical_volume_argv(vg_name: str, lv_name: str, size: str, *, wipe_stale_signatures: bool = False,
+                               thin_pool: str | None = None) -> list:
     """`wipe_stale_signatures` makes lvcreate wipe a filesystem signature it finds where the new volume lands. That space is
     unallocated in this volume group, so it belongs to no existing volume; it is only ever leftover from an earlier install
     of the drive, which otherwise stops the reinstall (lvcreate cannot ask, and refuses). Off by default."""
     wipe = ["--wipesignatures", "y", "--yes"] if wipe_stale_signatures else []
+    if thin_pool:             # a thin volume: `size` is its virtual size, space is taken from the pool only as it is written
+        return ["lvcreate", "-n", lv_name, "-V", size, "--thinpool", thin_pool, *wipe, vg_name]
     return ["lvcreate", "-n", lv_name, "-L", size, *wipe, vg_name]
 
 
@@ -369,7 +372,8 @@ def is_legacy_name(name: str) -> bool:
 
 
 def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
-                   label: str, mountpoint: str, wipe_stale_signatures: bool = False) -> CommandResult:
+                   label: str, mountpoint: str, wipe_stale_signatures: bool = False,
+                   thin_pool: str | None = None) -> CommandResult:
     """Idempotent: creates+formats+mounts `lv_name` only if it doesn't
     already exist. An already-existing volume is never reformatted -
     only (re-)mounted if not already mounted, so this is safe to run
@@ -405,7 +409,8 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
                                     f"it (lvrename + e2label) to adopt it.", created=False)
 
     create_proc = runner.run(create_logical_volume_argv(vg_name, lv_name, size,
-                                                        wipe_stale_signatures=wipe_stale_signatures), timeout=30)
+                                                        wipe_stale_signatures=wipe_stale_signatures,
+                                                        thin_pool=thin_pool), timeout=30)
     if create_proc.returncode != 0:
         return CommandResult(False, f"lvcreate failed: {create_proc.stderr.strip()}")
 
@@ -593,7 +598,7 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                              personas: tuple = DEFAULT_PERSONAS,
                              planned_sizes_gib: dict | None = None,
                              reserve_bytes: int = 0, wipe_stale_signatures: bool = False,
-                             grow_on_demand: bool = False) -> dict:
+                             grow_on_demand: bool = False, thin_roles: dict | None = None) -> dict:
     """The top-level, idempotent entry point: ensures the three shared
     volumes plus one USER_<PERSONA> volume per `personas`
     all exist on `vg_name`, sizing them adaptively to whatever real
@@ -634,7 +639,8 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                       and existing[v[0]] < planned_sizes_gib[v[3]] * 1024**3]
         if undersized:
             return {v[3]: CommandResult(False, "existing roles are smaller than the profile: " + ", ".join(undersized)) for v in volumes}
-        required = sum(planned_sizes_gib[v[3]] for v in volumes if v[0] not in existing) * 1024**3 + reserve_bytes
+        thin = thin_roles or {}
+        required = sum(planned_sizes_gib[v[3]] for v in volumes if v[0] not in existing and v[3] not in thin) * 1024**3 + reserve_bytes
         if required > free_bytes:
             return {v[3]: CommandResult(False, f"insufficient physical VG free space for the single-drive profile and reserve: "
                                        f"{required} needed, {free_bytes} available") for v in volumes}
@@ -650,9 +656,13 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                 False, f"insufficient free space in VG {vg_name!r} for {label} - "
                        f"{free_bytes} bytes free, adaptive plan gave 0G real usable space")
             continue
-        results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name,
-                                        size=f"{size_gb}G", label=label, mountpoint=mountpoint,
-                                        wipe_stale_signatures=wipe_stale_signatures)
+        thin = (thin_roles or {}).get(label)
+        if thin:      # a thin role: its size is the virtual size given for it, and it takes pool space only as it is written
+            results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name, size=f"{thin['virtual_gib']}G", label=label,
+                                           mountpoint=mountpoint, wipe_stale_signatures=wipe_stale_signatures, thin_pool=thin["pool"])
+        else:
+            results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name, size=f"{size_gb}G", label=label,
+                                           mountpoint=mountpoint, wipe_stale_signatures=wipe_stale_signatures)
     return results
 
 

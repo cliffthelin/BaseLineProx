@@ -723,7 +723,10 @@ def build_sources(*, is_mount=os.path.ismount, exists=os.path.exists) -> dict:
 # Proxmox guests on the PC601's local-lvm (v0.2 row 60)
 # ---------------------------------------------------------------------------
 
-LOCAL_LVM_STORAGE = "local-lvm"
+import host_layout  # noqa: E402
+
+LOCAL_LVM_STORAGE = host_layout.GUEST_STORAGE
+GUEST_STORAGES = (host_layout.GUEST_STORAGE, "local-lvm")      # drives installed before the rename keep their guests on local-lvm
 _VMID_RE = re.compile(r"^\d{1,9}$")
 _DUMP_RE = re.compile(r"^vzdump-(qemu|lxc|openvz)-(\d+)-[A-Za-z0-9_.-]+\.(vma|tar)(\.zst|\.gz|\.lzo)?$")
 _SIZE_RE = re.compile(r"size=(\d+(?:\.\d+)?)([KMGT]?)")
@@ -753,7 +756,7 @@ def list_guests_on_local_lvm(guest_run) -> list:
             config = guest_run([tool, "config", vmid], timeout=60)
             if config.returncode != 0:
                 continue
-            lines = [l for l in (config.stdout or "").splitlines() if f"{LOCAL_LVM_STORAGE}:" in l]
+            lines = [l for l in (config.stdout or "").splitlines() if any(f"{sid}:" in l for sid in GUEST_STORAGES)]
             if lines:
                 size = 0
                 for line in lines:
@@ -806,7 +809,7 @@ def run_guest_backup(*, destination: str, run, guest_run, now: float, allowed_se
     dest = resolve_destination(destination, run=run, allowed_serials=allowed_serials, boot_serial=boot_serial)
     guests = list_guests_on_local_lvm(guest_run)
     if not guests:
-        return BackupResult(None, False, True, 0, "skipped: no VM or container has a disk on local-lvm")
+        return BackupResult(None, False, True, 0, "skipped: no VM or container has a disk on the guest storage (SESSION_TEMP)")
     needed = sum(size for _k, _v, size in guests) or STRUCTURE_ESTIMATE
     check_space(dest, needed_bytes=needed)
     names = ", ".join(f"{kind} {vmid}" for kind, vmid, _ in guests)
