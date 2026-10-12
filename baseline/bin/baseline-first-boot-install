@@ -181,6 +181,24 @@ def step_dev_user(write_to=None, systemd=True):
     mark("dev-user", carried=True, user=value.split(":", 1)[0])
 
 
+def step_host_volumes():
+    """Express the host's own volumes in the agreed role names (DR257): swap lives in SESSION_TEMP, not in a volume of its own."""
+    import repair
+    import single_drive_storage as storage
+    import host_layout
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    runner = Root()
+    target = storage.running_target(runner)
+    done = host_layout.move_swap_to_session_temp(runner, target["vg_name"])
+    log("host-volumes:", json.dumps(done))
+    mark("host-volumes", **done)
+
+
 def step_storage():
     import repair
     import single_drive_storage as storage
@@ -382,7 +400,7 @@ def step_provision():
     mark("provision")
 
 
-STEPS = [("identity", step_identity), ("storage", step_storage), ("machine", step_machine), ("installer", step_installer),
+STEPS = [("identity", step_identity), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("installer", step_installer),
          ("os-isos", step_os_isos), ("provision", step_provision), ("dev-user", step_dev_user)]
 
 

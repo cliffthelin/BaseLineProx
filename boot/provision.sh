@@ -112,6 +112,7 @@ cp "$SRC/baseline/bin/baseline-bridge-port" /opt/baseline/bin/baseline-bridge-po
 cp "$SRC/baseline/lib/bridge_port.py" /opt/baseline/lib/bridge_port.py
 cp "$SRC/baseline/bin/baseline-volume-growth" /opt/baseline/bin/baseline-volume-growth
 cp "$SRC/baseline/lib/volume_growth.py" /opt/baseline/lib/volume_growth.py
+cp "$SRC/baseline/lib/host_layout.py" /opt/baseline/lib/host_layout.py
 cp "$SRC/baseline/bin/baseline-machine-check" /opt/baseline/bin/baseline-machine-check
 cp "$SRC/baseline/lib/machine_check.py" /opt/baseline/lib/machine_check.py
 chmod +x /opt/baseline/bin/baseline-machine-check
