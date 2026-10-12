@@ -14,6 +14,7 @@ repository and commits. This retries, on a timer, ONLY that same change: the one
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -38,11 +39,21 @@ def authorized_change(journal: dict) -> dict | None:
     return {"mode": diagnosis["mode"], "target": diagnosis["target"], "diff": diagnosis.get("diff")}
 
 
+_BRIDGE_PORTS = re.compile(r"^([ \t]*bridge[-_]ports[ \t]+)[^#\r\n]+", re.MULTILINE)
+
+
+def _without_bridge_port_names(after):
+    """The proposed file with the NIC names on `bridge-ports` lines blanked. bridge_port.py (ADR 0001) legitimately points a bridge at the
+    NIC the drive finds on a new machine; that must not make the confirmed change look like a different one. Nothing else is ignored."""
+    return _BRIDGE_PORTS.sub(r"\1<nic>", after) if isinstance(after, str) else after
+
+
 def same_change(authorized: dict, diagnosis: dict) -> bool:
     return bool(diagnosis.get("needs_repair")
                 and diagnosis.get("mode") == authorized["mode"]
                 and diagnosis.get("target") == authorized["target"]
-                and (diagnosis.get("diff") or {}).get("after") == (authorized["diff"] or {}).get("after"))
+                and _without_bridge_port_names((diagnosis.get("diff") or {}).get("after"))
+                == _without_bridge_port_names((authorized["diff"] or {}).get("after")))
 
 
 # After these the timer has nothing left to do and is disabled; every other action is tried again at the next tick.

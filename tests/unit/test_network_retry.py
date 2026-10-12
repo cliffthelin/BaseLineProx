@@ -145,3 +145,16 @@ def test_the_installed_units_and_provisioning_match(tmp_path):
     unit = (repo / "boot/baseline-network-retry.service").read_text()
     assert "ExecStart=/opt/baseline/bin/baseline-network-retry" in unit and "ReadOnlyPaths=/opt/baseline" in unit
     assert (repo / "baseline/bin/baseline-network-retry").stat().st_mode & 0o111
+
+
+def test_a_bridge_port_renamed_by_the_new_machine_step_is_still_the_confirmed_change_but_nothing_else_may_differ():
+    import network_retry as nr
+    base = "iface vmbr0 inet6 static\n        address fec0::1/64\n        bridge-ports {nic}\n        bridge-fd 0\niface vmbr0 inet dhcp\n"
+    authorized = {"mode": "additive", "target": "vmbr0", "diff": {"after": base.format(nic="ens3")}}
+    same = {"needs_repair": True, "mode": "additive", "target": "vmbr0", "diff": {"after": base.format(nic="enp0s3")}}
+    assert nr.same_change(authorized, same)
+    other_address = dict(same, diff={"after": base.format(nic="enp0s3").replace("fec0::1", "fec0::2")})
+    other_stanza = dict(same, diff={"after": base.format(nic="enp0s3").replace("inet dhcp", "inet static")})
+    other_target = dict(same, target="vmbr1")
+    for changed in (other_address, other_stanza, other_target):
+        assert not nr.same_change(authorized, changed)
