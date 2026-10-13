@@ -36,10 +36,10 @@ Added 2026-10-12 after the operator asked why tests passed without the agent kno
 does not prove any of these; `tests/unit/test_established_expectations.py` records which are met (pass) and which are known gaps
 (strict xfail: it fails the suite the day the gap closes, so the marker must then be removed).
 
-- **Five Proxmox applications (UNRESOLVED, ask before building).** The operator, 2026-10-12: "I expect 5 we have had established nearly from
-  day 1 ... they are Proxmox applications", and "I still do not see any of the Proxmox installed tools". No document or earlier session in
-  this repo names them. The Proxmox product family has five: Virtual Environment, Backup Server, Mail Gateway, Datacenter Manager and
-  Offline Mirror - a hypothesis only, to be confirmed with the operator and then recorded here and in a decision record.
+- **Five diagnostic tools on the Proxmox host** (resolved 2026-10-12 from `docs/design/current-drive-inventory-plan.md`, "The five-tool
+  manifest"; the operator called them "Proxmox installed tools"): lm-sensors, nvme-cli, smartmontools, iperf3, ethtool. Installed by first
+  boot from the drive's own repository (all five verified installed on PC601 from its dpkg status) and shown on the web app's
+  `/tools` page, bookmarked in the browser. NUT and ProxMenux are deliberately deferred.
 - **Five default (guest) applications**, from the first days of the project (DR133, `docs/INSTALL.md`; a separate fact from the one above): VS Code, Spotify, Chrome, ChatGPT (Linux
   preview) and Claude Desktop (Linux beta). Native publisher packages, exact-source prepared by `baseline-apps prepare`, carried on
   INSTALLER_CACHE. A finished drive must have them **installed and configured** in the default Ubuntu environment, each available as

@@ -56,3 +56,11 @@ def test_the_host_root_volume_is_renamed_substrate():
 def test_a_fresh_drive_provisions_an_ai_provider_and_harness():
     source = (REPO / "boot/provision.sh").read_text()
     assert "harness.env" in source
+
+
+def test_the_five_proxmox_host_tools_are_the_manifest_ones_and_are_installed_by_first_boot_and_shown():
+    manifest = __import__("json").loads((REPO / "baseline/lib/inventory/tools_manifest.json").read_text())
+    names = {t["name"] for t in manifest["tools"]}
+    assert names == {"lm-sensors", "nvme-cli", "smartmontools", "iperf3", "ethtool"}
+    assert '"/tools"' in (REPO / "baseline/lib/baseline_web.py").read_text()          # shown to the operator
+    assert "tools_page.py" in (REPO / "boot/provision.sh").read_text()

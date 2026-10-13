@@ -78,6 +78,7 @@ NAV_TABS = (
     ("/vms", "Virtual machines"),
     ("/containers", "Distro containers"),
     ("/hardware", "Hardware"),
+    ("/tools", "Diagnostic tools"),
     ("/installation-readiness", "Installation readiness"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -1911,6 +1912,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/install-plan":
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
+
+        if path == "/tools":
+            import tools_page
+            return self._html_response(200, _with_nav(tools_page.render(deps.get("tools_results") or tools_page.gather()), path))
 
         if path == "/recipes":
             import recipe_page
