@@ -16,6 +16,7 @@ import pty
 import re
 import select
 import signal
+import subprocess
 import threading
 import time
 
@@ -35,7 +36,7 @@ class GuidedSetup:
         self.wait_seconds, self.total_seconds = wait_seconds, total_seconds
         self._lock = threading.Lock()
         self._phase, self._url, self._message = "idle", None, ""
-        self._pid = self._fd = None
+        self._pid = self._fd = self._proc = None
         self._cancelled = False
 
     def state(self) -> dict:
@@ -52,27 +53,36 @@ class GuidedSetup:
         if self._phase != "idle":
             raise SetupError("this setup was already started")
         self._set("starting")
+        # A terminal for the CLI through subprocess (posix_spawn/vfork), not pty.fork(): this runs inside a threaded web server, where
+        # forking the interpreter can deadlock the child.
         try:
-            self._pid, self._fd = pty.fork()
+            master, slave = pty.openpty()
         except OSError as exc:
             self._set("failed", f"cannot open a terminal: {exc.strerror}")
             return
-        if self._pid == 0:                                  # child: becomes the provider's CLI
-            try:
-                os.execvp(self.argv[0], self.argv)
-            except OSError:
-                os._exit(127)
+        try:
+            self._proc = subprocess.Popen(self.argv, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
+        except OSError as exc:
+            os.close(master)
+            os.close(slave)
+            self._set("failed", f"the provider's tool could not be started: {exc.strerror}")
+            return
+        os.close(slave)
+        self._fd, self._pid = master, self._proc.pid
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):
         buffer, started = "", time.time()
         while True:
-            if self._cancelled:
+            if self._cancelled or self._fd is None:
                 return
             if time.time() - started > self.total_seconds:
                 self._finish_failed("the sign-in took too long and was stopped")
                 return
-            ready, _, _ = select.select([self._fd], [], [], 0.2)
+            try:
+                ready, _, _ = select.select([self._fd], [], [], 0.2)
+            except (OSError, ValueError, TypeError):
+                return                                  # the terminal was closed by terminate()
             if not ready:
                 if self._phase == "starting" and time.time() - started > self.wait_seconds:
                     self._finish_failed("the provider's tool never showed a sign-in link")
@@ -118,13 +128,19 @@ class GuidedSetup:
         pid, self._pid = self._pid, None
         if pid:
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.killpg(pid, signal.SIGTERM)              # its own session: the tool and anything it started
             except OSError:
                 pass
             try:
-                os.waitpid(pid, 0)
+                self._proc.wait(timeout=5)
+            except Exception:
+                pass
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
             except OSError:
                 pass
+            self._fd = None
 
     def submit_code(self, code):
         if self._phase != "waiting_for_code":

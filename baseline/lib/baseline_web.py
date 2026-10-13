@@ -1947,10 +1947,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import network
             import network_view
             import providers
-            facts = network.check_lifeline()
+            try:
+                facts = network.check_lifeline()
+            except (OSError, network.NetworkProbeError) as exc:       # a failed probe is reported, never a blank 500
+                facts = [{"fact": "interface_inventory", "ok": False, "detail": f"network probe failed: {exc}"}]
             try:
                 interfaces = network.list_interfaces()
-            except network.NetworkProbeError as exc:
+            except (OSError, network.NetworkProbeError) as exc:
                 interfaces = []
                 facts.append({"fact": "interface_inventory", "ok": False, "detail": str(exc)})
             page = network_view.render(network_view.build_rows(facts, interfaces, providers.check_providers(), network))
@@ -1963,8 +1966,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import diagnostics
             import repair
             import sensors_view
-            return self._html_response(200, _with_nav(sensors_view.render(
-                sensors_view.collect_rows(deps.get("runner") or repair.RealRunner(), diagnostics)), path))
+            try:
+                rows = sensors_view.collect_rows(deps.get("runner") or repair.RealRunner(), diagnostics)
+            except (OSError, ValueError, KeyError, AttributeError) as exc:
+                rows = [("error", "sensor collection failed", str(exc), "")]
+            return self._html_response(200, _with_nav(sensors_view.render(rows), path))
 
         if path == "/tools":
             import tools_page
@@ -2402,7 +2408,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     if old is not None:
                         old.cancel()
                     deps["claude_setup"] = provider_setup.GuidedSetup(
-                        ["claude", "setup-token"], vault.Vault(vault.ADMIN_VAULT), "CLAUDE_CODE_OAUTH_TOKEN",
+                        deps.get("claude_setup_argv") or ["claude", "setup-token"], vault.Vault(vault.ADMIN_VAULT), "CLAUDE_CODE_OAUTH_TOKEN",
                         allowed_url_prefix=ai_setup_page.CLAUDE_URL_PREFIX)
                     deps["claude_setup"].start()
                     return self._redirect("/ai-setup/claude")
