@@ -59,6 +59,7 @@ import vm_page
 import workload_jobs
 import workload_page
 import web_gate as wg
+import subprocess
 import web_security as ws
 
 from repair import Runner
@@ -1597,7 +1598,8 @@ def operation_history(deps):
 DEFAULT_STATE_DIR = Path("/var/lib/baseline")     # audit log, signing key and schedules (root-only, mode 0600)
 
 # The only routes reachable without a session: the login screen itself.
-_PUBLIC_PATHS = frozenset({"/", "/login", "/logout"})
+# /console only acts for a request from this machine itself (console_switch.is_local), so it needs no login: the person is at the screen.
+_PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/console", "/console/switch"})
 
 
 def _vm_host_for(deps: dict) -> vh.VmHost:
@@ -1823,6 +1825,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/logout":
             deps["sessions"].revoke(self._cookie_token())
             return self._redirect("/login", set_cookie=ws.clear_session_cookie())
+
+        if path == "/console":
+            import console_switch
+            if not console_switch.is_local(self.client_address[0]):
+                return self._html_response(403, console_switch.refused_page())
+            return self._html_response(200, console_switch.page())
 
         if path == "/settings":
             result = sw.handle_settings_view(deps["sessions"], deps["source"], self._cookie_token(), now,
@@ -2303,6 +2311,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(200,result)
             except (RuntimeError,vh.VmError,OSError,ValueError) as exc:
                 return self._json(409,{'outcome':'refused','detail':str(exc)})
+
+        if path == "/console/switch":
+            import console_switch
+            if not console_switch.is_local(self.client_address[0]):
+                return self._html_response(403, console_switch.refused_page())
+            console_switch.switch(run=deps.get("console_run", subprocess.run))
+            return self._redirect("/console")
 
         if path == "/host/restart":
             import host_restart

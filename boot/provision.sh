@@ -395,6 +395,7 @@ cp "$SRC/baseline/lib/baseline_drive_layout.py" /opt/baseline/lib/baseline_drive
 # to the operator to run themselves.
 cp "$SRC/baseline/lib/drive_admin.py" /opt/baseline/lib/drive_admin.py
 cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
+cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/host_restart.py" /opt/baseline/lib/host_restart.py
 cp "$SRC/baseline/lib/structured_controls.py" /opt/baseline/lib/structured_controls.py
 cp "$SRC/baseline/lib/hardware_configuration.py" /opt/baseline/lib/hardware_configuration.py
@@ -634,7 +635,8 @@ cat > /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
   "ManagedBookmarks": [
     {"toplevel_name": "Baseline"},
     {"name": "Proxmox VE (VMs, containers, storage, firewall)", "url": "https://localhost:8006"},
-    {"name": "Baseline (drive, apps, settings)", "url": "http://localhost:8100"}
+    {"name": "Baseline (drive, apps, settings)", "url": "http://localhost:8100"},
+    {"name": "Baseline text console (this screen)", "url": "http://localhost:8100/console"}
   ],
   "HomepageLocation": "https://localhost:8006",
   "ShowHomeButton": true

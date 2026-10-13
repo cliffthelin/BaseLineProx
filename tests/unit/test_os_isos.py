@@ -91,7 +91,7 @@ def test_the_cache_folder_gets_the_layout_proxmox_lists_isos_from(tmp_path):
 def test_the_iso_storage_is_added_once_and_a_conflicting_one_is_refused(tmp_path):
     root = "/mnt/INSTALLER_CACHE"
     argv = os_isos.storage_add_argv([{"storage": "local", "type": "dir", "path": "/var/lib/vz"}], root)
-    assert argv == ["pvesm", "add", "dir", os_isos.ISO_STORAGE, "--path", root, "--content", "iso",
+    assert argv == ["pvesm", "add", "dir", os_isos.ISO_STORAGE, "--path", root, "--content", "iso,vztmpl,import",
                     "--is_mountpoint", root]
     same = [{"storage": os_isos.ISO_STORAGE, "type": "dir", "path": root, "content": "iso"}]
     assert os_isos.storage_add_argv(same, root) is None

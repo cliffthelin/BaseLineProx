@@ -123,7 +123,7 @@ def storage_add_argv(definitions: list, cache_root) -> list | None:
     """`pvesm add` for the ISO storage, or None when it is already registered for this folder."""
     existing = next((d for d in definitions if d.get("storage") == ISO_STORAGE), None)
     if existing is None:
-        return ["pvesm", "add", "dir", ISO_STORAGE, "--path", str(cache_root), "--content", "iso",
+        return ["pvesm", "add", "dir", ISO_STORAGE, "--path", str(cache_root), "--content", "iso,vztmpl,import",
                 "--is_mountpoint", str(cache_root)]
     if existing.get("type") != "dir" or Path(existing.get("path", "")).resolve() != Path(cache_root).resolve():
         raise RuntimeError(f"storage {ISO_STORAGE} already exists with a different type or path")

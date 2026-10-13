@@ -120,6 +120,18 @@ def check_ssh_public_key(key: str) -> str:
     return key
 
 
+_CRYPT_HASH = re.compile(r"^\$(6|y|2b|2y)\$[./A-Za-z0-9$]{20,256}$")
+
+
+def check_password_hash(value: str) -> str:
+    """One crypt(3) hash (sha512crypt, yescrypt or bcrypt), exactly as it stands in /etc/shadow. Anything else is refused: the value is
+    written into the installer's answer file, so it must not carry quotes, spaces or a second field."""
+    text = (value or "").strip()
+    if not _CRYPT_HASH.fullmatch(text):
+        raise ValueError("not a crypt password hash (expected the second field of an /etc/shadow line: $6$..., $y$... or $2b$...)")
+    return text
+
+
 def render_answer(*, fqdn, password_hash, disk_serial, lvm_maxroot, lvm_maxvz, lvm_swapsize, first_boot=False, root_ssh_keys=()):
     keys = [check_ssh_public_key(k) for k in root_ssh_keys]
     line = ("root-ssh-keys = [" + ", ".join(f'"{k}"' for k in keys) + "]\n") if keys else ""
@@ -283,7 +295,7 @@ def build_and_write_self_installer(
     target_dmi_product: str | None = None,
     memory_mb: int = 3072,
     on_progress=None,
-    admin_password: str | None = None,
+    admin_password: str | None = None, admin_password_hash: str | None = None,
     offline_cache: Path | None = None, os_share: Path | None = None, child_identity: dict | None = None,
     root_ssh_keys=(), dev_user=None,
 ) -> SelfInstallerResult:
@@ -430,6 +442,12 @@ def build_and_write_self_installer(
         progress(f"Generated one-time Proxmox root password: {pw_display}  <-- write this down now, "
                   "it is shown only this once and is never saved anywhere.")
     pw_hash = dsan.hash_password_sha512crypt(pw, secrets.token_hex(8))
+    if admin_password_hash:
+        # "It has to accept my root password in Linux now" (2026-09-29, repeated 2026-10-12): the host account's own password hash,
+        # exported by the operator, becomes the installed root's hash. The password itself is never read, typed or stored by this code.
+        pw_hash = check_password_hash(admin_password_hash)
+        pw_display = None
+        progress("Using the host account's password hash as the new Proxmox root password (the password itself is never read).")
     # Real bug found live, 2026-09-29: this used to read
     # `disk_serial=expected_serial` - `expected_serial` is the
     # optional, usually-`None` human-override param (decision record

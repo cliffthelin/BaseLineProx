@@ -108,3 +108,20 @@ def test_bonding_masters_file_is_not_an_interface(tmp_path):
     (tmp_path / "lo").mkdir()
     (tmp_path / "enp1s0").mkdir()
     assert tether.find_tether_candidates(base=tmp_path) == []
+
+
+def test_a_carrier_the_kernel_refuses_to_read_on_a_down_interface_is_no_carrier(tmp_path, monkeypatch):
+    import errno
+
+    class Down:
+        def __init__(self, _path): pass
+        def read_text(self): raise OSError(errno.EINVAL, "Invalid argument")
+
+    class Denied(Down):
+        def read_text(self): raise OSError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(tether, "Path", Down)
+    assert tether._read_carrier("/sys/class/net/usb0/carrier") == "0"
+    monkeypatch.setattr(tether, "Path", Denied)
+    with pytest.raises(OSError):
+        tether._read_carrier("/sys/class/net/usb0/carrier")

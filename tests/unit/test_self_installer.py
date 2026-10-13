@@ -626,3 +626,17 @@ def test_the_answer_file_can_carry_root_ssh_public_keys_and_refuses_anything_els
     for bad in ("-----BEGIN OPENSSH PRIVATE KEY-----", "ssh-rsa AAAA" + "B" * 60, key + '"\n[x]', key + "\n" + key, ""):
         with pytest.raises(ValueError):
             si.render_answer(**base, root_ssh_keys=[bad])
+
+
+def test_only_one_real_crypt_hash_is_accepted_for_the_root_password():
+    import self_installer as si
+    sha512 = "$6$abcdefgh$" + "A" * 86
+    yescrypt = "$y$j9T$abcdefghijklmnop$" + "B" * 43
+    assert si.check_password_hash(sha512 + "\n") == sha512
+    assert si.check_password_hash(yescrypt) == yescrypt
+    for bad in ("", "plaintext-password", "cane:" + sha512, sha512 + '" \nroot-ssh-keys = ["x"]', "!", "*", "$1$weak$" + "C" * 22):
+        try:
+            si.check_password_hash(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted {bad!r}")

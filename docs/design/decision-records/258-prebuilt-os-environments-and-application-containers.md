@@ -32,3 +32,13 @@ Operator, 2026-10-12, after testing PC601 on a laptop. Recorded verbatim in inte
 
 ## Not decided here
 Sizes (volumes only grow when used, DR257), the overlay's association table (USER_DATA holds the association to APP_DATA per user and OS).
+
+## Queued by the operator, 2026-10-12 (second laptop review) - not built
+- **A Baseline browser page equivalent to the TUI**: hardware, network, tether, sensors, VMs and the AI chat as web pages, so the browser
+  alone is enough. Today the browser has `/console` (one button that shows the text console, loopback only) and the web app's own pages.
+- **Rename the host root volume to SUBSTRATE** (DR257 step 3). Until then Proxmox shows the root as the storage `substrate`
+  (`/var/lib/vz`, the root filesystem's real size) and `local` is disabled; the 1 GiB `baseline_substrate` volume still holds only the
+  storage policy.
+- **Containers and VMs ready to use** (this record's main subject): nothing is prebuilt yet.
+- **AI providers and harness**: a fresh drive has no provider credentials (`/etc/baseline/harness.env`) and no harness installed, so
+  everything shows unconfigured. Needs a decision on where credentials come from (USER_ADMIN) and which harness ships.

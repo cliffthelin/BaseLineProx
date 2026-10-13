@@ -27,6 +27,18 @@ def _path_exists(path: Path) -> bool:
     except OSError as exc:
         raise TetherProbeError(f"cannot inspect {path}: {exc}") from exc
 
+def _read_carrier(path) -> str:
+    """The interface's carrier as "0" or "1". The kernel refuses the read with EINVAL while an interface is administratively down
+    (a phone plugged in but not yet brought up): that is "no carrier yet", not a probe failure (operator saw "Errno 22", 2026-10-12)."""
+    import errno
+    try:
+        return Path(path).read_text().strip()
+    except OSError as exc:
+        if exc.errno == errno.EINVAL:
+            return "0"
+        raise
+
+
 # Kernel drivers that specifically mean "this is a tethered phone," not a
 # permanent USB-attached NIC like a dock's Ethernet adapter (r8152) or a
 # WWAN modem. Identifying by driver, not "wasn't there at boot," since the
@@ -90,7 +102,7 @@ def bring_up_tether(ifname: str, attempts: int = 5, attempt_timeout: int = 6):
 
     carrier_path = Path("/sys/class/net") / ifname / "carrier"
     try:
-        carrier = carrier_path.read_text().strip()
+        carrier = _read_carrier(carrier_path)
     except OSError as exc:
         return {"ok": False, "stage": "probe_error", "detail": f"cannot read carrier for {ifname}: {exc}", "address": None}
     if carrier not in {"0", "1"}:
@@ -179,7 +191,7 @@ def auto_tether(known_at_boot=frozenset()):
     # Prefer whichever candidate already has carrier, if any do.
     for name in candidates:
         try:
-            carrier = (Path("/sys/class/net") / name / "carrier").read_text().strip()
+            carrier = _read_carrier(Path("/sys/class/net") / name / "carrier")
         except OSError as exc:
             return {"ok": False, "stage": "probe_error", "detail": f"cannot read carrier for {name}: {exc}", "address": None, "candidates": candidates, "interface": name}
         if carrier not in {"0", "1"}:
