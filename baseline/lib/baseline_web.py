@@ -79,6 +79,7 @@ NAV_TABS = (
     ("/containers", "Distro containers"),
     ("/hardware", "Hardware"),
     ("/network", "Network"),
+    ("/chat", "Chat"),
     ("/sensors", "Sensors"),
     ("/tools", "Diagnostic tools"),
     ("/ai-setup", "AI providers"),
@@ -1935,6 +1936,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(ai_setup_page.render_overview(
                 providers.check_providers(), status, [notice] if notice else []), "/ai-setup"))
 
+        if path == "/chat":
+            import chat_page
+            import providers
+            return self._html_response(200, _with_nav(chat_page.render(
+                deps.setdefault("chat_history", []), [(h["id"], h["name"]) for h in providers.HARNESSES],
+                qs.get("notice", [""])[0][:200]), path))
+
         if path == "/network":
             import network
             import network_view
@@ -1945,8 +1953,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             except network.NetworkProbeError as exc:
                 interfaces = []
                 facts.append({"fact": "interface_inventory", "ok": False, "detail": str(exc)})
-            return self._html_response(200, _with_nav(network_view.render(
-                network_view.build_rows(facts, interfaces, providers.check_providers(), network)), path))
+            page = network_view.render(network_view.build_rows(facts, interfaces, providers.check_providers(), network))
+            notice = html.escape(qs.get("notice", [""])[0][:200].replace("+", " "))
+            extra = (f"<p>{notice}</p>" if notice else "") + ('<form method="post" action="/network/tether">'
+                                                              '<button type="submit">Connect a USB tether</button></form>')
+            return self._html_response(200, _with_nav(page.replace(b"</body>", extra.encode() + b"</body>"), path))
 
         if path == "/sensors":
             import diagnostics
@@ -2358,6 +2369,27 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(200,result)
             except (RuntimeError,vh.VmError,OSError,ValueError) as exc:
                 return self._json(409,{'outcome':'refused','detail':str(exc)})
+
+        if path == "/network/tether":
+            import chat_page
+            import tether
+            severity, message = chat_page.tether_message(tether.auto_tether())
+            if deps.get("audit"):
+                deps["audit"]({"event": "tether_requested", "severity": severity})
+            return self._redirect("/network?notice=" + html.escape(message).replace(" ", "+")[:200])
+
+        if path == "/chat/ask":
+            import chat_page
+            import harness
+            try:
+                question = chat_page.clean_question(str(body.get("question", "")))
+            except ValueError as exc:
+                return self._redirect("/chat?notice=" + html.escape(str(exc)).replace(" ", "+"))
+            if str(body.get("harness", "claude")) != "claude":
+                return self._redirect("/chat?notice=" + "That+harness+is+only+available+in+the+text+console+for+now")
+            deps.setdefault("chat_history", []).append((question, harness.ask(question)))
+            del deps["chat_history"][:-20]
+            return self._redirect("/chat")
 
         if path.startswith("/ai-setup/"):
             import ai_setup_page

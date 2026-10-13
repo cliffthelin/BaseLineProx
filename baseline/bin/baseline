@@ -40,6 +40,7 @@ import network  # noqa: E402
 import harness_registry  # noqa: E402
 import sensors_view  # noqa: E402
 import network_view  # noqa: E402
+import chat_page  # noqa: E402
 import harness_events  # noqa: E402
 import tether  # noqa: E402
 import providers  # noqa: E402
@@ -1049,14 +1050,7 @@ class BaselineApp(App):
 
     def report_tether_result(self, result: dict) -> None:
         """Show the observed tether outcome instead of silently discarding it."""
-        stage = result.get("stage", "unknown")
-        interface = result.get("interface")
-        if result.get("ok"):
-            message = f"USB tether connected on {interface}: {result.get('address')}"
-            severity = "information"
-        else:
-            message = f"USB tether {stage}: {result.get('detail') or 'no diagnostic detail provided'}"
-            severity = "error"
+        severity, message = chat_page.tether_message(result)          # same wording as the web page
         self.notify(message, severity=severity, timeout=10)
         try:
             self.query_one("#console_log", RichLog).write(message)

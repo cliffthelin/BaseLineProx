@@ -61,8 +61,9 @@ Sizes (volumes only grow when used, DR257), the overlay's association table (USE
 | Hardware | `/hardware` | exists |
 | VMs | `/vms`, `/containers` | exists |
 | Sensors | `/sensors` (rows shared with the TUI through `sensors_view`) | BUILT |
-| Network (+ providers, tether `t`, IDs `i`) | none | open |
-| Chat (harness select, ask) | none | open |
+| Network (+ providers, IDs `i`) | `/network` (rows shared through `network_view`) | BUILT; IDs toggle open |
+| Tether `t` | button on `/network` (wording shared via `chat_page.tether_message`) | BUILT |
+| Chat (harness select, ask) | `/chat` (Claude harness; OpenCode and streaming open) | PARTLY BUILT |
 | Console (hardware/network/tether/ask commands) | none | open |
 | `p` Proxmox / return to console | `/console` | BUILT |
 | `r` refresh, `c` copy | page reload / browser | n/a |

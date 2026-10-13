@@ -57,6 +57,8 @@ def test_tether_action_reports_the_real_outcome_before_refreshing_network():
 
     report = next(node for node in app.body if isinstance(node, ast.FunctionDef) and node.name == "report_tether_result")
     report_source = ast.unparse(report)
-    assert "result.get('ok')" in report_source or 'result.get("ok")' in report_source
-    assert "result.get('stage'" in report_source or 'result.get("stage"' in report_source
+    assert "chat_page.tether_message(result)" in report_source       # the outcome wording lives in chat_page, shared with the web page
     assert "self.notify" in report_source
+    helper = ast.unparse(next(n for n in ast.parse((ROOT / "baseline" / "lib" / "chat_page.py").read_text()).body
+                              if isinstance(n, ast.FunctionDef) and n.name == "tether_message"))
+    assert "result.get('ok')" in helper and "result.get('stage'" in helper
