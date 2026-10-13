@@ -165,7 +165,8 @@ def _rewrite(path: Path, old: str, new: str) -> bool:
     return True
 
 
-def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: str, name_files=NAME_FILES, grub_config=GRUB_CONFIG) -> dict:
+def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: str, name_files=NAME_FILES, grub_config=GRUB_CONFIG,
+                                    mapper_dir="/dev/mapper") -> dict:
     """Idempotent. Renames the root's volume group (by UUID, so a second group of the same name cannot be the one renamed), rewrites the files
     that name it, then rebuilds the initramfs and the boot loader. Returns {"renamed", "files", "name"}."""
     new = volume_group_name_for(serial)
@@ -187,8 +188,8 @@ def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: st
         # gone at the next boot, when the root is mounted under its new name). grub-probe still writes the old name into the configuration,
         # so the file is rewritten again afterwards - which is what the next boot reads. Regeneration is best effort; the rewritten file
         # is what is required.
-        link = Path(f"/dev/mapper/{vg}-root")
-        if vg != new and not link.exists() and Path(f"/dev/mapper/{new}-root").exists():
+        link = Path(mapper_dir) / f"{vg}-root"
+        if vg != new and not link.exists() and (Path(mapper_dir) / f"{new}-root").exists():
             link.symlink_to(f"{new}-root")
         argv = ["proxmox-boot-tool", "refresh"] if Path(BOOT_TOOL_UUIDS).is_file() else ["update-grub"]
         done["regenerated"] = runner.run(argv, timeout=600).returncode == 0
