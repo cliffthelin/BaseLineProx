@@ -64,3 +64,10 @@ def test_the_five_proxmox_host_tools_are_the_manifest_ones_and_are_installed_by_
     assert names == {"lm-sensors", "nvme-cli", "smartmontools", "iperf3", "ethtool"}
     assert '"/tools"' in (REPO / "baseline/lib/baseline_web.py").read_text()          # shown to the operator
     assert "tools_page.py" in (REPO / "boot/provision.sh").read_text()
+
+
+def test_the_vault_is_encrypted_at_rest_and_every_tui_tab_has_a_browser_page():
+    web = (REPO / "baseline/lib/baseline_web.py").read_text()
+    for route in ('"/vault"', '"/network"', '"/sensors"', '"/chat"', '"/shell"', '"/hardware"', '"/vms"', '"/environments"'):
+        assert route in web, route
+    assert "ENC1:" in (REPO / "baseline/lib/vault_crypto.py").read_text()
