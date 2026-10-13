@@ -74,3 +74,15 @@ def test_a_provider_without_credentials_is_not_set_up_not_unreachable():
     """The operator read "Unreachable" as a network fault (2026-10-12); the network was fine and nothing was configured."""
     assert providers.display_status("unconfigured") == "Not set up"
     assert providers.display_status("unreachable") == "Unreachable"
+
+
+def test_a_credential_in_the_vault_makes_the_provider_available(tmp_path, monkeypatch):
+    import vault
+    admin = vault.Vault(tmp_path / "admin")
+    admin.put("OPENAI_API_KEY", "sk-test-value-0000000001")
+    monkeypatch.setattr(vault, "default_vaults", lambda: [admin])
+    monkeypatch.setattr(providers, "HARNESS_ENV_FILE", str(tmp_path / "absent.env"))
+    for name in ("OPENAI_API_KEY",):
+        monkeypatch.delenv(name, raising=False)
+    assert providers._env_or_file("OPENAI_API_KEY") is True
+    assert providers._env_or_file("GEMINI_API_KEY", "GOOGLE_API_KEY") is False

@@ -42,3 +42,27 @@ Sizes (volumes only grow when used, DR257), the overlay's association table (USE
 - **Containers and VMs ready to use** (this record's main subject): nothing is prebuilt yet.
 - **AI providers and harness**: a fresh drive has no provider credentials (`/etc/baseline/harness.env`) and no harness installed, so
   everything shows unconfigured. Needs a decision on where credentials come from (USER_ADMIN) and which harness ships.
+
+## Operator decisions, 2026-10-12 (third review) - recorded
+1. **Applications:** all compatible applications for all OSes the drive provides (answers question 1 above). Compatibility comes from
+   `application_bundle` targets (Ubuntu 24.04/26.04, Debian 13 amd64 today); an OS outside them gets the applications through a helper
+   adapter, not silently none. Not built.
+2. **Credential vault:** secrets live in `/mnt/USER_ADMIN/vault` (the host's own) and `/mnt/USER_PERSONAL/vault` (a person's own).
+   BUILT (v1, file-mode protected, no encryption at rest yet: needs the passphrase-verifier key source from DR257): `vault.py`; the
+   provider status and the Claude harness read it first.
+3. **Browser sign-in to AI providers:** BUILT for Claude (`provider_setup.GuidedSetup` runs `claude setup-token`, shows its
+   claude.com link, passes the code back, stores the token in the vault; `/ai-setup`). Verified against the real CLI up to the sign-in
+   link (`tests/integration/verify_claude_signin_link.py`); the human sign-in itself is the operator's. OpenAI, Gemini and OpenRouter
+   offer no third-party sign-in grant for an unregistered app, so `/ai-setup` links to each provider's key page and stores the pasted key.
+4. **TUI parity in the browser (all tabs):** matrix below.
+
+| TUI tab / key | Browser | State |
+|---|---|---|
+| Hardware | `/hardware` | exists |
+| VMs | `/vms`, `/containers` | exists |
+| Sensors | `/sensors` (rows shared with the TUI through `sensors_view`) | BUILT |
+| Network (+ providers, tether `t`, IDs `i`) | none | open |
+| Chat (harness select, ask) | none | open |
+| Console (hardware/network/tether/ask commands) | none | open |
+| `p` Proxmox / return to console | `/console` | BUILT |
+| `r` refresh, `c` copy | page reload / browser | n/a |

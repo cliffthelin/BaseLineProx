@@ -30,6 +30,9 @@ def _env_or_file(*var_names: str) -> bool:
     """
     if any(os.environ.get(name) for name in var_names):
         return True
+    import vault                      # USER_PERSONAL's and USER_ADMIN's vaults (DR258); unreadable ones are skipped
+    if any(vault.lookup(name, environ={}) for name in var_names):
+        return True
     try:
         lines = Path(HARNESS_ENV_FILE).read_text().splitlines()
     except FileNotFoundError:

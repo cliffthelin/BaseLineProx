@@ -38,6 +38,7 @@ sys.path.insert(0, "/opt/baseline/lib")
 import hardware  # noqa: E402
 import network  # noqa: E402
 import harness_registry  # noqa: E402
+import sensors_view  # noqa: E402
 import harness_events  # noqa: E402
 import tether  # noqa: E402
 import providers  # noqa: E402
@@ -901,21 +902,7 @@ class BaselineApp(App):
     @work(thread=True, exclusive=True, group="sensors", exit_on_error=False)
     def collect_sensors(self) -> None:
         runner = repair.RealRunner()
-        rows = []  # (source, key, value, unit)
-        sensors_result = diagnostics.collect_sensors(runner)
-        for chip in sensors_result.chips:
-            for feature in chip["features"]:
-                rows.append(("sensors", f"{chip['chip']}/{feature['label']}", feature["value"], feature.get("unit", "")))
-        nvme_result = diagnostics.collect_nvme(runner)
-        for device in nvme_result.devices:
-            health = device.get("health") or {}
-            for field_name in ("temperature", "percentage_used"):
-                if isinstance(health.get(field_name), (int, float)):
-                    rows.append(("nvme", f"{device['path']}/{field_name}", health[field_name], "C" if field_name == "temperature" else "%"))
-        smart_result = diagnostics.collect_smart(runner)
-        for device in smart_result.devices:
-            if isinstance(device.get("temperature"), (int, float)):
-                rows.append(("smart", f"{device['device']}/temperature", device["temperature"], "C"))
+        rows = sensors_view.collect_rows(runner, diagnostics)       # shared with the web /sensors page
 
         history = []
         temp_rows = [r for r in rows if r[3] == "C" and isinstance(r[2], (int, float))]

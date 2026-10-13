@@ -78,7 +78,9 @@ NAV_TABS = (
     ("/vms", "Virtual machines"),
     ("/containers", "Distro containers"),
     ("/hardware", "Hardware"),
+    ("/sensors", "Sensors"),
     ("/tools", "Diagnostic tools"),
+    ("/ai-setup", "AI providers"),
     ("/installation-readiness", "Installation readiness"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -1913,6 +1915,32 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
 
+        if path in ("/ai-setup", "/ai-setup/claude"):
+            import ai_setup_page
+            import providers
+            import vault
+            if path == "/ai-setup/claude":
+                session = deps.get("claude_setup")
+                state = session.state() if session is not None else {"phase": "idle", "url": None,
+                                                                  "message": "no sign-in is in progress"}
+                return self._html_response(200, _with_nav(ai_setup_page.render_claude(state), "/ai-setup"))
+            status = []
+            for label, root in (("USER_ADMIN", vault.ADMIN_VAULT), ("USER_PERSONAL", vault.PERSONAL_VAULT)):
+                try:
+                    status += [dict(s, name=f"{s['name']} ({label})") for s in vault.Vault(root).status()]
+                except (vault.VaultError, OSError):
+                    pass
+            notice = qs.get("notice", [""])[0][:200]
+            return self._html_response(200, _with_nav(ai_setup_page.render_overview(
+                providers.check_providers(), status, [notice] if notice else []), "/ai-setup"))
+
+        if path == "/sensors":
+            import diagnostics
+            import repair
+            import sensors_view
+            return self._html_response(200, _with_nav(sensors_view.render(
+                sensors_view.collect_rows(deps.get("runner") or repair.RealRunner(), diagnostics)), path))
+
         if path == "/tools":
             import tools_page
             return self._html_response(200, _with_nav(tools_page.render(deps.get("tools_results") or tools_page.gather()), path))
@@ -2316,6 +2344,40 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(200,result)
             except (RuntimeError,vh.VmError,OSError,ValueError) as exc:
                 return self._json(409,{'outcome':'refused','detail':str(exc)})
+
+        if path.startswith("/ai-setup/"):
+            import ai_setup_page
+            import provider_setup
+            import vault
+            roots = {"admin": vault.ADMIN_VAULT, "personal": vault.PERSONAL_VAULT}
+            try:
+                if path == "/ai-setup/claude/start":
+                    old = deps.get("claude_setup")
+                    if old is not None:
+                        old.cancel()
+                    deps["claude_setup"] = provider_setup.GuidedSetup(
+                        ["claude", "setup-token"], vault.Vault(vault.ADMIN_VAULT), "CLAUDE_CODE_OAUTH_TOKEN",
+                        allowed_url_prefix=ai_setup_page.CLAUDE_URL_PREFIX)
+                    deps["claude_setup"].start()
+                    return self._redirect("/ai-setup/claude")
+                if path == "/ai-setup/claude/code":
+                    session = deps.get("claude_setup")
+                    if session is None:
+                        raise provider_setup.SetupError("no sign-in is in progress")
+                    session.submit_code(str(body.get("code", "")))
+                    return self._redirect("/ai-setup/claude")
+                if path == "/ai-setup/claude/cancel":
+                    if deps.get("claude_setup") is not None:
+                        deps["claude_setup"].cancel()
+                    return self._redirect("/ai-setup")
+                if path == "/ai-setup/paste":
+                    name, scope = ai_setup_page.paste_target(str(body.get("name", "")), str(body.get("scope", "")))
+                    vault.Vault(roots[scope]).put(name, str(body.get("value", "")))
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "vault_secret_stored", "name": name, "scope": scope})     # never the value
+                    return self._redirect("/ai-setup?notice=" + html.escape(f"{name} saved to the {scope} vault"))
+            except (provider_setup.SetupError, vault.VaultError, ValueError, OSError) as exc:
+                return self._redirect("/ai-setup?notice=" + html.escape(str(exc))[:180].replace(" ", "+"))
 
         if path == "/console/switch":
             import console_switch

@@ -192,6 +192,11 @@ def _load_env():
     without ever writing or logging the value itself."""
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return True
+    import vault                      # the vault first (DR258); the legacy /etc/baseline/harness.env still works
+    token = vault.lookup("CLAUDE_CODE_OAUTH_TOKEN", environ={})
+    if token:
+        os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        return True
     if os.path.exists(ENV_FILE):
         for line in open(ENV_FILE):
             line = line.strip()
