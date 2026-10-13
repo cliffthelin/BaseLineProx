@@ -36,7 +36,11 @@ Added 2026-10-12 after the operator asked why tests passed without the agent kno
 does not prove any of these; `tests/unit/test_established_expectations.py` records which are met (pass) and which are known gaps
 (strict xfail: it fails the suite the day the gap closes, so the marker must then be removed).
 
-- **Five default applications**, from the first days of the project (DR133, `docs/INSTALL.md`): VS Code, Spotify, Chrome, ChatGPT (Linux
+- **Five Proxmox applications (UNRESOLVED, ask before building).** The operator, 2026-10-12: "I expect 5 we have had established nearly from
+  day 1 ... they are Proxmox applications", and "I still do not see any of the Proxmox installed tools". No document or earlier session in
+  this repo names them. The Proxmox product family has five: Virtual Environment, Backup Server, Mail Gateway, Datacenter Manager and
+  Offline Mirror - a hypothesis only, to be confirmed with the operator and then recorded here and in a decision record.
+- **Five default (guest) applications**, from the first days of the project (DR133, `docs/INSTALL.md`; a separate fact from the one above): VS Code, Spotify, Chrome, ChatGPT (Linux
   preview) and Claude Desktop (Linux beta). Native publisher packages, exact-source prepared by `baseline-apps prepare`, carried on
   INSTALLER_CACHE. A finished drive must have them **installed and configured** in the default Ubuntu environment, each available as
   its own interchangeable application container with adapters where an OS needs a helper (DR258). Carried and verified is not
