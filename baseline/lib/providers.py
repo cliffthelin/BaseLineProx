@@ -51,13 +51,15 @@ def _configured_result(name: str, var_names: tuple[str, ...], provider: str) -> 
         return {"name": name, "state": "unknown", "detail": str(exc)}
     if configured:
         return {"name": name, "state": "available", "detail": f"{provider} credential configured; live access not checked"}
-    return {"name": name, "state": "unconfigured", "detail": f"no {provider} credential configured"}
+    return {"name": name, "state": "unconfigured",
+            "detail": f"no {provider} credential configured - add it to {HARNESS_ENV_FILE}"
+                      + (" (run /opt/baseline/bin/baseline-auth-setup.sh)" if provider == "Claude" else "")}
 
 
 def display_status(state: str) -> str:
     """Map provider observations to the dashboard without collapsing unknown."""
     return {"reachable": "Reachable", "available": "Available",
-            "unreachable": "Unreachable", "unconfigured": "Unreachable",
+            "unreachable": "Unreachable", "unconfigured": "Not set up",
             "unknown": "Unknown"}.get(state, "Unknown")
 
 

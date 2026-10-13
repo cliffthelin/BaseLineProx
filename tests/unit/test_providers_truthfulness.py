@@ -68,3 +68,9 @@ def test_ollama_refused_connection_is_not_claimed_configured(monkeypatch):
     ollama = next(item for item in result if item["name"] == "Ollama (local)")
     assert ollama["state"] == "unreachable"
     assert "refused" in ollama["detail"]
+
+
+def test_a_provider_without_credentials_is_not_set_up_not_unreachable():
+    """The operator read "Unreachable" as a network fault (2026-10-12); the network was fine and nothing was configured."""
+    assert providers.display_status("unconfigured") == "Not set up"
+    assert providers.display_status("unreachable") == "Unreachable"
