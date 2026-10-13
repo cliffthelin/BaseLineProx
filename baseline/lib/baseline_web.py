@@ -78,6 +78,7 @@ NAV_TABS = (
     ("/vms", "Virtual machines"),
     ("/containers", "Distro containers"),
     ("/hardware", "Hardware"),
+    ("/network", "Network"),
     ("/sensors", "Sensors"),
     ("/tools", "Diagnostic tools"),
     ("/ai-setup", "AI providers"),
@@ -1933,6 +1934,19 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             notice = qs.get("notice", [""])[0][:200]
             return self._html_response(200, _with_nav(ai_setup_page.render_overview(
                 providers.check_providers(), status, [notice] if notice else []), "/ai-setup"))
+
+        if path == "/network":
+            import network
+            import network_view
+            import providers
+            facts = network.check_lifeline()
+            try:
+                interfaces = network.list_interfaces()
+            except network.NetworkProbeError as exc:
+                interfaces = []
+                facts.append({"fact": "interface_inventory", "ok": False, "detail": str(exc)})
+            return self._html_response(200, _with_nav(network_view.render(
+                network_view.build_rows(facts, interfaces, providers.check_providers(), network)), path))
 
         if path == "/sensors":
             import diagnostics

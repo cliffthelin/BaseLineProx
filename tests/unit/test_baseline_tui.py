@@ -34,14 +34,16 @@ def test_connection_modal_disables_admin_switch_when_state_is_unknown():
 
 
 def test_network_dashboard_does_not_hide_bridge_member_probe_errors():
-    tree = ast.parse((ROOT / "baseline" / "bin" / "baseline").read_text())
-    app = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "BaselineApp")
-    render = next(node for node in app.body if isinstance(node, ast.FunctionDef) and node.name == "_render_network")
-    source = ast.unparse(render)
+    """The row builder moved to network_view (shared with the web page); the TUI must still use it."""
+    tree = ast.parse((ROOT / "baseline" / "lib" / "network_view.py").read_text())
+    build = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "build_rows")
+    source = ast.unparse(build)
     assert "network._bridge_members(active_dev)" in source
     assert "NetworkProbeError" in source
     assert "bridge member inventory unavailable" in source
     assert "Unknown" in source
+    tui = (ROOT / "baseline" / "bin" / "baseline").read_text()
+    assert "network_view.build_rows(" in tui and "network_view.sort_rows(" in tui
 
 
 def test_tether_action_reports_the_real_outcome_before_refreshing_network():

@@ -39,6 +39,7 @@ import hardware  # noqa: E402
 import network  # noqa: E402
 import harness_registry  # noqa: E402
 import sensors_view  # noqa: E402
+import network_view  # noqa: E402
 import harness_events  # noqa: E402
 import tether  # noqa: E402
 import providers  # noqa: E402
@@ -61,9 +62,9 @@ NETWORK_AUTOREFRESH_SECONDS = 15
 SENSORS_DB_PATH = Path("/var/lib/baseline/sensors_history.db")
 SENSORS_HISTORY_WINDOW_S = 3600
 DASHBOARD_AUTOREFRESH_SECONDS = 30
-CATEGORY_ORDER = ["Network", "AI Provider"]
-STATUS_ORDER = ["Active", "Reachable", "Available", "Unreachable", "Unknown"]
-STATUS_STYLE = {"Active": "#87ff87", "Reachable": "#5faf5f", "Available": "#ffd700", "Unreachable": "#ff5f5f", "Unknown": "#afafff"}
+CATEGORY_ORDER = network_view.CATEGORY_ORDER          # defined once, in network_view, for the TUI and the web page
+STATUS_ORDER = network_view.STATUS_ORDER
+STATUS_STYLE = network_view.STATUS_STYLE
 LIFELINE_STAGE_LABELS = [
     ("nic_detected", "NIC detected"),
     ("driver_bound", "Driver bound"),
@@ -991,97 +992,16 @@ class BaselineApp(App):
 
     @_safe
     def _render_network(self, facts: list, interfaces: list, provider_states: list) -> None:
-        fact_map = {f["fact"]: f for f in facts}
-        rows = []  # (key, category, label, status, detail)
+        rows = network_view.build_rows(facts, interfaces, provider_states, network, self.show_hardware_ids)
         self._last_facts = facts
-        self._active_display_dev = None
-
-        active_dev = None
-        active_members = set()
-        addr_fact = fact_map.get("address_assigned")
-        if addr_fact and addr_fact["ok"] and ":" in addr_fact["detail"]:
-            active_dev, ip = (p.strip() for p in addr_fact["detail"].split(":", 1))
-            active_members.add(active_dev)
-            try:
-                active_members.update(network._bridge_members(active_dev))
-                bridge_members_error = None
-            except network.NetworkProbeError as exc:
-                bridge_members_error = str(exc)
-            display_dev = next((m for m in active_members if m != active_dev), active_dev)
-            self._active_display_dev = display_dev
-            # "Active" - the one connection actually carrying the lifeline
-            # right now, not just "Reachable" like a passing check - no
-            # ambiguity about which path is in use. IP and traffic shown
-            # right on this row, not just in the modal - the two things
-            # an operator glancing at the main page needs most.
-            try:
-                traffic = network.interface_traffic_label(display_dev)
-            except network.NetworkProbeError as exc:
-                traffic = f"traffic counters unavailable: {exc}"
-            detail = f"{ip} | {traffic}" if traffic else ip
-            rows.append((f"iface:{display_dev}", "Network", network.friendly_name(display_dev, self.show_hardware_ids), "Active", detail))
-            if bridge_members_error:
-                rows.append(("info:bridge-members", "Network", "Bridge members", "Unknown",
-                             f"bridge member inventory unavailable: {bridge_members_error}"))
-
-        for stage, label in (("nic_detected", "Physical network adapters"),
-                             ("driver_bound", "Network driver"),
-                             ("carrier_present", "Network link"),
-                             ("interface_inventory", "Interface details"),
-                             ("gateway_reachable", "Gateway"),
-                             ("dns_functioning", "DNS"),
-                             ("internet_reachable", "Internet")):
-            f = fact_map.get(stage)
-            if f is not None and not f["ok"]:
-                rows.append((f"info:{label}", "Network", label, "Reachable" if f["ok"] else "Unreachable", f["detail"]))
-
-        for iface in interfaces:
-            if iface["name"] in active_members:
-                continue
-            name = network.friendly_name(iface["name"], self.show_hardware_ids)
-            if iface["carrier"] is None:
-                rows.append((f"iface:{iface['name']}", "Network", name, "Unknown",
-                             iface.get("carrier_error") or "carrier state unavailable"))
-            elif iface["carrier"]:
-                try:
-                    traffic = network.interface_traffic_label(iface["name"])
-                except network.NetworkProbeError as exc:
-                    traffic = f"traffic counters unavailable: {exc}"
-                rows.append((f"iface:{iface['name']}", "Network", name, "Available", traffic or "connected, not in use"))
-            elif iface.get("driver_bound") is None or iface.get("wired") is None:
-                rows.append((f"iface:{iface['name']}", "Network", name, "Unknown",
-                             iface.get("driver_error") or "driver/link type unavailable; connection state cannot be inferred"))
-            elif iface["wired"]:
-                # A wired link with no carrier is truly physically
-                # disconnected - no command can fix that, so it's
-                # Unreachable, not just "available if you try".
-                rows.append((f"iface:{iface['name']}", "Network", name, "Unreachable", "not physically connected"))
-            else:
-                # Wi-Fi / Cellular Modem / Phone Tether can lack carrier
-                # simply because nothing has associated yet - a recoverable
-                # state, not a dead one.
-                rows.append((f"iface:{iface['name']}", "Network", name, "Available", "not connected"))
-
-        claude = next((p for p in provider_states if p["name"] == "Claude Subscription"), None)
-        if claude:
-            rows.append((f"info:{claude['name']}", "AI Provider", claude["name"],
-                         providers.display_status(claude["state"]), claude["detail"]))
-        for p in provider_states:
-            if p is claude:
-                continue
-            rows.append((f"info:{p['name']}", "AI Provider", p["name"],
-                         providers.display_status(p["state"]), p["detail"]))
+        self._active_display_dev = next((r[0].split(":", 1)[1] for r in rows if r[3] == "Active" and r[0].startswith("iface:")), None)
 
         self._net_rows_by_key = {key: (label, status, detail) for key, _cat, label, status, detail in rows}
 
-        def sort_key(row):
-            _key, category, _label, status, _detail = row
-            return (CATEGORY_ORDER.index(category), STATUS_ORDER.index(status))
-
         table = self.query_one("#net_table", DataTable)
         table.clear()
-        for key, category, label, status, detail in sorted(rows, key=sort_key):
-            style = STATUS_STYLE[status]
+        for key, category, label, status, detail in network_view.sort_rows(rows):
+            style = network_view.STATUS_STYLE[status]
             try:
                 table.add_row(escape_markup(category), escape_markup(label),
                                f"[{style}]{status}[/{style}]", escape_markup(detail), key=key)
