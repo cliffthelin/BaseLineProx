@@ -29,3 +29,17 @@ def render(history, harnesses, notice="") -> bytes:
             "<input name='question' size='60' autocomplete='off' placeholder='Ask Baseline...' required> "
             f"<button type='submit'>Ask</button></form>{log}"
             "<p><a href='/ai-setup'>AI provider setup</a></p></body></html>").encode()
+
+
+def render_shell(transcript, harnesses, current="claude", notice="") -> bytes:
+    """The browser version of the TUI's Console tab: a transcript (lines already plain text) and a command box."""
+    log = "".join(f"<div>{html.escape(line)}</div>" for line in transcript)
+    options = "".join(f"<option value='{html.escape(i)}'{' selected' if i == current else ''}>{html.escape(n)}</option>"
+                      for i, n in harnesses)
+    note = f"<p>{html.escape(notice)}</p>" if notice else ""
+    return ("<!doctype html><html><head><meta charset='utf-8'><title>Console</title><style>"
+            "pre,.t{font-family:ui-monospace,monospace;white-space:pre-wrap}</style></head><body><h1>Console</h1>"
+            f"{note}<div class='t'>{log or 'Baseline console. Type help for commands.'}</div>"
+            "<form method=\"post\" action=\"/shell/run\"><label>baseline&gt; <input name='line' size='60' autocomplete='off' autofocus "
+            "placeholder='hardware | network | tether | ask &lt;question&gt; | help'></label> "
+            f"<select name='harness'>{options}</select> <button type='submit'>Run</button></form></body></html>").encode()

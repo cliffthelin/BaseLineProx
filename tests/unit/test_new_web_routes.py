@@ -143,3 +143,52 @@ def test_the_console_page_switches_the_screen_only_for_a_request_from_this_machi
     assert status == 200 and "Show the Baseline console" in body
     status, location, _ = req(case, "POST", "/console/switch", cookie=False)
     assert status == 303 and case.chvt_calls == [["chvt", "1"]]
+
+
+# --- Console tab parity and the OpenCode harness in the browser -----------------------------------------------------------------
+
+def _context(adapters):
+    from types import SimpleNamespace as NS
+    import console_commands as cc
+    registry = NS(get_adapter=lambda hid: adapters.get(hid), supports_write_grant=lambda a: False, HarnessAdapterError=RuntimeError)
+    return cc.Context(hardware=None, network=None, tether=None, harness_registry=registry, sessions={}, snapshot={}, now=lambda: 1.0)
+
+
+class _Adapter:
+    def __init__(self, name):
+        self.name, self.asked = name, []
+
+    def new_session(self):
+        return object()
+
+    def ask(self, question, session=None):
+        self.asked.append(question)
+        return f"{self.name} says: {question}"
+
+
+def test_the_browser_console_runs_commands_and_keeps_a_transcript(case):
+    status, _, page = req(case, "GET", "/shell")
+    assert status == 200 and "baseline&gt; help" not in page and 'action="/shell/run"' in page
+    req(case, "POST", "/shell/run", {"line": "help", "harness": "claude"})
+    req(case, "POST", "/shell/run", {"line": "bogus", "harness": "claude"})
+    _, _, page = req(case, "GET", "/shell")
+    assert "commands: hardware, network, tether" in page and "unknown command" in page and "baseline&gt; help" in page
+
+
+def test_the_opencode_harness_is_reachable_from_chat_and_the_console(case):
+    claude, opencode = _Adapter("claude"), _Adapter("opencode")
+    case.server.deps["console_context"] = _context({"claude": claude, "opencode": opencode})     # type: ignore[attr-defined]
+    req(case, "POST", "/chat/ask", {"harness": "opencode", "question": "list drives"})
+    req(case, "POST", "/shell/run", {"line": "ask what is hot", "harness": "opencode"})
+    assert opencode.asked == ["list drives", "what is hot"] and claude.asked == []
+    _, _, chat = req(case, "GET", "/chat")
+    _, _, shell = req(case, "GET", "/shell")
+    assert "opencode says: list drives" in chat and "opencode says: what is hot" in shell
+
+
+def test_the_console_refuses_an_oversized_line_and_requires_a_session(case):
+    status, location, _ = req(case, "POST", "/shell/run", {"line": "help", "harness": "claude"}, cookie=False)
+    assert status in (303, 401)
+    req(case, "POST", "/shell/run", {"line": "x" * 5000, "harness": "claude"})
+    _, _, page = req(case, "GET", "/shell")
+    assert "x" * 100 not in page and "too long" in page

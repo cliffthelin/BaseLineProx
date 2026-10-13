@@ -80,6 +80,7 @@ NAV_TABS = (
     ("/hardware", "Hardware"),
     ("/network", "Network"),
     ("/chat", "Chat"),
+    ("/shell", "Console"),
     ("/sensors", "Sensors"),
     ("/tools", "Diagnostic tools"),
     ("/ai-setup", "AI providers"),
@@ -1607,6 +1608,44 @@ DEFAULT_STATE_DIR = Path("/var/lib/baseline")     # audit log, signing key and s
 _PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/console", "/console/switch"})
 
 
+def _console_context(deps: dict):
+    """The Console/Chat command context (console_commands.Context), built once per server; tests inject `console_context`."""
+    if deps.get("console_context") is None:
+        import console_commands
+        import hardware
+        import harness_registry
+        import network
+        import tether
+        snapshot_path = Path("/var/lib/baseline/hardware_snapshot.json")
+
+        def read():
+            try:
+                return json.loads(snapshot_path.read_text())
+            except (OSError, ValueError):
+                return None
+
+        def write(data):
+            try:
+                snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+                snapshot_path.write_text(json.dumps(data, indent=2))
+            except OSError:
+                pass
+        deps["console_context"] = console_commands.Context(
+            hardware=hardware, network=network, tether=tether, harness_registry=harness_registry, sessions={},
+            snapshot={"read": read, "write": write}, now=deps.get("clock", __import__("time").time))
+    return deps["console_context"]
+
+
+def _shell_run(deps: dict, line: str, harness_id: str) -> list:
+    import console_commands
+    if len(line) > 1000:
+        return ["line too long (limit 1000 characters)"]
+    try:
+        return console_commands.run(line, _console_context(deps), harness=harness_id)
+    except Exception as exc:                           # a failing probe or harness is reported in the transcript, not a 500
+        return [f"[{line.split()[0] if line.split() else 'command'}] failed: {exc}"]
+
+
 def _vm_host_for(deps: dict) -> vh.VmHost:
     """The VM library for this request; the store folder is a setting, so it is read each time."""
     if deps.get("vm_host") is not None:
@@ -1935,6 +1974,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             notice = qs.get("notice", [""])[0][:200]
             return self._html_response(200, _with_nav(ai_setup_page.render_overview(
                 providers.check_providers(), status, [notice] if notice else []), "/ai-setup"))
+
+        if path == "/shell":
+            import chat_page
+            import providers
+            return self._html_response(200, _with_nav(chat_page.render_shell(
+                deps.setdefault("shell_transcript", []), [(h["id"], h["name"]) for h in providers.HARNESSES]), path))
 
         if path == "/chat":
             import chat_page
@@ -2384,16 +2429,23 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 deps["audit"]({"event": "tether_requested", "severity": severity})
             return self._redirect("/network?notice=" + html.escape(message).replace(" ", "+")[:200])
 
+        if path == "/shell/run":
+            line = str(body.get("line", "")).strip()
+            transcript = deps.setdefault("shell_transcript", [])
+            if line:
+                transcript.append(f"baseline> {line[:80]}")
+                transcript.extend(_shell_run(deps, line, str(body.get("harness", "claude"))))
+                del transcript[:-200]
+            return self._redirect("/shell")
+
         if path == "/chat/ask":
             import chat_page
-            import harness
             try:
                 question = chat_page.clean_question(str(body.get("question", "")))
             except ValueError as exc:
                 return self._redirect("/chat?notice=" + html.escape(str(exc)).replace(" ", "+"))
-            if str(body.get("harness", "claude")) != "claude":
-                return self._redirect("/chat?notice=" + "That+harness+is+only+available+in+the+text+console+for+now")
-            deps.setdefault("chat_history", []).append((question, harness.ask(question)))
+            answer = " ".join(_shell_run(deps, "ask " + question, str(body.get("harness", "claude"))))
+            deps.setdefault("chat_history", []).append((question, answer))
             del deps["chat_history"][:-20]
             return self._redirect("/chat")
 
