@@ -40,6 +40,8 @@ does not prove any of these; `tests/unit/test_established_expectations.py` recor
   manifest"; the operator called them "Proxmox installed tools"): lm-sensors, nvme-cli, smartmontools, iperf3, ethtool. Installed by first
   boot from the drive's own repository (all five verified installed on PC601 from its dpkg status) and shown on the web app's
   `/tools` page, bookmarked in the browser. NUT and ProxMenux are deliberately deferred.
+- **Credential vault is encrypted at rest** (2026-10-13, DR258): sealed with one passphrase, unlocked per boot into `/run/baseline/vault`.
+  An agent never sets, reads or stores that passphrase.
 - **Five default (guest) applications**, from the first days of the project (DR133, `docs/INSTALL.md`; a separate fact from the one above): VS Code, Spotify, Chrome, ChatGPT (Linux
   preview) and Claude Desktop (Linux beta). Native publisher packages, exact-source prepared by `baseline-apps prepare`, carried on
   INSTALLER_CACHE. A finished drive must have them **installed and configured** in the default Ubuntu environment, each available as

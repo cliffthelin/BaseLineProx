@@ -112,3 +112,18 @@ attacked offline, while the running system can still check a given passphrase.
 ## Open points
 
 - Whether the secret for the verifier is TPM-sealed or derived (this drive moves between machines, which argues for derived).
+
+## Step 3 analysis, 2026-10-13: renaming the host root volume to SUBSTRATE (not executed; needs a shared-code change and Codex)
+What a name change must touch, found by reading the code, not guessed:
+- The host root is the LV `root`; the 1 GiB role LV `baseline_substrate` (label SUBSTRATE, mounted `/mnt/SUBSTRATE`) already holds the
+  name and holds `storage-policy.json` (`storage_policy.POLICY_PATH`), the install identity (`install_identity.DEFAULT_PATH`) and is
+  read by `installed_drive_update`, `drive_guard`, `quadlet` and the storage verifier (`findmnt --mountpoint /mnt/SUBSTRATE -o UUID` must
+  equal the policy's SUBSTRATE binding).
+- So the rename cannot be an `lvrename` alone: (1) the 1 GiB role must be dissolved (policy, identity and any other file moved to
+  USER_ADMIN, DR257's own decision); (2) `drive_installer.baseline_volumes_for` stops creating it; (3) the policy's `SUBSTRATE` binding
+  becomes the root filesystem's UUID and `/mnt/SUBSTRATE` stops being a mount of its own (a bind of a directory on the root); (4) only
+  then `lvrename root baseline_substrate`, with fstab, grub.cfg and initramfs rewritten exactly as the volume-group rename does
+  (`host_layout.name_the_volume_group_for_drive` is the proven pattern, including the `/dev/mapper` link after a live rename).
+- Steps 2-3 change shared code and the policy format that PC401 (Codex's lane) validates by rebuild: it must be agreed with Codex, not
+  done from this lane alone. A drive built before the change keeps working through the compatibility path of step 3.
+- Until then the root is presented as the Proxmox storage `substrate` (boot/baseline-proxmox-defaults.sh).

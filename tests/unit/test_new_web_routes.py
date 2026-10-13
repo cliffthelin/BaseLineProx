@@ -254,3 +254,9 @@ def test_a_sealed_vault_accepts_the_claude_token_once_unlocked(case, monkeypatch
 def test_vault_actions_need_a_session(case, path):
     status, _, _ = req(case, "POST", path, {"passphrase": PASS, "again": PASS}, cookie=False)
     assert status in (303, 401) and not v.Vault(v.ADMIN_VAULT).has_passphrase()
+
+
+def test_the_environments_page_lists_the_images_and_needs_a_session(case):
+    assert req(case, "GET", "/environments", cookie=False)[0] == 303
+    status, _, page = req(case, "GET", "/environments")
+    assert status == 200 and "five guest applications" in page and "baseline-nav" in page

@@ -48,8 +48,9 @@ Sizes (volumes only grow when used, DR257), the overlay's association table (USE
    `application_bundle` targets (Ubuntu 24.04/26.04, Debian 13 amd64 today); an OS outside them gets the applications through a helper
    adapter, not silently none. Not built.
 2. **Credential vault:** secrets live in `/mnt/USER_ADMIN/vault` (the host's own) and `/mnt/USER_PERSONAL/vault` (a person's own).
-   BUILT (v1, file-mode protected, no encryption at rest yet: needs the passphrase-verifier key source from DR257): `vault.py`; the
-   provider status and the Claude harness read it first.
+   BUILT: `vault.py` (private files, provider status and the Claude harness read it first) and, from 2026-10-13, encryption at rest
+   (`vault_crypto.py`: scrypt-derived keys, AES-256-CTR through openssl, encrypt-then-MAC; one passphrase set on `/vault`; unlocking
+   writes plaintext only to the RAM-backed `/run/baseline/vault`). The passphrase is not stored: losing it loses the sealed secrets.
 3. **Browser sign-in to AI providers:** BUILT for Claude (`provider_setup.GuidedSetup` runs `claude setup-token`, shows its
    claude.com link, passes the code back, stores the token in the vault; `/ai-setup`). Verified against the real CLI up to the sign-in
    link (`tests/integration/verify_claude_signin_link.py`); the human sign-in itself is the operator's. OpenAI, Gemini and OpenRouter
@@ -63,7 +64,11 @@ Sizes (volumes only grow when used, DR257), the overlay's association table (USE
 | Sensors | `/sensors` (rows shared with the TUI through `sensors_view`) | BUILT |
 | Network (+ providers, IDs `i`) | `/network` (rows shared through `network_view`) | BUILT; IDs toggle open |
 | Tether `t` | button on `/network` (wording shared via `chat_page.tether_message`) | BUILT |
-| Chat (harness select, ask) | `/chat` (Claude harness; OpenCode and streaming open) | PARTLY BUILT |
-| Console (hardware/network/tether/ask commands) | none | open |
+| Chat (harness select, ask) | `/chat` through the harness registry (Claude and OpenCode); streaming open | BUILT, streaming open |
+| Console (hardware/network/tether/ask/grant write) | `/shell` (`console_commands`, same wording) | BUILT |
 | `p` Proxmox / return to console | `/console` | BUILT |
 | `r` refresh, `c` copy | page reload / browser | n/a |
+
+## 2026-10-13: environments catalogue
+`/environments` lists every carried OS image against the five guest applications (native / helper / none) and whether an environment of
+that name exists. It claims nothing is installed. The prebuilt, configured environments themselves remain unbuilt (the work above).

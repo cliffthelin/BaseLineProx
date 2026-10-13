@@ -77,6 +77,7 @@ NAV_TABS = (
     ("/remote-access", "Remote access"),
     ("/vms", "Virtual machines"),
     ("/containers", "Distro containers"),
+    ("/environments", "Environments"),
     ("/hardware", "Hardware"),
     ("/network", "Network"),
     ("/chat", "Chat"),
@@ -2006,6 +2007,19 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             notice = qs.get("notice", [""])[0][:200]
             return self._html_response(200, _with_nav(ai_setup_page.render_overview(
                 providers.check_providers(), status, [notice] if notice else []), "/ai-setup"))
+
+        if path == "/environments":
+            import environments
+            try:
+                host = _vm_host_for(deps)
+                isos = [i["name"] if isinstance(i, dict) else str(i)
+                        for i in vm_page.available_isos(host, deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)]
+                vms = host.list_vms()
+            except (vh.VmError, OSError, ValueError) as exc:
+                return self._html_response(200, _with_nav(environments.render([]).replace(
+                    b"<table>", ("<p role='alert'>Inventory unavailable: " + html.escape(str(exc))).encode() + b"</p><table>"), path))
+            return self._html_response(200, _with_nav(environments.render(environments.catalogue(
+                isos, [{"name": getattr(v, "name", None) or (v.get("name") if isinstance(v, dict) else None)} for v in vms])), path))
 
         if path == "/shell":
             import chat_page
