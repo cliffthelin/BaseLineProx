@@ -398,6 +398,8 @@ cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
+cp "$SRC/baseline/lib/vault_crypto.py" /opt/baseline/lib/vault_crypto.py
+cp "$SRC/baseline/lib/console_commands.py" /opt/baseline/lib/console_commands.py
 cp "$SRC/baseline/lib/chat_page.py" /opt/baseline/lib/chat_page.py
 cp "$SRC/baseline/lib/network_view.py" /opt/baseline/lib/network_view.py
 cp "$SRC/baseline/lib/sensors_view.py" /opt/baseline/lib/sensors_view.py

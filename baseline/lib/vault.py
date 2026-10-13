@@ -17,6 +17,11 @@ import stat
 import tempfile
 from pathlib import Path
 
+import vault_crypto
+from vault_crypto import SealError, WrongPassphrase  # noqa: F401  (re-exported: callers catch v.WrongPassphrase)
+
+RUNTIME_DIR = "/run/baseline/vault"      # RAM-backed: plaintext of an unlocked vault lives here and nowhere on the drive
+VERIFIER = ".verifier"
 ADMIN_VAULT = "/mnt/USER_ADMIN/vault"
 PERSONAL_VAULT = "/mnt/USER_PERSONAL/vault"
 _NAME = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
@@ -25,6 +30,10 @@ MIN_LENGTH, MAX_LENGTH = 8, 8192
 
 class VaultError(RuntimeError):
     """Never carries a secret value."""
+
+
+class VaultLocked(VaultError):
+    """The value is sealed and no passphrase was given."""
 
 
 class Vault:
@@ -47,19 +56,37 @@ class Vault:
             raise VaultError(f"{self.root} is accessible to others; it must be mode 0700")
         return self.root
 
-    def put(self, name, value):
-        self._check_name(name)
-        if (not isinstance(value, str) or not MIN_LENGTH <= len(value) <= MAX_LENGTH or any(c in value for c in "\r\n\x00")):
-            raise VaultError("a secret must be one line of 8 to 8192 characters")
+    def has_passphrase(self):
+        folder = self._folder()
+        return folder is not None and (folder / VERIFIER).is_file()
+
+    def check_passphrase(self, passphrase):
+        folder = self._folder()
+        if folder is None or not (folder / VERIFIER).is_file():
+            raise VaultError("this vault has no passphrase set")
+        try:
+            return vault_crypto.open_sealed((folder / VERIFIER).read_text().strip(), passphrase) == "baseline-vault-verifier"
+        except WrongPassphrase:
+            return False
+
+    def set_passphrase(self, passphrase):
+        """First-time passphrase: writes the verifier and seals every secret already stored in plain. An existing one is not replaced."""
+        if self.has_passphrase():
+            raise VaultError("this vault already has a passphrase")
         folder = self._folder(create=True)
-        target = folder / name
-        if target.is_symlink():
-            raise VaultError(f"{name} is a link; refusing to write through it")
-        fd, temporary = tempfile.mkstemp(prefix=name + ".", suffix=".tmp", dir=folder)
+        token = vault_crypto.seal("baseline-vault-verifier", passphrase)          # also validates the passphrase's length
+        for name in self.names():
+            raw = (folder / name).read_text().strip()
+            if not raw.startswith(vault_crypto.PREFIX):
+                self._write(name, vault_crypto.seal(raw, passphrase))
+        self._write_file(folder / VERIFIER, token)
+
+    def _write_file(self, target, text):
+        fd, temporary = tempfile.mkstemp(prefix=target.name + ".", suffix=".tmp", dir=target.parent)
         try:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w") as handle:
-                handle.write(value + "\n")
+                handle.write(text + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, target)
@@ -67,7 +94,26 @@ class Vault:
             Path(temporary).unlink(missing_ok=True)
             raise
 
-    def get(self, name):
+    def _write(self, name, text):
+        self._write_file(self._folder(create=True) / name, text)
+
+    def put(self, name, value, passphrase=None):
+        self._check_name(name)
+        if (not isinstance(value, str) or not MIN_LENGTH <= len(value) <= MAX_LENGTH or any(c in value for c in "\r\n\x00")):
+            raise VaultError("a secret must be one line of 8 to 8192 characters")
+        folder = self._folder(create=True)
+        target = folder / name
+        if target.is_symlink():
+            raise VaultError(f"{name} is a link; refusing to write through it")
+        if self.has_passphrase():
+            if passphrase is None:
+                raise VaultLocked("this vault is sealed; the passphrase is needed to store a secret")
+            if not self.check_passphrase(passphrase):
+                raise WrongPassphrase("wrong passphrase")
+            value = vault_crypto.seal(value, passphrase)
+        self._write_file(target, value)
+
+    def get(self, name, passphrase=None):
         self._check_name(name)
         folder = self._folder()
         if folder is None:
@@ -81,7 +127,35 @@ class Vault:
             raise VaultError(f"{name} is not a plain file; refusing to read it")
         if info.st_mode & 0o077:
             raise VaultError(f"{name} is accessible to others; it must be mode 0600")
-        return target.read_text().strip() or None
+        raw = target.read_text().strip() or None
+        if raw and raw.startswith(vault_crypto.PREFIX):
+            if passphrase is None:
+                raise VaultLocked(f"{name} is sealed; unlock the vault with its passphrase")
+            return vault_crypto.open_sealed(raw, passphrase)
+        return raw
+
+    def unlock(self, passphrase, runtime=RUNTIME_DIR):
+        """Decrypt every secret into the RAM-backed runtime folder (0700/0600) so other processes (the harness, the TUI) can read
+        them for this boot. Nothing is written to the drive. Returns the names unlocked."""
+        if not self.check_passphrase(passphrase):
+            raise WrongPassphrase("wrong passphrase")
+        runtime = Path(runtime)
+        runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(runtime, 0o700)
+        names = []
+        for name in self.names():
+            value = self.get(name, passphrase=passphrase)
+            if value:
+                self._write_file(runtime / name, value)
+                names.append(name)
+        return names
+
+    def lock(self, runtime=RUNTIME_DIR):
+        runtime = Path(runtime)
+        if runtime.is_dir():
+            for entry in runtime.iterdir():
+                if _NAME.fullmatch(entry.name):
+                    entry.unlink(missing_ok=True)
 
     def delete(self, name):
         self._check_name(name)
@@ -98,9 +172,12 @@ class Vault:
     def status(self):
         """[{name, length, fingerprint}] - what the operator may see about each secret."""
         out = []
+        folder = self._folder()
         for name in self.names():
-            value = self.get(name) or ""
-            out.append({"name": name, "length": len(value), "fingerprint": hashlib.sha256(value.encode()).hexdigest()[:8]})
+            raw = (folder / name).read_text().strip()
+            sealed = raw.startswith(vault_crypto.PREFIX)
+            out.append({"name": name, "length": len(raw) if not sealed else None,
+                        "fingerprint": hashlib.sha256(raw.encode()).hexdigest()[:8], "locked": sealed})
         return out
 
 
@@ -108,17 +185,41 @@ def default_vaults():
     return [Vault(PERSONAL_VAULT), Vault(ADMIN_VAULT)]
 
 
-def lookup(name, *, vaults=None, environ=None):
+def lookup(name, *, vaults=None, environ=None, runtime=RUNTIME_DIR):
     """The value of `name`: the process environment first (an authoritative process credential), then the personal vault, then the
     admin vault. None when none holds it. An unreadable vault is skipped, never fatal here: callers report 'not set up'."""
     environ = os.environ if environ is None else environ
     if environ.get(name):
         return environ[name]
+    try:                                                     # an unlocked vault's plaintext, in RAM for this boot
+        unlocked = Path(runtime) / name
+        if _NAME.fullmatch(name) and unlocked.is_file() and not unlocked.is_symlink() and not unlocked.stat().st_mode & 0o077:
+            value = unlocked.read_text().strip()
+            if value:
+                return value
+    except OSError:
+        pass
     for vault in (default_vaults() if vaults is None else vaults):
         try:
             value = vault.get(name)
-        except (VaultError, OSError):
+        except (VaultError, OSError):                        # sealed (locked) or unreadable: not available until unlocked
             continue
         if value:
             return value
     return None
+
+
+class Unlocked:
+    """A vault bound to its passphrase for one purpose (the sign-in thread storing a token). Holds the passphrase only in memory."""
+
+    def __init__(self, vault, passphrase):
+        self._vault, self._passphrase = vault, passphrase
+
+    def put(self, name, value):
+        self._vault.put(name, value, passphrase=self._passphrase)
+
+    def get(self, name):
+        return self._vault.get(name, passphrase=self._passphrase)
+
+    def names(self):
+        return self._vault.names()

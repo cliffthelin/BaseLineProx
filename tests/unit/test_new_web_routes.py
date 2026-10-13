@@ -192,3 +192,65 @@ def test_the_console_refuses_an_oversized_line_and_requires_a_session(case):
     req(case, "POST", "/shell/run", {"line": "x" * 5000, "harness": "claude"})
     _, _, page = req(case, "GET", "/shell")
     assert "x" * 100 not in page and "too long" in page
+
+
+# --- Vault encryption at rest through the browser ---------------------------------------------------------------------------------
+
+PASS = "a long vault passphrase 2026"
+
+
+def test_the_vault_is_sealed_with_a_passphrase_and_unlocked_for_the_boot(case, monkeypatch):
+    monkeypatch.setattr(v, "RUNTIME_DIR", str(case.tmp / "run-vault"))
+    req(case, "POST", "/ai-setup/paste", {"name": "OPENAI_API_KEY", "value": SECRET, "scope": "admin"})
+    assert v.Vault(v.ADMIN_VAULT).get("OPENAI_API_KEY") == SECRET                       # plain until a passphrase is set
+    _, _, page = req(case, "GET", "/vault")
+    assert "Set a vault passphrase" in page
+    status, location, _ = req(case, "POST", "/vault/set", {"passphrase": PASS, "again": PASS})
+    assert status == 303
+    raw = (case.tmp / "admin-vault" / "OPENAI_API_KEY").read_text()
+    assert raw.startswith("ENC1:") and SECRET not in raw                                # sealed on the drive
+    _, _, page = req(case, "GET", "/vault")
+    assert "Unlocked" in page and SECRET not in page and PASS not in page
+    assert (case.tmp / "run-vault" / "OPENAI_API_KEY").read_text().strip() == SECRET        # plaintext only in the RAM-backed folder
+    req(case, "POST", "/ai-setup/paste", {"name": "GEMINI_API_KEY", "value": "gemini-new-value-0002", "scope": "admin"})
+    assert (case.tmp / "admin-vault" / "GEMINI_API_KEY").read_text().startswith("ENC1:")     # new secrets are sealed too
+    req(case, "POST", "/vault/lock")
+    assert not list((case.tmp / "run-vault").glob("*"))
+    _, _, page = req(case, "GET", "/vault")
+    assert "Locked" in page and "Unlock" in page
+    req(case, "POST", "/vault/unlock", {"passphrase": "wrong passphrase 123456"})
+    assert not list((case.tmp / "run-vault").glob("*"))
+    req(case, "POST", "/vault/unlock", {"passphrase": PASS})
+    assert (case.tmp / "run-vault" / "GEMINI_API_KEY").read_text().strip() == "gemini-new-value-0002"
+
+
+def test_mismatched_or_short_passphrases_do_not_seal_anything(case, monkeypatch):
+    monkeypatch.setattr(v, "RUNTIME_DIR", str(case.tmp / "run-vault"))
+    req(case, "POST", "/ai-setup/paste", {"name": "OPENAI_API_KEY", "value": SECRET, "scope": "admin"})
+    req(case, "POST", "/vault/set", {"passphrase": PASS, "again": PASS + "x"})
+    req(case, "POST", "/vault/set", {"passphrase": "short", "again": "short"})
+    assert v.Vault(v.ADMIN_VAULT).get("OPENAI_API_KEY") == SECRET and not v.Vault(v.ADMIN_VAULT).has_passphrase()
+
+
+def test_a_sealed_vault_accepts_the_claude_token_once_unlocked(case, monkeypatch):
+    monkeypatch.setattr(v, "RUNTIME_DIR", str(case.tmp / "run-vault"))
+    req(case, "POST", "/vault/set", {"passphrase": PASS, "again": PASS})
+    req(case, "POST", "/ai-setup/claude/start")
+    for _ in range(100):
+        if "authorize" in req(case, "GET", "/ai-setup/claude")[2]:
+            break
+        time.sleep(0.1)
+    req(case, "POST", "/ai-setup/claude/code", {"code": "right-code-777"})
+    for _ in range(100):
+        if (case.tmp / "admin-vault" / "CLAUDE_CODE_OAUTH_TOKEN").exists():
+            break
+        time.sleep(0.1)
+    raw = (case.tmp / "admin-vault" / "CLAUDE_CODE_OAUTH_TOKEN").read_text()
+    assert raw.startswith("ENC1:") and "sk-ant-oat01" not in raw
+    assert v.Vault(v.ADMIN_VAULT).get("CLAUDE_CODE_OAUTH_TOKEN", passphrase=PASS) == "sk-ant-oat01-" + "Zq4" * 24
+
+
+@pytest.mark.parametrize("path", ["/vault/set", "/vault/unlock", "/vault/lock"])
+def test_vault_actions_need_a_session(case, path):
+    status, _, _ = req(case, "POST", path, {"passphrase": PASS, "again": PASS}, cookie=False)
+    assert status in (303, 401) and not v.Vault(v.ADMIN_VAULT).has_passphrase()

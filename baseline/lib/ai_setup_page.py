@@ -67,3 +67,28 @@ def render_claude(state):
     else:
         body = f"<p>{message}</p><p><a href='/ai-setup'>Back to AI providers</a></p>"
     return _page("Connect Claude", refresh + body)
+
+
+def render_vault(states, notice=""):
+    """states: [{label, has_passphrase, unlocked, count}] for the admin and personal vaults."""
+    rows = ""
+    for st in states:
+        state = "No passphrase (stored as plain files)" if not st["has_passphrase"] else ("Unlocked for this boot" if st["unlocked"] else "Locked")
+        rows += f"<tr><td>{html.escape(st['label'])}</td><td>{html.escape(state)}</td><td>{st['count']}</td></tr>"
+    any_unset = any(not st["has_passphrase"] for st in states)
+    any_sealed = any(st["has_passphrase"] for st in states)
+    forms = ""
+    if any_unset:
+        forms += ("<section><h2>Set a vault passphrase</h2><p>Seals every secret on the drive (AES-256, authenticated). The passphrase is "
+                  "never stored; lose it and the sealed secrets cannot be recovered.</p>"
+                  "<form method=\"post\" action=\"/vault/set\"><input name='passphrase' type='password' autocomplete='new-password' "
+                  "placeholder='passphrase (12+ characters)' required> <input name='again' type='password' autocomplete='new-password' "
+                  "placeholder='again' required> <button type='submit'>Seal the vault</button></form></section>")
+    if any_sealed:
+        forms += ("<section><h2>Unlock for this boot</h2><form method=\"post\" action=\"/vault/unlock\">"
+                  "<input name='passphrase' type='password' autocomplete='current-password' required> "
+                  "<button type='submit'>Unlock</button></form><form method=\"post\" action=\"/vault/lock\">"
+                  "<button type='submit'>Lock now</button></form></section>")
+    note = f"<p>{html.escape(notice)}</p>" if notice else ""
+    return _page("Credential vault", f"{note}<table><thead><tr><th>Vault</th><th>State</th><th>Secrets</th></tr></thead><tbody>{rows}"
+                 f"</tbody></table>{forms}<p><a href='/ai-setup'>AI providers</a></p>")

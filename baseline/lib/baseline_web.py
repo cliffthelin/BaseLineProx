@@ -84,6 +84,7 @@ NAV_TABS = (
     ("/sensors", "Sensors"),
     ("/tools", "Diagnostic tools"),
     ("/ai-setup", "AI providers"),
+    ("/vault", "Vault"),
     ("/installation-readiness", "Installation readiness"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
@@ -1646,6 +1647,31 @@ def _shell_run(deps: dict, line: str, harness_id: str) -> list:
         return [f"[{line.split()[0] if line.split() else 'command'}] failed: {exc}"]
 
 
+def _vault_roots():
+    import vault
+    return (("USER_ADMIN", "admin", vault.ADMIN_VAULT), ("USER_PERSONAL", "personal", vault.PERSONAL_VAULT))
+
+
+def _vault_states(deps: dict) -> list:
+    import vault
+    out = []
+    for label, _scope, root in _vault_roots():
+        store = vault.Vault(root)
+        try:
+            out.append({"label": label, "has_passphrase": store.has_passphrase(), "count": len(store.names()),
+                        "unlocked": bool(deps.get("vault_passphrase")) and store.has_passphrase()})
+        except (vault.VaultError, OSError):
+            out.append({"label": label, "has_passphrase": False, "count": 0, "unlocked": False})
+    return out
+
+
+def _vault_for(deps: dict, root: str):
+    """The vault bound to the passphrase held in this server's memory, or the plain vault when none is set."""
+    import vault
+    store = vault.Vault(root)
+    return vault.Unlocked(store, deps["vault_passphrase"]) if store.has_passphrase() and deps.get("vault_passphrase") else store
+
+
 def _vm_host_for(deps: dict) -> vh.VmHost:
     """The VM library for this request; the store folder is a setting, so it is read each time."""
     if deps.get("vm_host") is not None:
@@ -1955,6 +1981,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/install-plan":
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
+
+        if path == "/vault":
+            import ai_setup_page
+            import vault
+            return self._html_response(200, _with_nav(ai_setup_page.render_vault(
+                _vault_states(deps), qs.get("notice", [""])[0][:200].replace("+", " ")), path))
 
         if path in ("/ai-setup", "/ai-setup/claude"):
             import ai_setup_page
@@ -2449,6 +2481,39 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             del deps["chat_history"][:-20]
             return self._redirect("/chat")
 
+        if path in ("/vault/set", "/vault/unlock", "/vault/lock"):
+            import vault
+            notice = ""
+            try:
+                if path == "/vault/lock":
+                    for _label, _scope, root in _vault_roots():
+                        vault.Vault(root).lock(vault.RUNTIME_DIR)
+                    deps.pop("vault_passphrase", None)
+                    notice = "Vault locked"
+                else:
+                    passphrase = str(body.get("passphrase", ""))
+                    if path == "/vault/set":
+                        if passphrase != str(body.get("again", "")):
+                            raise ValueError("the two passphrases differ")
+                        for _label, _scope, root in _vault_roots():
+                            store = vault.Vault(root)
+                            if not store.has_passphrase():
+                                store.set_passphrase(passphrase)
+                    names = []
+                    for _label, _scope, root in _vault_roots():
+                        store = vault.Vault(root)
+                        if store.has_passphrase():
+                            names += store.unlock(passphrase, vault.RUNTIME_DIR)
+                    deps["vault_passphrase"] = passphrase
+                    notice = f"Vault unlocked for this boot ({len(names)} secrets)"
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "vault_unlocked", "count": len(names)})
+            except vault.WrongPassphrase:
+                notice = "Wrong passphrase"
+            except (vault.VaultError, vault.SealError, ValueError, OSError) as exc:
+                notice = str(exc)[:160]
+            return self._redirect("/vault?notice=" + html.escape(notice).replace(" ", "+"))
+
         if path.startswith("/ai-setup/"):
             import ai_setup_page
             import provider_setup
@@ -2460,7 +2525,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     if old is not None:
                         old.cancel()
                     deps["claude_setup"] = provider_setup.GuidedSetup(
-                        deps.get("claude_setup_argv") or ["claude", "setup-token"], vault.Vault(vault.ADMIN_VAULT), "CLAUDE_CODE_OAUTH_TOKEN",
+                        deps.get("claude_setup_argv") or ["claude", "setup-token"], _vault_for(deps, vault.ADMIN_VAULT),
+                        "CLAUDE_CODE_OAUTH_TOKEN",
                         allowed_url_prefix=ai_setup_page.CLAUDE_URL_PREFIX)
                     deps["claude_setup"].start()
                     return self._redirect("/ai-setup/claude")
@@ -2476,11 +2542,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     return self._redirect("/ai-setup")
                 if path == "/ai-setup/paste":
                     name, scope = ai_setup_page.paste_target(str(body.get("name", "")), str(body.get("scope", "")))
-                    vault.Vault(roots[scope]).put(name, str(body.get("value", "")))
+                    _vault_for(deps, roots[scope]).put(name, str(body.get("value", "")))
                     if deps.get("audit"):
                         deps["audit"]({"event": "vault_secret_stored", "name": name, "scope": scope})     # never the value
                     return self._redirect("/ai-setup?notice=" + html.escape(f"{name} saved to the {scope} vault"))
-            except (provider_setup.SetupError, vault.VaultError, ValueError, OSError) as exc:
+            except vault.VaultLocked:
+                return self._redirect("/vault?notice=Unlock+the+vault+first")
+            except (provider_setup.SetupError, vault.VaultError, vault.SealError, ValueError, OSError) as exc:
                 return self._redirect("/ai-setup?notice=" + html.escape(str(exc))[:180].replace(" ", "+"))
 
         if path == "/console/switch":
