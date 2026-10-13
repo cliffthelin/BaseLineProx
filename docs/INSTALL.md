@@ -1881,7 +1881,7 @@ under KVM (no root, no physical drive).
 - `install` / `--stage rehearse` offer the cache and OS images (`--os-iso NAME`, repeatable) to the installer VM. The installed
   system's first boot (`baseline-first-boot-install`) lays out storage, copies the exact installer ISO and its expanded
   environment onto INSTALLER_CACHE, copies and verifies the offered OS images (registered as the Proxmox ISO storage
-  `baseline-isos`), and provisions from the carried repository.
+  `installer-cache`), and provisions from the carried repository.
 - After CONFIRM, first boot installs its diagnostic tools from that repository when the network does not verify, commits, and the
   kiosk shows Proxmox. `baseline-network-retry.timer` then re-applies only the change that was confirmed, until it verifies.
 - The drive's cache learns: packages apt downloads are kept in it (`LEARNED.json`), so a rebuild finds them there.

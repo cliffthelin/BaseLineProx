@@ -30,6 +30,29 @@ When instructions appear to conflict, use this order:
 
 If a decision record and the actual current repo state disagree, trust the repo state and write a new record explaining the drift — never silently pick one without saying so.
 
+## Established facts (read these before building or reviewing anything for the installed system)
+
+Added 2026-10-12 after the operator asked why tests passed without the agent knowing the drive's expected contents. A passing unit suite
+does not prove any of these; `tests/unit/test_established_expectations.py` records which are met (pass) and which are known gaps
+(strict xfail: it fails the suite the day the gap closes, so the marker must then be removed).
+
+- **Five default applications**, from the first days of the project (DR133, `docs/INSTALL.md`): VS Code, Spotify, Chrome, ChatGPT (Linux
+  preview) and Claude Desktop (Linux beta). Native publisher packages, exact-source prepared by `baseline-apps prepare`, carried on
+  INSTALLER_CACHE. A finished drive must have them **installed and configured** in the default Ubuntu environment, each available as
+  its own interchangeable application container with adapters where an OS needs a helper (DR258). Carried and verified is not
+  installed: as of 2026-10-12 only "carried" is true.
+- **Roles and names** (DR257): the host root is SUBSTRATE (publishable, reveals nothing about the machine or user); USER_ADMIN holds
+  everything personal about the substrate (never published); SESSION_TEMP is the thin pool (`session-temp`), swap and VM disks; VM
+  overlays go to USER_PERSONAL/APPDATA_*, never USER_ADMIN. Proxmox's generic names (`pve`, `local`, `data`, `local-lvm`) are not used.
+  Storage ids are lowercase forms of the volume names (`installer-cache`, `user-admin`, `session-temp` ...).
+- **Root accepts the operator's own host password** (direct instruction 2026-09-29 and 2026-10-12). This overrides the one-time-password
+  rule below for the development drive, and only through a crypt hash the operator exports to
+  `baseline-build/host-password-hash` (mode 0600): an agent never reads, types or stores the password itself.
+- **The browser is a real browser window** (address bar, tabs, DevTools), Proxmox GUI and Baseline as tabs; the Baseline text console is
+  one click away (`/console`) and `p` returns. A locked kiosk page is not acceptable.
+- **A mismatch is a state with behaviours, never a failure** (DR256): a new machine, a missing NIC or a second drive is handled, not refused.
+- **Never attach drives behind this host's faulty USB port** (xHCI 0000:0a:00.0, `usb2-port5`; the bounce timer is deliberate).
+
 ## Credential rules
 
 - Every credential this project generates (Proxmox root passwords included) must be a fresh, high-entropy, one-time value with **no association to the actual human operator** — `drive_setup_answer.generate_one_time_password()` is the established mechanism (`secrets.token_urlsafe`, hashed via a stdin pipe that never touches argv/env/shell history). Never derive a credential from anything identifying the operator.
