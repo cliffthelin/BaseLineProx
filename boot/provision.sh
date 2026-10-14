@@ -65,7 +65,13 @@ if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
     cp -a "$BASELINE_PACKAGE_CACHE/npm-cache" "$NPM_SCRATCH"
     mkdir -p /var/log/baseline-npm
     npm install -g --offline --cache "$NPM_SCRATCH" --logs-dir /var/log/baseline-npm \
-        @anthropic-ai/claude-code opencode-ai @openai/codex
+        @anthropic-ai/claude-code
+    # The other two harnesses are installed from the same cache when it carries them; a cache built before they were added still
+    # finishes the installation (Claude Code is the one the rest of provisioning needs).
+    for extra in opencode-ai @openai/codex; do
+        npm install -g --offline --cache "$NPM_SCRATCH" --logs-dir /var/log/baseline-npm "$extra" \
+            || echo "NOTE: $extra is not in this installer's offline cache; install it with the cache rebuilt"
+    done
     rm -rf "$NPM_SCRATCH"
 else
     npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
