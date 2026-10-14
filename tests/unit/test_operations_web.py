@@ -182,7 +182,7 @@ def test_the_operator_role_comes_from_the_configured_machine_accounts(tmp_path):
         assert deps["sessions"].sessions[token].role == "operator"
         assert deps["sessions"].sessions[token].ttl_s == 3 * 3600
         status, location, cookie = login("cane")
-        assert location == "/settings"
+        assert location == "/home"          # a person lands on the Home page (the TUI's areas first); an agent operator on Operations
         token = cookie.split("session=")[1].split(";")[0]
         assert deps["sessions"].sessions[token].role == "admin"
         assert deps["sessions"].sessions[token].ttl_s == 1800.0
