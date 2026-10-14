@@ -67,6 +67,7 @@ from repair import Runner
 
 NAV_TABS = (
     ("/home", "Home"),
+    ("/launcher", "Launcher"),
     ("/hardware", "Hardware"),
     ("/network", "Network"),
     ("/sensors", "Sensors"),
@@ -1717,6 +1718,33 @@ def _vm_host_for(deps: dict) -> vh.VmHost:
                   if cfg else vh.DEFAULT_PERSISTENCE_STORE)
 
 
+_LAUNCHER_PERSONA = "personal"      # guest overlays are the person's, never USER_ADMIN (DR257, DR259)
+
+
+def _settings_error(message: str):
+    import layered_settings
+    return layered_settings.SettingsError(message)
+
+
+def _launcher_roots(deps: dict):
+    import layered_settings
+    return deps.get("launcher_roots") or layered_settings.default_roots(_LAUNCHER_PERSONA)
+
+
+def _launcher_ids():
+    import naming
+    return (lambda vm: naming.allocate("O", "V", "vm:" + vm["name"])), (lambda key: naming.allocate("A", "D", "guest-app:" + key))
+
+
+def _launcher_state(deps: dict) -> dict:
+    import socket
+    import launcher_state
+    host = _vm_host_for(deps)
+    os_id_for, app_id_for = _launcher_ids()
+    return launcher_state.collect(host.list_vms(), node=socket.gethostname().split(".")[0], roots=_launcher_roots(deps),
+                                  os_id_for=os_id_for, app_id_for=app_id_for)
+
+
 def _kvm_ok(deps: dict) -> bool:
     import os as _os
     return bool(deps["kvm_ok"]()) if deps.get("kvm_ok") else _os.access("/dev/kvm", _os.R_OK | _os.W_OK)
@@ -2013,6 +2041,20 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/install-plan":
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
+
+        if path in ("/launcher", "/launcher/state"):
+            import launcher_page
+            try:
+                state = _launcher_state(deps)
+            except (vh.VmError, OSError, ValueError) as exc:
+                message = f"VM inventory unavailable: {exc}"
+                if path == "/launcher/state":
+                    return self._json(503, {"error": message})
+                return self._html_response(200, _with_nav(launcher_page.render(
+                    {"host": "", "tiles": [], "apps": [], "schema": {"os": {}, "app": {}}}, message), path))
+            if path == "/launcher/state":
+                return self._json(200, state)
+            return self._html_response(200, _with_nav(launcher_page.render(state), path))
 
         if path == "/power":
             import power_control
@@ -2568,6 +2610,37 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             deps.setdefault("chat_history", []).append((question, answer))
             del deps["chat_history"][:-20]
             return self._redirect("/chat")
+
+        if path == "/launcher/settings":
+            import layered_settings
+            import launcher_state
+            try:
+                state = _launcher_state(deps)
+                known = {t["id"]: t for t in state["tiles"] if t["id"]}
+                layer, os_id, changes = body.get("layer"), body.get("id"), body.get("changes")
+                if layer not in ("user", "os", "app"):
+                    raise _settings_error("only the user, os and app settings can be changed here")
+                if not isinstance(os_id, str) or os_id not in known:
+                    raise _settings_error("that OS is not on this machine")
+                if not isinstance(changes, dict):
+                    raise _settings_error("changes must be a set of settings")
+                app_id = None
+                if layer == "app":
+                    app = body.get("app")
+                    if app not in launcher_state.APP_LABELS:
+                        raise _settings_error("unknown application")
+                    app_id = next(a["id"] for a in state["apps"] if a["key"] == app)
+                    if app_id is None:
+                        raise _settings_error("application identifiers are unavailable")
+                layered_settings.write_layer(_launcher_roots(deps), layer, changes, os_id=os_id if layer != "user" else None,
+                                             app_id=app_id, actor="person")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "launcher_settings", "layer": layer, "keys": sorted(changes)})
+                return self._json(200, {"ok": True})
+            except (layered_settings.SettingsError, ValueError) as exc:
+                return self._json(400, {"ok": False, "error": str(exc)})
+            except (vh.VmError, OSError) as exc:
+                return self._json(503, {"ok": False, "error": f"unavailable: {exc}"})
 
         if path.startswith("/power/"):
             import power_control

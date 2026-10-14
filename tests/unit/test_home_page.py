@@ -20,6 +20,7 @@ def test_the_navigation_starts_with_home_and_the_tui_tabs_and_ends_with_the_inst
     import baseline_web as bw
     paths = [p for p, _ in bw.NAV_TABS]
     assert paths[0] == "/home"
-    assert paths[1:7] == ["/hardware", "/network", "/sensors", "/vms", "/chat", "/shell"]
+    assert paths[1] == "/launcher"            # DR259 (operator 2026-10-14): the phone-style launcher is where VMs/OSes start
+    assert paths[2:8] == ["/hardware", "/network", "/sensors", "/vms", "/chat", "/shell"]
     assert paths.index("/install-plan") > paths.index("/vault") > paths.index("/shell")
     assert len(paths) == len(set(paths))

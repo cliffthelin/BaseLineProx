@@ -100,6 +100,15 @@ REDIRECT_PATHS = {
     "/root": "root",
     "/home": "home",
     "/etc/baseline-dev": "etc-baseline-dev",
+    # DR259 (operator 2026-10-14: "Proxmox has to use Overlay data like everything else; it uses User_Admin"): Proxmox's own state.
+    # pve-cluster's database is /etc/pve (storage, users, datacenter settings, guest configs, certificates, two-factor), so it is the one
+    # that matters; the others are this host's firewall state, task history and metrics. Whole directories only. Every Proxmox service that
+    # reads them is ordered after the redirect service by boot/proxmox-overlay.conf, so the first migration (on the boot after provisioning)
+    # happens while they are not running.
+    "/var/lib/pve-cluster": "var-lib-pve-cluster",
+    "/var/lib/pve-firewall": "var-lib-pve-firewall",
+    "/var/lib/pve-manager": "var-lib-pve-manager",
+    "/var/lib/rrdcached": "var-lib-rrdcached",
 }
 
 

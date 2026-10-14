@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 
 TUI_AREAS = (
+    ("/launcher", "Launcher", "every OS as a tile: open it as a console, a window or fullscreen; its settings and applications"),
     ("/hardware", "Hardware", "CPU, memory, drives, PCI devices and what changed since last boot"),
     ("/network", "Network", "connections, gateway, DNS, internet, AI providers and the USB tether"),
     ("/sensors", "Sensors", "temperatures, NVMe and SMART health"),

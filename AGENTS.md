@@ -57,6 +57,11 @@ does not prove any of these; `tests/unit/test_established_expectations.py` recor
 - **The browser is a real browser window** (address bar, tabs, DevTools), Proxmox GUI and Baseline as tabs; the Baseline text console is
   one click away (`/console`) and `p` returns. A locked kiosk page is not acceptable.
 - **A mismatch is a state with behaviours, never a failure** (DR256): a new machine, a missing NIC or a second drive is handled, not refused.
+- **About ten operating systems, settings shared between them, Proxmox on overlays** (operator 2026-10-14, DR259): Ubuntu is one of ~10 OSes,
+  not the special case. The user's settings are layered (admin, user, os, app, session; `layered_settings.py`) and shared from one OS to the
+  next. Proxmox's own state (`/var/lib/pve-cluster` etc.) is overlay data on USER_ADMIN. Non-public settings and data live ONLY on
+  USER_ADMIN, USER_DATA (`USER_<PERSONA>`), APP_DATA (`APPDATA_<PERSONA>`) and SESSION_TEMP, never SUBSTRATE. The browser front screen for VMs
+  and OSes is `/launcher` (a phone-style launcher, right-click menu, Console/Window/Fullscreen). Unit-tested only; not rehearsed or run on hardware.
 - **Never attach drives behind this host's faulty USB port** (xHCI 0000:0a:00.0, `usb2-port5`; the bounce timer is deliberate).
 
 ## Credential rules

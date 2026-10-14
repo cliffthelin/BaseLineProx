@@ -82,3 +82,9 @@ that name exists. It claims nothing is installed. The prebuilt, configured envir
 - **Ceph packages**: `/ceph` runs `pveceph install` (needs the internet). Cluster creation (monitors, OSDs) is left to the operator.
 - **Not built**: prebuilt VMs/containers (above), a Proxmox "Create VM" that applies Baseline's agreed recipes (Proxmox's own dialog is
   stock), management beyond listing in the TUI's VMs tab, and "Proxmox settings stored" (unclear what is expected: needs the operator).
+
+## Operator answers, 2026-10-14 (recorded in DR259)
+- Ubuntu is one of about ten operating systems, not the special case; the user's settings (USER_ADMIN and user data) are shared from one OS
+  to the next and configure each OS and its applications from the configuration, the user data and the app data.
+- Proxmox's own state is overlay data on USER_ADMIN; non-public settings and data go only to USER_ADMIN, USER_DATA, APP_DATA and
+  SESSION_TEMP. A phone-style web launcher with a right-click menu per VM/OS and three run modes. Built as a first slice: see DR259.

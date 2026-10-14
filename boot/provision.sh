@@ -409,6 +409,10 @@ cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
 cp "$SRC/baseline/lib/audio_bluetooth.py" /opt/baseline/lib/audio_bluetooth.py
 cp "$SRC/baseline/lib/power_control.py" /opt/baseline/lib/power_control.py
+cp "$SRC/baseline/lib/layered_settings.py" /opt/baseline/lib/layered_settings.py
+cp "$SRC/baseline/lib/launcher_model.py" /opt/baseline/lib/launcher_model.py
+cp "$SRC/baseline/lib/launcher_state.py" /opt/baseline/lib/launcher_state.py
+cp "$SRC/baseline/lib/launcher_page.py" /opt/baseline/lib/launcher_page.py
 cp "$SRC/baseline/lib/ceph_setup.py" /opt/baseline/lib/ceph_setup.py
 cp "$SRC/baseline/lib/tfa_setup.py" /opt/baseline/lib/tfa_setup.py
 cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py
@@ -508,6 +512,11 @@ cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
 # the bin script itself remains staged above for standalone use.
 cp "$SRC/boot/baseline-web.service" /etc/systemd/system/baseline-web.service
 cp "$SRC/boot/baseline-scripts-inbox.service" /etc/systemd/system/baseline-scripts-inbox.service
+# Proxmox's own state is overlay data on USER_ADMIN (DR259): every Proxmox service that reads it starts after the redirects are bound.
+for unit in pve-cluster pve-firewall pvedaemon pveproxy pvestatd rrdcached; do
+    mkdir -p "/etc/systemd/system/$unit.service.d"
+    cp "$SRC/boot/proxmox-overlay.conf" "/etc/systemd/system/$unit.service.d/baseline-overlay.conf"
+done
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
