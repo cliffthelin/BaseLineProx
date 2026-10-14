@@ -96,3 +96,20 @@ def render_vault(states, notice=""):
     note = f"<p>{html.escape(notice)}</p>" if notice else ""
     return _page("Credential vault", f"{note}<table><thead><tr><th>Vault</th><th>State</th><th>Secrets</th></tr></thead><tbody>{rows}"
                  f"</tbody></table>{forms}<p><a href='/ai-setup'>AI providers</a></p>")
+
+
+def render_security(pending, notice=""):
+    """pending: {userid: (secret, uri)} for enrolments that are waiting for their first code."""
+    note = f"<p>{html.escape(notice)}</p>" if notice else ""
+    waiting = "".join(
+        f"<section><h2>{html.escape(u)}: confirm your authenticator</h2><p>Enter this key in your authenticator app "
+        f"(or open the link on a phone with one): <code data-secret=\"{html.escape(sec, quote=True)}\">{html.escape(sec)}</code></p>"
+        f"<p><a href=\"{html.escape(uri, quote=True)}\">{html.escape('Open in authenticator')}</a></p>"
+        "<form method=\"post\" action=\"/security/tfa/confirm\">"
+        f"<input type='hidden' name='userid' value='{html.escape(u, quote=True)}'>"
+        "<input name='code' inputmode='numeric' autocomplete='one-time-code' maxlength='6' placeholder='6-digit code' required> "
+        "<button type='submit'>Turn on two-factor</button></form></section>" for u, (sec, uri) in pending.items())
+    return _page("Two-factor authentication", f"{note}{waiting}<section><h2>Set up two-factor for a Proxmox user</h2>"
+                 "<form method=\"post\" action=\"/security/tfa/start\"><input name='userid' value='baseline@pam' required> "
+                 "<button type='submit'>Start</button></form><p>Uses a time-based code (TOTP), the kind every authenticator app makes. "
+                 "Baseline registers it with Proxmox only after your code checks out, so a mistyped key cannot lock you out.</p></section>")

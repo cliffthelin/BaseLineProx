@@ -78,6 +78,8 @@ NAV_TABS = (
     ("/tools", "Diagnostic tools"),
     ("/ai-setup", "AI providers"),
     ("/vault", "Vault"),
+    ("/security", "Two-factor"),
+    ("/ceph", "Ceph"),
     ("/settings", "Settings"),
     ("/admin", "Admin"),
     ("/recovery", "Recovery"),
@@ -1984,6 +1986,27 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
 
+        if path == "/ceph":
+            import ceph_setup
+            job = deps.get("ceph_job")
+            state = job.state() if job is not None else {"phase": "idle", "message": ""}
+            installed = ceph_setup.is_installed(deps.get("ceph_runner"))
+            refresh = "<meta http-equiv='refresh' content='5'>" if state["phase"] == "running" else ""
+            body = (f"<!doctype html><html><head><meta charset='utf-8'><title>Ceph</title>{refresh}</head><body><h1>Ceph</h1>"
+                    f"<p>Ceph packages: <b>{'installed' if installed else 'not installed'}</b></p>"
+                    f"<p>{html.escape(state['message'])}</p>"
+                    + ("" if installed else '<form method="post" action="/ceph/install"><button type="submit">Install Ceph packages</button>'
+                       "</form><p>Needs the internet (Proxmox's repository). Creating monitors and OSDs is done in Proxmox "
+                       "(node &gt; Ceph) once you decide which drives to give it.</p>")
+                    + "</body></html>").encode()
+            return self._html_response(200, _with_nav(body, path))
+
+        if path == "/security":
+            import ai_setup_page
+            pending = {u: (v[0], v[1]) for u, v in deps.get("tfa_pending", {}).items()}
+            return self._html_response(200, _with_nav(ai_setup_page.render_security(
+                pending, qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
         if path == "/vault":
             import ai_setup_page
             import vault
@@ -2499,6 +2522,45 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             deps.setdefault("chat_history", []).append((question, answer))
             del deps["chat_history"][:-20]
             return self._redirect("/chat")
+
+        if path == "/ceph/install":
+            import ceph_setup
+            job = deps.get("ceph_job")
+            if job is None or job.state()["phase"] != "running":
+                deps["ceph_job"] = ceph_setup.InstallJob(deps.get("ceph_runner"))
+                deps["ceph_job"].start()
+                if deps.get("audit"):
+                    deps["audit"]({"event": "ceph_install_requested"})
+            return self._redirect("/ceph")
+
+        if path in ("/security/tfa/start", "/security/tfa/confirm"):
+            import tfa_setup
+            notice = ""
+            try:
+                userid = tfa_setup.check_userid(str(body.get("userid", "")))
+                pending = deps.setdefault("tfa_pending", {})
+                if path == "/security/tfa/start":
+                    secret = tfa_setup.new_secret()
+                    pending[userid] = (secret, tfa_setup.otpauth_uri(userid, secret, issuer="Baseline " + os.uname().nodename))
+                    notice = f"Key made for {userid}; confirm it with a code from your authenticator"
+                else:
+                    secret, uri = pending[userid]
+                    code = str(body.get("code", "")).strip()
+                    if not tfa_setup.verify(secret, code):
+                        raise ValueError("that code does not match; check the key in your authenticator and try again")
+                    done = deps.get("tfa_run", subprocess.run)(tfa_setup.enroll_argv(userid, uri, code, "Baseline authenticator"),
+                                                              capture_output=True, text=True, timeout=60)
+                    if done.returncode != 0:
+                        raise ValueError("Proxmox refused the registration: " + (done.stderr or "").strip()[-120:])
+                    del pending[userid]
+                    notice = f"Two-factor is on for {userid}"
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "tfa_enrolled", "userid": userid})
+            except KeyError:
+                notice = "start the setup first"
+            except ValueError as exc:
+                notice = str(exc)[:160]
+            return self._redirect("/security?notice=" + html.escape(notice).replace(" ", "+"))
 
         if path in ("/vault/set", "/vault/unlock", "/vault/lock"):
             import vault

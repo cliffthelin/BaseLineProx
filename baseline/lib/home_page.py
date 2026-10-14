@@ -16,6 +16,8 @@ TOOLS = (
     ("/tools", "Diagnostic tools", "lm-sensors, nvme-cli, smartmontools, iperf3, ethtool"),
     ("/ai-setup", "AI providers", "sign in to Claude, add other provider keys"),
     ("/vault", "Vault", "passphrase and unlock for stored credentials"),
+    ("/security", "Two-factor", "turn on an authenticator code for a Proxmox user"),
+    ("/ceph", "Ceph", "install the Ceph packages (needs the internet)"),
     ("/console", "Baseline text console", "show the text console on this machine's own screen"),
 )
 INSTALLER_GROUP = (

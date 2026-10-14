@@ -260,3 +260,59 @@ def test_the_environments_page_lists_the_images_and_needs_a_session(case):
     assert req(case, "GET", "/environments", cookie=False)[0] == 303
     status, _, page = req(case, "GET", "/environments")
     assert status == 200 and "five guest applications" in page and "baseline-nav" in page
+
+
+# --- Two-factor setup -------------------------------------------------------------------------------------------------------------
+
+def test_two_factor_is_set_up_only_after_the_authenticator_proves_itself(case):
+    import tfa_setup
+    calls = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "", ""
+
+    case.server.deps["tfa_run"] = lambda argv, **kw: (calls.append(argv), Done())[1]     # type: ignore[attr-defined]
+    status, _, page = req(case, "GET", "/security")
+    assert status == 200 and "baseline-nav" in page and 'action="/security/tfa/start"' in page
+    status, location, _ = req(case, "POST", "/security/tfa/start", {"userid": "baseline@pam"})
+    assert status == 303 and location.startswith("/security")
+    _, _, page = req(case, "GET", "/security")
+    secret = page.split("data-secret=\"")[1].split("\"")[0]
+    assert len(secret) >= 32 and calls == []                                            # shown, nothing registered yet
+    req(case, "POST", "/security/tfa/confirm", {"userid": "baseline@pam", "code": "000000"})
+    assert calls == []                                                                  # a wrong code registers nothing
+    req(case, "POST", "/security/tfa/confirm", {"userid": "baseline@pam", "code": tfa_setup.totp(secret, time.time())})
+    assert len(calls) == 1 and calls[0][:3] == ["pvesh", "create", "/access/tfa"] and "baseline@pam" in calls[0]
+    _, _, after = req(case, "GET", "/security")
+    assert secret not in after                                                          # the pending secret is gone
+
+
+def test_two_factor_actions_need_a_session_and_a_plain_user_id(case):
+    assert req(case, "POST", "/security/tfa/start", {"userid": "baseline@pam"}, cookie=False)[0] in (303, 401)
+    req(case, "POST", "/security/tfa/start", {"userid": "x; rm -rf /"})
+    _, _, page = req(case, "GET", "/security")
+    assert "data-secret" not in page
+
+
+def test_the_ceph_page_shows_state_and_starts_the_install_only_on_a_post(case):
+    from types import SimpleNamespace as NS
+    calls = []
+
+    class Runner:
+        def run(self, argv, timeout=0):
+            calls.append(list(argv))
+            return NS(returncode=1 if argv[0] == "dpkg-query" else 0, stdout="", stderr="")
+
+    case.server.deps["ceph_runner"] = Runner()                                        # type: ignore[attr-defined]
+    assert req(case, "GET", "/ceph", cookie=False)[0] == 303
+    status, _, page = req(case, "GET", "/ceph")
+    assert status == 200 and "not installed" in page.lower() and 'action="/ceph/install"' in page
+    assert not any(c[:2] == ["pveceph", "install"] for c in calls)                    # looking does not install
+    assert req(case, "POST", "/ceph/install", cookie=False)[0] in (303, 401)
+    status, location, _ = req(case, "POST", "/ceph/install")
+    assert status == 303 and location == "/ceph"
+    for _ in range(100):
+        if any(c[:2] == ["pveceph", "install"] for c in calls):
+            break
+        time.sleep(0.05)
+    assert ["pveceph", "install", "--repository", "no-subscription"] in calls

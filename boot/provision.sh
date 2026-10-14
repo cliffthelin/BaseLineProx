@@ -404,6 +404,8 @@ cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
+cp "$SRC/baseline/lib/ceph_setup.py" /opt/baseline/lib/ceph_setup.py
+cp "$SRC/baseline/lib/tfa_setup.py" /opt/baseline/lib/tfa_setup.py
 cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py
 cp "$SRC/baseline/bin/baseline-harness-install" /opt/baseline/bin/baseline-harness-install
 chmod +x /opt/baseline/bin/baseline-harness-install
@@ -669,6 +671,8 @@ cat > /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
     {"name": "Diagnostic tools (5)", "url": "http://localhost:8100/tools"},
     {"name": "AI providers (sign in)", "url": "http://localhost:8100/ai-setup"},
     {"name": "Vault", "url": "http://localhost:8100/vault"},
+    {"name": "Two-factor setup", "url": "http://localhost:8100/security"},
+    {"name": "Ceph", "url": "http://localhost:8100/ceph"},
     {"name": "Baseline text console (this screen)", "url": "http://localhost:8100/console"},
     {"name": "Proxmox VE (storage, firewall, users and two-factor, Ceph, backup)", "url": "https://localhost:8006"}
   ],
