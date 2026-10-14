@@ -9,6 +9,9 @@ import shutil
 import socket
 import subprocess
 
+# Sound and Bluetooth for the host's own browser session (operator, 2026-10-14: audio and Bluetooth input/output and tether in the Proxmox GUI):
+# the sound server, the Bluetooth stack and the plugin that joins them. Installed once online when the offline cache did not carry them.
+APT_PACKAGES = ["pipewire", "pipewire-pulse", "wireplumber", "bluez", "libspa-0.2-bluetooth"]
 PACKAGES = {"claude": "@anthropic-ai/claude-code", "opencode": "opencode-ai", "codex": "@openai/codex"}
 
 
@@ -40,3 +43,21 @@ def run_once(*, which=shutil.which, connect=_online, runner=None) -> dict:
         else:
             failed[name] = (done.stderr or "").strip()[-160:]
     return {"state": "installed" if not failed else "partly_failed", "installed": installed, "failed": failed}
+
+
+def _apt_installed(package: str) -> bool:
+    done = subprocess.run(["dpkg-query", "-W", "-f=${Status}", package], capture_output=True, text=True)
+    return done.returncode == 0 and "install ok installed" in done.stdout
+
+
+def run_extras(*, installed=_apt_installed, connect=_online, runner=None) -> dict:
+    missing = [p for p in APT_PACKAGES if not installed(p)]
+    if not missing:
+        return {"state": "nothing_missing", "installed": []}
+    if not connect():
+        return {"state": "waiting_for_internet", "missing": missing}
+    runner = runner or _Real()
+    done = runner.run(["apt-get", "install", "-y", "--no-install-recommends", *missing], timeout=1800)
+    if done.returncode == 0:
+        return {"state": "installed", "installed": missing}
+    return {"state": "failed", "installed": [], "failed": (done.stderr or "").strip()[-200:]}

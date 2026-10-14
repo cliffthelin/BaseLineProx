@@ -404,6 +404,7 @@ cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
+cp "$SRC/baseline/lib/audio_bluetooth.py" /opt/baseline/lib/audio_bluetooth.py
 cp "$SRC/baseline/lib/ceph_setup.py" /opt/baseline/lib/ceph_setup.py
 cp "$SRC/baseline/lib/tfa_setup.py" /opt/baseline/lib/tfa_setup.py
 cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py
@@ -664,6 +665,7 @@ cat > /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
     {"name": "Hardware", "url": "http://localhost:8100/hardware"},
     {"name": "Network", "url": "http://localhost:8100/network"},
     {"name": "Sensors", "url": "http://localhost:8100/sensors"},
+    {"name": "Audio and Bluetooth", "url": "http://localhost:8100/audio"},
     {"name": "Virtual machines", "url": "http://localhost:8100/vms"},
     {"name": "Environments", "url": "http://localhost:8100/environments"},
     {"name": "Chat", "url": "http://localhost:8100/chat"},

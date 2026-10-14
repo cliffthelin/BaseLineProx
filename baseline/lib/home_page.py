@@ -7,6 +7,7 @@ TUI_AREAS = (
     ("/hardware", "Hardware", "CPU, memory, drives, PCI devices and what changed since last boot"),
     ("/network", "Network", "connections, gateway, DNS, internet, AI providers and the USB tether"),
     ("/sensors", "Sensors", "temperatures, NVMe and SMART health"),
+    ("/audio", "Audio and Bluetooth", "speakers, microphones, headsets and other Bluetooth devices"),
     ("/vms", "Virtual machines", "your VMs and containers, start, stop and create"),
     ("/chat", "Chat", "ask Baseline, with the harness of your choice"),
     ("/shell", "Console", "the TUI's command line: hardware, network, tether, ask"),

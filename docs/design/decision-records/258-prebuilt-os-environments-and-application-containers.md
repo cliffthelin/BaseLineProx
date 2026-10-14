@@ -72,3 +72,13 @@ Sizes (volumes only grow when used, DR257), the overlay's association table (USE
 ## 2026-10-13: environments catalogue
 `/environments` lists every carried OS image against the five guest applications (native / helper / none) and whether an environment of
 that name exists. It claims nothing is installed. The prebuilt, configured environments themselves remain unbuilt (the work above).
+
+## Operator requirements, 2026-10-14 (fourth review)
+- **Audio and Bluetooth in the Proxmox GUI session** (input, output, tether): `/audio` lists PipeWire outputs/inputs and BlueZ devices and
+  runs connect/disconnect/pair/trust/remove with validated addresses; `harness_install.run_extras` installs pipewire, pipewire-pulse,
+  wireplumber, bluez and libspa-0.2-bluetooth once online (the offline cache did not carry them). NOT built: Bluetooth PAN tether
+  (needs a bnep interface and DHCP through the existing tether path) and routing guest audio into VMs.
+- **Two-factor** for Proxmox users: `/security` (TOTP, registered only after the person's own code verifies).
+- **Ceph packages**: `/ceph` runs `pveceph install` (needs the internet). Cluster creation (monitors, OSDs) is left to the operator.
+- **Not built**: prebuilt VMs/containers (above), a Proxmox "Create VM" that applies Baseline's agreed recipes (Proxmox's own dialog is
+  stock), management beyond listing in the TUI's VMs tab, and "Proxmox settings stored" (unclear what is expected: needs the operator).

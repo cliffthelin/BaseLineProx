@@ -73,6 +73,7 @@ NAV_TABS = (
     ("/vms", "Virtual machines"),
     ("/chat", "Chat"),
     ("/shell", "Console"),
+    ("/audio", "Audio and Bluetooth"),
     ("/containers", "Distro containers"),
     ("/environments", "Environments"),
     ("/tools", "Diagnostic tools"),
@@ -1986,6 +1987,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
 
+        if path == "/audio":
+            import audio_bluetooth
+            import repair
+            data = audio_bluetooth.collect(deps.get("audio_runner") or repair.RealRunner(), which=deps.get("audio_which") or __import__("shutil").which)
+            return self._html_response(200, _with_nav(audio_bluetooth.render(
+                data, qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
         if path == "/ceph":
             import ceph_setup
             job = deps.get("ceph_job")
@@ -2522,6 +2530,19 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             deps.setdefault("chat_history", []).append((question, answer))
             del deps["chat_history"][:-20]
             return self._redirect("/chat")
+
+        if path == "/audio/bluetooth":
+            import audio_bluetooth
+            import repair
+            try:
+                argv = audio_bluetooth.action_argv(str(body.get("action", "")), str(body.get("mac", "")))
+                done = (deps.get("audio_runner") or repair.RealRunner()).run(argv, timeout=30)
+                notice = f"{argv[1]} {argv[2]}: " + ("done" if done.returncode == 0 else ((done.stderr or done.stdout or "failed").strip()[-100:]))
+                if deps.get("audit"):
+                    deps["audit"]({"event": "bluetooth_action", "action": argv[1]})
+            except ValueError as exc:
+                notice = str(exc)
+            return self._redirect("/audio?notice=" + html.escape(notice).replace(" ", "+"))
 
         if path == "/ceph/install":
             import ceph_setup

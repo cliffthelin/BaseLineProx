@@ -316,3 +316,31 @@ def test_the_ceph_page_shows_state_and_starts_the_install_only_on_a_post(case):
             break
         time.sleep(0.05)
     assert ["pveceph", "install", "--repository", "no-subscription"] in calls
+
+
+def test_the_audio_bluetooth_page_lists_devices_and_actions_are_exact_commands(case):
+    from types import SimpleNamespace as NS
+    calls = []
+
+    class Runner:
+        def run(self, argv, timeout=0):
+            calls.append(list(argv))
+            if argv[:2] == ["bluetoothctl", "devices"]:
+                return NS(returncode=0, stdout="Device AA:BB:CC:DD:EE:01 Headset\n", stderr="")
+            if argv[:2] == ["bluetoothctl", "info"]:
+                return NS(returncode=0, stdout="\tPaired: yes\n\tTrusted: no\n\tConnected: no\n", stderr="")
+            return NS(returncode=0, stdout="", stderr="")
+
+    case.server.deps["audio_runner"] = Runner()                                        # type: ignore[attr-defined]
+    case.server.deps["audio_which"] = lambda tool: "/usr/bin/" + tool                  # type: ignore[attr-defined]
+    assert req(case, "GET", "/audio", cookie=False)[0] == 303
+    status, _, page = req(case, "GET", "/audio")
+    assert status == 200 and "Headset" in page and "AA:BB:CC:DD:EE:01" in page and "baseline-nav" in page
+    assert req(case, "POST", "/audio/bluetooth", {"mac": "AA:BB:CC:DD:EE:01", "action": "connect"}, cookie=False)[0] in (303, 401)
+    assert ["bluetoothctl", "connect", "AA:BB:CC:DD:EE:01"] not in calls
+    status, location, _ = req(case, "POST", "/audio/bluetooth", {"mac": "AA:BB:CC:DD:EE:01", "action": "connect"})
+    assert status == 303 and location.startswith("/audio") and ["bluetoothctl", "connect", "AA:BB:CC:DD:EE:01"] in calls
+    n = len(calls)
+    req(case, "POST", "/audio/bluetooth", {"mac": "AA:BB:CC:DD:EE:01; reboot", "action": "connect"})
+    req(case, "POST", "/audio/bluetooth", {"mac": "AA:BB:CC:DD:EE:01", "action": "poweroff"})
+    assert len(calls) == n
