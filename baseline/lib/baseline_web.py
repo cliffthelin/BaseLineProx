@@ -66,6 +66,18 @@ from repair import Runner
 
 
 NAV_TABS = (
+    ("/home", "Home"),
+    ("/hardware", "Hardware"),
+    ("/network", "Network"),
+    ("/sensors", "Sensors"),
+    ("/vms", "Virtual machines"),
+    ("/chat", "Chat"),
+    ("/shell", "Console"),
+    ("/containers", "Distro containers"),
+    ("/environments", "Environments"),
+    ("/tools", "Diagnostic tools"),
+    ("/ai-setup", "AI providers"),
+    ("/vault", "Vault"),
     ("/settings", "Settings"),
     ("/admin", "Admin"),
     ("/recovery", "Recovery"),
@@ -75,25 +87,14 @@ NAV_TABS = (
     ("/approvals", "Approvals"),
     ("/audit", "Audit"),
     ("/remote-access", "Remote access"),
-    ("/vms", "Virtual machines"),
-    ("/containers", "Distro containers"),
-    ("/environments", "Environments"),
-    ("/hardware", "Hardware"),
-    ("/network", "Network"),
-    ("/chat", "Chat"),
-    ("/shell", "Console"),
-    ("/sensors", "Sensors"),
-    ("/tools", "Diagnostic tools"),
-    ("/ai-setup", "AI providers"),
-    ("/vault", "Vault"),
+    ("/workloads", "Workload jobs"),
+    ("/master-config", "Master Config"),
     ("/installation-readiness", "Installation readiness"),
     ("/installer-cache", "Installer Cache"),
     ("/app-isolation", "App Isolation"),
     ("/recipes", "Environment recipes"),
     ("/install-plan", "Installer plan"),
     ("/install-plan?display=desktop", "Installer desktop"),
-    ("/workloads", "Workload jobs"),
-    ("/master-config", "Master Config"),
 )
 
 
@@ -1890,7 +1891,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path in ("/", "/login"):
             session = deps["sessions"].get(self._cookie_token(), now)
             if session is not None:
-                return self._redirect("/operations" if session.role == "operator" else "/settings")
+                return self._redirect("/home")
             return self._html_response(200, sw.render_login_page())
 
         if path == "/logout":
@@ -2007,6 +2008,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             notice = qs.get("notice", [""])[0][:200]
             return self._html_response(200, _with_nav(ai_setup_page.render_overview(
                 providers.check_providers(), status, [notice] if notice else []), "/ai-setup"))
+
+        if path == "/home":
+            import home_page
+            return self._html_response(200, _with_nav(home_page.render(), path))
 
         if path == "/environments":
             import environments
@@ -2602,7 +2607,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 session.ttl_s = _operator_session_seconds(deps)
                 deps["sessions"].persist(session)
                 self._record_attempt("login", now, ok=True)
-                return self._redirect("/operations", set_cookie=ws.session_cookie(session.token))
+                return self._redirect("/operations" if session.role == "operator" else "/home", set_cookie=ws.session_cookie(session.token))
             result = sw.handle_login(deps["verifier"], deps["sessions"],
                                       body.get("username", ""), body.get("password", ""), now,
                                       persona_provider=deps.get("persona_provider"))
@@ -2614,7 +2619,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             self._record_attempt("login", now, ok=result.outcome == "applied")
             if result.outcome == "applied":
                 role = deps["sessions"].sessions[result.body["token"]].role
-                return self._redirect("/operations" if role == "operator" else "/settings",
+                return self._redirect("/operations" if role == "operator" else "/home",
                                       set_cookie=ws.session_cookie(result.body["token"]))
             return self._html_response(401, _with_nav(sw.render_login_page("Invalid username or password."), "/login"))
 

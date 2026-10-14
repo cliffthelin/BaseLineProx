@@ -1,0 +1,54 @@
+"""The browser's starting page: what the TUI opens with, then the machine's tools, then administration and the installer."""
+from __future__ import annotations
+
+import html
+
+TUI_AREAS = (
+    ("/hardware", "Hardware", "CPU, memory, drives, PCI devices and what changed since last boot"),
+    ("/network", "Network", "connections, gateway, DNS, internet, AI providers and the USB tether"),
+    ("/sensors", "Sensors", "temperatures, NVMe and SMART health"),
+    ("/vms", "Virtual machines", "your VMs and containers, start, stop and create"),
+    ("/chat", "Chat", "ask Baseline, with the harness of your choice"),
+    ("/shell", "Console", "the TUI's command line: hardware, network, tether, ask"),
+)
+TOOLS = (
+    ("/environments", "Environments", "carried OS images and the five guest applications"),
+    ("/tools", "Diagnostic tools", "lm-sensors, nvme-cli, smartmontools, iperf3, ethtool"),
+    ("/ai-setup", "AI providers", "sign in to Claude, add other provider keys"),
+    ("/vault", "Vault", "passphrase and unlock for stored credentials"),
+    ("/console", "Baseline text console", "show the text console on this machine's own screen"),
+)
+INSTALLER_GROUP = (
+    ("/install-plan", "Installer plan"),
+    ("/install-plan?display=desktop", "Installer desktop"),
+    ("/installation-readiness", "Installation readiness"),
+    ("/installer-cache", "Installer Cache"),
+    ("/recipes", "Environment recipes"),
+    ("/app-isolation", "App Isolation"),
+)
+ADMIN_GROUP = (
+    ("/settings", "Settings"), ("/admin", "Admin"), ("/recovery", "Recovery"), ("/drive-admin", "Drive Administration"),
+    ("/operations", "Operations"), ("/operators", "Operators"), ("/approvals", "Approvals"), ("/audit", "Audit"),
+    ("/remote-access", "Remote access"), ("/workloads", "Workload jobs"), ("/master-config", "Master Config"),
+)
+
+
+def _cards(items):
+    return "".join(f'<a class="card" href="{html.escape(p, quote=True)}"><b>{html.escape(n)}</b>'
+                   f'<span>{html.escape(d)}</span></a>' for p, n, d in items)
+
+
+def _links(items):
+    return " &middot; ".join(f'<a href="{html.escape(p, quote=True)}">{html.escape(n)}</a>' for p, n in items)
+
+
+def render() -> bytes:
+    proxmox = ('<a class="card" href="https://localhost:8006" target="_blank" rel="noopener"><b>Proxmox VE</b>'
+               '<span>the Proxmox web interface: storage, firewall, users, two-factor</span></a>')
+    return ("<!doctype html><html><head><meta charset='utf-8'><title>Baseline</title><style>"
+            ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.8rem}"
+            ".card{display:block;padding:1rem;border:1px solid #33364a;border-radius:8px;background:#171923;text-decoration:none;color:#e7e9f0}"
+            ".card:hover,.card:focus-visible{border-color:#7fa4ec}.card span{display:block;color:#9aa0ba;margin-top:.3rem;font-size:.9rem}"
+            "</style></head><body><h1>Baseline</h1><h2>This machine</h2><div class='grid'>"
+            f"{_cards(TUI_AREAS)}</div><h2>Tools</h2><div class='grid'>{proxmox}{_cards(TOOLS)}</div>"
+            f"<h2>Installer</h2><p>{_links(INSTALLER_GROUP)}</p><h2>Administration</h2><p>{_links(ADMIN_GROUP)}</p></body></html>").encode()
