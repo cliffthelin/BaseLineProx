@@ -42,6 +42,9 @@ apt-get install -y inxi python3-rich python3-textual tmux gnupg
 echo "=== Installing kiosk GUI packages (Track A3 - cage + stock Chromium) ==="
 apt-get install -y cage chromium xorriso curl libnotify-bin kbd
 
+echo "=== Installing sound and Bluetooth (mouse, keyboard, audio, data transfer, tether from the host's browser GUI) ==="
+apt-get install -y bluez pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth
+
 echo "=== Installing Podman (Track B4 - Quadlet service management) ==="
 apt-get install -y podman
 mkdir -p /etc/containers/systemd
@@ -405,6 +408,7 @@ cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
 cp "$SRC/baseline/lib/audio_bluetooth.py" /opt/baseline/lib/audio_bluetooth.py
+cp "$SRC/baseline/lib/power_control.py" /opt/baseline/lib/power_control.py
 cp "$SRC/baseline/lib/ceph_setup.py" /opt/baseline/lib/ceph_setup.py
 cp "$SRC/baseline/lib/tfa_setup.py" /opt/baseline/lib/tfa_setup.py
 cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py

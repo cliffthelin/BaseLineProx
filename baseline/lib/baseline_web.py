@@ -74,6 +74,7 @@ NAV_TABS = (
     ("/chat", "Chat"),
     ("/shell", "Console"),
     ("/audio", "Audio and Bluetooth"),
+    ("/power", "Power"),
     ("/containers", "Distro containers"),
     ("/environments", "Environments"),
     ("/tools", "Diagnostic tools"),
@@ -242,10 +243,33 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 """
 
 
+_DRIVE_ROLE_TEXT = {
+    "boot": "the drive this system is running from - never offered as a target",
+    "allowed": "a drive Baseline is set up with or you enrolled - it appears below",
+    "not_enrolled": "not enrolled - Baseline leaves it alone (enroll it to let Baseline act on it)",
+    "no_serial": "reports no serial number - it cannot be enrolled, because the serial is its identity",
+}
+
+
+def _all_drives_html(all_drives, error: str = "") -> str:
+    if error:
+        return '<p class="empty-note"><strong>Drive list failed:</strong> ' + html.escape(error, quote=False) + '</p>'
+    if not all_drives:
+        return '<p class="empty-note">The machine reported no drives.</p>'
+    rows = "".join(
+        "<tr><td>{p}</td><td>{m}</td><td>{s}</td><td>{sz}</td><td>{t}</td><td>{r}</td></tr>".format(
+            p=html.escape(d["path"]), m=html.escape(d["model"]), s=html.escape(d["serial"] or "none"), sz=html.escape(d["size"]),
+            t=html.escape(d.get("transport") or ""), r=html.escape(_DRIVE_ROLE_TEXT.get(d["role"], d["role"])))
+        for d in all_drives)
+    return ('<table class="drives-found"><thead><tr><th>Device</th><th>Model</th><th>Serial</th><th>Size</th><th>Bus</th><th>Baseline</th></tr>'
+            f"</thead><tbody>{rows}</tbody></table>")
+
+
 def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notice: str = "",
                              notice_ok: bool | None = None, acted_on_path: str | None = None,
                              daily_ok: bool = False, selected_serial: str = "",
-                             volume_error: str = "", drive_error: str = "") -> bytes:
+                             volume_error: str = "", drive_error: str = "", all_drives: list | None = None,
+                             all_drives_error: str = "") -> bytes:
     """`notice_ok`: `True` (real success), `False` (real refusal/
     failure), or `None` (no action just ran - e.g. a plain page load).
     A prior version rendered every notice with the same quiet blue
@@ -377,10 +401,13 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
 <title>Drive Administration</title><style>{_DRIVE_ADMIN_CSS}</style></head>
 <body>
 <h1>Drive Administration</h1>
-<p class="subtitle">Every real, non-boot drive attached to this machine. The pre-authorized drive is selected by default - pick any other to target it instead.</p>
+<p class="subtitle">The drives Baseline may act on (below) are the ones it is set up with, plus any you enroll. Every drive the machine reports is listed under Drives found, so nothing is hidden - the rest are left alone.</p>
 {notice_html}
 
-<h2 class="section-title">Physical drives</h2>
+<h2 class="section-title">Drives found</h2>
+{_all_drives_html(all_drives, all_drives_error)}
+
+<h2 class="section-title">Drives Baseline can act on</h2>
 {drive_cards}
 
 <h2 class="section-title">Volumes</h2>
@@ -1987,6 +2014,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
 
+        if path == "/power":
+            import power_control
+            return self._html_response(200, _with_nav(power_control.render(qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
         if path == "/audio":
             import audio_bluetooth
             import repair
@@ -2267,6 +2298,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             except DriveInventoryError as exc:
                 drives = []
                 drive_error = str(exc)
+            all_drives, all_drives_error = None, ""
+            try:
+                if runner is None:
+                    raise DriveInventoryError("drive inventory runner unavailable")
+                all_drives = da.list_all_drives(runner, pds_runner=deps.get("pds_runner"))
+            except Exception as exc:      # the page still renders; the failure is shown, never an empty list
+                all_drives_error = str(exc)
             volume_error = ""
             try:
                 volumes = real_volume_state(runner)
@@ -2282,7 +2320,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                                          notice=notice, notice_ok=notice_ok, acted_on_path=acted_on_path,
                                          daily_ok=deps["sessions"].get(self._cookie_token(), now).role.startswith(wg.BOT_PREFIX),
                                          selected_serial=qs.get("serial", [""])[0], volume_error=volume_error,
-                                         drive_error=drive_error),
+                                         drive_error=drive_error, all_drives=all_drives, all_drives_error=all_drives_error),
                 path))
 
         if path.startswith('/installer-icons/'):
@@ -2530,6 +2568,23 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             deps.setdefault("chat_history", []).append((question, answer))
             del deps["chat_history"][:-20]
             return self._redirect("/chat")
+
+        if path.startswith("/power/"):
+            import power_control
+            import repair
+            action = path[len("/power/"):]
+            try:
+                argv = power_control.action_argv(action)
+                if str(body.get("confirm", "")) != "yes":
+                    raise ValueError("Tick the box to confirm; nothing was done")
+                done = (deps.get("power_runner") or repair.RealRunner()).run(argv, timeout=30)
+                if done.returncode != 0:
+                    raise ValueError("Failed: " + (done.stderr or done.stdout or "the command failed").strip()[-120:])
+                if deps.get("audit"):
+                    deps["audit"]({"event": "power_action", "action": action})
+                return self._html_response(200, _with_nav(power_control.render_done(action), "/power"))
+            except ValueError as exc:
+                return self._redirect("/power?notice=" + html.escape(str(exc)).replace(" ", "+"))
 
         if path == "/audio/bluetooth":
             import audio_bluetooth

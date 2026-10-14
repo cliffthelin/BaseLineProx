@@ -180,3 +180,45 @@ def test_enrollment_is_confirmed_by_a_person_every_time_and_never_pre_approved()
     import hitl
     assert "enroll_drive" in hitl.CONFIRMED_ACTIONS
     assert "enroll_drive" in hitl.NEVER_PRE_APPROVED
+
+
+# --- every drive is shown, read-only, whether or not Baseline may act on it (operator 2026-10-14: "no drives found other than PC601") ---
+
+def test_every_drive_is_listed_with_why_baseline_will_or_will_not_act_on_it():
+    drives = da.list_all_drives(_runner(), pds_runner=FakePdsRunner(boot_serial="SN211808916391"))
+    by_path = {d["path"]: d for d in drives}
+    assert set(by_path) == {"/dev/sda", "/dev/sdb", "/dev/nvme0n1", "/dev/sdd"}
+    assert by_path["/dev/nvme0n1"]["role"] == "boot"            # the drive this system is running from
+    assert by_path["/dev/sdb"]["role"] == "allowed"             # an SK hynix drive Baseline is set up with
+    assert by_path["/dev/sda"]["role"] == "not_enrolled"        # real, listed, and left alone until enrolled
+    assert by_path["/dev/sdd"]["role"] == "no_serial"           # cannot be enrolled: the serial is its identity
+
+
+def test_an_enrolled_drive_is_shown_as_allowed():
+    de.enroll("WCV00YLT", size_bytes=1, model="m", now=0.0)
+    drives = da.list_all_drives(_runner(), pds_runner=FakePdsRunner(boot_serial="SN211808916391"))
+    assert {d["path"]: d["role"] for d in drives}["/dev/sda"] == "allowed"
+
+
+def test_listing_every_drive_reads_one_lsblk_listing_and_probes_nothing_else():
+    runner = _runner()
+    da.list_all_drives(runner, pds_runner=FakePdsRunner(boot_serial="SN211808916391"))
+    assert [c[0] for c in runner.calls] == ["lsblk"]
+
+
+def test_listing_every_drive_does_not_widen_what_baseline_may_act_on():
+    pds_runner = FakePdsRunner(boot_serial="SN211808916391")
+    da.list_all_drives(_runner(), pds_runner=pds_runner)
+    assert "/dev/sda" not in {d["path"] for d in da.list_candidate_drives(_runner(), pds_runner=pds_runner)}
+
+
+def test_the_drive_page_shows_every_drive_even_when_none_is_eligible():
+    import baseline_web
+    page = baseline_web.render_drive_admin_page(
+        drives=[], volumes=[], actions=da.describe_actions(),
+        all_drives=da.list_all_drives(_runner(), pds_runner=FakePdsRunner(boot_serial="SN211808916391"))).decode()
+    assert "Drives found" in page
+    for text in ("WCV00YLT", "MD89N41071210AP4E", "SN211808916391", "ST5000DM003-2FH18L"):
+        assert text in page
+    assert "running from" in page and "not enrolled" in page.lower()
+    assert "Every real, non-boot drive" not in page            # the old subtitle claimed more than the list held

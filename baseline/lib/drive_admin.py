@@ -572,6 +572,30 @@ def list_enrollable_drives(runner: Runner, *, pds_runner=None) -> list:
     return drives
 
 
+def list_all_drives(runner: Runner, *, pds_runner=None) -> list:
+    """Every whole disk the machine reports, read-only, with the reason Baseline will or will not act on it (operator, 2026-10-14).
+
+    `list_candidate_drives` is the short list of drives an action may target and stays exactly that. This is what a person sees when they ask
+    "which drives are here": the drive the system is running from, the drives Baseline is set up with, and every other drive left alone until
+    it is enrolled. The one `lsblk -d` listing is all that is read; nothing is probed, so a drive that is not Baseline's is never touched."""
+    pds_runner = pds_runner or pds.Runner()
+    output = _run_drive_inventory(runner, list_candidate_drives_argv(), "drive list")
+    boot_serial = pds.get_boot_device_serial(pds_runner)
+    if not isinstance(boot_serial, str) or not boot_serial.strip():
+        raise DriveInventoryError("machine boot-drive identity unavailable; the drives cannot be safely labelled")
+    allowed = allowed_target_serials()
+    drives = []
+    for row in parse_candidate_drives(output):
+        if not row.get("NAME"):
+            continue
+        serial = row.get("SERIAL") or ""
+        role = ("boot" if serial and serial == boot_serial else "allowed" if serial in allowed
+                else "not_enrolled" if serial else "no_serial")
+        drives.append({"path": f"/dev/{row['NAME']}", "serial": serial, "model": row.get("MODEL") or "Unknown model",
+                       "size": row.get("SIZE") or "?", "transport": row.get("TRAN") or "", "role": role})
+    return drives
+
+
 def detect_baseline_drive(runner: Runner, device_path: str) -> dict:
     """Real, per-drive Baseline-install status (direct instruction,
     2026-09-29): does this specific drive have its own real LVM volume
