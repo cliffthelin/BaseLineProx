@@ -86,3 +86,11 @@ def test_a_credential_in_the_vault_makes_the_provider_available(tmp_path, monkey
         monkeypatch.delenv(name, raising=False)
     assert providers._env_or_file("OPENAI_API_KEY") is True
     assert providers._env_or_file("GEMINI_API_KEY", "GOOGLE_API_KEY") is False
+
+
+def test_harness_status_says_installed_and_credentialed_separately(monkeypatch):
+    monkeypatch.setattr(providers, "_env_or_file", lambda *names: names == ("CLAUDE_CODE_OAUTH_TOKEN",))
+    rows = {r["id"]: r for r in providers.harness_status(which=lambda b: "/usr/bin/" + b if b in ("claude", "codex") else None)}
+    assert rows["claude"] == {"id": "claude", "name": "Claude Code", "installed": True, "credential": "set"}
+    assert rows["codex"]["installed"] is True and rows["codex"]["credential"] == "missing"
+    assert rows["opencode"]["installed"] is False and rows["opencode"]["credential"] == "not needed"

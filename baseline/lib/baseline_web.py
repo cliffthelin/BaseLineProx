@@ -2007,7 +2007,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     pass
             notice = qs.get("notice", [""])[0][:200]
             return self._html_response(200, _with_nav(ai_setup_page.render_overview(
-                providers.check_providers(), status, [notice] if notice else []), "/ai-setup"))
+                providers.check_providers(), status, [notice] if notice else [], providers.harness_status()), "/ai-setup"))
 
         if path == "/home":
             import home_page

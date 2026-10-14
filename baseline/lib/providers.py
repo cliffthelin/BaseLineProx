@@ -114,4 +114,30 @@ def check_providers():
 HARNESSES = [
     {"id": "claude", "name": "Claude Code", "implemented": True, "adapter_module": "harness"},
     {"id": "opencode", "name": "OpenCode", "implemented": True, "adapter_module": "opencode_adapter"},
+    {"id": "codex", "name": "OpenAI Codex", "implemented": True, "adapter_module": "codex_adapter"},
 ]
+
+# Each harness's command-line tool and the credential it needs, for the "is it there and set up" view (/ai-setup).
+HARNESS_REQUIREMENTS = {
+    "claude": {"binary": "claude", "credential": ("CLAUDE_CODE_OAUTH_TOKEN",)},
+    "opencode": {"binary": "opencode", "credential": ()},       # OpenCode brings its own provider login
+    "codex": {"binary": "codex", "credential": ("OPENAI_API_KEY",)},
+}
+
+
+def harness_status(which=None) -> list:
+    """[{id, name, installed, credential}] - credential is 'set', 'missing' or 'not needed'."""
+    import shutil
+    find = which or shutil.which
+    rows = []
+    for entry in HARNESSES:
+        need = HARNESS_REQUIREMENTS.get(entry["id"], {"binary": entry["id"], "credential": ()})
+        if need["credential"]:
+            try:
+                credential = "set" if _env_or_file(*need["credential"]) else "missing"
+            except RuntimeError:
+                credential = "unknown"
+        else:
+            credential = "not needed"
+        rows.append({"id": entry["id"], "name": entry["name"], "installed": bool(find(need["binary"])), "credential": credential})
+    return rows

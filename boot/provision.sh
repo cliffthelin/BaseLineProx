@@ -65,10 +65,10 @@ if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
     cp -a "$BASELINE_PACKAGE_CACHE/npm-cache" "$NPM_SCRATCH"
     mkdir -p /var/log/baseline-npm
     npm install -g --offline --cache "$NPM_SCRATCH" --logs-dir /var/log/baseline-npm \
-        @anthropic-ai/claude-code
+        @anthropic-ai/claude-code opencode-ai @openai/codex
     rm -rf "$NPM_SCRATCH"
 else
-    npm install -g @anthropic-ai/claude-code
+    npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
 fi
 
 echo "=== Deploying Baseline app ==="
@@ -398,6 +398,7 @@ cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
+cp "$SRC/baseline/lib/codex_adapter.py" /opt/baseline/lib/codex_adapter.py
 cp "$SRC/baseline/lib/home_page.py" /opt/baseline/lib/home_page.py
 cp "$SRC/baseline/lib/environments.py" /opt/baseline/lib/environments.py
 cp "$SRC/baseline/lib/vault_crypto.py" /opt/baseline/lib/vault_crypto.py

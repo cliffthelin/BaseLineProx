@@ -8,7 +8,7 @@ network access only through the allowlisted package proxy (baseline/lib/installe
 
   apt-get install --download-only   every package provision.sh installs (offline_cache.provision_packages),
                                     plus Node.js 22 from NodeSource, with all dependencies
-  npm install --cache               Claude Code, filling npm's own cache with every tarball it needs
+  npm install --cache               Claude Code, OpenCode and OpenAI Codex, filling npm's own cache with every tarball they need
   apps                              the five applications (VS Code, Spotify, Chrome, ChatGPT, Claude Desktop) prepared with
                                     `baseline-apps prepare` for Debian 13 (publisher download, pinned sha256, recipe), and
                                     - in the VM - the dependencies of their packages, so `baseline-apps install` needs no network
@@ -190,7 +190,7 @@ def collect(key, packages, output, apps=None, seeds=()):
         _stream_into_vm(key, ["tar", "-C", str(npm_seed), "-cf", "-", "npm-cache"], "/root")
     ssh(key, proxy_env + "apt-get install -y nodejs && "
              f"npm install -g --cache /root/npm-cache --proxy {GUEST_PROXY} --https-proxy {GUEST_PROXY} "
-             "@anthropic-ai/claude-code")
+             "@anthropic-ai/claude-code opencode-ai @openai/codex")
     with open(output / "npm.tar", "wb") as stream:
         ssh(key, "tar -C /root -cf - npm-cache", stdout=stream)
     subprocess.run(["tar", "-xf", str(output / "npm.tar"), "-C", str(output)], check=True)

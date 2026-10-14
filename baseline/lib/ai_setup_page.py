@@ -33,7 +33,7 @@ def _page(title, body):
             f"<h1>{html.escape(title)}</h1>{body}</body></html>").encode()
 
 
-def render_overview(provider_states, vault_status, notices):
+def render_overview(provider_states, vault_status, notices, harnesses=()):
     rows = "".join(f"<tr><td>{html.escape(p['name'])}</td><td>{html.escape(providers.display_status(p['state']))}</td>"
                    f"<td>{html.escape(p['detail'])}</td></tr>" for p in provider_states)
     held = "".join(f"<tr><td>{html.escape(s['name'])}</td><td>{s['length']} characters</td><td>{html.escape(s['fingerprint'])}</td></tr>"
@@ -45,7 +45,11 @@ def render_overview(provider_states, vault_status, notices):
         f"<select name='scope'>{''.join(f'<option value={k}>{html.escape(v)}</option>' for k, v in SCOPES.items())}</select> "
         f"<button type='submit'>Save to vault</button></form></section>" for name, (label, url) in KEY_PAGES.items())
     notes = "".join(f"<p>{html.escape(n)}</p>" for n in notices)
-    return _page("AI providers", f"{notes}<table><thead><tr><th>Provider</th><th>State</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table>"
+    tools = "".join(f"<tr><td>{html.escape(h['name'])}</td><td>{'installed' if h['installed'] else 'NOT INSTALLED'}</td>"
+                    f"<td>{html.escape(h['credential'])}</td></tr>" for h in harnesses)
+    harness_table = (f"<section><h2>Harnesses</h2><table><thead><tr><th>Harness</th><th>Tool on this host</th><th>Credential</th></tr>"
+                     f"</thead><tbody>{tools}</tbody></table></section>") if tools else ""
+    return _page("AI providers", f"{notes}{harness_table}<table><thead><tr><th>Provider</th><th>State</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table>"
                  "<section><h2>Claude: sign in with your account</h2><p>You sign in on Anthropic's own site and grant access; "
                  "Baseline stores the resulting token in the vault.</p><form method='post' action=\"/ai-setup/claude/start\">"
                  "<button type='submit'>Connect Claude</button></form></section>"

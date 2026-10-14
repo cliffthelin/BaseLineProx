@@ -37,7 +37,7 @@ def test_every_user_selectable_harness_has_a_real_conforming_adapter():
     offered = [entry for entry in providers.HARNESSES if entry["implemented"]]
     assert offered
     assert all(reg.get_adapter(entry["id"]) is not None for entry in offered)
-    assert {entry["id"] for entry in providers.HARNESSES} == {"claude", "opencode"}
+    assert {entry["id"] for entry in providers.HARNESSES} == {"claude", "opencode", "codex"}
 
 
 def test_get_adapter_returns_the_real_harness_module_for_claude():
