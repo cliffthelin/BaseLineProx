@@ -404,6 +404,11 @@ cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
+cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py
+cp "$SRC/baseline/bin/baseline-harness-install" /opt/baseline/bin/baseline-harness-install
+chmod +x /opt/baseline/bin/baseline-harness-install
+cp "$SRC/boot/baseline-harness-install.service" /etc/systemd/system/baseline-harness-install.service
+cp "$SRC/boot/baseline-harness-install.timer" /etc/systemd/system/baseline-harness-install.timer
 cp "$SRC/baseline/lib/codex_adapter.py" /opt/baseline/lib/codex_adapter.py
 cp "$SRC/baseline/lib/home_page.py" /opt/baseline/lib/home_page.py
 cp "$SRC/baseline/lib/environments.py" /opt/baseline/lib/environments.py
@@ -639,6 +644,7 @@ APT_HOOK
 /opt/baseline/bin/baseline-proxmox-defaults || true
 systemctl enable baseline-bridge-port.service
 systemctl enable baseline-bridge-port-retry.timer
+systemctl enable baseline-harness-install.timer
 systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-machine-check.timer
 systemctl enable baseline-network-retry.timer
@@ -652,11 +658,19 @@ cat > /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
   "BookmarkBarEnabled": true,
   "ManagedBookmarks": [
     {"toplevel_name": "Baseline"},
-    {"name": "Proxmox VE (VMs, containers, storage, firewall)", "url": "https://localhost:8006"},
-    {"name": "Baseline (drive, apps, settings)", "url": "http://localhost:8100"},
+    {"name": "Home", "url": "http://localhost:8100/home"},
+    {"name": "Hardware", "url": "http://localhost:8100/hardware"},
+    {"name": "Network", "url": "http://localhost:8100/network"},
+    {"name": "Sensors", "url": "http://localhost:8100/sensors"},
+    {"name": "Virtual machines", "url": "http://localhost:8100/vms"},
+    {"name": "Environments", "url": "http://localhost:8100/environments"},
+    {"name": "Chat", "url": "http://localhost:8100/chat"},
+    {"name": "Console", "url": "http://localhost:8100/shell"},
     {"name": "Diagnostic tools (5)", "url": "http://localhost:8100/tools"},
     {"name": "AI providers (sign in)", "url": "http://localhost:8100/ai-setup"},
-    {"name": "Baseline text console (this screen)", "url": "http://localhost:8100/console"}
+    {"name": "Vault", "url": "http://localhost:8100/vault"},
+    {"name": "Baseline text console (this screen)", "url": "http://localhost:8100/console"},
+    {"name": "Proxmox VE (storage, firewall, users and two-factor, Ceph, backup)", "url": "https://localhost:8006"}
   ],
   "HomepageLocation": "https://localhost:8006",
   "ShowHomeButton": true

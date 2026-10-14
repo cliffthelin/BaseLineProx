@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Timer entry point: install any harness CLI (Claude Code, OpenCode, OpenAI Codex) the drive does not have yet, once online."""
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import harness_install  # noqa: E402
+
+if __name__ == "__main__":
+    print(json.dumps(harness_install.run_once()))

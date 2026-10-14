@@ -42,6 +42,18 @@ def _links(items):
     return " &middot; ".join(f'<a href="{html.escape(p, quote=True)}">{html.escape(n)}</a>' for p, n in items)
 
 
+PROXMOX_WHERE = (
+    ("Storage", "Datacenter > Storage (installer-cache, session-temp, user-admin, ...)"),
+    ("Disks", "node > Disks (every drive the host sees, including USB)"),
+    ("Firewall", "Datacenter > Firewall (rules, options) and node > Firewall"),
+    ("Users, groups, permissions", "Datacenter > Permissions"),
+    ("Two-factor authentication", "Datacenter > Permissions > Two Factor"),
+    ("Ceph", "node > Ceph (installs from here when you choose)"),
+    ("Backup", "Datacenter > Backup"),
+    ("VMs and containers", "Create VM / Create CT at the top of the Proxmox page"),
+)
+
+
 def render() -> bytes:
     proxmox = ('<a class="card" href="https://localhost:8006" target="_blank" rel="noopener"><b>Proxmox VE</b>'
                '<span>the Proxmox web interface: storage, firewall, users, two-factor</span></a>')
@@ -51,4 +63,6 @@ def render() -> bytes:
             ".card:hover,.card:focus-visible{border-color:#7fa4ec}.card span{display:block;color:#9aa0ba;margin-top:.3rem;font-size:.9rem}"
             "</style></head><body><h1>Baseline</h1><h2>This machine</h2><div class='grid'>"
             f"{_cards(TUI_AREAS)}</div><h2>Tools</h2><div class='grid'>{proxmox}{_cards(TOOLS)}</div>"
+            "<h2>Where the Proxmox tools are</h2><ul>"
+            + "".join(f"<li><b>{html.escape(n)}</b>: {html.escape(w)}</li>" for n, w in PROXMOX_WHERE) + "</ul>"
             f"<h2>Installer</h2><p>{_links(INSTALLER_GROUP)}</p><h2>Administration</h2><p>{_links(ADMIN_GROUP)}</p></body></html>").encode()

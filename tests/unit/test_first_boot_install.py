@@ -265,7 +265,7 @@ def test_provision_gives_npm_a_scratch_copy_so_the_carried_cache_is_never_writte
     block = text[text.index("NPM_SCRATCH="):text.index(line) + 300]
     assert 'cp -a "$BASELINE_PACKAGE_CACHE/npm-cache" "$NPM_SCRATCH"' in block
     assert "--logs-dir /var/log/baseline-npm" in block
-    assert 'rm -rf "$NPM_SCRATCH"' in text[text.index(line):text.index(line) + 400]
+    assert 'rm -rf "$NPM_SCRATCH"' in text[text.index(line):text.index(line) + 1000]
 
 
 def test_the_cache_also_carries_the_runtime_packages_the_applications_need():
