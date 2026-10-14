@@ -5,4 +5,5 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/opt/baseline/bin/baseline-harness-install
+ReadOnlyPaths=/opt/baseline
 Environment=PYTHONDONTWRITEBYTECODE=1
