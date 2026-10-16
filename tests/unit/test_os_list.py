@@ -16,7 +16,7 @@ def listing(*rows):
 
 def test_a_good_list_is_read_with_defaults_filled_in():
     rows = os_list.parse(listing({"id": "fedora", "name": "Fedora"}, {"id": "kasm", "name": "Kasm", "kind": "kasm", "iso": "x.iso"}))
-    assert rows[0] == {"id": "fedora", "name": "Fedora", "kind": "vm", "iso": None, "notes": ""} and rows[1]["kind"] == "kasm"
+    assert rows[0] == {"id": "fedora", "name": "Fedora", "kind": "vm", "iso": None, "apps": list(os_list.APPS), "notes": ""} and rows[1]["kind"] == "kasm"
 
 
 @pytest.mark.parametrize("bad,why", [
@@ -64,3 +64,19 @@ def test_the_committed_example_is_valid_and_says_where_the_real_one_goes():
 
 def test_the_host_keeps_its_copy_on_user_admin():
     assert str(os_list.HOST_COPY).startswith("/mnt/USER_ADMIN/")
+
+
+def test_apps_default_to_the_five_and_a_kasm_entry_has_none():
+    rows = os_list.parse(listing({"id": "a", "name": "A"}, {"id": "k", "name": "K", "kind": "kasm"}, {"id": "b", "name": "B", "apps": ["chrome"]}))
+    assert rows[0]["apps"] == list(os_list.APPS) and rows[1]["apps"] == [] and rows[2]["apps"] == ["chrome"]
+
+
+def test_an_unknown_or_repeated_app_is_refused():
+    for apps in (["notepad"], ["chrome", "chrome"], "chrome"):
+        with pytest.raises(os_list.OsListError, match="apps must be"):
+            os_list.parse(listing({"id": "a", "name": "A", "apps": apps}))
+
+
+def test_the_apps_are_the_five_the_environments_catalogue_knows():
+    import environments
+    assert tuple(os_list.APPS) == tuple(environments.APPS)

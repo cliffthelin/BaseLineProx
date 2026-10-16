@@ -174,6 +174,10 @@ _FIRMWARE = (
     ("intel-microcode", "Intel CPU microcode", "drivers.cpu_microcode_package"),
     ("firmware-mediatek", "MediaTek Wi-Fi firmware", "drivers.wifi_firmware_package"),
     ("firmware-realtek", "Realtek Wi-Fi firmware", "drivers.wifi_firmware_package"),
+    # DR262: what the two named machines need (driver_profiles.py checks each name against Debian 13's file index)
+    ("firmware-iwlwifi", "Intel Wi-Fi and Bluetooth firmware", "drivers.wifi_firmware_package"),
+    ("firmware-intel-graphics", "Intel graphics firmware", "drivers (carried; installed when Intel graphics is detected)"),
+    ("wireless-regdb", "Wi-Fi regulatory database", "drivers (carried; installed with any Wi-Fi)"),
 )
 
 

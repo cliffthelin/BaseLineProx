@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Which driver and firmware packages THIS machine needs (DR262), read from what it reports, and whether they are installed.
+
+  baseline-drivers          a readable list
+  baseline-drivers --json   the same as JSON
+Changes nothing. Run it on the Dell Latitude 5290 to settle the parts of its profile that are not yet confirmed.
+"""
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/opt/baseline/lib")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import driver_profiles  # noqa: E402
+
+
+def _out(argv):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def _installed(package):
+    return subprocess.run(["dpkg-query", "-W", "-f=${Status}", package], capture_output=True, text=True).stdout.startswith("install ok installed")
+
+
+def _debian():
+    try:
+        ids = dict(line.split("=", 1) for line in Path("/etc/os-release").read_text().splitlines() if "=" in line)
+    except OSError:
+        return False
+    return ids.get("ID", "").strip('"') == "debian"        # Proxmox is Debian; Ubuntu is only Debian-like and has no firmware-* packages
+
+
+def main(argv):
+    cpuinfo = Path("/proc/cpuinfo").read_text() if Path("/proc/cpuinfo").exists() else ""
+    rows = driver_profiles.needed(_out(["lspci", "-nn"]), _out(["lsusb"]), cpuinfo)
+    debian = _debian()
+    for row in rows:
+        # Debian (and so Proxmox) splits firmware into packages; Ubuntu and others ship it in one linux-firmware package, so a Debian package name means nothing there
+        row["installed"] = _installed(row["package"]) if debian else None
+    if "--json" in argv:
+        print(json.dumps(rows, indent=1))
+        return 0
+    for row in rows:
+        print(f"{'n/a (not Debian)' if row['installed'] is None else 'installed' if row['installed'] else 'MISSING  '}  {row['package']:<26} {row['label']}  <- {'; '.join(row['why'])}")
+    if not rows:
+        print("this machine reports no hardware that needs a driver or firmware package")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

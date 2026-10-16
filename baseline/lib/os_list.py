@@ -2,6 +2,7 @@
 
 The list is the operator's own choice, so it is never committed: the build machine's working copy is `config/local/supported-os.json` (git-ignored;
 `config/supported-os.example.json` shows the shape) and the installed host keeps its copy on USER_ADMIN, where non-public host configuration lives (DR257).
+Each entry also lists the applications to install and configure on it (default: all five; a Kasm entry has none, its workspaces are its applications).
 Entries are checked here once, so everything that reads the list sees the same thing. Nothing in this module ever writes outside the file it is given.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ from pathlib import Path
 HOST_COPY = Path("/mnt/USER_ADMIN/config/supported-os.json")
 REPO_COPY = Path(__file__).resolve().parents[2] / "config" / "local" / "supported-os.json"
 KINDS = ("vm", "container", "kasm")
+APPS = ("vscode", "spotify", "chrome", "chatgpt", "claude")     # the five guest applications (DR258); an entry lists the ones to install and configure on it
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 _ISO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
 
@@ -36,10 +38,13 @@ def _entry(raw, position: int) -> dict:
     iso = raw.get("iso")
     if iso is not None and (not isinstance(iso, str) or not _ISO.fullmatch(iso)):
         raise OsListError(f"{ident}: iso must be a file name, not a path")
+    apps = raw.get("apps", list(APPS) if kind != "kasm" else [])
+    if not isinstance(apps, list) or any(a not in APPS for a in apps) or len(set(apps)) != len(apps):
+        raise OsListError(f"{ident}: apps must be a list without repeats from {', '.join(APPS)}")
     notes = raw.get("notes", "")
     if not isinstance(notes, str) or len(notes) > 300:
         raise OsListError(f"{ident}: notes must be text up to 300 characters")
-    return {"id": ident, "name": name.strip(), "kind": kind, "iso": iso, "notes": notes}
+    return {"id": ident, "name": name.strip(), "kind": kind, "iso": iso, "apps": apps, "notes": notes}
 
 
 def parse(text: str) -> list:

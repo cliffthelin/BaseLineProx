@@ -25,7 +25,8 @@ def classify(iso: str):
         if m:
             release = m.group(1) if family != "debian" or name.startswith("debian") else ""
             return ("mx" if name.startswith("mx-") else family), release
-    for needle, family in (("cachyos", "arch"), ("omarchy", "arch"), ("nixos", "nixos"), ("rescue", "rescue")):
+    for needle, family in (("cachyos", "arch"), ("omarchy", "arch"), ("nixos", "nixos"), ("rescue", "rescue"),
+                           ("qubes", "qubes"), ("fydeos", "chromeos"), ("bazzite", "fedora")):
         if needle in name:
             return family, ""
     return "unknown", ""

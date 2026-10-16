@@ -1574,7 +1574,7 @@ or change any current setting. Nothing here is reinstalled or wiped.</p>
 
 _FIELD_CHOICES = {
     'cpu_microcode_package': [('amd64-microcode','AMD microcode'),('intel-microcode','Intel microcode')],
-    'wifi_firmware_package': [('firmware-mediatek','MediaTek firmware'),('firmware-realtek','Realtek firmware')],
+    'wifi_firmware_package': [('firmware-mediatek','MediaTek firmware'),('firmware-realtek','Realtek firmware'),('firmware-iwlwifi','Intel firmware')],
     'smartd_auto_offline': [('on', 'Enabled'), ('off', 'Disabled')],
     'smartd_attribute_autosave': [('on', 'Enabled'), ('off', 'Disabled')],
     'smartd_selftest_schedule': [('', 'No scheduled tests'), ('S/../.././02', 'Short test daily at 02:00'),

@@ -37,3 +37,10 @@ def test_the_page_lists_every_row_and_never_claims_apps_are_installed():
     for iso in ISOS:
         assert iso in html
     assert "not built" in html and "installed" not in html.lower().replace("not installed", "")
+
+
+def test_qubes_fydeos_and_bazzite_are_recognised_and_marked_helper_not_native():
+    rows = {e["iso"]: e for e in env.catalogue(["Qubes-R4.3.2-x86_64.iso", "FydeOS-VMWare-v23.0-Preview2-x86_64-io.ova", "bazzite-stable-amd64.iso", "omarchy-4.0.4.iso"], [])}
+    assert (rows["Qubes-R4.3.2-x86_64.iso"]["os"], rows["FydeOS-VMWare-v23.0-Preview2-x86_64-io.ova"]["os"], rows["bazzite-stable-amd64.iso"]["os"]) == ("qubes", "chromeos", "fedora")
+    assert rows["omarchy-4.0.4.iso"]["os"] == "arch"
+    assert all(set(r["apps"].values()) == {"helper"} for r in rows.values())
