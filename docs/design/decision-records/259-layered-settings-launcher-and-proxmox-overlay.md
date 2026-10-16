@@ -89,3 +89,31 @@ in the offline cache. Unit-tested against fakes only. Ceph and two-factor wait (
 - Name the ten operating systems and which need a helper (DR258 question 4).
 - Say what the guest-side applier should set up per OS first (cloud-init for Ubuntu/Debian is the obvious start).
 - Containers as tiles; a console URL check against a real Proxmox; the touch long-press on a real touch screen.
+
+## QEMU rehearsal evidence (2026-10-15; runs 20-22 of `baseline-allscript-install --stage rehearse`; a sparse 64 GiB disk, no network, no real drive)
+Built from commits through the live-migration fix; offline cache rebuilt first (403 packages, 491 files verified, all five new audio/Bluetooth
+packages and the five applications present). Read over SSH with the development monitoring key (a host-to-guest port forward added through the
+QEMU monitor) and from a RAM dump of the guest when it was unreachable.
+- **Found by run 20, fixed:** the ordering cycle (storage-verify <-> pve-cluster <-> redirects). Symptom: VM idle at a login prompt, no CONFIRM
+  screen. Evidence: the guest journal's "Found ordering cycle ... Job baseline-persist-bind-mounts.service/start deleted".
+- **Found by run 21, fixed:** the redirect service started mid-boot through `Requires=` and moved the live Proxmox database.
+- **Run 22 (final code), verified in the guest:** first boot never starts the redirect service (0 starts, 0 refusals); second boot order is
+  storage-verify 4.2 s -> redirects 4.4-4.6 s -> pve-cluster 4.9 s -> storage-reconcile -> first-boot; all four Proxmox state directories are
+  mounted from USER_ADMIN (device `baseline_user_admin`); `config.db` is on USER_ADMIN and the same paths on the substrate hold 0 entries (also
+  `/root`, `/home`, `/etc/baseline`); Proxmox sees storage.cfg, user.cfg, datacenter.cfg and all eight storages; a marker pool created with
+  `pveum pool add` was found inside `user.cfg` in the database on USER_ADMIN and **survived a normal reboot**; 0 ordering-cycle messages, 0 failed units.
+- **Also verified in the guest:** bluez, pipewire, pipewire-pulse, wireplumber and libspa-0.2-bluetooth installed offline from the carried repository
+  (the `bluetooth` service is inactive because the VM has no Bluetooth hardware); the new modules deployed and import; layered settings written
+  to the real mounted volumes (user and os layers on USER_PERSONAL, app layer on APPDATA_PERSONAL, session layer on SESSION_TEMP, 0 files on the
+  substrate, admin layer refused); `/launcher`, `/launcher/state` and `/power` exist and redirect to login; the launcher state builds from the real
+  Proxmox VM host (0 VMs, no error); the kiosk browser window shows the Proxmox login with Baseline's tab and bookmarks.
+## Still not verified
+- Real hardware (laptop or the PC601 drive itself) and real Bluetooth devices; the launcher in a logged-in browser with real VM tiles, its
+  console URLs against a real Proxmox, and the popup/fullscreen behaviour; right-click and long-press on real input devices.
+- Several Proxmox services were checked only for "active"; a VM or container was not created and run under the overlay layout in this run.
+- The sensors-history, scripts-inbox and other older units were not part of this check.
+## Open: a stale offline cache is accepted silently
+`baseline-allscript-install`'s `cache_status` calls any cache with a manifest and an `apps` folder "complete", so a cache built before
+provision.sh gained new packages is used as-is and the install fails offline at `apt-get install`. This run avoided it by moving the old cache
+aside by hand. A fix needs the cache to record what it was built for (a hash of `offline_cache.required_packages`) and the stage to compare it;
+comparing against the apt index does not work (the Proxmox base already has curl, smartmontools, ethtool and others, so they never appear there).

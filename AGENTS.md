@@ -61,7 +61,7 @@ does not prove any of these; `tests/unit/test_established_expectations.py` recor
   not the special case. The user's settings are layered (admin, user, os, app, session; `layered_settings.py`) and shared from one OS to the
   next. Proxmox's own state (`/var/lib/pve-cluster` etc.) is overlay data on USER_ADMIN. Non-public settings and data live ONLY on
   USER_ADMIN, USER_DATA (`USER_<PERSONA>`), APP_DATA (`APPDATA_<PERSONA>`) and SESSION_TEMP, never SUBSTRATE. The browser front screen for VMs
-  and OSes is `/launcher` (a phone-style launcher, right-click menu, Console/Window/Fullscreen). Unit-tested only; not rehearsed or run on hardware.
+  and OSes is `/launcher` (a phone-style launcher, right-click menu, Console/Window/Fullscreen). Rehearsed in QEMU 2026-10-15 (Proxmox state on USER_ADMIN survives a reboot; two boot-order bugs found and fixed, see DR259's rehearsal evidence); not run on real hardware.
 - **Never attach drives behind this host's faulty USB port** (xHCI 0000:0a:00.0, `usb2-port5`; the bounce timer is deliberate).
 
 ## Credential rules
