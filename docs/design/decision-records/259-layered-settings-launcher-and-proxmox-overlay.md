@@ -155,3 +155,14 @@ throwaway account created inside the disposable guest (its password generated fo
   creates any VM. With growth now wired in, that makes a first small VM grow two volumes by about 10 GiB each, which sits oddly with "volumes grow
   only if actually used and needed"; the rehearsal's 21 GiB volume group was a hair too small for it (the test lowered the constant in its own
   process only). Whether a growable volume should need less headroom at creation, and let the growth timer follow actual use, is the operator's call.
+
+## Swap as a user setting (operator 2026-10-16; built, simulated host + HTTP tests; not yet rehearsed)
+Asked: "make it a setting that can be made by the user either from Proxmox or on the VM, whichever is appropriate". Where each belongs:
+- **This machine (host):** Proxmox has no swap setting, so it is Baseline's `/memory` page ("Memory and swap"). Size 0-64 GiB and a kind: `file` (a swap file in
+  SESSION_TEMP, written once; the default and the previous behaviour) or `reserved` (a regular volume; the space is reserved, nothing is written, and it is
+  taken from what the other volumes can grow into). `swap_config.apply` brings the new swap up before releasing the old, keeps an old one that is still in use
+  until the next restart, never touches swap it does not manage, and cleans up leftovers. The choice is recorded in the admin layer on USER_ADMIN
+  (`host_swap_gib`, `host_swap_kind`; admin-only keys that never reach a guest).
+- **Container:** a native Proxmox setting, so choosing it in the launcher applies `pct set <id> --swap <MB>` first and stores it only if Proxmox accepted it.
+- **VM:** swap lives in the guest, so `swap_mb` is stored per OS (or for all OSes) for the guest to apply when the OS is set up; that applier is not built.
+- Not changed: first boot still makes the 4 GiB swap file; a replicated drive does not inherit the choice (USER_ADMIN is never published).

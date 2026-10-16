@@ -10,6 +10,7 @@ TUI_AREAS = (
     ("/sensors", "Sensors", "temperatures, NVMe and SMART health"),
     ("/audio", "Audio and Bluetooth", "speakers, microphones, headsets and other Bluetooth devices"),
     ("/power", "Power", "shut down or restart this machine"),
+    ("/memory", "Memory and swap", "the host's swap: size, and written or just reserved"),
     ("/vms", "Virtual machines", "your VMs and containers, start, stop and create"),
     ("/chat", "Chat", "ask Baseline, with the harness of your choice"),
     ("/shell", "Console", "the TUI's command line: hardware, network, tether, ask"),

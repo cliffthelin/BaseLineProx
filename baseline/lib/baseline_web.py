@@ -76,6 +76,7 @@ NAV_TABS = (
     ("/shell", "Console"),
     ("/audio", "Audio and Bluetooth"),
     ("/power", "Power"),
+    ("/memory", "Memory and swap"),
     ("/containers", "Distro containers"),
     ("/environments", "Environments"),
     ("/tools", "Diagnostic tools"),
@@ -1735,6 +1736,14 @@ def _settings_error(message: str):
     return layered_settings.SettingsError(message)
 
 
+def _swap_runner(deps: dict):
+    """The runner and volume group for host swap changes: injected in tests, the real root runner and the running root's group otherwise."""
+    import repair
+    import volume_growth
+    runner = deps.get("swap_runner") or repair.RealRunner()
+    return runner, (deps.get("swap_vg") or volume_growth.volume_group(runner))
+
+
 def _launcher_roots(deps: dict):
     import layered_settings
     return deps.get("launcher_roots") or layered_settings.default_roots(_LAUNCHER_PERSONA)
@@ -2074,6 +2083,23 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             if path == "/launcher/state":
                 return self._json(200, state)
             return self._html_response(200, _with_nav(launcher_page.render(state), path))
+
+        if path == "/memory":
+            import layered_settings
+            import memory_page
+            import swap_config
+            runner, vg = _swap_runner(deps)
+            try:
+                current = swap_config.current(runner, vg)
+            except (swap_config.SwapError, RuntimeError, OSError) as exc:
+                current, notice = {"kind": None, "gib": 0, "names": []}, "Swap could not be read: " + str(exc)
+            else:
+                notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            try:
+                recorded = layered_settings.read_layer(_launcher_roots(deps), "admin")
+            except layered_settings.SettingsError:
+                recorded = {}
+            return self._html_response(200, _with_nav(memory_page.render(current, recorded, notice), path))
 
         if path == "/power":
             import power_control
@@ -2651,15 +2677,47 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     app_id = next(a["id"] for a in state["apps"] if a["key"] == app)
                     if app_id is None:
                         raise _settings_error("application identifiers are unavailable")
+                applied = None
+                tile = known[os_id]
+                if layer == "os" and tile["kind"] == "ct" and changes.get("swap_mb") is not None:
+                    # a container's swap is a native Proxmox setting: apply it first, and store it only if Proxmox accepted it
+                    mb = layered_settings.SHARED_KEYS["swap_mb"](changes["swap_mb"])
+                    if mb is None:
+                        raise _settings_error("that swap size is not offered")
+                    import repair
+                    argv = ["pct", "set", str(tile["vmid"]), "--swap", str(mb)]
+                    done = (deps.get("container_runner") or repair.RealRunner()).run(argv, timeout=60)
+                    if done.returncode != 0:
+                        return self._json(502, {"ok": False, "error": "Proxmox did not accept it: " + ((done.stderr or done.stdout or "failed").strip()[-160:])})
+                    applied = " ".join(argv)
                 layered_settings.write_layer(_launcher_roots(deps), layer, changes, os_id=os_id if layer != "user" else None,
                                              app_id=app_id, actor="person")
                 if deps.get("audit"):
-                    deps["audit"]({"event": "launcher_settings", "layer": layer, "keys": sorted(changes)})
-                return self._json(200, {"ok": True})
+                    deps["audit"]({"event": "launcher_settings", "layer": layer, "keys": sorted(changes), "applied": applied})
+                return self._json(200, {"ok": True, "applied": applied})
             except (layered_settings.SettingsError, ValueError) as exc:
                 return self._json(400, {"ok": False, "error": str(exc)})
             except (vh.VmError, OSError) as exc:
                 return self._json(503, {"ok": False, "error": f"unavailable: {exc}"})
+
+        if path == "/memory/swap":
+            import layered_settings
+            import swap_config
+            try:
+                if str(body.get("confirm", "")) != "yes":
+                    raise ValueError("Tick the box to confirm; nothing was changed")
+                gib_text = str(body.get("gib", "")).strip()
+                gib, kind = swap_config.validate(int(gib_text) if gib_text.isdigit() else gib_text, str(body.get("kind", "")))
+                runner, vg = _swap_runner(deps)
+                kwargs = {"ensure_room": deps["swap_ensure_room"]} if deps.get("swap_ensure_room") else {}
+                result = swap_config.apply(runner, vg, gib, kind, **kwargs)
+                layered_settings.write_layer(_launcher_roots(deps), "admin", {"host_swap_gib": gib, "host_swap_kind": kind}, actor="admin")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "host_swap_changed", "gib": gib, "kind": kind, "changed": result["changed"]})
+                notice = ("Swap is now " + (f"{gib} GiB ({kind})" if gib else "off") + ("." if not result["notes"] else ". " + " ".join(result["notes"])))
+            except (ValueError, swap_config.SwapError, layered_settings.SettingsError, RuntimeError, OSError) as exc:
+                notice = str(exc)
+            return self._redirect("/memory?notice=" + html.escape(notice).replace(" ", "+"))
 
         if path.startswith("/power/"):
             import power_control

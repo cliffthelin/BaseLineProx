@@ -298,7 +298,7 @@ function osSettings(sh, t){
     if (cur && cur.source === 'os') scope.value = 'os';
     const save = el('button', {className:'btn go', type:'button'}, 'Save');
     save.onclick = async () => { if (input.value === '') return toast('Choose a value, or use "Use inherited".');
-      const v = key === 'display_scale' ? Number(input.value) : input.value;
+      const v = f.numeric ? Number(input.value) : input.value;
       const fresh = await writeSetting(t, scope.value, null, {[key]: v}); openSheet(fresh, 'os_settings'); };
     const reset = el('button', {className:'btn', type:'button'}, 'Use inherited');
     reset.onclick = async () => { const fresh = await writeSetting(t, scope.value, null, {[key]: null}); openSheet(fresh, 'os_settings'); };

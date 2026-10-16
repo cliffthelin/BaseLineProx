@@ -177,3 +177,47 @@ def test_each_effective_value_says_which_layer_it_came_from(roots):
     assert "timezone" not in os_view                                    # unset everywhere: absent, never invented
     app_view = ls.explain_app(roots, OS_A, APP)
     assert app_view["enabled"] == {"value": True, "source": "app"} and app_view["theme"]["source"] == "user"
+
+
+# --- swap (operator 2026-10-16: swap is a setting the user can change) ---------------------------------------------------------------
+
+@pytest.mark.parametrize("value", [0, 256, 512, 1024, 2048, 4096, 8192, 16384])
+def test_a_guests_swap_size_is_one_of_the_offered_sizes(roots, value):
+    ls.write_layer(roots, "user", {"swap_mb": value})
+    assert ls.effective_os(roots, OS_A)["swap_mb"] == value
+
+
+@pytest.mark.parametrize("value", [-1, 100, 3000, 10**9, "1024", True, 1.5])
+def test_other_swap_sizes_are_refused(roots, value):
+    with pytest.raises(ls.SettingsError):
+        ls.write_layer(roots, "user", {"swap_mb": value})
+
+
+def test_swap_can_differ_per_os_and_inherits_otherwise(roots):
+    ls.write_layer(roots, "user", {"swap_mb": 2048})
+    ls.write_layer(roots, "os", {"swap_mb": 0}, os_id=OS_A)
+    assert ls.effective_os(roots, OS_A)["swap_mb"] == 0 and ls.effective_os(roots, OS_B)["swap_mb"] == 2048
+
+
+def test_the_hosts_own_swap_is_an_admin_setting_and_cannot_be_set_for_a_guest(roots):
+    ls.write_layer(roots, "admin", {"host_swap_gib": 8, "host_swap_kind": "reserved"}, actor="admin")
+    assert ls.read_layer(roots, "admin") == {"host_swap_gib": 8, "host_swap_kind": "reserved"}
+    for layer in ("user", "session"):
+        with pytest.raises(ls.SettingsError):
+            ls.write_layer(roots, layer, {"host_swap_gib": 8})
+    with pytest.raises(ls.SettingsError):
+        ls.write_layer(roots, "os", {"host_swap_kind": "file"}, os_id=OS_A)
+
+
+@pytest.mark.parametrize("key,value", [("host_swap_gib", -1), ("host_swap_gib", 65), ("host_swap_gib", "8"), ("host_swap_gib", True),
+                                       ("host_swap_kind", "zeroed"), ("host_swap_kind", "")])
+def test_bad_host_swap_values_are_refused(roots, key, value):
+    with pytest.raises(ls.SettingsError):
+        ls.write_layer(roots, "admin", {key: value}, actor="admin")
+    assert ls.read_layer(roots, "admin") == {}
+
+
+def test_host_only_settings_never_leak_into_what_a_guest_receives(roots):
+    ls.write_layer(roots, "admin", {"theme": "dark", "host_swap_gib": 8, "host_swap_kind": "reserved"}, actor="admin")
+    assert ls.effective_os(roots, OS_A) == {"theme": "dark"}
+    assert set(ls.explain_os(roots, OS_A)) == {"theme"} and set(ls.effective_app(roots, OS_A, APP)) == {"theme"}

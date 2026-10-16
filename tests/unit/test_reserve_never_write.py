@@ -29,14 +29,16 @@ def _offending():
     return found
 
 
-def test_the_only_pre_filling_write_in_the_product_is_the_swap_file():
+def test_the_only_pre_filling_writes_in_the_product_are_the_swap_file_makers():
+    """Two named sites, one write each: first boot's swap file (host_layout) and the user-chosen `file` kind (swap_config, never run for `reserved`)."""
     offenders = _offending()
-    assert list(offenders) == ["baseline/lib/host_layout.py"], f"space is being written or preallocated outside the swap file: {offenders}"
-    assert len(offenders["baseline/lib/host_layout.py"]) == 1
+    assert sorted(offenders) == ["baseline/lib/host_layout.py", "baseline/lib/swap_config.py"], \
+        f"space is being written or preallocated outside the swap file makers: {offenders}"
+    assert all(len(lines) == 1 for lines in offenders.values())
 
 
 def test_the_swap_exception_stays_small_and_fixed():
-    assert host_layout.SWAP_SIZE_GIB <= 4, "the one pre-filled file must stay small; reserve space instead of writing it"
+    assert host_layout.SWAP_SIZE_GIB <= 4, "the first-boot pre-filled file must stay small; reserve space instead of writing it"
     text = (REPO / "baseline/lib/host_layout.py").read_text()
     assert "SESSION_TEMP is a thin volume" in text        # the reason for the exception stays written next to it
 

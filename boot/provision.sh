@@ -419,6 +419,8 @@ cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
 cp "$SRC/baseline/lib/audio_bluetooth.py" /opt/baseline/lib/audio_bluetooth.py
 cp "$SRC/baseline/lib/power_control.py" /opt/baseline/lib/power_control.py
 cp "$SRC/baseline/lib/vm_power.py" /opt/baseline/lib/vm_power.py
+cp "$SRC/baseline/lib/swap_config.py" /opt/baseline/lib/swap_config.py
+cp "$SRC/baseline/lib/memory_page.py" /opt/baseline/lib/memory_page.py
 cp "$SRC/baseline/lib/layered_settings.py" /opt/baseline/lib/layered_settings.py
 cp "$SRC/baseline/lib/launcher_model.py" /opt/baseline/lib/launcher_model.py
 cp "$SRC/baseline/lib/launcher_state.py" /opt/baseline/lib/launcher_state.py

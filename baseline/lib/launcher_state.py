@@ -15,8 +15,9 @@ def schema() -> dict:
         "locale": {"label": "Language and region", "type": "text", "pattern": _PATTERNS["locale"], "example": "en_US.UTF-8"},
         "keyboard": {"label": "Keyboard layout", "type": "text", "pattern": _PATTERNS["keyboard"], "example": "us"},
         "theme": {"label": "Appearance", "type": "choice", "choices": ["light", "dark", "auto"]},
-        "display_scale": {"label": "Display scale (%)", "type": "choice", "choices": [100, 125, 150, 200]},
+        "display_scale": {"label": "Display scale (%)", "type": "choice", "choices": [100, 125, 150, 200], "numeric": True},
         "default_run_mode": {"label": "Opens in", "type": "choice", "choices": list(ls.RUN_MODES)},
+        "swap_mb": {"label": "Swap (MB, 0 = none)", "type": "choice", "choices": list(ls.SWAP_MB_CHOICES), "numeric": True},
     }
     app_fields = {"enabled": {"label": "Wanted in this OS", "type": "boolean"},
                   "autostart": {"label": "Start with the OS", "type": "boolean"}}

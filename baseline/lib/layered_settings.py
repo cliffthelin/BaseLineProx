@@ -41,6 +41,10 @@ def _boolean(v):
     return v if isinstance(v, bool) else None
 
 
+SWAP_MB_CHOICES = (0, 256, 512, 1024, 2048, 4096, 8192, 16384)      # a guest's swap; 0 is none
+HOST_SWAP_KINDS = ("file", "reserved")                              # written once into SESSION_TEMP, or a regular volume that only reserves the space
+HOST_SWAP_MAX_GIB = 64
+
 SHARED_KEYS = {
     "timezone": _matching(_TIMEZONE),
     "locale": _matching(_LOCALE),
@@ -48,9 +52,15 @@ SHARED_KEYS = {
     "theme": _one_of("light", "dark", "auto"),
     "display_scale": lambda v: v if (isinstance(v, int) and not isinstance(v, bool) and v in (100, 125, 150, 200)) else None,
     "default_run_mode": _one_of(*RUN_MODES),
+    "swap_mb": lambda v: v if (isinstance(v, int) and not isinstance(v, bool) and v in SWAP_MB_CHOICES) else None,
+}
+# The host's own swap is not a guest setting: only the admin layer carries it, and only an administrator writes that layer.
+ADMIN_ONLY_KEYS = {
+    "host_swap_gib": lambda v: v if (isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= HOST_SWAP_MAX_GIB) else None,
+    "host_swap_kind": _one_of(*HOST_SWAP_KINDS),
 }
 APP_KEYS = {"enabled": _boolean, "autostart": _boolean}
-_KEYS = {"admin": SHARED_KEYS, "user": SHARED_KEYS, "os": SHARED_KEYS, "session": SHARED_KEYS, "app": APP_KEYS}
+_KEYS = {"admin": {**SHARED_KEYS, **ADMIN_ONLY_KEYS}, "user": SHARED_KEYS, "os": SHARED_KEYS, "session": SHARED_KEYS, "app": APP_KEYS}
 
 
 class SettingsError(RuntimeError):
@@ -174,9 +184,8 @@ def write_layer(roots: Roots, layer: str, changes: dict, *, os_id=None, app_id=N
 
 def effective_os(roots: Roots, os_id: str) -> dict:
     _identifier(os_id, "O", "an OS")
-    merged = {}
-    for layer in ("admin", "user"):
-        merged.update(read_layer(roots, layer))
+    merged = {k: v for k, v in read_layer(roots, "admin").items() if k not in ADMIN_ONLY_KEYS}     # host-only settings are not a guest's
+    merged.update(read_layer(roots, "user"))
     merged.update(read_layer(roots, "os", os_id=os_id))
     return merged
 
@@ -194,6 +203,8 @@ def explain_os(roots: Roots, os_id: str) -> dict:
     for layer, data in (("admin", read_layer(roots, "admin")), ("user", read_layer(roots, "user")),
                         ("os", read_layer(roots, "os", os_id=os_id))):
         for key, value in data.items():
+            if layer == "admin" and key in ADMIN_ONLY_KEYS:
+                continue
             view[key] = {"value": value, "source": layer}
     return view
 

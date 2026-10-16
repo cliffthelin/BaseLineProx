@@ -185,3 +185,57 @@ def test_a_container_listing_problem_is_a_notice_and_the_vms_stay(case):
 
 def test_a_container_host_that_is_not_there_is_not_an_error(case):
     assert state(case)["notices"] == [] and [t["kind"] for t in state(case)["tiles"]] == ["vm", "vm"]
+
+
+# --- swap per VM / container (operator 2026-10-16) ----------------------------------------------------------------------------------
+
+class Recorder:
+    def __init__(self, rc=0, err=""):
+        self.calls, self.rc, self.err = [], rc, err
+
+    def run(self, argv, timeout=10):
+        self.calls.append(list(argv))
+        return type("P", (), {"returncode": self.rc, "stdout": "", "stderr": self.err})()
+
+
+def test_swap_is_offered_in_the_os_settings_with_the_agreed_sizes(case):
+    swap = state(case)["schema"]["os"]["swap_mb"]
+    assert swap["type"] == "choice" and swap["choices"] == [0, 256, 512, 1024, 2048, 4096, 8192, 16384]
+
+
+def test_a_vms_swap_is_stored_for_the_guest_and_nothing_is_run(case):
+    rec = Recorder()
+    case.server.deps["container_runner"] = rec                                           # type: ignore[attr-defined]
+    vm = state(case)["tiles"][0]
+    status, data = post(case, {"id": vm["id"], "layer": "os", "changes": {"swap_mb": 2048}})
+    assert status == 200 and data["ok"] is True and data.get("applied") is None
+    assert state(case)["tiles"][0]["settings"]["os"]["swap_mb"] == {"value": 2048, "source": "os"}
+    assert rec.calls == []                                                               # a VM's swap is inside the guest: stored, not applied here
+
+
+def test_a_containers_swap_is_applied_by_proxmox_itself_and_then_stored(case):
+    rec = Recorder()
+    case.server.deps["container_runner"] = rec                                           # type: ignore[attr-defined]
+    case.server.deps["container_host"] = FakeContainers()                                # type: ignore[attr-defined]
+    ct = state(case)["tiles"][2]
+    status, data = post(case, {"id": ct["id"], "layer": "os", "changes": {"swap_mb": 1024}})
+    assert status == 200 and rec.calls == [["pct", "set", "200", "--swap", "1024"]] and data["applied"] == "pct set 200 --swap 1024"
+    assert state(case)["tiles"][2]["settings"]["os"]["swap_mb"]["value"] == 1024
+
+
+def test_when_proxmox_refuses_the_containers_swap_nothing_is_stored(case):
+    case.server.deps["container_runner"] = Recorder(rc=255, err="unable to set swap: not enough memory")   # type: ignore[attr-defined]
+    case.server.deps["container_host"] = FakeContainers()                                # type: ignore[attr-defined]
+    ct = state(case)["tiles"][2]
+    status, data = post(case, {"id": ct["id"], "layer": "os", "changes": {"swap_mb": 16384}})
+    assert status == 502 and "not enough memory" in data["error"]
+    assert "swap_mb" not in state(case)["tiles"][2]["settings"]["os"]
+
+
+def test_the_shared_swap_setting_is_not_pushed_into_containers(case):
+    rec = Recorder()
+    case.server.deps["container_runner"] = rec                                           # type: ignore[attr-defined]
+    case.server.deps["container_host"] = FakeContainers()                                # type: ignore[attr-defined]
+    ct = state(case)["tiles"][2]
+    assert post(case, {"id": ct["id"], "layer": "user", "changes": {"swap_mb": 512}})[0] == 200
+    assert rec.calls == []                       # "all my OSes" is a default for new ones, not a change to every running container
