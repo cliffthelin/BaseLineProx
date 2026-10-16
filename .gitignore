@@ -26,3 +26,6 @@ venv/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# The operator's own list of operating systems to support (DR261): a working copy for the build machine; the installed host keeps its copy on USER_ADMIN.
+/config/local/
