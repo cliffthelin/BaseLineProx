@@ -1,14 +1,15 @@
 [Unit]
 Description=Verify independent Baseline drive storage identities and capacity
+# Runs BEFORE the redirects and before Proxmox starts (DR259): it must not wait for pve-cluster, whose state is on USER_ADMIN, which the
+# redirect service mounts. Reconciling Proxmox's storage definitions needs a running pve-cluster, so that is baseline-storage-reconcile.service.
 ConditionPathExists=/etc/baseline/independent-drive.json
-After=local-fs.target pve-cluster.service
-Wants=pve-cluster.service
+After=local-fs.target
 RequiresMountsFor=/mnt/BASELINE /mnt/INSTALLER_CACHE /mnt/SESSION_TEMP /mnt/SUBSTRATE /mnt/USER_ADMIN /mnt/USER_PERSONAL /mnt/APPDATA_ADMIN /mnt/APPDATA_PERSONAL
 Before=baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-web.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /opt/baseline/bin/baseline-single-drive-storage verify --reconcile-proxmox
+ExecStart=/usr/bin/python3 /opt/baseline/bin/baseline-single-drive-storage verify
 RemainAfterExit=yes
 
 [Install]

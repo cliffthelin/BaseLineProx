@@ -342,6 +342,7 @@ cp "$SRC/baseline/lib/drive_recovery.py" /opt/baseline/lib/drive_recovery.py
 cp "$SRC/baseline/lib/single_drive_storage.py" /opt/baseline/lib/single_drive_storage.py
 cp "$SRC/baseline/lib/storage_policy.py" /opt/baseline/lib/storage_policy.py
 cp "$SRC/boot/baseline-storage-verify.service" /etc/systemd/system/baseline-storage-verify.service
+cp "$SRC/boot/baseline-storage-reconcile.service" /etc/systemd/system/baseline-storage-reconcile.service
 for storage_unit in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service; do
     mkdir -p "/etc/systemd/system/$storage_unit.d"
     cat > "/etc/systemd/system/$storage_unit.d/storage.conf" <<'STORAGE_GATE'
@@ -349,6 +350,14 @@ for storage_unit in baseline-persist-bind-mounts.service baseline-firstboot.serv
 Requires=baseline-storage-verify.service
 After=baseline-storage-verify.service
 STORAGE_GATE
+done
+# Proxmox's storage definitions are reconciled once pve-cluster runs (after the redirects); Baseline's own services wait for that.
+for reconcile_unit in baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service; do
+    cat > "/etc/systemd/system/$reconcile_unit.d/reconcile.conf" <<'RECONCILE_GATE'
+[Unit]
+Requires=baseline-storage-reconcile.service
+After=baseline-storage-reconcile.service
+RECONCILE_GATE
 done
 cp "$SRC/baseline/lib/config_diff.py" /opt/baseline/lib/config_diff.py
 cp "$SRC/baseline/lib/update_pipeline.py" /opt/baseline/lib/update_pipeline.py
@@ -630,6 +639,7 @@ systemctl daemon-reload
 systemctl enable baseline-persist-bind-mounts.service
 systemctl enable baseline-firstboot.service
 systemctl enable baseline-storage-verify.service
+systemctl enable baseline-storage-reconcile.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 # smartd exits 17 ("no SMART devices to monitor") on a machine whose drives are all USB bridges or virtual; that is not a failure.

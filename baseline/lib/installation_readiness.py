@@ -5,7 +5,7 @@ import lan_firewall
 import storage_policy
 from firstboot_network_repair import facts_verification
 
-SERVICES=('baseline-storage-verify.service','baseline-persist-bind-mounts.service',
+SERVICES=('baseline-storage-verify.service','baseline-persist-bind-mounts.service','baseline-storage-reconcile.service',
           'baseline-firstboot.service','baseline.service','baseline-web.service','baseline-kiosk.service',
           'pve-cluster.service','pvedaemon.service','pveproxy.service')
 

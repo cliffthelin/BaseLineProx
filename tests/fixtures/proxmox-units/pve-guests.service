@@ -1,0 +1,24 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=PVE guests
+ConditionPathExists=/usr/bin/pvesh
+RefuseManualStart=true
+RefuseManualStop=true
+Wants=pvestatd.service
+Wants=pveproxy.service
+Wants=spiceproxy.service
+Wants=pve-firewall.service
+Wants=lxc.service
+After=pveproxy.service
+After=pvestatd.service
+After=spiceproxy.service
+After=pve-firewall.service
+After=lxc.service
+After=pve-ha-crm.service pve-ha-lrm.service
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target
+Alias=pve-manager.service

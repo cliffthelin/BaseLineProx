@@ -1,0 +1,12 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=PVE API Daemon
+ConditionPathExists=/usr/bin/pvedaemon
+Wants=corosync.service pve-cluster.service
+After=corosync.service pve-cluster.service
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target

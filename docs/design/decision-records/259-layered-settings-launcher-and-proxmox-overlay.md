@@ -21,7 +21,16 @@ settings, guest configs, certificates, two-factor), `/var/lib/pve-firewall`, `/v
 - The first migration (the redirect service moves what the installer left in the directory into USER_ADMIN) runs on the boot after
   provisioning, before any of those services start, so no live database is moved.
 - **Fail closed:** if USER_ADMIN cannot be mounted, Proxmox does not start; it never runs on a second, empty configuration on SUBSTRATE.
-- The redirect service has no dependency on Proxmox (its boot checks make no Proxmox calls), so the ordering cannot cycle.
+- ~~The redirect service has no dependency on Proxmox, so the ordering cannot cycle.~~ **Wrong, found by the first QEMU rehearsal (2026-10-15).**
+  `baseline-storage-verify.service` was already `After=pve-cluster.service` and `Before=` the redirect service (it reconciled Proxmox's storage
+  definitions with `pvesm`), so the drop-in closed a loop: storage-verify -> pve-cluster -> redirects -> storage-verify. systemd resolved it by
+  deleting the redirect service's start job: Proxmox never started and the first-boot CONFIRM screen never appeared (the VM sat at a login
+  prompt). The unit test I wrote for this only compared unit text and could not see it.
+  **Fix:** `baseline-storage-verify.service` keeps its identity/capacity check before the redirects and no longer waits for Proxmox; the
+  `--reconcile-proxmox` step moved to the new `baseline-storage-reconcile.service` (after the redirects and pve-cluster, before Baseline's own
+  services). The order is now verify -> redirects -> pve-cluster -> reconcile -> Baseline. `tests/unit/test_boot_unit_ordering.py` loads
+  Baseline's units, Proxmox's real ordering directives (tests/fixtures/proxmox-units, from the 9.2 packages) and provision.sh's drop-ins
+  together and asks `systemd-analyze verify` for cycles; it reproduced this one before the fix.
 Not proved: that a real Proxmox boots this way, that the first migration completes, that the GUI sees its configuration afterwards. DR257
 step 2 requires the rehearsal VM first; that run has not happened. Still open from DR257: `/etc/ssh` host keys, `/etc/shadow`,
 `/var/log`, `/etc/machine-id`/hostname/network files, and the publishability scan.
