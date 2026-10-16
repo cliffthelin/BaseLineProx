@@ -1,0 +1,15 @@
+[Unit]
+Description=Baseline: build the Kasm Workspaces VM from the carried base and keep it running
+# Only once the machine is configured and Proxmox is up with its storage reconciled; the base is carried with the installer's cache, and
+# without it this does nothing. Safe to repeat: the timer retries until the VM exists and Kasm is installed, then it only makes sure it runs.
+ConditionPathExists=/var/lib/baseline-firstboot/complete
+After=pve-cluster.service pvedaemon.service baseline-storage-reconcile.service baseline-firstboot.service
+Wants=pve-cluster.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-kasm setup
+TimeoutStartSec=3600
+Nice=10
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1

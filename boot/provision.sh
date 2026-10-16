@@ -428,6 +428,12 @@ cp "$SRC/baseline/lib/launcher_page.py" /opt/baseline/lib/launcher_page.py
 cp "$SRC/baseline/lib/ceph_setup.py" /opt/baseline/lib/ceph_setup.py
 cp "$SRC/baseline/lib/tfa_setup.py" /opt/baseline/lib/tfa_setup.py
 cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py
+cp "$SRC/baseline/lib/kasm_setup.py" /opt/baseline/lib/kasm_setup.py
+cp "$SRC/baseline/lib/kasm_page.py" /opt/baseline/lib/kasm_page.py
+cp "$SRC/baseline/bin/baseline-kasm" /opt/baseline/bin/baseline-kasm
+chmod +x /opt/baseline/bin/baseline-kasm
+cp "$SRC/boot/baseline-kasm-setup.service" /etc/systemd/system/baseline-kasm-setup.service
+cp "$SRC/boot/baseline-kasm-setup.timer" /etc/systemd/system/baseline-kasm-setup.timer
 cp "$SRC/baseline/bin/baseline-harness-install" /opt/baseline/bin/baseline-harness-install
 chmod +x /opt/baseline/bin/baseline-harness-install
 cp "$SRC/boot/baseline-harness-install.service" /etc/systemd/system/baseline-harness-install.service
@@ -674,6 +680,7 @@ APT_HOOK
 systemctl enable baseline-bridge-port.service
 systemctl enable baseline-bridge-port-retry.timer
 systemctl enable baseline-harness-install.timer
+systemctl enable baseline-kasm-setup.timer
 systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-machine-check.timer
 systemctl enable baseline-network-retry.timer
@@ -693,6 +700,7 @@ cat > /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
     {"name": "Sensors", "url": "http://localhost:8100/sensors"},
     {"name": "Audio and Bluetooth", "url": "http://localhost:8100/audio"},
     {"name": "Virtual machines", "url": "http://localhost:8100/vms"},
+    {"name": "Workspaces (Kasm)", "url": "http://localhost:8100/workspaces"},
     {"name": "Environments", "url": "http://localhost:8100/environments"},
     {"name": "Chat", "url": "http://localhost:8100/chat"},
     {"name": "Console", "url": "http://localhost:8100/shell"},

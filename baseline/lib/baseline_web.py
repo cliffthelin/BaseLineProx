@@ -77,6 +77,7 @@ NAV_TABS = (
     ("/audio", "Audio and Bluetooth"),
     ("/power", "Power"),
     ("/memory", "Memory and swap"),
+    ("/workspaces", "Workspaces"),
     ("/containers", "Distro containers"),
     ("/environments", "Environments"),
     ("/tools", "Diagnostic tools"),
@@ -2101,6 +2102,16 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 recorded = {}
             return self._html_response(200, _with_nav(memory_page.render(current, recorded, notice), path))
 
+        if path == "/workspaces":
+            import kasm_page
+            import kasm_setup
+            try:
+                status = (deps.get("kasm_machine") or kasm_setup.KasmSetup()).status()
+                notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                status, notice = {"present": False, "installed": False}, "Kasm's state could not be read: " + str(exc)
+            return self._html_response(200, _with_nav(kasm_page.render(status, notice), path))
+
         if path == "/power":
             import power_control
             return self._html_response(200, _with_nav(power_control.render(qs.get("notice", [""])[0][:200].replace("+", " ")), path))
@@ -2718,6 +2729,14 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             except (ValueError, swap_config.SwapError, layered_settings.SettingsError, RuntimeError, OSError) as exc:
                 notice = str(exc)
             return self._redirect("/memory?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path == "/workspaces/setup":
+            import repair
+            done = (deps.get("kasm_runner") or repair.RealRunner()).run(["systemctl", "start", "--no-block", "baseline-kasm-setup.service"], timeout=30)
+            if deps.get("audit"):
+                deps["audit"]({"event": "kasm_setup_requested"})
+            notice = "Setting up Kasm. This page shows its progress." if done.returncode == 0 else "Could not start the set-up: " + (done.stderr or "").strip()[-120:]
+            return self._redirect("/workspaces?notice=" + html.escape(notice).replace(" ", "+"))
 
         if path.startswith("/power/"):
             import power_control

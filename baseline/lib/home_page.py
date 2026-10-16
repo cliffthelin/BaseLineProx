@@ -12,6 +12,7 @@ TUI_AREAS = (
     ("/power", "Power", "shut down or restart this machine"),
     ("/memory", "Memory and swap", "the host's swap: size, and written or just reserved"),
     ("/vms", "Virtual machines", "your VMs and containers, start, stop and create"),
+    ("/workspaces", "Workspaces", "Kasm: browsers and desktops in the browser, with profiles that are kept"),
     ("/chat", "Chat", "ask Baseline, with the harness of your choice"),
     ("/shell", "Console", "the TUI's command line: hardware, network, tether, ask"),
 )

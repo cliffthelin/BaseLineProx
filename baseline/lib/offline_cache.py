@@ -174,3 +174,24 @@ def verify_carried(root) -> int:
             expected.pop(path, None)
         expected.update(learned.get("files", {}))
     return verify_manifest(root, expected)
+
+
+KASM_BUNDLE = "kasm"
+
+
+def carry_kasm_base(source, target) -> dict:
+    """Copy the prepared Kasm base (baseline-build-kasm-base: the qcow2 and its KASM.json) into the cache as `kasm/`, after checking the base
+    against its own manifest and that it says it holds no install state or secrets. A base that fails either is never carried."""
+    import json
+    import shutil
+    source, target = Path(source), Path(target) / KASM_BUNDLE
+    manifest = json.loads((source / "KASM.json").read_text())
+    image = source / manifest["base"]
+    if manifest.get("holds_install_state_or_secrets") is not False:
+        raise RuntimeError("the Kasm base does not say it is free of install state and secrets; it is not carried")
+    if sha256(image) != manifest["sha256"]:
+        raise RuntimeError("the Kasm base does not match its manifest checksum; it is not carried")
+    target.mkdir(parents=True)
+    shutil.copyfile(image, target / image.name)
+    shutil.copyfile(source / "KASM.json", target / "KASM.json")
+    return {"base": image.name, "bytes": image.stat().st_size, "kasm_version": manifest.get("kasm_version")}

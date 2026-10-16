@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry building the Kasm Workspaces VM until it is installed, then keep it running
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
