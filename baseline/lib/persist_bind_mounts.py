@@ -112,6 +112,28 @@ REDIRECT_PATHS = {
 }
 
 
+# DR259: services that hold each Proxmox state directory open. The first migration moves its content onto USER_ADMIN; SQLite files (pmxcfs's
+# config.db and its WAL) moved under a running process are not a safe copy, and the QEMU rehearsal (2026-10-15) saw exactly that happen when a
+# pveproxy restart pulled this service in mid-boot. The move is therefore refused while any of these runs, and an unreadable state counts as
+# running. At the next boot it happens before they start (boot/proxmox-overlay.conf orders them after this service).
+QUIESCE_BEFORE_MOVE = {
+    "/var/lib/pve-cluster": ("pve-cluster",),
+    "/var/lib/pve-firewall": ("pve-firewall",),
+    "/var/lib/pve-manager": ("pvedaemon", "pveproxy", "pvestatd"),
+    "/var/lib/rrdcached": ("rrdcached",),
+}
+_STOPPED = ("inactive", "failed", "unknown")
+
+
+def _running_units(runner: Runner, target_path: str) -> list:
+    running = []
+    for unit in QUIESCE_BEFORE_MOVE.get(target_path, ()):
+        proc = runner.run(["systemctl", "is-active", unit], timeout=10)
+        if (proc.stdout or "").strip() not in _STOPPED:
+            running.append(unit)
+    return running
+
+
 @dataclass
 class ApplyResult:
     applied: bool
@@ -385,6 +407,10 @@ def ensure_redirect(runner: Runner, target_path: str, subdir: str, *, persona: s
     persistence_side = f"{mountpoint}/{subdir}"
 
     if not runner.path_exists(persistence_side):
+        running = _running_units(runner, target_path)
+        if running:
+            return ApplyResult(False, f"refusing to move {target_path} while {', '.join(running)} is running (or its state cannot be read); "
+                                      "it is moved at the next boot, before it starts")
         runner.makedirs(persistence_side)
         if runner.path_exists(target_path):
             for entry in runner.listdir(target_path):

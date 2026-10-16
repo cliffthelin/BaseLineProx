@@ -35,11 +35,11 @@ def test_the_proxmox_state_is_whole_directories_never_single_files():
         assert not Path(path).suffix
 
 
-def test_the_drop_in_orders_proxmox_after_the_redirects_and_refuses_to_start_without_them():
+def test_the_drop_in_orders_proxmox_after_the_redirects_and_never_pulls_the_redirect_service_in():
     text = (REPO / "boot/proxmox-overlay.conf").read_text()
-    assert re.search(r"^\[Unit\]$", text, re.M)
-    assert re.search(r"^Requires=baseline-persist-bind-mounts\.service$", text, re.M)
-    assert re.search(r"^After=baseline-persist-bind-mounts\.service$", text, re.M)
+    directives = [line for line in text.splitlines() if line and not line.startswith("#")]
+    assert directives == ["[Unit]", "After=baseline-persist-bind-mounts.service"]
+    # Requires=/Wants= would let a pveproxy restart start the redirect service mid-boot and move the live pmxcfs database (rehearsal 2026-10-15)
 
 
 def test_provisioning_installs_the_drop_in_for_every_proxmox_service_that_reads_the_state():

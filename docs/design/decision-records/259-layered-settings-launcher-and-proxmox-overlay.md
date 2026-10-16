@@ -18,9 +18,15 @@ hardware or in a rehearsal VM yet (each section says what is and is not proved).
 settings, guest configs, certificates, two-factor), `/var/lib/pve-firewall`, `/var/lib/pve-manager`, `/var/lib/rrdcached`.
 `boot/proxmox-overlay.conf` is installed as a drop-in for pve-cluster, pve-firewall, pvedaemon, pveproxy, pvestatd and rrdcached:
 `Requires=` and `After=baseline-persist-bind-mounts.service`. Consequences, deliberately:
-- The first migration (the redirect service moves what the installer left in the directory into USER_ADMIN) runs on the boot after
-  provisioning, before any of those services start, so no live database is moved.
-- **Fail closed:** if USER_ADMIN cannot be mounted, Proxmox does not start; it never runs on a second, empty configuration on SUBSTRATE.
+- The first migration (the redirect service moves what the installer left in the directory into USER_ADMIN) is meant to run on the boot after
+  provisioning, before any of those services start. **The first rehearsal run showed it did not:** with `Requires=` in the drop-in, a
+  `pveproxy` restart that `baseline-proxmox-defaults` does during the first boot started the redirect service mid-boot, which moved the
+  live pmxcfs database (config.db and its WAL) under a running `pve-cluster`. Proxmox came up afterwards with its data, but copying SQLite
+  files under a running process is not safe. **Fixed twice over:** the drop-in is now `After=` only (nothing can pull the redirect service
+  in), and `persist_bind_mounts.ensure_redirect` refuses to move a Proxmox state directory while the service that holds it is running, or
+  when that cannot be read (`QUIESCE_BEFORE_MOVE`).
+- **Fail closed:** the redirects are in /etc/fstab once made, so if USER_ADMIN cannot be mounted the boot stops at local-fs.target; Proxmox never
+  runs on a second, empty configuration on SUBSTRATE. (The first version used `Requires=` for this; see above for why it was dropped.)
 - ~~The redirect service has no dependency on Proxmox, so the ordering cannot cycle.~~ **Wrong, found by the first QEMU rehearsal (2026-10-15).**
   `baseline-storage-verify.service` was already `After=pve-cluster.service` and `Before=` the redirect service (it reconciled Proxmox's storage
   definitions with `pvesm`), so the drop-in closed a loop: storage-verify -> pve-cluster -> redirects -> storage-verify. systemd resolved it by

@@ -580,7 +580,9 @@ def test_create_baseline_volumes_reports_failure_when_vg_has_no_free_space():
 
 def test_switch_persona_reuses_persist_bind_mounts_directly():
     mounts = "/dev/sdb2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
-    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    # Proxmox's services are not running when the redirects are first made (the redirect code refuses to move their state otherwise)
+    runner = FakeRunner(files={"/proc/self/mounts": mounts},
+                        command_responses=[(lambda a: a[:2] == ["systemctl", "is-active"], FakeProc(3, "inactive\n", ""))])
     result = da.switch_persona(runner, to_persona="admin")
     assert result.ok is True
 

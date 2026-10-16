@@ -61,7 +61,7 @@ def test_the_dropins_provision_installs_are_found_so_the_check_is_not_vacuous():
     found = _dropins_from_provision()
     assert {"baseline-persist-bind-mounts", "baseline-firstboot", "baseline-kiosk"} <= set(found)
     assert {"pve-cluster", "pveproxy", "rrdcached"} <= set(found)
-    assert "Requires=baseline-persist-bind-mounts.service" in found["pve-cluster"]["baseline-overlay.conf"]
+    assert "After=baseline-persist-bind-mounts.service" in found["pve-cluster"]["baseline-overlay.conf"]
 
 
 def test_baseline_and_proxmox_units_together_have_no_ordering_cycle(tmp_path):
