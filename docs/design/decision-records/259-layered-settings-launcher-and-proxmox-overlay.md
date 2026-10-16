@@ -71,8 +71,9 @@ long-press on a tile opens a menu: **Open** (Console / Window / Fullscreen), **S
   They are links into Proxmox's own console pages, **not an embedded frame**: embedding across origins is reported to fail on Proxmox's
   authentication cookies and its framing policy is unconfirmed, so it is not relied on. A page cannot force browser fullscreen on another
   origin; "Fullscreen" is a full-screen-sized window, and Proxmox's console toolbar has its own fullscreen toggle. Honest limit.
-- **Containers (LXC):** the model supports them (`console=lxc`, console only, no Window/Fullscreen) but the page does not list them yet; only VMs
-  are tiles today. Not built.
+- **Containers (LXC):** are tiles after the VMs (identifiers `O_L_NNNNN`), console only (`console=lxc`; Window/Fullscreen shown disabled with the reason),
+  start/shutdown through the existing `/containers/action` jobs, OS settings shared like any OS, no application panel. A problem listing them is a
+  notice on the page; it never hides the VMs. Unit/HTTP-tested against a fake container host only.
 - VM start/stop/configure reuse the existing `/vms/action` jobs; nothing in the launcher runs a command of its own.
 Not verified: the console URLs against a real Proxmox, popup behaviour in the host's browser window, touch long-press, anything on a
 laptop. Not built: guest-side application install and status ("which applications are installed" shows what the settings layers and the
@@ -117,3 +118,12 @@ QEMU monitor) and from a RAM dump of the guest when it was unreachable.
 provision.sh gained new packages is used as-is and the install fails offline at `apt-get install`. This run avoided it by moving the old cache
 aside by hand. A fix needs the cache to record what it was built for (a hash of `offline_cache.required_packages`) and the stage to compare it;
 comparing against the apt index does not work (the Proxmox base already has curl, smartmontools, ethtool and others, so they never appear there).
+
+## Follow-ups built 2026-10-16
+- **Stale offline cache is now refused** (the open item above): the cache carries `BUILT_FOR.json` (the package list it was built for, hashed in its
+  manifest); `baseline-allscript-install` compares it with `offline_cache.required_packages` and calls a mismatch "stale", naming what it lacks, and the
+  cache stage keeps the old cache under a timestamped name and rebuilds from it. Checked on the real stale cache (reported stale; the rebuild
+  renamed it and produced 403 packages, 493 files).
+- **TUI VMs tab** (operator item 9): `s` starts and `h` cleanly shuts down the VM or container under the cursor; Enter shows its details
+  (`vm_power.py`: fixed `qm`/`pct` commands, validated). Forced stop stays in the browser launcher, which asks first. The key handling needs
+  Textual, which this dev machine lacks, so it is checked in the guest, not here.

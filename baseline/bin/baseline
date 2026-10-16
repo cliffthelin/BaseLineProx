@@ -47,6 +47,7 @@ import providers  # noqa: E402
 import netpref  # noqa: E402
 import diagnostics  # noqa: E402
 import proxmox_vm_metrics  # noqa: E402
+import vm_power  # noqa: E402
 import repair  # noqa: E402
 import sensors_history  # noqa: E402
 import clipboard_osc52  # noqa: E402
@@ -475,6 +476,8 @@ class BaselineApp(App):
         ("i", "toggle_hardware_ids", "Toggle IDs"),
         ("p", "return_to_proxmox", "Proxmox"),
         ("c", "copy_last_answer", "Copy"),
+        ("s", "vm_start", "Start VM"),
+        ("h", "vm_shutdown", "Shut down VM"),
         # priority=True: Screen binds "tab" to focus-cycling by default,
         # which would otherwise win over this since it's more specific
         # than an App-level binding. Priority bindings are checked from
@@ -601,6 +604,44 @@ class BaselineApp(App):
 
     def action_run_tether(self) -> None:
         self.run_tether()
+
+    @_safe
+    def action_vm_start(self) -> None:
+        self._vm_power("start")
+
+    @_safe
+    def action_vm_shutdown(self) -> None:
+        self._vm_power("shutdown")
+
+    def _vm_power(self, action: str) -> None:
+        """Start or cleanly shut down the VM or container under the cursor on the VMs tab (operator 2026-10-14). Elsewhere these keys do nothing."""
+        tabbed = self._active_tabbed_content()
+        if tabbed is None or tabbed.active != "vms_tab":
+            return
+        table = self.query_one("#vms_table", DataTable)
+        try:
+            key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+        except Exception:                                   # noqa: BLE001 - an empty table has no row under the cursor
+            key = None
+        vm = getattr(self, "_vms_by_key", {}).get(key)
+        if vm is None:
+            self.notify("Select a VM or container first: press Down, then use the arrow keys.", severity="warning")
+            return
+        if vm_power.allowed_action(vm) != action:
+            self.notify(f"{vm.name} is {vm.status}, so it cannot be {'started' if action == 'start' else 'shut down'} now.", severity="warning")
+            return
+        self.run_vm_power(vm.type, vm.vmid, vm.name, action)
+
+    @work(thread=True, exit_on_error=False, group="vmpower")
+    def run_vm_power(self, kind: str, vmid: int, name: str, action: str) -> None:
+        try:
+            done = repair.RealRunner().run(vm_power.power_argv(kind, vmid, action), timeout=60)
+            message = vm_power.result_message(action, name, vmid, returncode=done.returncode, output=(done.stderr or done.stdout or ""))
+            failed = done.returncode != 0
+        except (ValueError, OSError) as exc:
+            message, failed = vm_power.result_message(action, name, vmid, returncode=None, output=str(exc)), True
+        self.call_from_thread(self.notify, message, severity="error" if failed else "information")
+        self.call_from_thread(self.collect_vms)
 
     def action_toggle_hardware_ids(self) -> None:
         self.show_hardware_ids = not self.show_hardware_ids
@@ -963,6 +1004,7 @@ class BaselineApp(App):
     def _render_vms(self, vms: list, history_values: list, error: str = "") -> None:
         table = self.query_one("#vms_table", DataTable)
         table.clear()
+        self._vms_by_key = {f"vm:{vm.vmid}": vm for vm in vms}
         if error:
             table.add_row("-", escape_markup(error), "-", "-", "-", "-", "-")
         elif not vms:
@@ -1028,6 +1070,14 @@ class BaselineApp(App):
             item = getattr(self, "_hw_rows_by_key", {}).get(key)
             if item:
                 self.push_screen(HardwareModal(item["group"], item["label"], item["fields"]))
+            return
+        if event.data_table.id == "vms_table":
+            vm = getattr(self, "_vms_by_key", {}).get(key)
+            if vm is not None:
+                action = vm_power.allowed_action(vm)
+                hint = {"start": "Press s to start it.", "shutdown": "Press h to shut it down cleanly."}.get(
+                    action, "Its state is not known, so no action is offered.")
+                self.push_screen(InfoModal(vm.name or str(vm.vmid), vm_power.details(vm) + "\n\n" + hint))
             return
         if event.data_table.id != "net_table":
             return

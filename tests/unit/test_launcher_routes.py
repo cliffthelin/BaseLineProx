@@ -138,3 +138,50 @@ def test_settings_need_a_session(case):
     conn = http.client.HTTPConnection("127.0.0.1", case.port, timeout=10)
     conn.request("POST", "/launcher/settings", body=b"{}", headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{case.port}"})
     assert conn.getresponse().status in (303, 401)
+
+
+CTS = [{"name": "debian-svc", "vmid": 200, "running": True, "phase": "ready", "template": "debian-12-standard_12.7-1_amd64.tar.zst",
+        "os_storage": "session-temp", "data_path": "/mnt/APPDATA_PERSONAL/ct/debian-svc", "base_vmid": 9000}]
+
+
+class FakeContainers:
+    def __init__(self, items=CTS, fail=None):
+        self.items, self.fail = items, fail
+
+    def list_containers(self):
+        if self.fail:
+            raise vh.VmError(self.fail)
+        return self.items
+
+
+def test_containers_appear_as_tiles_with_their_own_identifiers_and_a_console_only(case):
+    case.server.deps["container_host"] = FakeContainers()                                   # type: ignore[attr-defined]
+    tiles = state(case)["tiles"]
+    assert [t["name"] for t in tiles] == ["ubuntu-desk", "debian-13-lab", "debian-svc"]
+    ct = tiles[2]
+    assert ct["kind"] == "ct" and ct["id"].startswith("O_L_") and list(ct["paths"]) == ["console"]
+    assert ct["paths"]["console"].startswith("/?console=lxc&xtermjs=1&vmid=200")
+    status, _, page = req(case, "GET", "/launcher")
+    assert status == 200 and "debian-svc" in page and "/containers/action" in page
+
+
+def test_a_container_shares_the_users_settings_and_can_be_given_its_own(case):
+    case.server.deps["container_host"] = FakeContainers()                                   # type: ignore[attr-defined]
+    ct_id = state(case)["tiles"][2]["id"]
+    assert post(case, {"id": ct_id, "layer": "user", "changes": {"theme": "dark"}})[0] == 200
+    assert post(case, {"id": ct_id, "layer": "os", "changes": {"keyboard": "de"}})[0] == 200
+    ct = state(case)["tiles"][2]
+    assert ct["settings"]["os"]["theme"]["source"] == "user" and ct["settings"]["os"]["keyboard"]["source"] == "os"
+    assert os.path.exists(os.path.join(case.tmp, "user", "settings", "os", f"{ct_id}.json"))
+
+
+def test_a_container_listing_problem_is_a_notice_and_the_vms_stay(case):
+    case.server.deps["container_host"] = FakeContainers(fail="pct status failed")           # type: ignore[attr-defined]
+    s = state(case)
+    assert [t["name"] for t in s["tiles"]] == ["ubuntu-desk", "debian-13-lab"]
+    assert any("pct status failed" in n for n in s["notices"])
+    assert "pct status failed" in req(case, "GET", "/launcher")[2]
+
+
+def test_a_container_host_that_is_not_there_is_not_an_error(case):
+    assert state(case)["notices"] == [] and [t["kind"] for t in state(case)["tiles"]] == ["vm", "vm"]

@@ -46,6 +46,48 @@ def required_packages(repo_root) -> list:
     return names + [p for p in dict.fromkeys(wanted) if p not in names]
 
 
+BUILT_FOR = "BUILT_FOR.json"
+
+
+def required_fingerprint(repo_root) -> str:
+    """Identifies the set of apt packages the current code needs, independent of order and duplicates."""
+    names = sorted(set(required_packages(repo_root)))
+    return hashlib.sha256("\n".join(names).encode()).hexdigest()
+
+
+def write_built_for(root, repo_root) -> None:
+    """Record, inside the cache (and so in its manifest), the packages it was built to satisfy."""
+    import json
+    names = sorted(set(required_packages(repo_root)))
+    record = {"required_packages": names, "sha256": hashlib.sha256("\n".join(names).encode()).hexdigest()}
+    (Path(root) / BUILT_FOR).write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+
+
+def cache_is_current(root, repo_root) -> tuple:
+    """(True, "") when the cache was built for exactly the packages the code needs now; otherwise (False, why).
+
+    A cache built before provision.sh gained packages would be accepted by every other check (its manifest verifies, its applications
+    are there) and the install would then fail offline at `apt-get install`; this is what refuses it up front."""
+    import json
+    path = Path(root) / BUILT_FOR
+    if not path.is_file():
+        return False, "it never recorded what it was built for (it predates that record), so it cannot be known to match"
+    try:
+        built = set(json.loads(path.read_text())["required_packages"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return False, f"its record of what it was built for is unreadable: {exc}"
+    needed = set(required_packages(repo_root))
+    lacking, extra = sorted(needed - built), sorted(built - needed)
+    if not lacking and not extra:
+        return True, ""
+    parts = []
+    if lacking:
+        parts.append("lacks " + ", ".join(lacking[:8]) + (" ..." if len(lacking) > 8 else ""))
+    if extra:
+        parts.append("carries packages no longer needed: " + ", ".join(extra[:8]) + (" ..." if len(extra) > 8 else ""))
+    return False, "it " + " and ".join(parts)
+
+
 APP_BUNDLE = "apps"
 
 

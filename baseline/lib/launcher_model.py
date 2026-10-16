@@ -44,11 +44,23 @@ def _support(family: str, release: str) -> str:
     return "none" if family in ("rescue", "unknown") else "helper"
 
 
-def _modes(kind: str, running: bool, serial) -> list:
+def _state(vm: dict) -> str:
+    """running, stopped, unknown (Proxmox status could not be read) or preparing (a container that is not ready yet)."""
+    if vm.get("phase") not in (None, "ready"):
+        return "preparing"
+    if vm.get("running") is None:
+        return "unknown"
+    return "running" if vm["running"] else "stopped"
+
+
+_NOT_OPENABLE = {"stopped": "Start it first", "unknown": "Proxmox status unavailable", "preparing": "Still being prepared"}
+
+
+def _modes(kind: str, state: str, serial) -> list:
     out = []
     for mode, label in MODES:
-        if not running:
-            out.append({"id": mode, "label": label, "enabled": False, "hint": "Start it first"})
+        if state != "running":
+            out.append({"id": mode, "label": label, "enabled": False, "hint": _NOT_OPENABLE[state]})
         elif kind == "ct" and mode != "console":
             out.append({"id": mode, "label": label, "enabled": False, "hint": "A container has no graphical console"})
         elif mode == "console" and kind == "vm" and serial is False:
@@ -60,17 +72,25 @@ def _modes(kind: str, running: bool, serial) -> list:
 
 
 def build_tile(vm: dict, *, os_id: str, node: str, kind: str = "vm") -> dict:
-    family, release = os_of(vm) if kind == "vm" else ("linux", "")
-    running = bool(vm.get("running"))
+    if kind == "vm":
+        family, release = os_of(vm)
+    else:
+        family, release = ("linux", "")
+        if vm.get("template"):
+            found, rel = environments.classify(str(vm["template"]))
+            if found != "unknown":
+                family, release = found, rel
+    state = _state(vm)
     support = _support(family, release)
     return {
         "id": os_id, "name": vm["name"], "vmid": vm.get("vmid"), "kind": kind, "node": node,
-        "state": "running" if running else "stopped", "os": {"family": family, "release": release},
+        "state": state, "os": {"family": family, "release": release},
         "icon": {"letter": (family[:1] or "?").upper(), "hue": zlib.crc32(family.encode()) % 360},
         "apps": [{"key": a, "support": support, "installed": None} for a in environments.APPS] if kind == "vm" else [],
-        "modes": _modes(kind, running, vm.get("serial")),
+        "modes": _modes(kind, state, vm.get("serial")),
         "memory_mb": vm.get("memory_mb"), "cpus": vm.get("cpus"), "base": vm.get("base"), "iso": vm.get("iso"),
         "recipe": vm.get("recipe"), "persistence_disk": vm.get("persistence_disk"), "persistence_gb": vm.get("persistence_gb"),
+        "template": vm.get("template"), "os_storage": vm.get("os_storage"), "data_path": vm.get("data_path"),
     }
 
 
@@ -96,18 +116,21 @@ def console_path(kind: str, vmid, name: str, node: str, mode: str) -> str:
 
 
 def menu_for(tile: dict) -> list:
-    running = tile["state"] == "running"
+    state = tile["state"]
+    running = state == "running"
     items = [{"id": f"open_{m['id']}", "label": f"Open: {m['label']}", "enabled": m["enabled"], "hint": m["hint"]} for m in tile["modes"]]
     if running:
-        items += [{"id": "shutdown", "label": "Shut down", "enabled": True, "hint": ""},
-                  {"id": "force_stop", "label": "Force stop", "enabled": True, "hint": "Recent writes can be lost"}]
-    else:
+        items.append({"id": "shutdown", "label": "Shut down", "enabled": True, "hint": ""})
+        if tile["kind"] == "vm":                    # the container page has no forced stop, so none is offered
+            items.append({"id": "force_stop", "label": "Force stop", "enabled": True, "hint": "Recent writes can be lost"})
+    elif state == "stopped":
         items.append({"id": "start", "label": "Start", "enabled": True, "hint": ""})
     items.append({"id": "details", "label": "Details", "enabled": True, "hint": ""})
-    items.append({"id": "vm_settings", "label": "VM settings", "enabled": tile["kind"] == "vm" and not running,
-                  "hint": "" if not running else "Shut the VM down to change its memory or CPUs"})
-    items.append({"id": "os_settings", "label": "OS settings", "enabled": tile["kind"] == "vm", "hint": ""})
-    items.append({"id": "applications", "label": "Applications", "enabled": tile["kind"] == "vm", "hint": ""})
+    items.append({"id": "vm_settings", "label": "VM settings", "enabled": tile["kind"] == "vm" and state == "stopped",
+                  "hint": "Shut the VM down to change its memory or CPUs" if tile["kind"] == "vm" and running else ""})
+    items.append({"id": "os_settings", "label": "OS settings", "enabled": True, "hint": ""})
+    items.append({"id": "applications", "label": "Applications", "enabled": tile["kind"] == "vm",
+                  "hint": "" if tile["kind"] == "vm" else "Containers have no application set yet"})
     return items
 
 
@@ -121,6 +144,9 @@ def details(tile: dict) -> list:
             rows.append(("Retained user disk", f"{tile['persistence_gb']} GB ({tile['persistence_disk']})"))
         if tile.get("iso"):
             rows.append(("Installer image", f"{tile['iso']} (attached)"))
+    else:
+        rows += [("Template", str(tile.get("template") or "unknown")), ("Storage", str(tile.get("os_storage") or "unknown")),
+                 ("Data folder", str(tile.get("data_path") or "unknown"))]
     return rows
 
 

@@ -1741,8 +1741,18 @@ def _launcher_state(deps: dict) -> dict:
     import launcher_state
     host = _vm_host_for(deps)
     os_id_for, app_id_for = _launcher_ids()
+    containers, containers_error = (), ""
+    try:                      # containers are optional: a problem listing them is shown as a notice and never hides the VMs
+        container_host = _container_host_for(deps)
+        if container_host is not None:
+            containers = container_host.list_containers()
+    except (vh.VmError, OSError, ValueError, KeyError) as exc:
+        containers_error = str(exc)
+    import naming
     return launcher_state.collect(host.list_vms(), node=socket.gethostname().split(".")[0], roots=_launcher_roots(deps),
-                                  os_id_for=os_id_for, app_id_for=app_id_for)
+                                  os_id_for=os_id_for, app_id_for=app_id_for, containers=containers,
+                                  container_id_for=lambda ct: naming.allocate("O", "L", "ct:" + ct["name"]),
+                                  containers_error=containers_error)
 
 
 def _kvm_ok(deps: dict) -> bool:

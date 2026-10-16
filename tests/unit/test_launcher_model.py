@@ -128,3 +128,54 @@ def test_vm_settings_are_validated_like_the_existing_configure_action(memory, cp
     else:
         with pytest.raises(ValueError):
             lm.validate_vm_settings(memory, cpus)
+
+
+# --- containers (LXC) as tiles ----------------------------------------------------------------------------------------------------
+
+CT = {"name": "debian-svc", "vmid": 200, "running": True, "phase": "ready", "template": "debian-12-standard_12.7-1_amd64.tar.zst",
+      "os_storage": "session-temp", "data_path": "/mnt/APPDATA_PERSONAL/ct/debian-svc"}
+
+
+def ct_tile(**over):
+    return lm.build_tile({**CT, **over}, os_id="O_L_00001", node="pc601", kind="ct")
+
+
+@pytest.mark.parametrize("over,state", [({}, "running"), ({"running": False}, "stopped"), ({"running": None}, "unknown"),
+                                        ({"running": False, "phase": "preparing"}, "preparing")])
+def test_a_container_tile_says_what_is_known_about_it(over, state):
+    assert ct_tile(**over)["state"] == state
+
+
+def test_the_os_of_a_container_comes_from_its_template():
+    t = ct_tile()
+    assert (t["os"]["family"], t["os"]["release"]) == ("debian", "12") or t["os"]["family"] == "debian"
+    assert ct_tile(template="ubuntu-24.04-standard_24.04-2_amd64.tar.zst")["os"]["family"] == "ubuntu"
+    assert ct_tile(template=None)["os"]["family"] == "linux"
+
+
+def test_a_container_can_only_be_opened_as_a_console_and_only_while_running():
+    assert [m["id"] for m in ct_tile()["modes"] if m["enabled"]] == ["console"]
+    assert not any(m["enabled"] for m in ct_tile(running=False)["modes"])
+    unknown = ct_tile(running=None)
+    assert not any(m["enabled"] for m in unknown["modes"]) and all("status" in m["hint"].lower() for m in unknown["modes"])
+
+
+def test_a_container_menu_has_start_stop_details_and_os_settings_but_no_force_stop_vm_settings_or_applications():
+    m = {i["id"]: i for i in lm.menu_for(ct_tile())}
+    assert m["shutdown"]["enabled"] and "force_stop" not in m
+    assert m["details"]["enabled"] and m["os_settings"]["enabled"]
+    assert m["vm_settings"]["enabled"] is False and m["applications"]["enabled"] is False
+    assert {i["id"]: i for i in lm.menu_for(ct_tile(running=False))}["start"]["enabled"]
+
+
+def test_a_container_that_is_still_being_prepared_or_unknown_offers_no_power_actions():
+    for over in ({"phase": "preparing", "running": False}, {"running": None}):
+        ids = [i["id"] for i in lm.menu_for(ct_tile(**over))]
+        assert "start" not in ids and "shutdown" not in ids, over
+        assert "details" in ids
+
+
+def test_container_details_list_its_facts():
+    d = dict(lm.details(ct_tile()))
+    assert d["Identifier"] == "O_L_00001" and d["Proxmox ID"] == "200" and d["Template"].startswith("debian-12")
+    assert d["Storage"] == "session-temp" and d["Data folder"].startswith("/mnt/APPDATA_PERSONAL")

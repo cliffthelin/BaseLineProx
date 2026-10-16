@@ -43,7 +43,7 @@ background:linear-gradient(145deg,hsl(var(--h) 72% 63%),hsl(var(--h) 66% 36%));t
 transition:transform .16s ease,box-shadow .16s ease}
 .tile:hover .icon{transform:translateY(-2px) scale(1.04)}.tile:active .icon{transform:scale(.96)}
 .tile[data-state=running] .icon{box-shadow:0 0 0 2px rgba(255,255,255,.5),0 8px 26px hsl(var(--h) 85% 58%/.55)}
-.tile[data-state=stopped] .icon{filter:saturate(.5) brightness(.78)}
+.tile[data-state=stopped] .icon,.tile[data-state=unknown] .icon,.tile[data-state=preparing] .icon{filter:saturate(.5) brightness(.78)}
 .tile .pip{position:absolute;right:-3px;top:-3px;width:15px;height:15px;border-radius:50%;border:2px solid #0a0c16;background:var(--faint)}
 .tile[data-state=running] .pip{background:var(--ok)}
 .label{font-size:.86rem;font-weight:600;text-align:center;max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -88,6 +88,7 @@ border:1px solid var(--line);backdrop-filter:blur(18px)}#toast[hidden]{display:n
 <body class="phone">
 <div class="status" role="status"><span class="clock" id="clock"></span><span id="host"></span><span class="grow"></span><span class="live" id="live"></span></div>
 __BANNER__
+<div id="notices"></div>
 <main class="home" id="home"></main>
 <nav class="dock" aria-label="Quick links">
 <a id="pve" href="#" target="_blank" rel="noopener"><b aria-hidden="true">P</b>Proxmox</a>
@@ -118,6 +119,7 @@ function draw(){
   $('host').textContent = S.host;
   const running = S.tiles.filter(t => t.state === 'running').length;
   $('live').textContent = running ? running + ' running' : '';
+  $('notices').replaceChildren(...(S.notices || []).map(n => el('p', {className:'banner', role:'status'}, n)));
   const home = $('home'); home.replaceChildren();
   if (!S.tiles.length){
     home.append(el('div', {className:'empty'}, el('h2', {}, 'No virtual machines yet'),
@@ -133,7 +135,7 @@ function draw(){
     const apps = el('span', {className:'apps', title:'Applications (installation is not reported yet)'});
     for (const a of t.apps){ const i = el('i', {}, APP_INITIALS[a.key]); i.dataset.support = a.support; apps.append(i); }
     b.append(icon, el('span', {className:'label'}, t.name),
-      el('span', {className:'sub'}, (t.os.family + ' ' + t.os.release).trim() + ' · ' + t.state), apps);
+      el('span', {className:'sub'}, (t.kind === 'ct' ? 'container · ' : '') + (t.os.family + ' ' + t.os.release).trim() + ' · ' + t.state), apps);
     wire(b, t); grid.append(el('li', {}, b));
   }
   home.append(grid, el('p', {className:'hint'}, 'Click a running tile to open it. Right-click (or long-press) a tile for its menu.'));
@@ -212,8 +214,11 @@ async function choose(t, id){
 async function power(t, action, params){
   toast('Working…');
   try{
-    const r = await fetch('/vms/action', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(Object.assign({action, request_id: crypto.randomUUID()}, params))});
+    // containers have their own action endpoint and call a clean stop 'shutdown'
+    const endpoint = t.kind === 'ct' ? '/containers/action' : '/vms/action';
+    const verb = (t.kind === 'ct' && action === 'request_stop') ? 'shutdown' : action;
+    const r = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({action: verb, request_id: crypto.randomUUID()}, params))});
     let j = await r.json();
     if (r.status === 202 && j.job_id){
       for (;;){

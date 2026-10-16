@@ -84,3 +84,38 @@ def test_the_five_applications_are_described_once_for_the_page(roots):
     apps = collect(roots)["apps"]
     assert [a["key"] for a in apps] == ["vscode", "spotify", "chrome", "chatgpt", "claude"]
     assert apps[0]["label"] == "VS Code" and apps[3]["label"] == "ChatGPT"
+
+
+CTS = [{"name": "debian-svc", "vmid": 200, "running": True, "phase": "ready", "template": "debian-12-standard_12.7-1_amd64.tar.zst",
+        "os_storage": "session-temp", "data_path": "/mnt/APPDATA_PERSONAL/ct/debian-svc"}]
+
+
+def collect_with_containers(roots, containers=CTS, **kw):
+    os_ids = {"ubuntu-desk": "O_V_00001", "debian-13-lab": "O_V_00002"}
+    apps = {k: "A_D_%05d" % i for i, k in enumerate(["vscode", "spotify", "chrome", "chatgpt", "claude"], 1)}
+    return lst.collect(VMS, node="pc601", roots=roots, os_id_for=lambda vm: os_ids[vm["name"]], app_id_for=lambda k: apps[k],
+                       containers=containers, container_id_for=lambda ct: "O_L_00001", **kw)
+
+
+def test_containers_follow_the_vms_as_tiles_with_console_paths(roots):
+    state = collect_with_containers(roots)
+    assert [t["name"] for t in state["tiles"]] == ["ubuntu-desk", "debian-13-lab", "debian-svc"]
+    ct = state["tiles"][2]
+    assert ct["kind"] == "ct" and ct["id"] == "O_L_00001" and ct["paths"] == {"console": "/?console=lxc&xtermjs=1&vmid=200&vmname=debian-svc&node=pc601&cmd="}
+    assert ct["apps"] == [] and ct["settings"]["os"] == {}
+
+
+def test_a_container_shares_the_users_settings_like_any_other_os(roots):
+    ls.write_layer(roots, "user", {"theme": "dark"})
+    ct = collect_with_containers(roots)["tiles"][2]
+    assert ct["settings"]["os"]["theme"] == {"value": "dark", "source": "user"}
+
+
+def test_without_containers_nothing_changes(roots):
+    assert [t["kind"] for t in collect(roots)["tiles"]] == ["vm", "vm"]
+
+
+def test_an_unavailable_container_host_is_reported_and_the_vms_stay(roots):
+    state = collect_with_containers(roots, containers=None, containers_error="pct is not installed")
+    assert len(state["tiles"]) == 2 and any("pct is not installed" in n for n in state["notices"])
+    assert collect(roots)["notices"] == []

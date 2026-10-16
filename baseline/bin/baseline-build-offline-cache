@@ -254,6 +254,7 @@ def index(output):
                              capture_output=True).stdout
     (apt_dir / "Packages").write_bytes(listing)
     (apt_dir / "Packages.gz").write_bytes(gzip.compress(listing))
+    offline_cache.write_built_for(output, REPO)      # what this cache was built for; part of the manifest, so a target verifies it
     manifest = offline_cache.build_manifest(output)
     (output / "MANIFEST.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     offline_cache.verify_manifest(output, manifest)

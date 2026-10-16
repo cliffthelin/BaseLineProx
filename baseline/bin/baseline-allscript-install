@@ -214,12 +214,29 @@ def root_required(stages):
     return sorted(set(stages) & ROOT_STAGES)
 
 
-def cache_status(cache_dir):
-    """missing, built before the applications were carried (without_apps), or complete."""
+def cache_not_ready(message):
+    """Say why: a stale cache is named as stale, with what it lacks, instead of the generic 'run the cache stage'."""
+    import offline_cache
+    if (CACHE_DIR / "MANIFEST.json").is_file() and (CACHE_DIR / "apps").is_dir():
+        ok, why = offline_cache.cache_is_current(CACHE_DIR, REPO)
+        if not ok:
+            return f"the offline cache is stale ({why}); run the cache stage, which keeps it and rebuilds from it"
+    return message
+
+
+def cache_status(cache_dir, repo_root=None):
+    """missing, built before the applications were carried (without_apps), stale (built for other packages than the code needs now), or
+    complete. `repo_root` turns on the staleness check; every caller in this script passes it."""
     cache_dir = Path(cache_dir)
     if not (cache_dir / "MANIFEST.json").is_file():
         return "missing"
-    return "complete" if (cache_dir / "apps").is_dir() else "without_apps"
+    if not (cache_dir / "apps").is_dir():
+        return "without_apps"
+    if repo_root is not None:
+        import offline_cache
+        if not offline_cache.cache_is_current(cache_dir, repo_root)[0]:
+            return "stale"
+    return "complete"
 
 
 def cache_seeds(installer_cache, earlier):
@@ -510,8 +527,8 @@ def stage_install(r):
     # The authorization is the exact `--confirm-wipe <serial>` on the command line (checked in main), after a verified
     # recovery image and under the serial lock: an interactive prompt on top of that only blocks unattended runs.
     say(f"ERASING {TARGET_NAME} ({SERIAL}, {target['path']}); verified recovery image: {folder}")
-    if cache_status(CACHE_DIR) != "complete":
-        raise RuntimeError("run the cache stage first; the installer must carry its own packages and applications")
+    if cache_status(CACHE_DIR, REPO) != "complete":
+        raise RuntimeError(cache_not_ready("run the cache stage first; the installer must carry its own packages and applications"))
     target = identify(r)
     workspace = WORK / "installer"
     result = si.build_and_write_self_installer(
@@ -611,7 +628,14 @@ def send_keys(text):
 
 
 def stage_cache(r):
-    status = cache_status(CACHE_DIR)
+    status = cache_status(CACHE_DIR, REPO)
+    if status == "stale":
+        import offline_cache
+        why = offline_cache.cache_is_current(CACHE_DIR, REPO)[1]
+        kept = CACHE_DIR.with_name(CACHE_DIR.name + "-before-" + time.strftime("%Y%m%d-%H%M%S"))
+        say("the existing cache is stale:", why, "- keeping it as", kept, "and rebuilding (seeded from it, so only what is missing is downloaded)")
+        CACHE_DIR.rename(kept)
+        status = "missing"
     if status == "without_apps":
         kept = CACHE_DIR.with_name(CACHE_DIR.name + "-before-apps")
         if kept.exists():
@@ -660,8 +684,8 @@ def stage_rehearse(r):
     import first_boot_hook as fbh
     import iso_builder as ib
     import self_installer as si
-    if cache_status(CACHE_DIR) != "complete":
-        raise RuntimeError("run the cache stage first (the cache must carry the applications)")
+    if cache_status(CACHE_DIR, REPO) != "complete":
+        raise RuntimeError(cache_not_ready("run the cache stage first (the cache must carry the applications)"))
     work = BUILD / "rehearsal"
     if work.exists():
         shutil.rmtree(work)
