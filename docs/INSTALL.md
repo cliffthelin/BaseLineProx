@@ -1361,8 +1361,8 @@ real deployment check; DR117 does not claim it works after a host reboot.
 |---|---|---|
 | Unchanged public Ubuntu download | `/mnt/INSTALLER_CACHE/images/` | Source bytes stay vanilla, SHA256 checked. |
 | Prepared immutable templates, disposable OS overlay and VM runtime metadata | `/mnt/BASELINE/vm-runtime/` | Ubuntu OS overlay can be replaced while stopped. Templates must remain available to backing chains. |
-| Ubuntu home disk, account hash/profile and Proxmox VMID/name records | `/mnt/USER_ADMIN/vm-data/` | Kept across an OS rebuild; never formatted by a rebuild seed. |
-| Ordinary VM full writable disk | `/mnt/USER_ADMIN/vm-data/` | Protected state; no backing image or automatic OS reset. |
+| Ubuntu home disk, account hash/profile and Proxmox VMID/name records | `/mnt/USER_PERSONAL/vm-data/` (`/mnt/USER_ADMIN/vm-data/` only on a drive that already held VMs there; DR259) | Kept across an OS rebuild; never formatted by a rebuild seed. |
+| Ordinary VM full writable disk | `/mnt/USER_PERSONAL/vm-data/` (`/mnt/USER_ADMIN/vm-data/` only on a drive that already held VMs there; DR259) | Protected state; no backing image or automatic OS reset. |
 
 Independent absolute directories on other storage are also supported. On
 Proxmox this increment registers directory stores `baseline-os` and

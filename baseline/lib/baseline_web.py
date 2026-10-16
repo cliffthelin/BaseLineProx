@@ -1713,9 +1713,18 @@ def _vm_host_for(deps: dict) -> vh.VmHost:
     import shutil
     import proxmox_vm_host
     engine = proxmox_vm_host.ProxmoxVmHost if shutil.which("qm") and shutil.which("pvesh") else vh.VmHost
+    persistence_default = vh.default_persistence_store()
     return engine(vm_page.load_store(cfg, default=str(vh.DEFAULT_STORE)) if cfg else vh.DEFAULT_STORE,
-                  persistence_store=vm_page.load_persistence_store(cfg, default=str(vh.DEFAULT_PERSISTENCE_STORE))
-                  if cfg else vh.DEFAULT_PERSISTENCE_STORE)
+                  persistence_store=vm_page.load_persistence_store(cfg, default=str(persistence_default))
+                  if cfg else persistence_default,
+                  grow_volume=_grow_role_volume if shutil.which("lvextend") else None)
+
+
+def _grow_role_volume(label: str, needed_bytes: int):
+    """Extend a Baseline role volume so a VM disk fits (volumes start small and grow when actually needed)."""
+    import repair
+    import volume_growth
+    return volume_growth.ensure_room(repair.RealRunner(), label, needed_bytes)
 
 
 _LAUNCHER_PERSONA = "personal"      # guest overlays are the person's, never USER_ADMIN (DR257, DR259)

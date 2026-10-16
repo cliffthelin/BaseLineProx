@@ -68,8 +68,9 @@ long-press on a tile opens a menu: **Open** (Console / Window / Fullscreen), **S
 **OS settings**, **Applications**. Settings panels read and write the layers above.
 - **Run modes.** Console = Proxmox's xterm.js serial console in a browser tab (needs `serial0` on the VM; without it the menu says so and
   offers Window). Window = Proxmox's noVNC console in a popup window. Fullscreen = the same console in a popup sized to the whole screen.
-  They are links into Proxmox's own console pages, **not an embedded frame**: embedding across origins is reported to fail on Proxmox's
-  authentication cookies and its framing policy is unconfirmed, so it is not relied on. A page cannot force browser fullscreen on another
+  They are links into Proxmox's own console pages, **not an embedded frame**. Checked 2026-10-16 against Proxmox 9.2: it sends no
+  `X-Frame-Options` and no framing CSP, so it does not forbid embedding; cross-origin cookie handling is still reported to be a problem, and Baseline's
+  own CSP forbids frames, so embedding is not built. A page cannot force browser fullscreen on another
   origin; "Fullscreen" is a full-screen-sized window, and Proxmox's console toolbar has its own fullscreen toggle. Honest limit.
 - **Containers (LXC):** are tiles after the VMs (identifiers `O_L_NNNNN`), console only (`console=lxc`; Window/Fullscreen shown disabled with the reason),
   start/shutdown through the existing `/containers/action` jobs, OS settings shared like any OS, no application panel. A problem listing them is a
@@ -127,3 +128,25 @@ comparing against the apt index does not work (the Proxmox base already has curl
 - **TUI VMs tab** (operator item 9): `s` starts and `h` cleanly shuts down the VM or container under the cursor; Enter shows its details
   (`vm_power.py`: fixed `qm`/`pct` commands, validated). Forced stop stays in the browser launcher, which asks first. The key handling needs
   Textual, which this dev machine lacks, so it is checked in the guest, not here.
+
+## Rehearsal run 23 (2026-10-16): the launcher end to end, and two defects it found in the VM library
+Final code through `2527c06` plus the changes below; hot-copied into the running guest for the last part. Driven over the forwarded web port with a
+throwaway account created inside the disposable guest (its password generated for the test and never printed) and a real Proxmox-backed VM.
+- **Launcher, verified in the guest:** real login (303 to `/home`); a VM made through the real VM library appears as a tile with a constant
+  identifier (`O_V_00001`), its menu and details; user and per-OS settings saved and read back with their sources; the admin layer refused from
+  the page; `/power` present and a power request without the confirmation refused; **starting the VM through `/vms/action` really started it**
+  ("Started rehearsal-vm", the tile became running and offered Console, Window and Fullscreen); both console address shapes are served by Proxmox
+  (an xterm.js page and a noVNC page, HTTP 200). The page rendered in a browser from the guest with its running tile.
+- **TUI VMs tab, verified in the guest** with Textual's Pilot against the real app (recording runner, no real `qm`): keys do nothing outside the VMs
+  tab; start of a stopped VM issues `qm start 101`, shutdown of a running one `qm shutdown 102`, start of a container `pct start 200`; a disallowed
+  action (shutting down a stopped VM) is refused with a notice; Enter opens the details.
+- **Defect 1, fixed:** the VM library compared a new disk with the *current* free space of a role volume, but those start at 1 GiB and grow on
+  demand, so a fresh drive could not create its first VM. It now asks `volume_growth.ensure_room` first (`VmHost._ensure_room`, hook wired in
+  `_vm_host_for`), and says why when growth cannot help. Verified in the guest: the persistence volume grew.
+- **Defect 2, fixed:** the default VM persistence store was `/mnt/USER_ADMIN/vm-data` (DR117), against DR257's "VMs never write to USER_ADMIN". New
+  default `/mnt/USER_PERSONAL/vm-data`; a drive that already holds VM records under the old folder keeps using it (`default_persistence_store`), so
+  nothing is orphaned and Proxmox's `baseline-user` storage keeps matching. `docs/INSTALL.md` and `docs/layers/06` updated.
+- **Open decision (not changed):** the library demands `FREE_HEADROOM` = 10 GiB (plus 10% of the disk) free in each of two volumes before it
+  creates any VM. With growth now wired in, that makes a first small VM grow two volumes by about 10 GiB each, which sits oddly with "volumes grow
+  only if actually used and needed"; the rehearsal's 21 GiB volume group was a hair too small for it (the test lowered the constant in its own
+  process only). Whether a growable volume should need less headroom at creation, and let the growth timer follow actual use, is the operator's call.

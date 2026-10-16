@@ -28,7 +28,20 @@ from pathlib import Path
 GIB = 2**30
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 DEFAULT_STORE = Path("/mnt/BASELINE/vm-runtime")
-DEFAULT_PERSISTENCE_STORE = Path("/mnt/USER_ADMIN/vm-data")
+DEFAULT_PERSISTENCE_STORE = Path("/mnt/USER_PERSONAL/vm-data")     # DR257: VMs never write to USER_ADMIN; their state is the user's
+LEGACY_PERSISTENCE_STORE = Path("/mnt/USER_ADMIN/vm-data")          # the default before DR257; kept for drives that already hold VMs there
+
+
+def default_persistence_store(legacy: Path = LEGACY_PERSISTENCE_STORE) -> Path:
+    """USER_PERSONAL for a new drive; the old USER_ADMIN folder only when it already holds VM records, so those are not orphaned (and
+    Proxmox's `baseline-user` storage, registered against that path, keeps matching)."""
+    machines = Path(legacy) / "control" / "machines"
+    try:
+        if machines.is_dir() and any(machines.iterdir()):
+            return Path(legacy)
+    except OSError:
+        pass
+    return DEFAULT_PERSISTENCE_STORE
 DEFAULT_ISO_DIR = Path("/mnt/INSTALLER_CACHE/isos")
 FREE_HEADROOM = 10 * GIB
 VM_NICENESS = 10      # Proxmox and its own guests (nice 0) win any CPU contention against VMs started here
@@ -150,12 +163,13 @@ def _real_free(path) -> int:
 class VmHost:
     def __init__(self, store, *, run=_real_run, spawn=_real_spawn, is_alive=_real_alive, qmp=_real_qmp,
                  kill=_real_kill, sleep=time.sleep, free_bytes=_real_free, cmdline=_real_cmdline, runtime_dir=None,
-                 persistence_store=DEFAULT_PERSISTENCE_STORE):
+                 persistence_store=DEFAULT_PERSISTENCE_STORE, grow_volume=None):
         self.store = Path(store)
         self.persistence_store = Path(persistence_store)
         self.runtime_dir = Path(runtime_dir) if runtime_dir else Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "baseline-vms"
         self.run, self.spawn, self.is_alive, self.qmp, self.kill = run, spawn, is_alive, qmp, kill
         self.sleep, self.free_bytes, self._cmdline = sleep, free_bytes, cmdline
+        self.grow_volume = grow_volume      # callable(label, needed_bytes) that extends a Baseline role volume; None where volumes do not grow
 
     # ---- paths -------------------------------------------------------------------------------------------------
     @property
@@ -242,13 +256,28 @@ class VmHost:
             if not os.path.ismount(mount):
                 raise VmError(f"{mount} must be mounted before storing VM state")
 
+    def _ensure_room(self, path: Path, needed: int, refusal: str) -> None:
+        """Free space is a property of a role volume that grows on demand, not of its current size (a fresh drive's volumes start at 1 GiB): when the
+        path is on a Baseline role volume and a growth hook is configured, ask it for the room first. Refuses, with the reason, when it cannot."""
+        if self.free_bytes(path) >= needed:
+            return
+        parts = Path(path).parts
+        label = parts[2] if len(parts) > 2 and parts[1] == "mnt" and re.fullmatch(r"[A-Z][A-Z0-9_]{1,31}", parts[2]) else None
+        if label is not None and self.grow_volume is not None:
+            try:
+                self.grow_volume(label, needed)
+            except Exception as exc:        # noqa: BLE001 - the growth module's own reason is what the person needs to read
+                raise VmError(f"{refusal}: {exc}") from exc
+            if self.free_bytes(path) >= needed:
+                return
+        raise VmError(refusal)
+
     def _new_dir(self, name: str, size_gb: int) -> Path:
         self._check_store(self.store)
         d = self.vm_dir(name)
         if d.exists():
             raise VmError(f"a VM named {name} already exists")
-        if self.free_bytes(self.store) < FREE_HEADROOM + size_gb * GIB // 10:
-            raise VmError("not enough free space in the VM store for this VM")
+        self._ensure_room(self.store, FREE_HEADROOM + size_gb * GIB // 10, "not enough free space in the VM store for this VM")
         d.mkdir(parents=True)
         return d
 
@@ -266,8 +295,7 @@ class VmHost:
         self._check_store(self.persistence_store)
         if self.persistence_store.resolve().is_relative_to(self.store.resolve()) or self.store.resolve().is_relative_to(self.persistence_store.resolve()):
             raise VmError("protected disks must be outside the disposable VM store")
-        if self.free_bytes(self.persistence_store) < FREE_HEADROOM + int(disk_gb) * GIB // 10:
-            raise VmError("not enough free space for the standard VM disk")
+        self._ensure_room(self.persistence_store, FREE_HEADROOM + int(disk_gb) * GIB // 10, "not enough free space for the standard VM disk")
         d = self._new_dir(name, 0)
         root = self.standalone_path(name)
         if root.parent.exists():
@@ -305,9 +333,11 @@ class VmHost:
             raise VmError(f"{name} has retained user data; explicitly reattach it instead of replacing it")
         self._create_disk(d, ["qemu-img", "create", "-f", "qcow2", "-b", str(bpath), "-F", "qcow2",
                               str(self.disk_path(name))])
-        if self.free_bytes(self.persistence_store) < FREE_HEADROOM + int(persistence_gb) * GIB // 10:
+        try:
+            self._ensure_room(self.persistence_store, FREE_HEADROOM + int(persistence_gb) * GIB // 10, "not enough free space for the retained user disk")
+        except VmError:
             shutil.rmtree(d)
-            raise VmError("not enough free space for the retained user disk")
+            raise
         try:
             data_dir.mkdir(parents=True)
             self._create_disk(data_dir, ["qemu-img", "create", "-f", "qcow2", str(data_path),
