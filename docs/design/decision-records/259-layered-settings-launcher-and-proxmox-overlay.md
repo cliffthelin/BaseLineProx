@@ -146,7 +146,12 @@ throwaway account created inside the disposable guest (its password generated fo
 - **Defect 2, fixed:** the default VM persistence store was `/mnt/USER_ADMIN/vm-data` (DR117), against DR257's "VMs never write to USER_ADMIN". New
   default `/mnt/USER_PERSONAL/vm-data`; a drive that already holds VM records under the old folder keeps using it (`default_persistence_store`), so
   nothing is orphaned and Proxmox's `baseline-user` storage keeps matching. `docs/INSTALL.md` and `docs/layers/06` updated.
-- **Open decision (not changed):** the library demands `FREE_HEADROOM` = 10 GiB (plus 10% of the disk) free in each of two volumes before it
+- **Decided 2026-10-16 (operator): reserving is fine, writing is not.** "As long as you're just reserving space that is fine. I do not want to have
+  to write 48GB as if there is anything in it." The 10 GiB headroom therefore stays: growth is `lvextend` (extents reserved, nothing written) and a VM
+  disk is a sparse qcow2 (a 48 GiB one occupies 196 KB, measured). `tests/unit/test_reserve_never_write.py` enforces it: nothing may zero-fill,
+  `fallocate` or preallocate, except the one swap file on the thin SESSION_TEMP volume (`host_layout.py`, 4 GiB, written once so swap never finds a
+  missing block when the pool is full), whose size is capped by the test. Whether swap should become reserved instead (a thick volume) is open.
+- *(Superseded by the decision above.)* The library demands `FREE_HEADROOM` = 10 GiB (plus 10% of the disk) free in each of two volumes before it
   creates any VM. With growth now wired in, that makes a first small VM grow two volumes by about 10 GiB each, which sits oddly with "volumes grow
   only if actually used and needed"; the rehearsal's 21 GiB volume group was a hair too small for it (the test lowered the constant in its own
   process only). Whether a growable volume should need less headroom at creation, and let the growth timer follow actual use, is the operator's call.
