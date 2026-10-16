@@ -32,6 +32,11 @@ SECRET_NAMES = ("KASM_ADMIN_PASSWORD", "KASM_USER_PASSWORD", "KASM_DB_PASSWORD",
 MIN_HOST_MB, MIN_VM_MB, MAX_VM_MB = 12288, 6144, 16384
 ADMIN_DISK_GB, PROFILES_DISK_GB = 20, 100
 AGENT_WAIT_S, INSTALL_TIMEOUT_S = 300, 1800
+GIB = 2**30
+# Room asked of each role volume before the VM is built. The disks are sparse, so their size is only a limit; what Kasm actually writes in its first
+# minutes (Docker's container layers and sessions, the database and logs, a first profile) must already fit, because the periodic growth check is slower
+# than an install. Beyond this the volumes grow as they fill.
+ROOM_NEEDED = {"SESSION_TEMP": 8 * GIB, "APPDATA_ADMIN": 4 * GIB, "APPDATA_PERSONAL": 2 * GIB}
 
 
 class KasmSetupError(Exception):
@@ -90,10 +95,11 @@ def file_sha256(path: Path) -> str:
 
 class KasmSetup:
     def __init__(self, layout: Layout = Layout(), *, run=_run, is_mount=os.path.ismount, sleep=time.sleep, hash_file=file_sha256,
-                 vault=None, host_mb=None, host_cores=None, clock=time.monotonic):
+                 vault=None, host_mb=None, host_cores=None, clock=time.monotonic, ensure_room=None):
         self.layout, self.run, self.is_mount, self.sleep, self.hash_file, self.clock = layout, run, is_mount, sleep, hash_file, clock
         self.vault = vault if vault is not None else vault_mod.Vault(layout.vault_path)
         self._host_mb, self._host_cores = host_mb, host_cores
+        self.ensure_room = ensure_room      # callable(label, needed_bytes) that extends a Baseline role volume; None where volumes do not grow
 
     # ---- Proxmox -----------------------------------------------------------------------------------------------------
     def _command(self, argv, **kwargs):
@@ -154,6 +160,16 @@ class KasmSetup:
         if self.hash_file(self.layout.base) != manifest.get("sha256"):
             raise KasmSetupError("the Kasm base image does not match its manifest checksum; refusing to boot it")
         return manifest
+
+    def make_room(self):
+        """Ask each role volume the VM writes to for what its first minutes need. A volume that cannot provide it stops the build with the reason."""
+        if self.ensure_room is None:
+            return
+        for label, needed in ROOM_NEEDED.items():
+            try:
+                self.ensure_room(label, needed)
+            except Exception as exc:        # noqa: BLE001 - the growth module's own reason is what the person needs to read
+                raise KasmSetupError(f"{label} cannot be given the room Kasm needs: {exc}") from exc
 
     def check_volumes(self):
         missing = [m for m in self.layout.mounts if not self.is_mount(m)]
@@ -294,6 +310,7 @@ class KasmSetup:
         manifest = self.check_base()
         size = self.sizing()
         self._ensure_storages()
+        self.make_room()
         created = vmid is None
         if created:
             vmid = self.recorded_vmid() or int(self._command(["pvesh", "get", "/cluster/nextid"]).strip())

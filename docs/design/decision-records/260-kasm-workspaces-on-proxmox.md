@@ -1,7 +1,7 @@
 # 260 - Kasm Workspaces on top of Proxmox, aligned with the overlay and persistence design
 
-Date: 2026-10-16. Status: built; the guest side is verified end to end in a QEMU test guest (below); the Proxmox side is unit-tested with a fake Proxmox and NOT yet run on a
-real Proxmox host. Each claim says which. Builds on DR257 (volume roles), DR258 (environments, application containers) and DR259 (layered settings, launcher, Proxmox overlay).
+Date: 2026-10-16. Status: built and verified end to end on a Proxmox host that is itself a QEMU VM (nested KVM, no network); NOT yet on real hardware and NOT yet from a
+fresh installer ISO. Each claim says which. Builds on DR257 (volume roles), DR258 (environments, application containers) and DR259 (layered settings, launcher, Proxmox overlay).
 
 ## Operator instruction (2026-10-16)
 "Build in Kasm on top of Proxmox and align Kasm to build the overlays and persistence data like I have been designing to. Include configuring Kasm to do these
@@ -69,11 +69,25 @@ failure marker and poweroff); a 22-character disk serial was truncated (limit 20
 `kasm` user and network and `bin/start` pulled `-rolling` images (own start script, `--use-static-images`); the installer fetches two Docker plugins from the registry
 even in offline mode (now packed in the base).
 
+## Verified on a real Proxmox VE 9.2 (a QEMU guest with nested KVM; the earlier rehearsal's installed system, its disk enlarged to 128 GiB)
+`baseline-kasm setup` run on it, with the base shared read-only at the installer cache's `kasm/` path:
+- It checked the 16 GB base against its manifest, asked the three role volumes for room (they grew: APPDATA_ADMIN 5 GiB, APPDATA_PERSONAL 3 GiB, SESSION_TEMP
+  13 GiB), registered the three directory storages, built VM 101 (4 cores, 6 GiB, sized from the 24 GiB host) with the root overlay on SESSION_TEMP and the
+  two data disks on the AppData volumes, attached by serial, started it, generated the four credentials into `/mnt/USER_ADMIN/vault` (mode 0600), installed Kasm
+  through the guest agent, and reported the VM's address. Kasm reported healthy.
+- A second `setup` is a one-second no-op (no base check, no guest work); `baseline-kasm-setup.service` runs it under its real unit sandbox.
+- **Reset-root** (`baseline-kasm reset-root`): same user id and workspace ids afterwards; a file written in the personal workspace before was there; one written
+  in the temporary workspace was not.
+- **Rebuild** (the VM's definition and its OS disk deleted outright, then `setup`): a new VM 101 reattached the same admin and profile disks, reused the vault's
+  credentials, and the same checks passed (same ids, personal file kept, temporary file gone).
+Found and fixed on the way: the AppData volumes start at 1 GiB and the growth check runs every ten minutes, which Kasm's first writes would outrun; setup now asks
+each volume for room first (`ROOM_NEEDED`) and stops with the volume's own reason if it cannot be given.
+
 ## Not verified (each a step of the plan, not an assumption to hide)
-- `kasm_setup.py` against a real Proxmox host (`pvesm`, `qm create` with directory-storage volumes, `qm guest exec`): unit-tested against a scripted fake only.
-- The carried base inside the installer ISO and the first-boot path (a QEMU rehearsal of a whole new setup with Kasm). The ISO grows by the base's size
-  (about 15.5 GiB) and INSTALLER_CACHE holds it twice (the ISO and its expanded copy).
-- Nested virtualization: the Kasm VM inside a Proxmox that is itself a VM needs 8 GiB or more of memory to give it.
+- Real hardware (the Proxmox here was itself a VM; KVM-in-KVM is slower and the sizes were small).
+- The carried base inside the installer ISO and the first-boot path from a fresh installer (a rehearsal of a whole new setup with Kasm): the unit and timer
+  are enabled by `provision.sh` and the cache builder carries the base, but that chain was not run end to end. The ISO grows by the base's size (about 15.5 GiB)
+  and INSTALLER_CACHE holds it twice (the ISO and its expanded copy).
 - Kasm Workspaces Community Edition is free to use and is **not fully open source** (the platform's license restricts it; KasmVNC and the workspace images are
   open). Used without activation; its limits apply. The page says so.
 - Smaller base: the Ubuntu desktop image alone is about 11 GB uncompressed; dropping it (or carrying only Chrome and VS Code) cuts the base to a fraction.

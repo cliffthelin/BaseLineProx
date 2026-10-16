@@ -286,3 +286,21 @@ def test_status_reports_without_changing_anything(world):
     now = setup.status()
     assert now["present"] and now["running"] and now["installed"] and now["url"] == "https://192.168.1.50"
     assert not fake.named("qm", "stop") and len(fake.named("qm", "start")) == 1
+
+
+def test_each_role_volume_is_given_room_for_kasms_first_writes_before_anything_is_built(world):
+    asked = []
+    setup, fake = build(world, ensure_room=lambda label, needed: asked.append((label, needed)))
+    setup.setup()
+    assert dict(asked) == ks.ROOM_NEEDED and set(dict(asked)) == {"SESSION_TEMP", "APPDATA_ADMIN", "APPDATA_PERSONAL"}
+    assert fake.calls.index(fake.named("qm", "create")[0]) > 0 and asked                      # asked, and before the VM exists
+
+
+def test_a_volume_that_cannot_grow_stops_the_build_with_its_reason(world):
+    def refuse(label, needed):
+        if label == "APPDATA_ADMIN":
+            raise RuntimeError("the volume group has no free space")
+    setup, fake = build(world, ensure_room=refuse)
+    with pytest.raises(ks.KasmSetupError, match="APPDATA_ADMIN cannot be given the room.*no free space"):
+        setup.setup()
+    assert not fake.named("qm", "create") and not fake.named("qemu-img")

@@ -21,7 +21,9 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     passphrase = sys.stdin.readline().rstrip("\n") if "--passphrase-stdin" in argv else None
-    machine = kasm_setup.KasmSetup()
+    import repair
+    import volume_growth
+    machine = kasm_setup.KasmSetup(ensure_room=lambda label, needed: volume_growth.ensure_room(repair.RealRunner(), label, needed))
     try:
         if command == "setup":
             if not machine.layout.base.is_file() and machine.existing_vmid() is None:

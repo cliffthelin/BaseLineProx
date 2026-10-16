@@ -41,7 +41,7 @@ def _cli():
 def test_an_installer_with_no_carried_base_is_skipped_quietly_not_failed(monkeypatch, capsys, tmp_path):
     cli = _cli()
     machine = ks.KasmSetup(ks.Layout(base_dir=tmp_path), run=lambda argv, **k: (0, "[]", ""), vault=object())
-    monkeypatch.setattr(cli.kasm_setup, "KasmSetup", lambda: machine)
+    monkeypatch.setattr(cli.kasm_setup, "KasmSetup", lambda **_k: machine)
     assert cli.main(["baseline-kasm", "setup"]) == 0
     assert "no Kasm base" in json.loads(capsys.readouterr().out)["skipped"]
 
@@ -58,7 +58,7 @@ def test_a_stop_is_reported_on_stderr_with_a_failing_exit(monkeypatch, capsys, t
         def setup(self, passphrase=None):
             raise ks.KasmSetupError("these volumes must be mounted first: /mnt/APPDATA_ADMIN")
 
-    monkeypatch.setattr(cli.kasm_setup, "KasmSetup", Stops)
+    monkeypatch.setattr(cli.kasm_setup, "KasmSetup", lambda **_k: Stops())
     assert cli.main(["baseline-kasm", "setup"]) == 1
     assert "APPDATA_ADMIN" in capsys.readouterr().err
 
