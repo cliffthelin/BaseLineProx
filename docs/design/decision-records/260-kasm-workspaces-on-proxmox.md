@@ -162,3 +162,9 @@ the client used (a Host header that is not an address is ignored). Everything el
 The address Kasm is told at install is the recipe's `registry.list_url`, or, when empty, this host's own address on the VM bridge (`vmbr0`) on port 8100; if there is no IPv4 address to give, none is offered rather than a wrong one.
 Test-harness note (not a product fact): QEMU's `guestfwd` to a TCP target serves one connection and then stalls, which made Kasm time out fetching `list.json`; direct reachability showed the registry itself was fine.
 Not yet: workspace icons (entries name `<image>.png`; nothing serves them), a signature, and reaching the registry across a real Proxmox bridge with Baseline's web firewall rule in between (the rule allows private networks to the web app, which is expected to cover the Kasm VM, unverified).
+
+## Update 2026-10-17: the registry across a real bridge and the host's firewall (verified)
+On a scratch copy of the installed Proxmox host (nested, its own firewall enabled and running, a rule for port 8100 present): Baseline's web app listens on all interfaces on 8100; the address Baseline derives for the Kasm VM from the host's own bridge (`vmbr0`) is
+`http://10.0.2.15:8100/kasm-registry/`; and from INSIDE the Kasm VM, across the bridge and through the firewall, `versions.txt` returned `1.1` and `1.1/list.json` returned the five workspaces with `list_url` set to the address the VM used. A page that needs a login (`/home`) still answered 303 to the same
+caller. So a fresh install can use the registry with no manual step. (Kasm's own fetch and acceptance of the list was verified earlier against the real route; this run proved the network path and the address derivation on a real host.)
+Still open for the registry: workspace icons, and a signature.
