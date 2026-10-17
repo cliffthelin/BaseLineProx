@@ -150,9 +150,9 @@ function drawAvailable(home){
   for (const a of list){
     const b = el('button', {className:'tile ghost', type:'button'});
     b.dataset.image = a.image; b.dataset.blocked = a.blocked ? 'yes' : 'no'; b.style.setProperty('--h', (a.os.family.length * 47) % 360);
-    b.title = a.blocked ? 'Cannot be created here: ' + a.blocked : (a.plan.disk_gb + ' GB disk, ' + a.plan.memory_mb + ' MB, ' + a.plan.cpus + ' CPUs');
+    b.title = a.blocked ? 'Cannot be created here: ' + a.blocked : (a.plan.prebuilt ? 'Ready-made: ' : '') + (a.plan.disk_gb + ' GB disk, ' + a.plan.memory_mb + ' MB, ' + a.plan.cpus + ' CPUs');
     b.append(el('span', {className:'icon'}, (a.name[0] || '?').toUpperCase()), el('span', {className:'label'}, a.name),
-      el('span', {className:'sub'}, a.blocked ? 'not built · cannot be created here' : 'not built · create'));
+      el('span', {className:'sub'}, a.blocked ? 'not built · cannot be created here' : (a.plan.prebuilt ? 'ready-made · create' : 'not built · create')));
     b.addEventListener('click', () => createFromList(a));
     row.append(el('li', {}, b));
   }
@@ -163,6 +163,10 @@ function drawAvailable(home){
 async function createFromList(a){
   if (a.blocked){ toast(a.name + ' cannot be created here: ' + a.blocked); return; }
   const p = a.plan;
+  if (p.prebuilt){
+    if (!confirm('Create ' + a.name + ' from its ready-made base?\n\nIt already has its desktop and applications; no installer runs. ' + p.memory_mb + ' MB memory, ' + p.cpus + ' CPUs, UEFI.\nIt is created stopped; you get a one-time login to save where the system makes the account that way.')) return;
+    return power({kind:'vm'}, 'create_prebuilt', {name:p.name, os:p.os, memory_mb:p.memory_mb, cpus:p.cpus});
+  }
   if (!confirm('Create ' + a.name + ' from ' + p.iso + '?\n\n' + p.disk_gb + ' GB disk, ' + p.memory_mb + ' MB memory, ' + p.cpus + ' CPUs, UEFI.\nIt is created stopped. You can change these afterwards in VM settings.')) return;
   return power({kind:'vm'}, 'create_iso', {name:p.name, iso:p.iso, disk_gb:p.disk_gb, memory_mb:p.memory_mb, cpus:p.cpus, firmware:p.firmware});
 }
@@ -258,6 +262,7 @@ async function power(t, action, params){
       }
     }
     toast(j.message || (j.ok ? 'Done' : 'Failed'));
+    if (j.message && j.message.indexOf('one-time login') >= 0) alert(j.message);      // a login is shown once and kept nowhere: it must not vanish with the toast
   }catch(e){ toast('Connection lost. Check the tile before retrying.'); }
   await refresh();
 }

@@ -82,3 +82,10 @@ def test_the_lists_file_names_match_proxmox_volume_names_and_the_hosts_own_name_
     assert env.listed_catalogue(listing, ["debian-13.7.0-amd64-DVD-1.iso"], [])[0]["carried_as"] == "debian-13.7.0-amd64-DVD-1.iso"      # a local folder: plain names
     assert env.listed_catalogue(listing, ["installer-cache:iso/other.iso"], [])[0]["image"] == "missing"
     assert env.match_image("a.iso", ["x:iso/xa.iso"]) is None                                   # the whole file name, never a suffix of it
+
+
+def test_a_carried_ready_made_base_is_shown_beside_the_image_state():
+    rows = env.listed_catalogue(LISTING, [], [], bases={"debian"})
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["debian"]["base"] is True and by_id["qubes"]["base"] is False
+    assert "ready-made base carried" in env.render(rows).decode()

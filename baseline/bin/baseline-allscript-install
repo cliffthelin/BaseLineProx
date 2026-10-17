@@ -65,6 +65,7 @@ ASSISTANT_CANDIDATES = [Path("/run/media/cane/CACHE/baseline-build/assistant/acq
                         Path("/var/tmp/baseline-self-installer/acquire") / _ASSISTANT_REL]
 BACKUP_ROOT = Path("/mnt/10TB/backup")
 KASM_BASE = None                                           # a prepared Kasm base (baseline-build-kasm-base output folder) the cache must carry
+OS_BASES = None                                            # the ready-made VM bases (baseline-build-os-base output folder) the cache should carry
 OS_ISOS = Path("/mnt/INSTALLER_CACHE/isos")     # vanilla installer ISOs already on this machine
 ASSISTANT = locate_assistant(ASSISTANT_CANDIDATES)
 PROXY = REPO / "baseline/lib/installer_package_proxy.py"  # allowlisted package proxy, listens on 127.0.0.1:32165
@@ -226,7 +227,7 @@ def cache_not_ready(message):
     return message
 
 
-def cache_status(cache_dir, repo_root=None, kasm_base=None):
+def cache_status(cache_dir, repo_root=None, kasm_base=None, os_bases=None):
     """missing, built before the applications were carried (without_apps), stale (built for other packages than the code needs now, or without the
     Kasm base when one is wanted), or complete. `repo_root` turns on the staleness check; every caller in this script passes it."""
     cache_dir = Path(cache_dir)
@@ -236,6 +237,8 @@ def cache_status(cache_dir, repo_root=None, kasm_base=None):
         return "without_apps"
     if kasm_base is not None and not (cache_dir / "kasm" / "KASM.json").is_file():
         return "stale"
+    if os_bases is not None and not list((cache_dir / "os-bases").glob("*-base.json")):
+        return "stale"                          # ready-made bases are wanted and the cache carries none
     if repo_root is not None:
         import offline_cache
         if not offline_cache.cache_is_current(cache_dir, repo_root)[0]:
@@ -543,7 +546,7 @@ def stage_install(r):
     # The authorization is the exact `--confirm-wipe <serial>` on the command line (checked in main), after a verified
     # recovery image and under the serial lock: an interactive prompt on top of that only blocks unattended runs.
     say(f"ERASING {TARGET_NAME} ({SERIAL}, {target['path']}); verified recovery image: {folder}")
-    if cache_status(CACHE_DIR, REPO, KASM_BASE) != "complete":
+    if cache_status(CACHE_DIR, REPO, KASM_BASE, OS_BASES) != "complete":
         raise RuntimeError(cache_not_ready("run the cache stage first; the installer must carry its own packages and applications"))
     target = identify(r)
     workspace = WORK / "installer"
@@ -644,7 +647,7 @@ def send_keys(text):
 
 
 def stage_cache(r):
-    status = cache_status(CACHE_DIR, REPO, KASM_BASE)
+    status = cache_status(CACHE_DIR, REPO, KASM_BASE, OS_BASES)
     if status == "stale":
         import offline_cache
         why = offline_cache.cache_is_current(CACHE_DIR, REPO)[1] or "it does not carry the Kasm base"
@@ -668,6 +671,7 @@ def stage_cache(r):
         sh([REPO / "baseline/bin/baseline-build-offline-cache", "--source-iso", SOURCE_ISO, "--assistant", ASSISTANT,
             "--workspace", BUILD / "cache-vm", "--output", CACHE_DIR, "--apps", APPS_DIR,
             *(["--kasm-base", KASM_BASE] if KASM_BASE is not None else []),
+            *(["--os-bases", OS_BASES] if OS_BASES is not None else []),
             *[arg for seed in seeds for arg in ("--seed", seed)]], timeout=14400)
     import offline_cache
     import application_bundle
@@ -701,7 +705,7 @@ def stage_rehearse(r):
     import first_boot_hook as fbh
     import iso_builder as ib
     import self_installer as si
-    if cache_status(CACHE_DIR, REPO, KASM_BASE) != "complete":
+    if cache_status(CACHE_DIR, REPO, KASM_BASE, OS_BASES) != "complete":
         raise RuntimeError(cache_not_ready("run the cache stage first (the cache must carry the applications)"))
     work = BUILD / "rehearsal"
     if work.exists():
@@ -797,12 +801,15 @@ def main():
                              "default: every .iso (the rehearsal: the smallest)")
     parser.add_argument("--kasm-base", type=Path, metavar="DIR",
                         help="a prepared Kasm base (the folder baseline-build-kasm-base wrote); the cache then carries it (about 15 GiB) so Kasm is built on the new setup")
+    parser.add_argument("--os-bases", type=Path, metavar="DIR",
+                        help="the folder baseline-build-os-base wrote; the cache then carries each ready-made VM base that passes its checks, so the listed systems can be created already set up")
     parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
                         help="authorize erasing the target (after its verified recovery image); its exact serial")
     args = parser.parse_args()
-    global CONFIRMED_WIPE, WORK, KASM_BASE
+    global CONFIRMED_WIPE, WORK, KASM_BASE, OS_BASES
     CONFIRMED_WIPE = args.confirm_wipe
     KASM_BASE = args.kasm_base
+    OS_BASES = args.os_bases
     stages = select_stages(args.stage, args.start)
     select_target(*target_for(args.target, CONFIRMED_WIPE, stages))
     WORK = work_dir(TARGET_NAME, stages)

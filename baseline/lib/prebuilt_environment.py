@@ -1,0 +1,163 @@
+"""Ready-made operating systems as VMs (DR258, DR267): a prebuilt base, an overlay over it, one account made at the first boot, and a retained home.
+
+`baseline-build-os-base` produces a read-only base for each listed system, with its desktop and applications already installed and no account in it. This makes a VM from one the way
+`ubuntu_environment` makes an Ubuntu VM: the host's `create_overlay` gives a disposable OS layer over the base and a separate retained disk for the person's files; a one-time password is
+generated and only its salted hash goes into the cloud-init seed; the base is never written. Systems whose own first-boot setup creates the owner (Omarchy, Bazzite, FydeOS) get the overlay
+and the retained disk and no seed.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import secrets
+from pathlib import Path
+
+import drive_setup_answer as answer
+import os_build
+import vm_host as vh
+
+USERNAME = "baseline-admin"
+# id -> does it take a cloud-init seed, and which display manager must wait for the retained home
+SYSTEMS = {
+    "debian": {"seed": True, "greeter": "gdm3"}, "ubuntu": {"seed": True, "greeter": "gdm3"}, "nixos": {"seed": True, "greeter": None}, "cachyos": {"seed": True, "greeter": "sddm"},
+    "omarchy": {"seed": False, "greeter": None}, "bazzite": {"seed": False, "greeter": None}, "fydeos": {"seed": False, "greeter": None},
+}
+
+
+class PrebuiltError(vh.VmError):
+    pass
+
+
+def base_name(os_id: str) -> str:
+    if os_id not in SYSTEMS:
+        raise PrebuiltError(f"{os_id} has no ready-made base")
+    return f"{os_id}-base"
+
+
+def read_manifest(source_dir, os_id: str) -> dict:
+    try:
+        manifest = json.loads((Path(source_dir) / f"{os_id}-base.json").read_text())
+    except (OSError, ValueError) as exc:
+        raise PrebuiltError(f"no readable manifest for the {os_id} base: {exc}") from None
+    if manifest.get("holds_install_state_or_secrets") is not False:
+        raise PrebuiltError(f"the {os_id} base does not say it is free of install state and secrets")
+    return manifest
+
+
+def install_base(host, os_id: str, source_dir) -> Path:
+    """Make the carried base available to the host as a base image: checked against its own manifest first, then linked (not copied) so the carried file stays the one copy. Never replaces a base."""
+    source_dir = Path(source_dir)
+    manifest = read_manifest(source_dir, os_id)
+    image = source_dir / manifest["base"]
+    if image.is_symlink() or not image.is_file():
+        raise PrebuiltError(f"the {os_id} base image is missing")
+    digest = hashlib.sha256()
+    with open(image, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    if digest.hexdigest() != manifest["sha256"]:
+        raise PrebuiltError(f"the {os_id} base does not match its manifest checksum")
+    host.bases_dir.mkdir(parents=True, exist_ok=True)
+    target = host.base_path(base_name(os_id))
+    if target.exists() or target.is_symlink():
+        return target
+    target.symlink_to(image.resolve())
+    return target
+
+
+def cloud_config(os_id: str, *, password_hash: str, initialize_home: bool, hostname: str) -> str:
+    """The seed's user-data: mount (or on a fresh disk, make) the retained home, create the one admin account from a hash, and have the display manager wait for the home."""
+    spec = SYSTEMS[os_id]
+    if not password_hash.startswith("$6$") or any(c in password_hash for c in "\n\r"):
+        raise PrebuiltError("a salted password hash is required, never a plaintext credential")
+    initialize = """
+    if blkid -p "$disk" >/dev/null 2>&1; then
+        echo 'Refusing to format an existing or unrecognized home filesystem' >&2; exit 1
+    fi
+    cmp -n 1048576 "$disk" /dev/zero || { echo 'Home disk is not blank' >&2; exit 1; }
+    mkfs.ext4 -q -L baseline-home "$disk"
+""" if initialize_home else """
+    echo 'Retained home filesystem missing or damaged; recovery required' >&2; exit 1
+"""
+    prepare_home = """set -eu
+disk=/dev/disk/by-id/virtio-baseline-home
+[ -b "$disk" ] || { echo 'Retained home disk is absent' >&2; exit 1; }
+if [ "$(blkid -s TYPE -o value "$disk" || true)" != ext4 ] ||
+   [ "$(blkid -s LABEL -o value "$disk" || true)" != baseline-home ]; then
+""" + initialize + """
+fi
+mkdir -p /home
+if ! mountpoint -q /home; then mount -t ext4 "$disk" /home; fi
+actual=$(findmnt -n -o SOURCE --mountpoint /home)
+[ "$(readlink -f "$actual")" = "$(readlink -f "$disk")" ] ||
+    { echo 'Wrong filesystem mounted at /home' >&2; exit 1; }
+touch /run/baseline-home-ready
+"""
+    config = {
+        "disable_root": True, "ssh_pwauth": False, "hostname": hostname, "preserve_hostname": False,
+        "users": [{"name": USERNAME, "uid": 1000, "groups": ["sudo", "wheel"], "shell": "/bin/bash", "lock_passwd": False, "hashed_passwd": password_hash, "sudo": ["ALL=(ALL) ALL"]}],
+        "bootcmd": [["bash", "-c", prepare_home]],
+        "write_files": [{"path": "/etc/baseline-environment.json", "permissions": "0644", "content": json.dumps({"format": "baseline.prebuilt-environment/v1", "os": os_id}, sort_keys=True) + "\n"}],
+        "runcmd": [["systemctl", "enable", "--now", "qemu-guest-agent"]],
+    }
+    if spec["greeter"]:                                  # the login screen must not appear before the retained home is mounted
+        config["write_files"].append({"path": f"/etc/systemd/system/{spec['greeter']}.service.d/baseline-home.conf", "permissions": "0644",
+                                      "content": "[Unit]\nRequiresMountsFor=/home\nConditionPathExists=/run/baseline-home-ready\n"})
+    return "#cloud-config\n" + json.dumps(config, indent=2) + "\n"
+
+
+def _run(host, argv):
+    rc, out, err = host.run(argv)
+    if rc:
+        raise PrebuiltError(f"{argv[0]} failed: {err.strip()[-400:]}")
+    return out
+
+
+def write_seed(host, name: str, os_id: str, profile: dict, *, initialize_home: bool) -> None:
+    folder = host.vm_dir(name)
+    seed = folder / "seed"
+    seed.mkdir(mode=0o700, exist_ok=True)
+    files = (("user-data", cloud_config(os_id, password_hash=profile["password_hash"], initialize_home=initialize_home, hostname=name)),
+             ("meta-data", json.dumps({"instance-id": profile["instance_id"], "local-hostname": name})))
+    for filename, content in files:
+        path = seed / filename
+        path.write_text(content)
+        os.chmod(path, 0o600)
+    fresh = folder / "seed.new.iso"
+    try:
+        _run(host, ["xorriso", "-as", "mkisofs", "-volid", "cidata", "-joliet", "-rock", "-o", str(fresh), str(seed / "user-data"), str(seed / "meta-data")])
+        if not fresh.is_file():
+            raise PrebuiltError("the seed builder produced no ISO")
+        os.chmod(fresh, 0o600)
+        os.replace(fresh, folder / "seed.iso")
+    finally:
+        fresh.unlink(missing_ok=True)
+
+
+def create(host, name: str, os_id: str, *, memory_mb=4096, cpus=2, disk_gb=None, persistence_gb=32, password_factory=answer.generate_one_time_password, password_hasher=None) -> dict:
+    """A VM from the carried base of `os_id`: an overlay (the base is never written), a retained home disk, and, for systems that take one, a first-boot seed that makes the one account. The
+    one-time password is returned once and kept nowhere: only its hash is stored."""
+    base = base_name(os_id)
+    if not host.base_path(base).is_file():
+        raise PrebuiltError(f"the {os_id} base is not installed on this host")
+    spec = host.create_overlay(name, base=base, memory_mb=memory_mb, cpus=cpus, persistence_gb=persistence_gb)
+    if disk_gb:
+        _run(host, ["qemu-img", "resize", str(host.disk_path(name)), f"{int(disk_gb)}G"])
+    result = {"name": name, "os": os_id}
+    if SYSTEMS[os_id]["seed"]:
+        password = password_factory()
+        hashed = (password_hasher or (lambda p: answer.hash_password_sha512crypt(p, secrets.token_hex(8))))(password)
+        profile = {"os": os_id, "base": base, "password_hash": hashed, "instance_id": secrets.token_hex(16)}
+        profile_path = Path(spec["persistence_disk"]).parent / "profile.json"
+        profile_path.write_text(json.dumps(profile))
+        os.chmod(profile_path, 0o600)
+        write_seed(host, name, os_id, profile, initialize_home=True)
+        spec.update({"recipe": f"prebuilt-{os_id}", "seed": True})
+        result.update(username=USERNAME, password=password.decode("ascii"), message="Created. Save the one-time login, then start it.")
+    else:
+        result["message"] = "Created. The system's own first-boot setup asks you to make the account when you start it."
+    host._write_spec(name, spec)
+    host.configure_uefi(name)
+    return result

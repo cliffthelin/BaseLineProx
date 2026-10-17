@@ -197,3 +197,34 @@ def carry_kasm_base(source, target) -> dict:
     if (source / "registry").is_dir():                       # the workspace registry files (versions.txt, <schema>/list.json) Baseline serves
         shutil.copytree(source / "registry", target / "registry")
     return {"base": image.name, "bytes": image.stat().st_size, "kasm_version": manifest.get("kasm_version")}
+
+
+OS_BASES_BUNDLE = "os-bases"
+
+
+def carry_os_bases(source, target, only=None) -> dict:
+    """Copy the ready-made VM bases (baseline-build-os-base: `<os>-base.qcow2` and `<os>-base.json`) into the cache as `os-bases/`. Each base is checked against its own manifest and must say it
+    holds no install state or secrets; one that fails either is NOT carried and is reported, never silently dropped. Returns {"carried": {os: bytes}, "refused": {os: reason}}."""
+    import json
+    import shutil
+    source, target = Path(source), Path(target) / OS_BASES_BUNDLE
+    carried, refused = {}, {}
+    for manifest_path in sorted(source.glob("*-base.json")):
+        os_id = manifest_path.name[:-len("-base.json")]
+        if only is not None and os_id not in only:
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            image = source / manifest["base"]
+            if manifest.get("holds_install_state_or_secrets") is not False:
+                refused[os_id] = "it does not say it is free of install state and secrets"
+            elif not image.is_file() or sha256(image) != manifest["sha256"]:
+                refused[os_id] = "it does not match its manifest checksum"
+            else:
+                target.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(image, target / image.name)
+                shutil.copyfile(manifest_path, target / manifest_path.name)
+                carried[os_id] = image.stat().st_size
+        except (OSError, ValueError, KeyError) as exc:
+            refused[os_id] = f"its manifest could not be read: {exc}"
+    return {"carried": carried, "refused": refused}

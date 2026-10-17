@@ -301,3 +301,14 @@ def test_an_explicit_request_and_the_rehearsal_default_still_win_over_the_list()
     assert allscript.select_os_isos(["a.iso"], available, rehearsal=False, listed=["b.iso"]) == ["a.iso"]
     assert allscript.select_os_isos([], available, rehearsal=True, sizes={"a.iso": 9, "b.iso": 1}, listed=["a.iso"]) == ["b.iso"]
     assert allscript.select_os_isos([], available, rehearsal=False, listed=[]) == ["a.iso", "b.iso"]       # no list: every .iso, as before
+
+
+def test_a_cache_with_no_ready_made_bases_is_stale_when_bases_are_wanted(tmp_path):
+    cache = tmp_path / "c"
+    (cache / "apps").mkdir(parents=True)
+    (cache / "MANIFEST.json").write_text("{}")
+    assert allscript.cache_status(cache, None, os_bases=None) == "complete"
+    assert allscript.cache_status(cache, None, os_bases=tmp_path / "bases") == "stale"
+    (cache / "os-bases").mkdir()
+    (cache / "os-bases" / "debian-base.json").write_text("{}")
+    assert allscript.cache_status(cache, None, os_bases=tmp_path / "bases") == "complete"

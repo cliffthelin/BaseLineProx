@@ -59,7 +59,7 @@ def match_image(iso: str, carried) -> str | None:
     return None
 
 
-def listed_catalogue(listing, isos, vms) -> list:
+def listed_catalogue(listing, isos, vms, bases=()) -> list:
     """The catalogue built from the operator's supported-OS list (DR261/262) instead of from whatever images happen to be on the drive: one row per VM entry, in the
     list's order, with the applications that entry asks for (others are "not planned") and "image missing" when the cache does not carry its file. Kasm entries are
     the workspaces component, not a guest OS, so they are not rows here."""
@@ -75,7 +75,7 @@ def listed_catalogue(listing, isos, vms) -> list:
         built = next((n for n in names if n and (entry["id"] in n.lower() or (family != "unknown" and family in n.lower() and (not release or release in n)))), None)
         rows.append({"iso": iso or entry["name"], "id": entry["id"], "name": entry["name"], "os": family, "release": release,
                      "apps": {a: (level if a in entry["apps"] else "not planned") for a in APPS},
-                     "image": "carried" if carried_as else ("missing" if iso else "none listed"), "carried_as": carried_as,
+                     "image": "carried" if carried_as else ("missing" if iso else "none listed"), "carried_as": carried_as, "base": entry["id"] in bases,
                      "state": "built" if built else "not built", "vm": built})
     return rows
 
@@ -83,7 +83,8 @@ def listed_catalogue(listing, isos, vms) -> list:
 def _image_cell(row) -> str:
     if "name" not in row:
         return html.escape(row["iso"])
-    return f"<b>{html.escape(row['name'])}</b><br><small>{html.escape(row['iso'])}: image {html.escape(row['image'])}</small>"
+    ready = "; ready-made base carried" if row.get("base") else ""
+    return f"<b>{html.escape(row['name'])}</b><br><small>{html.escape(row['iso'])}: image {html.escape(row['image'])}{ready}</small>"
 
 
 def render(rows) -> bytes:

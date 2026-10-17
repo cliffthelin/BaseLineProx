@@ -21,9 +21,24 @@ def test_qubes_is_refused_with_the_reason_even_when_its_image_is_carried():
     assert "plan" not in got and "Xen" in got["blocked"]
 
 
-def test_an_ova_is_refused_because_importing_appliances_is_not_built():
-    got = op.plan_for(entry("fydeos", "FydeOS-VMWare-v23.0-Preview2-x86_64-io.ova"), image_carried=True)
+def test_fydeos_is_refused_because_its_desktop_needs_an_intel_gpu_even_when_its_base_is_carried():
+    for kwargs in ({"image_carried": True}, {"image_carried": True, "base_carried": True}):
+        got = op.plan_for(entry("fydeos", "FydeOS-VMWare-v23.0-Preview2-x86_64-io.ova"), **kwargs)
+        assert "Intel GPU" in got["blocked"] and "plan" not in got
+
+
+def test_an_ova_for_any_other_system_is_still_refused_because_importing_appliances_is_not_built():
+    got = op.plan_for(entry("someappliance", "thing.ova"), image_carried=True)
     assert "appliance" in got["blocked"] and "plan" not in got
+
+
+def test_a_carried_ready_made_base_makes_a_plan_that_needs_no_installer_image():
+    got = op.plan_for(entry("debian", "debian.iso"), image_carried=False, base_carried=True)
+    assert got["plan"] == {"name": "debian", "prebuilt": True, "os": "debian", "disk_gb": 32, "memory_mb": 4096, "cpus": 2, "firmware": "uefi"}
+    assert "plan" not in op.plan_for(entry("debian", "debian.iso"), image_carried=False)                  # without the base the missing image still refuses
+    small = op.plan_for(entry("omarchy", ""), image_carried=False, host_mb=8192, base_carried=True)["plan"]
+    assert small["memory_mb"] == 4096                                                                       # still never more than half of a small host
+    assert "Xen" in op.plan_for(entry("qubes", "q.iso"), image_carried=True, base_carried=True)["blocked"]   # a base cannot unblock what cannot be a plain VM
 
 
 def test_a_missing_image_or_no_image_is_refused_naming_which():

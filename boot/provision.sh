@@ -440,6 +440,8 @@ cp "$SRC/baseline/lib/kasm_telemetry.py" /opt/baseline/lib/kasm_telemetry.py
 cp "$SRC/baseline/lib/kasm_registry.py" /opt/baseline/lib/kasm_registry.py
 cp "$SRC/baseline/lib/kasm_settings_ui.py" /opt/baseline/lib/kasm_settings_ui.py
 cp "$SRC/baseline/lib/kasm_settings.py" /opt/baseline/lib/kasm_settings.py
+cp "$SRC/baseline/lib/prebuilt_environment.py" /opt/baseline/lib/prebuilt_environment.py
+cp "$SRC/baseline/lib/os_build.py" /opt/baseline/lib/os_build.py
 cp "$SRC/baseline/lib/kasm_wiki.py" /opt/baseline/lib/kasm_wiki.py
 cp "$SRC/baseline/lib/kasm_proposals.py" /opt/baseline/lib/kasm_proposals.py
 cp "$SRC/baseline/lib/kasm_advice.py" /opt/baseline/lib/kasm_advice.py

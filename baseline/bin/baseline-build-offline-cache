@@ -277,6 +277,8 @@ def main():
                                                  "without it the cache carries no applications")
     parser.add_argument("--kasm-base", type=Path, help="a prepared Kasm base (the folder baseline-build-kasm-base wrote: the qcow2 and KASM.json); "
                                                        "carried so Kasm can be built on a new setup with no internet. About 15 GiB.")
+    parser.add_argument("--os-bases", type=Path, help="the folder baseline-build-os-base wrote (<os>-base.qcow2 and <os>-base.json); the ready-made VM bases that pass their checks are carried "
+                                                      "so each listed system can be created already set up. Several GiB each.")
     args = parser.parse_args()
     if args.output.exists():
         raise RuntimeError(f"{args.output} already exists; the cache is built fresh, never merged")
@@ -312,6 +314,12 @@ def main():
         if args.kasm_base is not None:
             kasm = offline_cache.carry_kasm_base(args.kasm_base, staging)
             say("carried: Kasm", kasm["kasm_version"], f"{kasm['bytes'] // 2**20} MiB")
+        if args.os_bases is not None:
+            bases = offline_cache.carry_os_bases(args.os_bases, staging)
+            for os_id, size in bases["carried"].items():
+                say("carried: ready-made", os_id, f"{size // 2**20} MiB")
+            for os_id, why in bases["refused"].items():
+                say("NOT carried: ready-made", os_id, "-", why)
         index(staging)
         os.replace(staging, args.output)
     finally:

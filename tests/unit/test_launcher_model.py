@@ -205,3 +205,22 @@ def test_the_plan_names_the_image_the_way_the_host_lists_it():
     listing = [{"id": "debian", "name": "Debian 13", "kind": "vm", "iso": "debian-13.7.0-amd64-DVD-1.iso", "apps": [], "notes": ""}]
     got = lm.available_to_create(listing, ["installer-cache:iso/debian-13.7.0-amd64-DVD-1.iso"], [], host_mb=65536)[0]
     assert got["plan"]["iso"] == "installer-cache:iso/debian-13.7.0-amd64-DVD-1.iso" and got["image"] == "carried"      # what create_iso looks up on Proxmox
+
+
+def test_a_carried_base_turns_the_entry_into_a_ready_made_plan_even_with_no_installer_image():
+    listing = [{"id": "nixos", "name": "NixOS", "kind": "vm", "iso": "nixos.iso", "apps": [], "notes": ""},
+               {"id": "debian", "name": "Debian 13", "kind": "vm", "iso": "debian.iso", "apps": [], "notes": ""}]
+    got = {a["id"]: a for a in lm.available_to_create(listing, [], [], host_mb=65536, bases={"nixos"})}
+    assert got["nixos"]["plan"]["prebuilt"] is True and got["nixos"]["plan"]["os"] == "nixos" and "blocked" not in got["nixos"]
+    assert "not carried" in got["debian"]["blocked"]                                         # no base and no image: still refused with the reason
+
+
+def test_the_carried_bases_are_read_from_the_manifests_and_a_base_whose_file_is_missing_does_not_count(tmp_path):
+    import json
+    import baseline_web as bw
+    (tmp_path / "debian-base.json").write_text(json.dumps({"base": "debian-base.qcow2"}))
+    (tmp_path / "debian-base.qcow2").write_bytes(b"x")
+    (tmp_path / "ubuntu-base.json").write_text(json.dumps({"base": "ubuntu-base.qcow2"}))               # manifest only: the disk is not here
+    (tmp_path / "broken-base.json").write_text("{ nope")
+    assert bw._carried_bases({"os_bases_dir": str(tmp_path)}) == {"debian"}
+    assert bw._carried_bases({"os_bases_dir": str(tmp_path / "absent")}) == set()

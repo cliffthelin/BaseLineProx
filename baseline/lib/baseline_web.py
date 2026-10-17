@@ -1801,7 +1801,27 @@ def _launcher_available(deps: dict, host, vms: list) -> tuple:
         isos = []
     import os_profiles
     host_mb = deps["host_memory_mb"]() if deps.get("host_memory_mb") else os_profiles.host_memory_mb()
-    return launcher_model.available_to_create(listing, isos, [{"name": v.get("name")} for v in vms], host_mb), []
+    return launcher_model.available_to_create(listing, isos, [{"name": v.get("name")} for v in vms], host_mb, bases=_carried_bases(deps)), []
+
+
+DEFAULT_OS_BASES_DIR = "/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/os-bases"
+
+
+def _carried_bases(deps: dict) -> set:
+    """The ids of the ready-made VM bases this machine carries (each has a manifest saying it is free of secrets); none when the folder is absent."""
+    folder = Path(deps.get("os_bases_dir") or DEFAULT_OS_BASES_DIR)
+    found = set()
+    try:
+        manifests = sorted(folder.glob("*-base.json"))
+    except OSError:
+        return found
+    for manifest in manifests:                      # one unreadable manifest does not hide the others
+        try:
+            if (folder / json.loads(manifest.read_text())["base"]).is_file():
+                found.add(manifest.name[:-len("-base.json")])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return found
 
 
 def _kvm_ok(deps: dict) -> bool:
@@ -2313,7 +2333,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             except (os_list.OsListError, OSError) as exc:
                 listing = []
                 notes += ("<p role='alert'>The supported-OS list could not be used (" + html.escape(str(exc)) + "); showing every carried image instead.</p>").encode()
-            rows = environments.listed_catalogue(listing, isos, vm_rows) if any(e["kind"] != "kasm" for e in listing) else environments.catalogue(isos, vm_rows)
+            rows = environments.listed_catalogue(listing, isos, vm_rows, _carried_bases(deps)) if any(e["kind"] != "kasm" for e in listing) else environments.catalogue(isos, vm_rows)
             return self._html_response(200, _with_nav(environments.render(rows).replace(b"<table>", notes + b"<table>", 1), path))
 
         if path == "/shell":
@@ -3623,7 +3643,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     vm_page.save_store(deps.get('vm_config_path'),body.get('store'),persistence_store=body.get('persistence_store'))
                 return self._json(200,result)
             actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login','recover','backup','restore'},
-                     'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_overlay','start','request_stop','force_stop',
+                     'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_prebuilt','create_overlay','start','request_stop','force_stop',
                            'configure','eject_iso','rollback','freeze','delete_vm','delete_base','reset_login','inspect_app','verify_ubuntu'}}
             if action not in actions[kind]:
                 return self._json(400,{'ok':False,'message':'unknown workload action'})
@@ -3644,7 +3664,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 host.run=traced_run
                 try:
                     result=container_page.perform(host,action,params,origin=origin,backup_run=deps.get('container_backup_run')) if kind=='container' else \
-                        vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR)
+                        vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR,os_bases_dir=deps.get('os_bases_dir') or DEFAULT_OS_BASES_DIR)
                 finally:
                     host.run=original_run
                 audit=deps.get('audit')
