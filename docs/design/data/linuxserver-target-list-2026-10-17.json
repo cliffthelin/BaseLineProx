@@ -1,0 +1,2821 @@
+{
+ "source": "https://github.com/orgs/linuxserver/repositories?type=all (GitHub API, read 2026-10-17)",
+ "repositories": 321,
+ "buckets": {
+  "gui": "graphical apps on the Selkies base (own streaming, own sign-in; not KasmVNC)",
+  "service-web": "services with a web UI on an alpine, alpine-nginx or ubuntu base",
+  "service-other": "services with no web port (daemons, tools)",
+  "infra": "base images, build and CI tooling, templates, docs"
+ },
+ "counts": {
+  "service-web": 97,
+  "gui": 96,
+  "infra": 22,
+  "service-other": 12
+ },
+ "archived": [
+  "docker-baseimage-rdesktop",
+  "docker-citron",
+  "docker-daapd",
+  "docker-emulatorjs",
+  "docker-feed2toot",
+  "docker-fleet",
+  "docker-freetube",
+  "docker-gc",
+  "docker-haste-server",
+  "docker-hubstats",
+  "docker-invoiceninja",
+  "docker-manifest-tool",
+  "docker-minetest",
+  "docker-monica",
+  "docker-netbootxyz",
+  "docker-overseerr",
+  "docker-project-template",
+  "docker-pylon",
+  "docker-rdesktop",
+  "docker-readarr",
+  "docker-series-troxide",
+  "docker-shellcheck",
+  "docker-sickchill",
+  "docker-snapdrop",
+  "docker-snipe-it",
+  "docker-steamos",
+  "emulatorjs",
+  "kclient",
+  "web_hook_plg"
+ ],
+ "not_docker_repos": [
+  ".github",
+  "1password-teams-open-source",
+  "Casper",
+  "Clarkson",
+  "Heimdall",
+  "Heimdall-Apps",
+  "Jenkins-Kodi-Build-Box",
+  "Playground",
+  "alpiner",
+  "budge",
+  "composer",
+  "composer-templates",
+  "config",
+  "core",
+  "cstate",
+  "davos",
+  "discord-cogs",
+  "discord-open-source",
+  "emulatorjs",
+  "fail2ban-confs",
+  "fanart-nginx",
+  "ffmpeg-builder",
+  "file-drop",
+  "fleet",
+  "gclient",
+  "git-backup",
+  "github-workflows",
+  "hass-wheel-builder",
+  "heimdall-apps-site",
+  "heimdalljs",
+  "image-docs",
+  "kasm_workspaces_registry",
+  "kclient",
+  "libreelec-addon-repo",
+  "libreelec-addons",
+  "libreelec-builder",
+  "libretro-cores",
+  "libretrojs",
+  "linuxserver-Plugin-Repository",
+  "linuxserver.github.io",
+  "live-nano-wallet",
+  "meta-discussion",
+  "mod-list",
+  "nano-checkout",
+  "nano-metadata",
+  "nano-wallet",
+  "nntp2nntp",
+  "objectstorageapp",
+  "odin",
+  "pelorus",
+  "picons-builder",
+  "pipeline-triggers",
+  "proot",
+  "proot-apps",
+  "reverse-proxy-confs",
+  "rootfs-builder-alpine",
+  "rootfs-builder-ubuntu",
+  "sealskin-apps",
+  "selkies-layers",
+  "server-backup",
+  "spaces-file-upload",
+  "templates",
+  "text-drop",
+  "toolchain-builder",
+  "unraid-templates",
+  "waylandtyper",
+  "web_hook_plg",
+  "wheelie"
+ ],
+ "kasm_tagged_images": [
+  "docker-chromium",
+  "docker-firefox"
+ ],
+ "kasm_tag_deprecated_by_maker": true,
+ "proot_apps": [
+  "antigravity",
+  "anydesk",
+  "ardour",
+  "audacity",
+  "aws-workspaces",
+  "azahar",
+  "beekeeperstudio",
+  "bitwarden",
+  "blender",
+  "brave",
+  "braveorigin",
+  "cadcraft",
+  "calibre",
+  "celluloid",
+  "cemu",
+  "chatgpt",
+  "chrome",
+  "chromium",
+  "claude",
+  "deckcraft",
+  "deluge",
+  "designcraft",
+  "digikam",
+  "dolphin",
+  "dosbox",
+  "doublecmd",
+  "dreamm",
+  "duckstation",
+  "earth",
+  "eclipsejava",
+  "eden",
+  "edge",
+  "effectcraft",
+  "ferdium",
+  "figcraft",
+  "filezilla",
+  "filmcraft",
+  "firefox",
+  "firefox-dev",
+  "flameshot",
+  "flycast",
+  "freecad",
+  "freeciv",
+  "freedoom",
+  "geany",
+  "gimp",
+  "gridcraft",
+  "handbrake",
+  "helium",
+  "idea",
+  "inkscape",
+  "joplin",
+  "kdenlive",
+  "keepassxc",
+  "kicad",
+  "kodi",
+  "krita",
+  "ktorrent",
+  "libreoffice",
+  "librewolf",
+  "lightcraft",
+  "lmms",
+  "lmstudio",
+  "logisim",
+  "lollypop",
+  "maltego",
+  "mame",
+  "mayo",
+  "melonds",
+  "moonlight",
+  "mumble",
+  "nextcloud",
+  "obs",
+  "obsidian",
+  "onlyoffice",
+  "opencloud",
+  "opencode",
+  "opera",
+  "orcaslicer",
+  "parsec",
+  "pcsx2",
+  "pdfcraft",
+  "photocraft",
+  "postman",
+  "ppsspp",
+  "pycharm",
+  "qbittorrent",
+  "remmina",
+  "retroarch",
+  "rpcs3",
+  "rustdesk",
+  "scummvm",
+  "shortwave",
+  "shotcut",
+  "soundcraft",
+  "spotify",
+  "spotube",
+  "sqlitebrowser",
+  "stremio",
+  "tabby",
+  "telegram",
+  "thunderbird",
+  "torbrowser",
+  "ungoogledchromium",
+  "vectorcraft",
+  "vivaldi",
+  "vlc",
+  "vscode",
+  "vscodium",
+  "weather",
+  "webcord",
+  "wechat",
+  "winegui",
+  "wordcraft",
+  "wpsoffice",
+  "xemu",
+  "xenia",
+  "yandex",
+  "zen",
+  "zim",
+  "zoom",
+  "zotero"
+ ],
+ "apps": [
+  {
+   "repo": "docker-adguardhome-sync",
+   "bucket": "service-web",
+   "categories": "Network,DNS",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a tool to synchronize AdGuardHome config to replica instances. "
+  },
+  {
+   "repo": "docker-airsonic-advanced",
+   "bucket": "service-web",
+   "categories": "Media Servers,Music",
+   "ports": [
+    "4040"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free, web-based media streamer, providing ubiquitious access to your music. Use it t"
+  },
+  {
+   "repo": "docker-altus",
+   "bucket": "gui",
+   "categories": "Chat",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Altus]({{ project_url }}) is an Electron-based WhatsApp client with themes and multiple account support."
+  },
+  {
+   "repo": "docker-apprise-api",
+   "bucket": "service-web",
+   "categories": "Monitoring",
+   "ports": [
+    "8000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) Takes advantage of [Apprise](https://github.com/caronc/apprise) through your network with"
+  },
+  {
+   "repo": "docker-ardour",
+   "bucket": "gui",
+   "categories": "Audio Processing",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Ardour]({{ project_url }}) is an open source, collaborative effort of a worldwide team including musicians, programmers, and professional r"
+  },
+  {
+   "repo": "docker-audacity",
+   "bucket": "gui",
+   "categories": "Audio Processing",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Audacity]({{ project_url }}) is an easy-to-use, multi-track audio editor and recorder. Developed by a group of volunteers as open source."
+  },
+  {
+   "repo": "docker-audiosilo",
+   "bucket": "service-web",
+   "categories": "Audiobooks,Media Servers",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[AudioSilo]({{ project_url }}) is a self-hosted audiobook server. Point it at your audiobook folders and listen from the built-in web player"
+  },
+  {
+   "repo": "docker-azahar",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Azahar]({{ project_url }}) is an open-source 3DS emulator based on Citra."
+  },
+  {
+   "repo": "docker-babybuddy",
+   "bucket": "service-web",
+   "categories": "Family",
+   "ports": [
+    "8000"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a buddy for babies! Helps caregivers track sleep, feedings, diaper changes, tummy time"
+  },
+  {
+   "repo": "docker-bambustudio",
+   "bucket": "gui",
+   "categories": "3D Printing",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Bambu Studio]({{ project_url }}) is an open-source, cutting-edge, feature-rich slicing software. It contains project-based workflows, syste"
+  },
+  {
+   "repo": "docker-baseimage-alpine-nginx",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-alpine",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-arch",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-debian",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-el",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "scratch",
+   "deprecated": true,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-fedora",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-kasmvnc",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-selkies",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "debian",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-baseimage-ubuntu",
+   "bucket": "infra",
+   "categories": null,
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-bazarr",
+   "bucket": "service-web",
+   "categories": "Media Management",
+   "ports": [
+    "6767"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a companion application to Sonarr and Radarr. It can manage and download subtitles bas"
+  },
+  {
+   "repo": "docker-beets",
+   "bucket": "service-web",
+   "categories": "Music",
+   "ports": [
+    "8337"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a music library manager and not, for the most part, a music player. It does include a "
+  },
+  {
+   "repo": "docker-bitcoin-knots",
+   "bucket": "gui",
+   "categories": "Finance",
+   "ports": [
+    "3000",
+    "3001",
+    "8333"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Bitcoin Knots]({{ project_url }}) can be used as a desktop client for regular payments or as a full node server utility for merchants and o"
+  },
+  {
+   "repo": "docker-blade-of-agony",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Wolfenstein: Blade of Agony]({{ project_url }}) is a story-driven WWII shooter inspired by Wolfenstein and Doom."
+  },
+  {
+   "repo": "docker-blender",
+   "bucket": "gui",
+   "categories": "3D Modeling",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Blender]({{ project_url }}) is a free and open-source 3D computer graphics software toolset used for creating animated films, visual effect"
+  },
+  {
+   "repo": "docker-boinc",
+   "bucket": "gui",
+   "categories": "Science",
+   "ports": [
+    "8080",
+    "8181"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[BOINC]({{ project_url }}) is a platform for high-throughput computing on a large scale (thousands or millions of computers). It can be used"
+  },
+  {
+   "repo": "docker-bookstack",
+   "bucket": "service-web",
+   "categories": "Content Management",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free and open source Wiki designed for creating beautiful documentation. Featuring a"
+  },
+  {
+   "repo": "docker-brave",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[The Brave browser]({{ project_url }}) is a fast, private and secure web browser for PC, Mac and mobile."
+  },
+  {
+   "repo": "docker-budge",
+   "bucket": "service-web",
+   "categories": "Finance",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name }}]({{ project_url }}) is an open source 'budgeting with envelopes' personal finance app."
+  },
+  {
+   "repo": "docker-build-agent",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-calibre-web",
+   "bucket": "service-web",
+   "categories": "Books",
+   "ports": [
+    "8083"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a web app providing a clean interface for browsing, reading and downloading eBooks usi"
+  },
+  {
+   "repo": "docker-calibre",
+   "bucket": "gui",
+   "categories": "Books",
+   "ports": [
+    "8080",
+    "8181",
+    "8081"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a powerful and easy to use e-book manager. Users say it's outstanding and a must-have."
+  },
+  {
+   "repo": "docker-calligra",
+   "bucket": "gui",
+   "categories": "Documents",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Calligra]({{ project_url }}) is an office and graphic art suite by KDE. It is available for desktop PCs, tablet computers, and smartphones."
+  },
+  {
+   "repo": "docker-changedetection.io",
+   "bucket": "service-web",
+   "categories": "Web Tools,Automation",
+   "ports": [
+    "5000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) provides free, open-source web page monitoring, notification and change detection."
+  },
+  {
+   "repo": "docker-chrome",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Chrome]({{ project_url }}) is the official web browser from Google, built to be fast, secure, and customizable."
+  },
+  {
+   "repo": "docker-chromium",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Chromium]({{ project_url }}) is an open-source browser project that aims to build a safer, faster, and more stable way for all users to exp"
+  },
+  {
+   "repo": "docker-ci",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-code-server",
+   "bucket": "service-web",
+   "categories": "Programming",
+   "ports": [
+    "8443"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is VS Code running on a remote server, accessible through the browser. - Code on your Chr"
+  },
+  {
+   "repo": "docker-cops",
+   "bucket": "service-web",
+   "categories": "Books",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) by S\u00e9bastien Lucas, now maintained by MikesPub, stands for Calibre OPDS (and HTML) Php Se"
+  },
+  {
+   "repo": "docker-craft-apps",
+   "bucket": "gui",
+   "categories": "Image Editor,Video Editor, Media Tools",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[ArtCraft]({{ project_url }}) is a suite of open source creative applications written in Rust. This image bundles PhotoCraft (image editor),"
+  },
+  {
+   "repo": "docker-cura",
+   "bucket": "gui",
+   "categories": "3D Printing",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[UltiMaker Cura]({{ project_url }}) is free, easy-to-use 3D printing software trusted by millions of users. Fine-tune your 3D model with 400"
+  },
+  {
+   "repo": "docker-d2-builder",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-darktable",
+   "bucket": "gui",
+   "categories": "Photos",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[darktable]({{ project_url }}) is an open source photography workflow application and raw developer. A virtual lighttable and darkroom for p"
+  },
+  {
+   "repo": "docker-davos",
+   "bucket": "service-web",
+   "categories": "FTP",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an FTP automation tool that periodically scans given host locations for new files. It "
+  },
+  {
+   "repo": "docker-ddclient",
+   "bucket": "service-other",
+   "categories": "Network,DNS",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a Perl client used to update dynamic DNS entries for accounts on Dynamic DNS Network S"
+  },
+  {
+   "repo": "docker-deluge",
+   "bucket": "service-web",
+   "categories": "Downloaders",
+   "ports": [
+    "8112",
+    "6881",
+    "6881/udp",
+    "58846"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a lightweight, Free Software, cross-platform BitTorrent client.  * Full Encryption * W"
+  },
+  {
+   "repo": "docker-digikam",
+   "bucket": "gui",
+   "categories": "Photos",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[digiKam]({{ project_url }}): Professional Photo Management with the Power of Open Source"
+  },
+  {
+   "repo": "docker-diskover",
+   "bucket": "service-web",
+   "categories": "Storage,Monitoring",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name }}]({{ project_url }}) is an open source file system indexer that uses Elasticsearch to index and manage data across hetero"
+  },
+  {
+   "repo": "docker-documentation",
+   "bucket": "infra",
+   "categories": null,
+   "ports": null,
+   "base": null,
+   "deprecated": null,
+   "blurb": null
+  },
+  {
+   "repo": "docker-dogwalk",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[DOGWALK]({{ project_url }}) is Blender Studio's long awaited second game project, focused on creating a bite-sized interactive storytelling"
+  },
+  {
+   "repo": "docker-dokuwiki",
+   "bucket": "service-web",
+   "categories": "Content Management",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a simple to use and highly versatile Open Source wiki software that doesn't require a "
+  },
+  {
+   "repo": "docker-dolphin",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Dolphin Emulator]({{ project_url }}) lets you play GameCube and Wii games with various graphical enhancements and other features are availa"
+  },
+  {
+   "repo": "docker-doplarr",
+   "bucket": "service-other",
+   "categories": "Media Requesters",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": true,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an *arr request bot for Discord.\" "
+  },
+  {
+   "repo": "docker-doplarr_rs",
+   "bucket": "service-other",
+   "categories": "Media Requesters",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a Discord bot for requesting media through *arr backends, written in Rust. "
+  },
+  {
+   "repo": "docker-dosbox-staging",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[DOSBox Staging]({{ project_url }}) is a modern continuation of DOSBox a free and open-source emulator that enables the execution of MS-DOS "
+  },
+  {
+   "repo": "docker-doublecommander",
+   "bucket": "gui",
+   "categories": "Administration,Storage",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Double Commander]({{ project_url }}) is a free cross platform open source file manager with two panels side by side. It is inspired by Tota"
+  },
+  {
+   "repo": "docker-duckdns",
+   "bucket": "service-other",
+   "categories": "Network,DNS",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free service which will point a DNS (sub domains of duckdns.org) to an IP of your ch"
+  },
+  {
+   "repo": "docker-duckstation",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[DuckStation]({{ project_url }}) is a PS1 Emulator aiming for the best accuracy and game support."
+  },
+  {
+   "repo": "docker-duplicati",
+   "bucket": "service-web",
+   "categories": "Backup",
+   "ports": [
+    "8200"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a backup client that securely stores encrypted, incremental, compressed backups on loc"
+  },
+  {
+   "repo": "docker-eden",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Eden]({{ project_url }}) is an experimental open-source emulator for the Nintendo Switch, built with performance and stability in mind."
+  },
+  {
+   "repo": "docker-emby",
+   "bucket": "service-web",
+   "categories": "Media Servers,Music,Audiobooks",
+   "ports": [
+    "8096",
+    "8920"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) organizes video, music, live TV, and photos from personal media libraries and streams the"
+  },
+  {
+   "repo": "docker-fail2ban",
+   "bucket": "service-other",
+   "categories": "Network,Security",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a daemon to ban hosts that cause multiple authentication errors. "
+  },
+  {
+   "repo": "docker-faster-whisper",
+   "bucket": "service-web",
+   "categories": "Machine Learning",
+   "ports": [
+    "10300"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a reimplementation of OpenAI's Whisper model using CTranslate2, which is a fast infere"
+  },
+  {
+   "repo": "docker-ferdium",
+   "bucket": "gui",
+   "categories": "Chat,Social",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Ferdium]({{ project_url }}) is a desktop app that helps you organize how you use your favourite apps by combining them into one application"
+  },
+  {
+   "repo": "docker-ffmpeg",
+   "bucket": "service-other",
+   "categories": "Media Tools",
+   "ports": [],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "A complete, cross-platform solution to record, convert and stream audio and video."
+  },
+  {
+   "repo": "docker-filezilla",
+   "bucket": "gui",
+   "categories": "FTP",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[FIleZilla]({{ project_url }}) Client is a fast and reliable cross-platform FTP, FTPS and SFTP client with lots of useful features and an in"
+  },
+  {
+   "repo": "docker-firefox",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Firefox]({{ project_url }}) Browser, also known as Mozilla Firefox or simply Firefox, is a free and open-source web browser developed by th"
+  },
+  {
+   "repo": "docker-flexget",
+   "bucket": "service-web",
+   "categories": "Downloaders",
+   "ports": [
+    "5050"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a multipurpose automation tool for all of your media."
+  },
+  {
+   "repo": "docker-flycast",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Flycast]({{ project_url }}) is a multi-platform Sega Dreamcast, Naomi, Naomi 2, and Atomiswave emulator derived from reicast."
+  },
+  {
+   "repo": "docker-foldingathome",
+   "bucket": "service-web",
+   "categories": "Science",
+   "ports": [
+    "7396"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[Folding@home]({{ project_url }}) is a distributed computing project for simulating protein dynamics, including the process of protein foldi"
+  },
+  {
+   "repo": "docker-freecad",
+   "bucket": "gui",
+   "categories": "3D Modeling",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[FreeCAD]({{ project_url }}) is a general-purpose parametric 3D computer-aided design (CAD) modeler and a building information modeling (BIM"
+  },
+  {
+   "repo": "docker-freshrss",
+   "bucket": "service-web",
+   "categories": "RSS",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free, self-hostable aggregator for rss feeds."
+  },
+  {
+   "repo": "docker-gimp",
+   "bucket": "gui",
+   "categories": "Image Editor",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[GIMP]({{ project_url }}) is a free and open-source raster graphics editor used for image manipulation (retouching) and image editing, free-"
+  },
+  {
+   "repo": "docker-github-desktop",
+   "bucket": "gui",
+   "categories": "Programming",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Github Desktop]({{ project_url }}) is an open source Electron-based GitHub app. It is written in TypeScript and uses React."
+  },
+  {
+   "repo": "docker-gitqlient",
+   "bucket": "gui",
+   "categories": "Programming",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[GitQlient]({{ project_url }}) is a multi-platform Git client originally forked from QGit. Nowadays it goes beyond of just a fork and adds a"
+  },
+  {
+   "repo": "docker-grav",
+   "bucket": "service-web",
+   "categories": "Content Management",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a Fast, Simple, and Flexible, file-based Web-platform. "
+  },
+  {
+   "repo": "docker-grocy",
+   "bucket": "service-web",
+   "categories": "Recipes",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an ERP system for your kitchen! Cut down on food waste, and manage your chores with th"
+  },
+  {
+   "repo": "docker-gzdoom",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[GZDoom]({{ project_url }}) is a feature centric port for all Doom engine games, based on ZDoom, adding an OpenGL renderer and powerful scri"
+  },
+  {
+   "repo": "docker-habridge",
+   "bucket": "service-web",
+   "categories": "Home Automation",
+   "ports": [
+    "8080",
+    "50000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) emulates Philips Hue API to other home automation gateways such as an Amazon Echo/Dot Gen"
+  },
+  {
+   "repo": "docker-handbrake",
+   "bucket": "gui",
+   "categories": "Media Management",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[HandBrake]({{ project_url }}) is an open-source tool, built by volunteers, for converting video from nearly any format to a selection of mo"
+  },
+  {
+   "repo": "docker-healthchecks",
+   "bucket": "service-web",
+   "categories": "Monitoring",
+   "ports": [
+    "8000",
+    "2525"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a watchdog for your cron jobs. It's a web server that listens for pings from your cron"
+  },
+  {
+   "repo": "docker-hedgedoc",
+   "bucket": "service-web",
+   "categories": "Content Management",
+   "ports": [
+    "3000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[HedgeDoc]({{ project_url }}) gives you access to all your files wherever you are.  HedgeDoc is a real-time, multi-platform collaborative ma"
+  },
+  {
+   "repo": "docker-heimdall",
+   "bucket": "service-web",
+   "categories": "Dashboard",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a way to organise all those links to your most used web sites and web applications in "
+  },
+  {
+   "repo": "docker-helium",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Helium]({{ project_url }}) is a Chromium-based web browser made for people, with love. Privacy-first with unbiased ad-blocking."
+  },
+  {
+   "repo": "docker-hishtory-server",
+   "bucket": "service-web",
+   "categories": "Administration",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[hiSHtory]({{ project_url }}) is a better shell history. It stores your shell history in context (what directory you ran the command in, whe"
+  },
+  {
+   "repo": "docker-homeassistant",
+   "bucket": "service-web",
+   "categories": "Home Automation",
+   "ports": [
+    "8123"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[Home Assistant Core]({{ project_url }}) - Open source home automation that puts local control and privacy first. Powered by a worldwide com"
+  },
+  {
+   "repo": "docker-htpcmanager",
+   "bucket": "service-web",
+   "categories": "Media Tools",
+   "ports": [
+    "8085"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a front end for many htpc related applications."
+  },
+  {
+   "repo": "docker-inkscape",
+   "bucket": "gui",
+   "categories": "3D Modeling",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Inkscape]({{ project_url }}) is professional quality vector graphics software which runs on Linux, Mac OS X and Windows desktop computers."
+  },
+  {
+   "repo": "docker-intellij-idea",
+   "bucket": "gui",
+   "categories": "Programming",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[IntelliJ IDEA]({{ project_url }}) helps you write code faster with tools that eliminate tedious tasks and let you focus on what matters \u2013 b"
+  },
+  {
+   "repo": "docker-jackett",
+   "bucket": "service-web",
+   "categories": "Indexers",
+   "ports": [
+    "9117"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) works as a proxy server: it translates queries from apps (Sonarr, SickRage, CouchPotato, "
+  },
+  {
+   "repo": "docker-jellyfin",
+   "bucket": "service-web",
+   "categories": "Media Servers,Music,Audiobooks",
+   "ports": [
+    "8096",
+    "8920",
+    "7359/udp",
+    "1900/udp"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a Free Software Media System that puts you in control of managing and streaming your m"
+  },
+  {
+   "repo": "docker-jenkins-builder",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-joplin",
+   "bucket": "gui",
+   "categories": "Content Management",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Joplin]({{ project_url }}) is a free, open source note taking and to-do application, which can handle a large number of notes organised int"
+  },
+  {
+   "repo": "docker-kali-linux",
+   "bucket": "gui",
+   "categories": "Remote Desktop,Security",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) - is an Advanced Penetration Testing Linux distribution used for Penetration Testing, Eth"
+  },
+  {
+   "repo": "docker-kasm",
+   "bucket": "service-web",
+   "categories": "Remote Desktop,Business",
+   "ports": [
+    "3000",
+    "443"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) Workspaces is a docker container streaming platform for delivering browser-based access t"
+  },
+  {
+   "repo": "docker-kavita",
+   "bucket": "service-web",
+   "categories": "Books",
+   "ports": [
+    "5000"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a fast, feature rich, cross platform reading server. Built with a focus for being a fu"
+  },
+  {
+   "repo": "docker-kdenlive",
+   "bucket": "gui",
+   "categories": "Video Editor",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Kdenlive]({{ project_url }}) is a powerful free and open source cross-platform video editing program made by the KDE community. Feature ric"
+  },
+  {
+   "repo": "docker-keepassxc",
+   "bucket": "gui",
+   "categories": "Password Manager",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[KeePassXC]({{ project_url }}) is a free and open-source password manager. It started as a community fork of KeePassX (itself a cross-platfo"
+  },
+  {
+   "repo": "docker-kicad",
+   "bucket": "gui",
+   "categories": "3D Modeling",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[KiCad]({{ project_url }}) - A Cross Platform and Open Source Electronics Design Automation Suite."
+  },
+  {
+   "repo": "docker-kimai",
+   "bucket": "service-web",
+   "categories": "Finance,Business",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a professional grade time-tracking application, free and open-source. It handles use-c"
+  },
+  {
+   "repo": "docker-kometa",
+   "bucket": "service-other",
+   "categories": "Media Management",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a powerful tool designed to give you complete control over your media libraries. With "
+  },
+  {
+   "repo": "docker-krita",
+   "bucket": "gui",
+   "categories": "Image Editor",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Krita]({{ project_url }}) is a professional FREE and open source painting program. It is made by artists that want to see affordable art to"
+  },
+  {
+   "repo": "docker-lazylibrarian",
+   "bucket": "service-web",
+   "categories": "Books",
+   "ports": [
+    "5299"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a program to follow authors and grab metadata for all your digital reading needs. It u"
+  },
+  {
+   "repo": "docker-ldap-auth",
+   "bucket": "service-web",
+   "categories": "Administration,Security",
+   "ports": [
+    "8888",
+    "9000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) software is for authenticating users who request protected resources from servers proxied"
+  },
+  {
+   "repo": "docker-libreoffice",
+   "bucket": "gui",
+   "categories": "Documents",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[LibreOffice]({{ project_url }}) is a free and powerful office suite, and a successor to OpenOffice.org (commonly known as OpenOffice). Its "
+  },
+  {
+   "repo": "docker-librespeed",
+   "bucket": "service-web",
+   "categories": "Monitoring",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a very lightweight Speedtest implemented in Javascript, using XMLHttpRequest and Web W"
+  },
+  {
+   "repo": "docker-librewolf",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[LibreWolf]({{ project_url }}) is a custom and independent version of Firefox, with the primary goals of privacy, security and user freedom."
+  },
+  {
+   "repo": "docker-lidarr",
+   "bucket": "service-web",
+   "categories": "Media Management,Music",
+   "ports": [
+    "8686"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a music collection manager for Usenet and BitTorrent users. It can monitor multiple RS"
+  },
+  {
+   "repo": "docker-limnoria",
+   "bucket": "service-web",
+   "categories": "IRC",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) A robust, full-featured, and user/programmer-friendly Python IRC bot, with many existing "
+  },
+  {
+   "repo": "docker-lm-studio",
+   "bucket": "gui",
+   "categories": "Remote Desktop,AI",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[LM Studio]({{ project_url }}) can run local AI models like gpt-oss, Llama, Gemma, Qwen, and DeepSeek privately on your computer."
+  },
+  {
+   "repo": "docker-lollypop",
+   "bucket": "gui",
+   "categories": "Music",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Lollypop]({{ project_url }}) is a lightweight modern music player designed to work excellently on the GNOME desktop environment."
+  },
+  {
+   "repo": "docker-lsio-api",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-luanti",
+   "bucket": "service-web",
+   "categories": "Games",
+   "ports": [
+    "30000/udp"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) (formerly Minetest) is an open source voxel game-creation platform with easy modding and "
+  },
+  {
+   "repo": "docker-lychee",
+   "bucket": "service-web",
+   "categories": "Photos",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free photo-management tool, which runs on your server or web-space. Installing is a "
+  },
+  {
+   "repo": "docker-mame",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[MAME]({{ project_url }}) is a free and open-source emulator designed to emulate the hardware of arcade games, video game consoles, old comp"
+  },
+  {
+   "repo": "docker-manyfold",
+   "bucket": "service-web",
+   "categories": "3D Printing",
+   "ports": [
+    "3214"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }})  is an open source, self-hosted web application for managing a collection of 3D models, p"
+  },
+  {
+   "repo": "docker-mariadb",
+   "bucket": "service-web",
+   "categories": "Databases",
+   "ports": [
+    "3306"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is one of the most popular database servers. Made by the original developers of MySQL."
+  },
+  {
+   "repo": "docker-mastodon",
+   "bucket": "service-web",
+   "categories": "Social",
+   "ports": [
+    "80",
+    "443",
+    "9394"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free, open-source social network server based on ActivityPub where users can follow "
+  },
+  {
+   "repo": "docker-mediaelch",
+   "bucket": "gui",
+   "categories": "Media Management",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[MediaElch]({{ project_url }}) is a MediaManager for Kodi. Information about Movies, TV Shows, Concerts and Music are stored as nfo files. F"
+  },
+  {
+   "repo": "docker-medusa",
+   "bucket": "service-web",
+   "categories": "Media Management",
+   "ports": [
+    "8081"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an automatic Video Library Manager for TV Shows. It watches for new episodes of your f"
+  },
+  {
+   "repo": "docker-melonds",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[melonDS]({{ project_url }}) aims at providing fast and accurate Nintendo DS emulation."
+  },
+  {
+   "repo": "docker-minisatip",
+   "bucket": "service-web",
+   "categories": "Media Tools",
+   "ports": [
+    "8875",
+    "554",
+    "1900/udp"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a multi-threaded satip server version 1.2 that runs under Linux and it was tested with"
+  },
+  {
+   "repo": "docker-modmanager",
+   "bucket": "service-other",
+   "categories": "Docker",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "Modmanager is a centralised tool for downloading and updating docker mods for all your other Linuxserver containers."
+  },
+  {
+   "repo": "docker-modrinth",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Modrinth App]({{ project_url }}) is a unique, open source launcher that allows you to play your favorite mods, and keep them up to date, al"
+  },
+  {
+   "repo": "docker-mods",
+   "bucket": "infra",
+   "categories": null,
+   "ports": null,
+   "base": null,
+   "deprecated": null,
+   "blurb": null
+  },
+  {
+   "repo": "docker-msedge",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Microsoft Edge]({{ project_url }}) is a cross-platform web browser developed by Microsoft and based on Chromium."
+  },
+  {
+   "repo": "docker-mstream",
+   "bucket": "service-web",
+   "categories": "Media Servers,Music",
+   "ports": [
+    "3000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name }}]({{ project_url }}) is a personal music streaming server. You can use mStream to stream your music from your home comput"
+  },
+  {
+   "repo": "docker-mullvad-browser",
+   "bucket": "gui",
+   "categories": "Web Browser,VPN",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "The [Mullvad Browser]({{ project_url }}) is a privacy-focused web browser developed in a collaboration between Mullvad VPN and the Tor Proje"
+  },
+  {
+   "repo": "docker-mylar3",
+   "bucket": "service-web",
+   "categories": "Books,Media Management",
+   "ports": [
+    "8090"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an automated Comic Book downloader (cbr/cbz) for use with NZB and torrents written in "
+  },
+  {
+   "repo": "docker-mysql-workbench",
+   "bucket": "gui",
+   "categories": "Databases",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[MySQL Workbench]({{ project_url }}) is a unified visual tool for database architects, developers, and DBAs. MySQL Workbench provides data m"
+  },
+  {
+   "repo": "docker-netbox",
+   "bucket": "service-web",
+   "categories": "Administration,Business",
+   "ports": [
+    "8000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an IP address management (IPAM) and data center infrastructure management (DCIM) tool."
+  },
+  {
+   "repo": "docker-nextcloud",
+   "bucket": "service-web",
+   "categories": "Cloud,Documents",
+   "ports": [
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) gives you access to all your files wherever you are.  Where are your photos and documents"
+  },
+  {
+   "repo": "docker-nginx",
+   "bucket": "service-web",
+   "categories": "Reverse Proxy",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an HTTP web server, reverse proxy, content cache, load balancer, TCP/UDP proxy server,"
+  },
+  {
+   "repo": "docker-ngircd",
+   "bucket": "service-web",
+   "categories": "IRC",
+   "ports": [
+    "6667"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free, portable and lightweight Internet Relay Chat server for small or private netwo"
+  },
+  {
+   "repo": "docker-nomacs",
+   "bucket": "gui",
+   "categories": "Image Editor",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free, open source image viewer, which supports multiple platforms. You can use it fo"
+  },
+  {
+   "repo": "docker-nzbget",
+   "bucket": "service-web",
+   "categories": "Downloaders",
+   "ports": [
+    "6789"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a usenet downloader, written in C++ and designed with performance in mind to achieve m"
+  },
+  {
+   "repo": "docker-nzbhydra2",
+   "bucket": "service-web",
+   "categories": "Indexers",
+   "ports": [
+    "5076"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a meta search application for NZB indexers, the spiritual successor to NZBmegasearcH, "
+  },
+  {
+   "repo": "docker-obsidian",
+   "bucket": "gui",
+   "categories": "Content Management",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Obsidian]({{ project_url }}) is a note-taking app that lets you create, link, and organize your notes on your device, with hundreds of plug"
+  },
+  {
+   "repo": "docker-ombi",
+   "bucket": "service-web",
+   "categories": "Media Requesters",
+   "ports": [
+    "3579"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) allows you to host your own Plex Request and user management system. If you are sharing y"
+  },
+  {
+   "repo": "docker-onlyoffice",
+   "bucket": "gui",
+   "categories": "Documents",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[ONLYOFFICE]({{ project_url }}) provides a full range of tools to create, edit and collaborate on text documents, spreadsheets, presentation"
+  },
+  {
+   "repo": "docker-openshot",
+   "bucket": "gui",
+   "categories": "Video Editor",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[OpenShot]({{ project_url }}) Video Editor is an award-winning free and open-source video editor for Linux, Mac, and Windows, and is dedicat"
+  },
+  {
+   "repo": "docker-openssh-server",
+   "bucket": "service-web",
+   "categories": "Administration",
+   "ports": [
+    "2222"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a sandboxed environment that allows ssh access without giving keys to the entire serve"
+  },
+  {
+   "repo": "docker-openvscode-server",
+   "bucket": "service-web",
+   "categories": "Programming",
+   "ports": [
+    "3000"
+   ],
+   "base": "ubuntu",
+   "deprecated": true,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) provides a version of VS Code that runs a server on a remote machine and allows access th"
+  },
+  {
+   "repo": "docker-opera",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Opera]({{ project_url }}) is a multi-platform web browser developed by its namesake company Opera. The browser is based on Chromium, but di"
+  },
+  {
+   "repo": "docker-orcaslicer",
+   "bucket": "gui",
+   "categories": "3D Printing",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Orca Slicer]({{ project_url }}) is an open source slicer for FDM printers. OrcaSlicer is fork of Bambu Studio, it was previously known as B"
+  },
+  {
+   "repo": "docker-oscam",
+   "bucket": "service-web",
+   "categories": "Media Tools",
+   "ports": [
+    "8888"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an Open Source Conditional Access Module software used for descrambling DVB transmissi"
+  },
+  {
+   "repo": "docker-pairdrop",
+   "bucket": "service-web",
+   "categories": "File Sharing",
+   "ports": [
+    "3000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[PairDrop]({{ project_url }}) is a sublime alternative to AirDrop that works on all platforms. Send images, documents or text via peer to pe"
+  },
+  {
+   "repo": "docker-pcsx2",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[PCSX2]({{ project_url }}) is an open source PS2 Emulator."
+  },
+  {
+   "repo": "docker-pelorus",
+   "bucket": "gui",
+   "categories": "Remote Desktop,AI",
+   "ports": [
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Pelorus]({{ project_url }}) is an AI navigator for Selkies-powered Linux desktops. Pelorus runs a FastAPI server that gives an LLM agent (O"
+  },
+  {
+   "repo": "docker-phpmyadmin",
+   "bucket": "service-web",
+   "categories": "Databases",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free software tool written in PHP, intended to handle the administration of MySQL ov"
+  },
+  {
+   "repo": "docker-pidgin",
+   "bucket": "gui",
+   "categories": "IRC,Chat",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Pidgin]({{ project_url }}) is a chat program which lets you log into accounts on multiple chat networks simultaneously. This means that you"
+  },
+  {
+   "repo": "docker-piper",
+   "bucket": "service-web",
+   "categories": "Machine Learning",
+   "ports": [
+    "10200"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a fast, local neural text to speech system that sounds great and is optimized for the "
+  },
+  {
+   "repo": "docker-piwigo",
+   "bucket": "service-web",
+   "categories": "Photos",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a photo gallery software for the web that comes with powerful features to publish and "
+  },
+  {
+   "repo": "docker-planka",
+   "bucket": "service-web",
+   "categories": "Content Management,Business",
+   "ports": [
+    "1337"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an elegant open source project tracking tool."
+  },
+  {
+   "repo": "docker-plex",
+   "bucket": "service-other",
+   "categories": "Media Servers,Music,Audiobooks",
+   "ports": [],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) organizes video, music and photos from personal media libraries and streams them to smart"
+  },
+  {
+   "repo": "docker-ppsspp",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[PPSSPP]({{ project_url }}) is a free and open-source PSP emulator for Windows, macOS, Linux, iOS, Android, Nintendo Wii U, Nintendo Switch,"
+  },
+  {
+   "repo": "docker-projectsend",
+   "bucket": "service-web",
+   "categories": "File Sharing",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a self-hosted application that lets you upload files and assign them to specific clien"
+  },
+  {
+   "repo": "docker-prowlarr",
+   "bucket": "service-web",
+   "categories": "Indexers",
+   "ports": [
+    "9696"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a indexer manager/proxy built on the popular arr .net/reactjs base stack to integrate "
+  },
+  {
+   "repo": "docker-pwndrop",
+   "bucket": "service-web",
+   "categories": "File Sharing,Security",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a self-deployable file hosting service for sending out red teaming payloads or securel"
+  },
+  {
+   "repo": "docker-pycharm",
+   "bucket": "gui",
+   "categories": "Programming",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[PyCharm]({{ project_url }}) offers out-of-the-box support for Python, databases, Jupyter, Git, Conda, PyTorch, TensorFlow, Hugging Face, Dj"
+  },
+  {
+   "repo": "docker-pydio-cells",
+   "bucket": "service-web",
+   "categories": "File Sharing",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is the nextgen file sharing platform for organizations. It is a full rewrite of the Pydio"
+  },
+  {
+   "repo": "docker-pyload-ng",
+   "bucket": "service-web",
+   "categories": "Downloaders",
+   "ports": [
+    "8000",
+    "9666"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[pyLoad]({{ project_url }}) is a Free and Open Source download manager written in Python and designed to be extremely lightweight, easily ex"
+  },
+  {
+   "repo": "docker-python",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-qbittorrent",
+   "bucket": "service-web",
+   "categories": "Downloaders",
+   "ports": [
+    "8080",
+    "6881",
+    "6881/udp"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "The [{{ project_name|capitalize }}]({{ project_url }}) is a bittorrent client programmed in C++ / Qt that uses libtorrent (sometimes called "
+  },
+  {
+   "repo": "docker-qdirstat",
+   "bucket": "gui",
+   "categories": "Storage",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[QDirStat]({{ project_url }}) Qt-based directory statistics: KDirStat without any KDE -- from the author of the original KDirStat."
+  },
+  {
+   "repo": "docker-qemu-static",
+   "bucket": "service-other",
+   "categories": "Docker",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "Run multiple architectures of Docker containers on an x86_64 or aarch64 host using QEMU static."
+  },
+  {
+   "repo": "docker-radarr",
+   "bucket": "service-web",
+   "categories": "Media Management",
+   "ports": [
+    "7878"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) - A fork of Sonarr to work with movies \u00e0 la Couchpotato. "
+  },
+  {
+   "repo": "docker-raneto",
+   "bucket": "service-web",
+   "categories": "Content Management",
+   "ports": [
+    "3000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) - is an open source Knowledgebase platform that uses static Markdown files to power your "
+  },
+  {
+   "repo": "docker-rawtherapee",
+   "bucket": "gui",
+   "categories": "Image Editor",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[RawTherapee]({{ project_url }}) is a free, cross-platform raw image processing program!"
+  },
+  {
+   "repo": "docker-remmina",
+   "bucket": "gui",
+   "categories": "Remote Desktop",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Remmina]({{ project_url }}) is a remote desktop client written in GTK, aiming to be useful for system administrators and travellers, who ne"
+  },
+  {
+   "repo": "docker-resilio-sync",
+   "bucket": "service-web",
+   "categories": "Backup",
+   "ports": [
+    "8888",
+    "55555"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) (formerly BitTorrent Sync) uses the BitTorrent protocol to sync files and folders between"
+  },
+  {
+   "repo": "docker-retroarch",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[RetroArch]({{ project_url }}) is a frontend for emulators, game engines and media players. It enables you to run classic games on a wide ra"
+  },
+  {
+   "repo": "docker-rpcs3",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[RPCS3]({{ project_url }}) is a multi-platform open-source Sony PlayStation 3 emulator and debugger written in C++ for Windows, Linux, macOS"
+  },
+  {
+   "repo": "docker-rsnapshot",
+   "bucket": "service-other",
+   "categories": "Backup",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a filesystem snapshot utility based on rsync. rsnapshot makes it easy to make periodic"
+  },
+  {
+   "repo": "docker-rustdesk",
+   "bucket": "gui",
+   "categories": "Remote Desktop",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[RustDesk]({{ project_url }}) is a full-featured open source remote control alternative for self-hosting and security with minimal configura"
+  },
+  {
+   "repo": "docker-sabnzbd",
+   "bucket": "service-web",
+   "categories": "Downloaders",
+   "ports": [
+    "8080"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) makes Usenet as simple and streamlined as possible by automating everything we can. All y"
+  },
+  {
+   "repo": "docker-scummvm",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[ScummVM]({{ project_url }}) is a program which allows you to run certain classic graphical adventure and role-playing games, provided you a"
+  },
+  {
+   "repo": "docker-sealskin",
+   "bucket": "service-web",
+   "categories": "Remote Desktop, Business",
+   "ports": [
+    "8443",
+    "8000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[Sealskin]({{ project_url }}) is a self-hosted, client-server platform that enables users to run powerful, containerized desktop application"
+  },
+  {
+   "repo": "docker-shadps4",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[shadPS4]({{ project_url }}) is an early PlayStation 4 emulator for Windows, Linux and macOS written in C++. "
+  },
+  {
+   "repo": "docker-shotcut",
+   "bucket": "gui",
+   "categories": "Video Editor",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free, open source, cross-platform video editor."
+  },
+  {
+   "repo": "docker-sickgear",
+   "bucket": "service-web",
+   "categories": "Media Management",
+   "ports": [
+    "8081"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[SickGear]({{ project_url }}) provides management of TV shows and/or Anime, it detects new episodes, links downloader apps, and more..  For "
+  },
+  {
+   "repo": "docker-signal",
+   "bucket": "gui",
+   "categories": "Chat",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Signal]({{ project_url }}) is a messaging app with privacy at its core. It is free and easy to use, with strong end-to-end encryption that "
+  },
+  {
+   "repo": "docker-smokeping",
+   "bucket": "service-web",
+   "categories": "Monitoring",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) keeps track of your network latency. For a full example of what this application is capab"
+  },
+  {
+   "repo": "docker-socket-proxy",
+   "bucket": "infra",
+   "categories": "Docker",
+   "ports": [],
+   "base": "docker.io/alpine",
+   "deprecated": false,
+   "blurb": "The Socket Proxy is a security-enhanced proxy which allows you to apply access rules to the Docker socket, limiting the attack surface for c"
+  },
+  {
+   "repo": "docker-sonarr",
+   "bucket": "service-web",
+   "categories": "Media Management",
+   "ports": [
+    "8989"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) (formerly NZBdrone) is a PVR for usenet and bittorrent users. It can monitor multiple RSS"
+  },
+  {
+   "repo": "docker-speedtest-tracker",
+   "bucket": "service-web",
+   "categories": "Monitoring",
+   "ports": [
+    "80"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a self-hosted internet performance tracking application that runs speedtest checks aga"
+  },
+  {
+   "repo": "docker-spotube",
+   "bucket": "gui",
+   "categories": "Music",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Spotube]({{ project_url }}) is an open source, cross-platform Spotify client compatible across multiple platforms utilizing Spotify's data "
+  },
+  {
+   "repo": "docker-sqlitebrowser",
+   "bucket": "gui",
+   "categories": "Databases",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[DB Browser for SQLite]({{ project_url }}) is a high quality, visual, open source tool to create, design, and edit database files compatible"
+  },
+  {
+   "repo": "docker-steam",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Steam]({{ project_url }}) is the ultimate destination for playing, discussing, and creating games."
+  },
+  {
+   "repo": "docker-swag",
+   "bucket": "service-web",
+   "categories": "Reverse Proxy",
+   "ports": [
+    "443",
+    "80",
+    "443/udp"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "SWAG - Secure Web Application Gateway (formerly known as letsencrypt, no relation to Let's Encrypt\u2122) sets up an Nginx webserver and reverse "
+  },
+  {
+   "repo": "docker-synclounge",
+   "bucket": "service-web",
+   "categories": "Media Tools",
+   "ports": [
+    "8088"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a third party tool that allows you to watch Plex in sync with your friends/family, whe"
+  },
+  {
+   "repo": "docker-syncthing",
+   "bucket": "service-web",
+   "categories": "Backup",
+   "ports": [
+    "8384",
+    "22000/tcp",
+    "22000/udp",
+    "21027/udp"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) replaces proprietary sync and cloud services with something open, trustworthy and decentr"
+  },
+  {
+   "repo": "docker-syslog-ng",
+   "bucket": "service-web",
+   "categories": "Monitoring",
+   "ports": [
+    "5514/udp",
+    "6601/tcp",
+    "6514/tcp"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[syslog-ng]({{ project_url }}) allows you to flexibly collect, parse, classify, rewrite and correlate logs from across your infrastructure a"
+  },
+  {
+   "repo": "docker-tautulli",
+   "bucket": "service-web",
+   "categories": "Media Tools",
+   "ports": [
+    "8181"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a python based web application for monitoring, analytics and notifications for Plex Me"
+  },
+  {
+   "repo": "docker-telegram",
+   "bucket": "gui",
+   "categories": "Chat",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Telegram]({{ project_url }}) is a cloud-based mobile and desktop messaging app."
+  },
+  {
+   "repo": "docker-templates",
+   "bucket": "infra",
+   "categories": null,
+   "ports": null,
+   "base": null,
+   "deprecated": null,
+   "blurb": null
+  },
+  {
+   "repo": "docker-thelounge",
+   "bucket": "service-web",
+   "categories": "IRC,Chat",
+   "ports": [
+    "9000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) (a fork of shoutIRC) is a web IRC client that you host on your own server."
+  },
+  {
+   "repo": "docker-thunderbird",
+   "bucket": "gui",
+   "categories": "Email",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Thunderbird]({{ project_url }}) is a free and open-source personal information manager primarily used as an e-mail client with a calendar a"
+  },
+  {
+   "repo": "docker-transmission",
+   "bucket": "service-web",
+   "categories": "Downloaders",
+   "ports": [
+    "9091",
+    "51413",
+    "51413/udp"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is designed for easy, powerful use. Transmission has the features you want from a BitTorr"
+  },
+  {
+   "repo": "docker-tvheadend",
+   "bucket": "service-web",
+   "categories": "Media Tools",
+   "ports": [
+    "9981",
+    "9982"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) works as a proxy server: is a TV streaming server and recorder for Linux, FreeBSD and And"
+  },
+  {
+   "repo": "docker-ubooquity",
+   "bucket": "service-web",
+   "categories": "Books",
+   "ports": [
+    "2202",
+    "2203"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a free, lightweight and easy-to-use home server for your comics and ebooks. Use it to "
+  },
+  {
+   "repo": "docker-ungoogled-chromium",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Ungoogled Chromium]({{ project_url }}) is Google Chromium, sans dependency on Google web services."
+  },
+  {
+   "repo": "docker-unifi-network-application",
+   "bucket": "service-web",
+   "categories": "Network",
+   "ports": [
+    "8443",
+    "3478/udp",
+    "10001/udp",
+    "8080",
+    "1900/udp",
+    "8843",
+    "8880",
+    "6789",
+    "5514/udp"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "The [{{ project_name|capitalize }}]({{ project_url }}) software is a powerful, enterprise wireless software engine ideal for high-density cl"
+  },
+  {
+   "repo": "docker-unrar",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-vivaldi",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Vivaldi]({{ project_url }}) is a Norwegian freeware, cross-platform web browser with a built-in email client developed by Vivaldi Technolog"
+  },
+  {
+   "repo": "docker-vlc",
+   "bucket": "gui",
+   "categories": "Media Management",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[VLC Media Player]({{ project_url }}) is a free and open source cross-platform multimedia player and framework that delivers dependable perf"
+  },
+  {
+   "repo": "docker-vscode",
+   "bucket": "gui",
+   "categories": "Programming",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[VS Code]({{ project_url }}) is an integrated development environment developed by Microsoft. This container runs the full desktop applicati"
+  },
+  {
+   "repo": "docker-vscodium-web",
+   "bucket": "service-web",
+   "categories": "Programming",
+   "ports": [
+    "8000"
+   ],
+   "base": "ubuntu",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a community-driven, freely-licensed binary distribution of the remote host web compone"
+  },
+  {
+   "repo": "docker-vscodium",
+   "bucket": "gui",
+   "categories": "Programming",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[VSCodium]({{ project_url }}) is a community-driven, freely-licensed binary distribution of Microsoft\u2019s editor VS Code."
+  },
+  {
+   "repo": "docker-webcord",
+   "bucket": "gui",
+   "categories": "Chat",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[WebCord]({{ project_url }}) can be summarized as a pack of security and privacy hardenings, Discord features reimplementations, Electron / "
+  },
+  {
+   "repo": "docker-webgrabplus",
+   "bucket": "service-other",
+   "categories": "Media Tools",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a multi-site incremental xmltv epg grabber. It collects tv-program guide data from sel"
+  },
+  {
+   "repo": "docker-webstation",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Webstation]({{ project_url }}) is a web native emulation focused LXQt desktop based on Ubuntu."
+  },
+  {
+   "repo": "docker-webtop",
+   "bucket": "gui",
+   "categories": "Remote Desktop",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) - Alpine, Ubuntu, Fedora, and Arch based containers containing full desktop environments "
+  },
+  {
+   "repo": "docker-weixin",
+   "bucket": "gui",
+   "categories": "Chat",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Weixin]({{ project_url }}) (WeChat) is an instant messaging, social media, and mobile payment app developed by Tencent."
+  },
+  {
+   "repo": "docker-wikijs",
+   "bucket": "service-web",
+   "categories": "Content Management",
+   "ports": [
+    "3000"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) A modern, lightweight and powerful wiki app built on NodeJS."
+  },
+  {
+   "repo": "docker-winegui",
+   "bucket": "gui",
+   "categories": "Games,Business",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[WineGUI]({{ project_url }}) is a user-interface friendly Wine manager that provides a graphical frontend for creating and managing Wine bot"
+  },
+  {
+   "repo": "docker-wireguard",
+   "bucket": "service-web",
+   "categories": "Network,VPN",
+   "ports": [
+    "51820/udp"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[WireGuard\u00ae]({{ project_url }}) is an extremely simple yet fast and modern VPN that utilizes state-of-the-art cryptography. It aims to be fa"
+  },
+  {
+   "repo": "docker-wireshark",
+   "bucket": "gui",
+   "categories": "Network",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Wireshark]({{ project_url }}) is the world\u2019s foremost and widely-used network protocol analyzer. It lets you see what\u2019s happening on your n"
+  },
+  {
+   "repo": "docker-wps-office",
+   "bucket": "gui",
+   "categories": "Documents",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[WPS Office]({{ project_url }}) is a lightweight, feature-rich comprehensive office suite with high compatibility. As a handy and profession"
+  },
+  {
+   "repo": "docker-xbackbone",
+   "bucket": "service-web",
+   "categories": "File Sharing",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a simple, self-hosted, lightweight PHP file manager that support the instant sharing t"
+  },
+  {
+   "repo": "docker-xemu",
+   "bucket": "gui",
+   "categories": "Games",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[xemu]({{ project_url }}) is a free and open-source application that emulates the original Microsoft Xbox game console, enabling people to p"
+  },
+  {
+   "repo": "docker-xvfb",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "scratch",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-yaak",
+   "bucket": "gui",
+   "categories": "Programming",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a desktop API client for organizing and executing REST, GraphQL, and gRPC requests. It"
+  },
+  {
+   "repo": "docker-your_spotify",
+   "bucket": "service-web",
+   "categories": "Music",
+   "ports": [
+    "80",
+    "443"
+   ],
+   "base": "alpine-nginx",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is a self-hosted application that tracks what you listen and offers you a dashboard to ex"
+  },
+  {
+   "repo": "docker-yq",
+   "bucket": "infra",
+   "categories": "Internal",
+   "ports": [],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": ""
+  },
+  {
+   "repo": "docker-zen",
+   "bucket": "gui",
+   "categories": "Web Browser",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Zen Browser]({{ project_url }}) is a free and open-source fork of Mozilla Firefox with a focus on privacy, customizability and design."
+  },
+  {
+   "repo": "docker-znc",
+   "bucket": "service-web",
+   "categories": "IRC",
+   "ports": [
+    "6501"
+   ],
+   "base": "alpine",
+   "deprecated": false,
+   "blurb": "[{{ project_name|capitalize }}]({{ project_url }}) is an IRC network bouncer or BNC. It can detach the client from the actual IRC server, an"
+  },
+  {
+   "repo": "docker-zotero",
+   "bucket": "gui",
+   "categories": "Documents",
+   "ports": [
+    "3000",
+    "3001"
+   ],
+   "base": "selkies",
+   "deprecated": false,
+   "blurb": "[Zotero]({{ project_url }}) is a free, easy-to-use tool to help you collect, organize, annotate, cite, and share research."
+  }
+ ]
+}

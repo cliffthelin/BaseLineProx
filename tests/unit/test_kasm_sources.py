@@ -208,11 +208,8 @@ def test_sources_need_the_registry_on_and_each_id_once():
         kr.validate(recipe_with(sources=[source(), source()]))
 
 
-def test_the_shipped_example_recipe_is_valid_and_names_linuxserver_with_the_hashes_that_were_read():
+def test_nothing_is_taken_from_outside_by_default_and_the_example_matches_the_built_in_recipe():
     example = json.loads((Path(__file__).parents[2] / "config" / "kasm-recipe.example.json").read_text())
     kr.validate(example)
-    assert kr.default(example["workspaces"])["registry"] == example["registry"]                    # the example and the built-in recipe offer the same
-    listed = {i["name"]: i for i in example["registry"]["sources"][0]["include"]}
-    assert example["registry"]["sources"][0]["url"] == "https://kasmregistry.linuxserver.io/" and listed["Chromium"]["reviewed"] == CHROMIUM and listed["Firefox"]["reviewed"] == FIREFOX
-    entries, report = ks.import_workspaces(upstream(), example["registry"]["sources"][0], "1.19.x", "LinuxServer.io")
-    assert sorted(e["friendly_name"] for e in entries) == ["Chromium (LinuxServer.io)", "Firefox (LinuxServer.io)"]      # what the example promises is what the real list gives
+    assert kr.default(example["workspaces"])["registry"] == example["registry"] and example["registry"]["sources"] == [] and example["registry"]["enabled"] is False
+    assert "deprecated" in example["_note"]                                                   # the example says why LinuxServer's Kasm images are not suggested

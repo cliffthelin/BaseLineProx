@@ -35,12 +35,10 @@ class RecipeError(ValueError):
     pass
 
 
-# LinuxServer.io's own Kasm registry (https://kasmregistry.linuxserver.io/, schema 1.1): Chromium and Firefox built on Kasm's base. Reviewed 2026-10-17: run configuration is an entrypoint
-# /kasminit, user 1000, HOME, and `security_opt: seccomp=unconfined` (the one property accepted, by name; it weakens the container's syscall filter and is why Kasm flags these orange); exec is
-# the browser started on the session's URL. Their entries cover Kasm 1.16 to 1.18, so 1.19 is assumed to hold (reported as unverified) until it has been run on a 1.19 Kasm.
-DEFAULT_SOURCES = [{"id": "linuxserver", "name": "LinuxServer.io", "url": "https://kasmregistry.linuxserver.io/", "assume_compatible_from": "1.18.x",
-                    "include": [{"name": "Chromium", "reviewed": "09ed0e04afcb08b4", "accept": ["run_config.security_opt"]},
-                                {"name": "Firefox", "reviewed": "7db1220fdc97832a", "accept": ["run_config.security_opt"]}]}]
+# No source is taken by default. LinuxServer.io's Kasm registry (https://kasmregistry.linuxserver.io/) offers only Chromium and Firefox built on the KasmVNC base, and LinuxServer has
+# DEPRECATED those images (read 2026-10-17: each prints "This image is deprecated. We will not offer support for this image and it will not be updated." at start; the whole LinuxServer
+# graphical catalogue has moved to Selkies, which Kasm does not stream). An unpatched browser is not something to ship by default; see DR265 for the route that replaces it.
+DEFAULT_SOURCES: list = []
 
 
 def default(workspaces) -> dict:
@@ -63,8 +61,7 @@ def default(workspaces) -> dict:
         ],
         "workspaces": [dict(w) for w in workspaces],
         "settings": {},
-        "registry": {"enabled": True, "name": "Baseline", "description": "Workspaces carried by this Baseline host, and a reviewed few from LinuxServer.io.", "list_url": "",
-                     "sources": json.loads(json.dumps(DEFAULT_SOURCES))},
+        "registry": {"enabled": False, "name": "Baseline", "description": "Workspaces carried by this Baseline host.", "list_url": "", "sources": json.loads(json.dumps(DEFAULT_SOURCES))},
     }
 
 

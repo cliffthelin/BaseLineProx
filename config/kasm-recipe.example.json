@@ -107,34 +107,11 @@
  ],
  "settings": {},
  "registry": {
-  "enabled": true,
+  "enabled": false,
   "name": "Baseline",
-  "description": "Workspaces carried by this Baseline host, and a reviewed few from LinuxServer.io.",
+  "description": "Workspaces carried by this Baseline host.",
   "list_url": "",
-  "sources": [
-   {
-    "id": "linuxserver",
-    "name": "LinuxServer.io",
-    "url": "https://kasmregistry.linuxserver.io/",
-    "assume_compatible_from": "1.18.x",
-    "include": [
-     {
-      "name": "Chromium",
-      "reviewed": "09ed0e04afcb08b4",
-      "accept": [
-       "run_config.security_opt"
-      ]
-     },
-     {
-      "name": "Firefox",
-      "reviewed": "7db1220fdc97832a",
-      "accept": [
-       "run_config.security_opt"
-      ]
-     }
-    ]
-   }
-  ]
+  "sources": []
  },
- "_note": "Copy to config/local/kasm-recipe.json (git-ignored) and edit; the build then uses it. states: required (Kasm does not run without it), used, unused (carried because the all-in-one install starts it). settings: server settings to set at install (not secrets). registry: when enabled, Kasm is pointed at Baseline's own workspace registry (list_url empty means this host's own address). registry.sources: other registries whose NAMED workspaces are offered through it (kasm_sources.py): each workspace is pinned to the hash of the definition that was read (run the build once, read the report, copy the hash into reviewed) and each run-configuration property it adds must be accepted by name. These images are not carried: they are pulled from their own registry when first started (internet needed). A Kasm entry in the supported-OS list may name the workspaces instead."
+ "_note": "Copy to config/local/kasm-recipe.json (git-ignored) and edit; the build then uses it. states: required (Kasm does not run without it), used, unused (carried because the all-in-one install starts it). settings: server settings to set at install (not secrets). registry: when enabled, Kasm is pointed at Baseline's own workspace registry (list_url empty means this host's own address). registry.sources: other registries whose NAMED workspaces are offered through it (kasm_sources.py): each workspace is pinned to the hash of the definition that was read (run the build once, read the report, copy the hash into reviewed) and each run-configuration property it adds must be accepted by name. These images are not carried: they are pulled from their own registry when first started (internet needed). Do not point a source at an image its maker has deprecated (LinuxServer's Kasm-tagged Chromium and Firefox are): it will never be patched. A Kasm entry in the supported-OS list may name the workspaces instead."
 }
