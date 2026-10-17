@@ -2202,6 +2202,21 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 status, report, notice = {"present": False, "installed": False}, None, "Kasm's state could not be read: " + str(exc)
             return self._html_response(200, _with_nav(kasm_page.render(status, notice, report), path))
 
+        if path in ("/workspaces/settings", "/workspaces/settings/advanced"):
+            import kasm_settings_ui
+            import kasm_setup
+            machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+            notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            try:
+                live = machine.read_settings()
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                live = {"ok": False, "reason": str(exc)}
+            if not live["ok"]:
+                return self._html_response(200, _with_nav(kasm_settings_ui.render_unavailable(live["reason"]), "/workspaces"))
+            if path.endswith("/advanced"):
+                return self._html_response(200, _with_nav(kasm_settings_ui.render_advanced(live["settings"], notice, qs.get("q", [""])[0][:100]), "/workspaces"))
+            return self._html_response(200, _with_nav(kasm_settings_ui.render_simple(live["settings"], notice), "/workspaces"))
+
         if path == "/power":
             import power_control
             return self._html_response(200, _with_nav(power_control.render(qs.get("notice", [""])[0][:200].replace("+", " ")), path))
@@ -2845,6 +2860,27 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 deps["audit"](event)
             notice = f"Started: {action}. This page shows the result." if done.returncode == 0 else "Could not start it: " + (done.stderr or "").strip()[-120:]
             return self._redirect("/workspaces?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path == "/workspaces/settings/apply":
+            import kasm_settings_ui
+            import kasm_setup
+            machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+            back = "/workspaces/settings/advanced" if str(body.get("mode", "")) == "advanced" else "/workspaces/settings"
+            if str(body.get("confirm", "")) != "yes":
+                return self._redirect(back + "?notice=" + html.escape("Tick the box to confirm; nothing was changed").replace(" ", "+"))
+            try:
+                live = machine.read_settings()
+                if not live["ok"]:
+                    raise kasm_setup.KasmSetupError(live["reason"])
+                form = {k: v for k, v in body.items() if k not in ("mode", "confirm")}
+                requested = (kasm_settings_ui.advanced_requested(live["settings"], form) if back.endswith("advanced")
+                             else kasm_settings_ui.simple_requested(live["settings"], form))
+                result = machine.apply_settings(requested)
+            except (kasm_settings_ui.SettingsError, kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                return self._redirect(back + "?notice=" + html.escape(str(exc)[:250]).replace(" ", "+"))
+            if deps.get("audit"):
+                deps["audit"]({"event": "kasm_settings_changed", "settings": sorted(a["name"] for a in result["applied"]), "failed": len(result["failed"])})
+            return self._html_response(200, _with_nav(kasm_settings_ui.render_result(result), "/workspaces"))
 
         if path == "/workspaces/setup":
             import repair

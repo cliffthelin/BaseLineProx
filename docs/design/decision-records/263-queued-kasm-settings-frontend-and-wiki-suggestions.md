@@ -1,6 +1,6 @@
 # 263 - Queued: a settings front end for Kasm, and a Wiki that turns logs into tested suggestions
 
-Date: 2026-10-17. Status: QUEUED by the operator; nothing below is built. It builds on DR260 (the recipe, the settings catalogue, the telemetry and suggestions, the registry), which is built and verified.
+Date: 2026-10-17. Status: part 1 (the two settings front ends) BUILT 2026-10-17, see "Built: the settings screens" at the end; the Wiki, the AI intent and the temporary builds (parts 2 to 4) remain QUEUED and unbuilt. It builds on DR260 (the recipe, the settings catalogue, the telemetry and suggestions, the registry), which is built and verified.
 
 ## Operator request (2026-10-17), recorded as asked
 1. "Baseline should have a low technical front end for Kasm Workspace settings as well as an advanced version that gives the full Kasm Workspace settings."
@@ -24,3 +24,11 @@ Nothing is promoted automatically: only the person promotes a candidate into the
 
 ## Questions to settle when this is picked up
 Which settings belong in the simple view (I would propose starting from what the history shows people actually change). Which AI harness and how its cost is bounded. What counts as "fixed" for each kind of concern (the check each suggestion must name). How long a temporary build may live and how much space it may use (it is a layer, so it is small, but it needs a limit). Whether the archive is shared across hosts or stays per host.
+
+## Built: the settings screens (2026-10-17)
+- `/workspaces/settings` (everyday settings) and `/workspaces/settings/advanced` (all 87, grouped by Kasm's own categories, searchable, typed inputs, restarts named); both over Kasm's own live list read through its admin API from inside the VM, so titles, descriptions, types and values are Kasm's, not a copy.
+- The everyday view is a curated start (nine groups: log keeping, sign-in length, lockout, idle sessions, password rules, a sign-in notice, new workspaces to everyone, new machines, update checks), shown in the unit a person thinks in (hours, not seconds), each with its bounds. It is a starting point to correct, not a claim about what matters most; the choice of which settings belong in it is still the operator's.
+- Writing goes through Kasm's own `update_setting` (it does the encrypting), is type-checked first, is read back afterwards, and is recorded in the history with the real old and new values. A secret is never shown, never given an input, and a forged field for one is refused. One bad entry stops the whole request. Nothing restarts automatically: the result names the services that must restart.
+- Applying needs a login and a ticked confirmation; the audit log names the settings changed and never their values.
+- Verified live on the local test Kasm: all 87 read (nine secrets withheld), `log_retention` and `debug_retention` changed through the screens' own path, read back, recorded, and restored.
+- Not covered: group settings (clipboard, downloads, audio and the like), a different part of Kasm with its own API.

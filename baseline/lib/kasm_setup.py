@@ -512,6 +512,66 @@ class KasmSetup:
             return None
         return len(kasm_telemetry.record_settings(conn, kasm_telemetry.latest_settings(conn), current, secret_names=secrets_, now=now))
 
+    def _admin_password(self, passphrase=None):
+        try:
+            return self.vault.get("KASM_ADMIN_PASSWORD", passphrase=passphrase) or None
+        except vault_mod.VaultError:
+            return None
+
+    def read_settings(self, passphrase=None) -> dict:
+        """Every setting Kasm has, as Kasm itself reports it, read live from the running VM. {"ok": True, "settings": [...]} or {"ok": False, "reason": ...}."""
+        vmid = self.existing_vmid()
+        if vmid is None or self.vm_status(vmid) != "running":
+            return {"ok": False, "reason": "The Kasm VM is not running."}
+        password = self._admin_password(passphrase)
+        if not password:
+            return {"ok": False, "reason": "The Kasm admin password is not available (the Vault may be locked)."}
+        out = self._guest_output(vmid, kasm_telemetry.SETTINGS_SCRIPT, stdin=password + "\n")
+        rows = kasm_telemetry.parse_settings_full(out or "")
+        if not rows:
+            return {"ok": False, "reason": "Kasm did not answer with its settings."}
+        return {"ok": True, "settings": rows}
+
+    def apply_settings(self, requested: dict, passphrase=None) -> dict:
+        """Change settings through Kasm's own admin API and check each one afterwards by reading it back. `requested` is {setting name: new value}. Anything refused (unknown, secret, ill-typed)
+        raises SettingsError before anything is sent. The changes made are kept in the history WITH their real old and new values. Returns {applied, failed, restart}."""
+        import kasm_settings_ui
+        current = self.read_settings(passphrase)
+        if not current["ok"]:
+            raise KasmSetupError(current["reason"])
+        changes = kasm_settings_ui.plan(current["settings"], requested)
+        if not changes:
+            return {"applied": [], "failed": [], "restart": []}
+        vmid, password = self.existing_vmid(), self._admin_password(passphrase)
+        payload = json.dumps([{"id": c["id"], "value": c["new"]} for c in changes])
+        out = self._guest_output(vmid, kasm_telemetry.UPDATE_SETTINGS_SCRIPT, stdin=password + "\n" + payload + "\n")
+        if out is None:
+            raise KasmSetupError("Kasm did not accept the change request.")
+        verdict = {}
+        for line in out.splitlines():
+            ident, _, rest = line.strip().partition(" ")
+            if ident:
+                verdict[ident] = rest or "ok"
+        after = self.read_settings(passphrase)
+        now_values = {r["name"]: r["value"] for r in after["settings"]} if after["ok"] else {}
+        applied, failed, restart = [], [], []
+        for change in changes:
+            reply = verdict.get(str(change["id"]), "no answer")
+            if reply != "ok":
+                failed.append({"title": change["title"], "reason": reply})
+                continue
+            applied.append({"name": change["name"], "title": change["title"], "old": change["old"], "new": change["new"],
+                            "verified": now_values.get(change["name"]) == change["new"]})
+            restart.extend(change["restart"])
+        if applied:
+            conn = self.telemetry_db()
+            try:
+                previous = {r["name"]: r["value"] for r in current["settings"] if r["value"] is not None}   # what Kasm held just before this change
+                kasm_telemetry.record_settings(conn, previous, {a["name"]: a["new"] for a in applied}, now=time.time())
+            finally:
+                conn.close()
+        return {"applied": applied, "failed": failed, "restart": sorted(set(restart))}
+
     def telemetry_report(self, now=None) -> dict:
         """What the history says to change, why, and what it buys, plus the repeating errors and the settings changed, with their values."""
         record = self.read_record()
