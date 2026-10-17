@@ -176,3 +176,12 @@ The release ships no icon files; Kasm's web UI serves the thumbnails as ordinary
 **Verified on a live Kasm:** the real fetch code copied all five thumbnails from it, byte-identical to Kasm's own copy (checked by hash); Baseline's real web handler served each with the right type and size; Kasm reloaded the registry listing the five workspaces and their icon names with no error; one icon rendered in a browser from Baseline's route.
 Not verified: that Kasm's admin screen draws these icons (that needs a person to open Workspaces > Workspace Registry and look; the layout follows the official registry's, which Kasm's own screen reads).
 The host needs no PyYAML for this (the import is lazy; a test imports the module with PyYAML blocked).
+
+## Update 2026-10-17: Proxmox's own view joins the telemetry (verified against a real Proxmox 9.2)
+The collector now also asks Proxmox (through `pvesh`, the data its own graphs use) for the VM's current status and the node's status, and keeps: the VM's CPU and memory use as the host sees them, Proxmox's pressure figures for the VM (CPU, memory, I/O), and the host's memory (used percent, total and free in MB), swap use and CPU.
+Field names were read from a real Proxmox 9.2: the VM status has `cpu`, `mem`, `maxmem`, `pressurecpusome`, `pressurememorysome`, `pressureiosome` (and the `full` variants); the node status has `memory` (total, used, free, available), `swap` and `cpu`. An older Proxmox without pressure figures simply yields fewer metrics.
+What it changes in the suggestions:
+- **More memory** now says whether the host has room ("it used at most N% of its memory"), and when the host's own free memory is smaller than what the VM would need it says so in the title and marks the action `blocked_by_host`: free memory on the host or add RAM first, rather than starving the host.
+- **More cores** notes when the host's own CPUs are busy too, so an extra core will give less than its full share.
+- **A swapping host** (swap use of 20% or more) is its own suggestion, as the host's problem and not this VM's.
+Still open: Proxmox's longer RRD history (not needed yet; the periodic collection builds its own), and acting on a suggestion automatically (only described, and only the person approves).

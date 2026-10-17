@@ -173,6 +173,40 @@ jq -n --arg t "$token" '{token:$t,username:"admin@kasm.local"}' | curl -sk -X PO
 '''
 
 
+def parse_host_view(vm_status: dict, node_status: dict) -> dict:
+    """Proxmox's own view of the VM and of the host it runs on, as metrics. Anything missing is simply absent: an older Proxmox has no pressure figures, and that is not an error."""
+    out = {}
+
+    def number(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    cpu, mem, maxmem = number(vm_status.get("cpu")), number(vm_status.get("mem")), number(vm_status.get("maxmem"))
+    if cpu is not None:
+        out["host_vm_cpu_pct"] = round(cpu * 100, 1)
+    if mem is not None and maxmem:
+        out["host_vm_mem_used_pct"] = round(100 * mem / maxmem, 1)
+    for kind in ("cpu", "memory", "io"):
+        value = number(vm_status.get(f"pressure{kind}some"))
+        if value is not None:
+            out[f"host_vm_pressure_{kind}"] = value
+    node_mem = node_status.get("memory") if isinstance(node_status.get("memory"), dict) else {}
+    total, used = number(node_mem.get("total")), number(node_mem.get("used"))
+    if total and used is not None:
+        out["host_node_mem_used_pct"] = round(100 * used / total, 1)
+        out["host_node_mem_total_mb"] = round(total / 1048576)
+        out["host_node_mem_free_mb"] = round((total - used) / 1048576)
+    swap = node_status.get("swap") if isinstance(node_status.get("swap"), dict) else {}
+    swap_total, swap_used = number(swap.get("total")), number(swap.get("used"))
+    if swap_total and swap_used is not None:
+        out["host_node_swap_used_pct"] = round(100 * swap_used / swap_total, 1)
+    node_cpu = number(node_status.get("cpu"))
+    if node_cpu is not None:
+        out["host_node_cpu_pct"] = round(node_cpu * 100, 1)
+    return out
+
+
 def parse_accounting(output: str) -> list:
     rows = []
     for line in output.splitlines():
@@ -272,18 +306,36 @@ def suggestions(conn, vm: dict, now=None, window_days=7) -> list:
     mem_avail, mem_psi = _values(conn, "mem_avail_pct", since), _values(conn, "memory_psi_some10", since)
     oom = [e for e in error_report(conn, since, 50) if "oom" in e["fingerprint"] or "lack of memory" in e["message"] or "Out of memory" in e["message"] or "oom-kill" in e["message"]]
     low, stall = _percentile(mem_avail, 0.1), _percentile(mem_psi, 0.9)
+    host_used, host_free = _percentile(_values(conn, "host_node_mem_used_pct", since), 0.9), _percentile(_values(conn, "host_node_mem_free_mb", since), 0.1)
     if oom or (low is not None and low < 8) or (stall is not None and stall > 10):
         new = int(vm["memory_mb"] * 1.5) // 512 * 512
-        out.append({"id": "more-memory", "severity": "error" if oom else "warning", "title": f"Give the VM more memory ({vm['memory_mb']} MB to {new} MB)",
-                    "evidence": [f"memory available fell to {low:.0f}% at its lowest tenth" if low is not None else "", f"memory stalls reached {stall:.0f}% of the time (90th percentile)" if stall is not None else "",
-                                 f"{sum(e['count'] for e in oom)} memory kills seen" if oom else ""],
-                    "benefit": "fewer stalls and no workspace or service killed for lack of memory", "action": {"memory_mb": new}})
+        extra = new - vm["memory_mb"]
+        evidence = [f"memory available fell to {low:.0f}% at its lowest tenth" if low is not None else "", f"memory stalls reached {stall:.0f}% of the time (90th percentile)" if stall is not None else "",
+                    f"{sum(e['count'] for e in oom)} memory kills seen" if oom else ""]
+        if host_free is not None and host_free < extra * 1.2:               # the host is the limit: giving the VM more would starve the host
+            title = f"The VM needs more memory ({vm['memory_mb']} MB to {new} MB), but the host has only {host_free:.0f} MB free: free memory on the host or add RAM first"
+            evidence.append(f"the host's own free memory fell to {host_free:.0f} MB (lowest tenth); the VM would need {extra} MB more")
+            action = {"memory_mb": new, "blocked_by_host": True, "host_free_mb": host_free}
+            benefit = "the VM stops being killed for memory, without pushing the host into swap"
+        else:
+            title, action, benefit = f"Give the VM more memory ({vm['memory_mb']} MB to {new} MB)", {"memory_mb": new}, "fewer stalls and no workspace or service killed for lack of memory"
+            if host_used is not None:
+                evidence.append(f"the host has room: it used at most {host_used:.0f}% of its memory")
+        out.append({"id": "more-memory", "severity": "error" if oom else "warning", "title": title, "evidence": evidence, "benefit": benefit, "action": action})
     cpu_psi, load = _values(conn, "cpu_psi_some10", since), _values(conn, "load1_per_core", since)
     cpu_stall, cpu_load = _percentile(cpu_psi, 0.9), _percentile(load, 0.9)
+    host_cpu = _percentile(_values(conn, "host_node_cpu_pct", since), 0.9)
     if (cpu_stall is not None and cpu_stall > 20) or (cpu_load is not None and cpu_load > 1.5):
-        out.append({"id": "more-cores", "severity": "warning", "title": f"Give the VM more CPU cores ({vm['cpus']} to {vm['cpus'] + 1})",
-                    "evidence": [f"CPU waiting reached {cpu_stall:.0f}% of the time (90th percentile)" if cpu_stall is not None else "", f"load per core reached {cpu_load:.1f}" if cpu_load is not None else ""],
+        busy = host_cpu is not None and host_cpu > 90
+        out.append({"id": "more-cores", "severity": "warning", "title": f"Give the VM more CPU cores ({vm['cpus']} to {vm['cpus'] + 1})" + (" (the host is busy too)" if busy else ""),
+                    "evidence": [f"CPU waiting reached {cpu_stall:.0f}% of the time (90th percentile)" if cpu_stall is not None else "", f"load per core reached {cpu_load:.1f}" if cpu_load is not None else "",
+                                 f"the host's own CPUs reached {host_cpu:.0f}% busy, so an extra core will give less than its full share" if busy else ""],
                     "benefit": "sessions respond faster when several are open", "action": {"cpus": vm["cpus"] + 1}})
+    swap = _percentile(_values(conn, "host_node_swap_used_pct", since), 0.9)
+    if swap is not None and swap >= 20:
+        out.append({"id": "host-swapping", "severity": "warning", "title": f"The host is using {swap:.0f}% of its swap",
+                    "evidence": [f"host swap use reached {swap:.0f}% (90th percentile)"], "benefit": "less stalling for every VM; the cause is the host running short of memory, not this VM alone",
+                    "action": {"investigate": "host memory"}})
     for metric in sorted({m for (m,) in conn.execute("SELECT DISTINCT metric FROM samples WHERE metric LIKE 'disk_%_used_pct'").fetchall()}):
         high = _percentile(_values(conn, metric, since), 0.9)
         if high is not None and high >= 85:

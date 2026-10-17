@@ -188,3 +188,60 @@ def test_redaction_removes_secret_values_and_leaves_ordinary_words_alone():
     assert kt.redact('{"api_key": "abc", "name": "keep"}') == '{"api_key": "<redacted>", "name": "keep"}'
     assert kt.redact("Authorization: Bearer abc.def-ghi") == "Authorization: Bearer <redacted>"
     assert kt.redact("sent " + "x" * 30 + " ok") == "sent <redacted> ok"
+
+
+VM_STATUS = {"cpu": 0.42, "cpus": 4, "mem": 3221225472, "maxmem": 6442450944, "pressurecpusome": 3.5, "pressurememorysome": 12.0, "pressureiosome": 0.5, "netin": 1}
+NODE_STATUS = {"cpu": 0.31, "memory": {"total": 17179869184, "used": 8589934592, "free": 8589934592}, "swap": {"total": 2147483648, "used": 214748364}}
+
+
+def test_proxmoxs_view_of_the_vm_and_the_host_becomes_metrics():
+    got = kt.parse_host_view(VM_STATUS, NODE_STATUS)
+    assert got == {"host_vm_cpu_pct": 42.0, "host_vm_mem_used_pct": 50.0, "host_vm_pressure_cpu": 3.5, "host_vm_pressure_memory": 12.0, "host_vm_pressure_io": 0.5,
+                   "host_node_mem_used_pct": 50.0, "host_node_mem_total_mb": 16384, "host_node_mem_free_mb": 8192, "host_node_swap_used_pct": 10.0, "host_node_cpu_pct": 31.0}
+
+
+def test_an_older_proxmox_without_pressure_figures_or_a_bad_field_is_not_an_error():
+    got = kt.parse_host_view({"cpu": "x", "mem": 100, "maxmem": 0}, {"memory": "nonsense", "swap": {}})
+    assert got == {}
+    assert "host_vm_pressure_cpu" not in kt.parse_host_view({"cpu": 0.1}, {})
+
+
+def _memory_pressure(db):
+    put(db, "mem_avail_pct", [4, 5, 6, 40, 50, 6, 5, 4])
+    put(db, "memory_psi_some10", [25, 30, 1, 1, 22, 24, 26, 2])
+
+
+def test_more_memory_says_the_host_has_room_when_it_does(db):
+    _memory_pressure(db)
+    put(db, "host_node_mem_used_pct", [40] * 10)
+    put(db, "host_node_mem_free_mb", [9000] * 10)
+    item = next(s for s in kt.suggestions(db, VM, now=NOW) if s["id"] == "more-memory")
+    assert item["action"] == {"memory_mb": 9216} and any("the host has room: it used at most 40%" in e for e in item["evidence"])
+
+
+def test_more_memory_is_held_back_when_the_host_itself_is_short_so_the_host_is_not_starved(db):
+    _memory_pressure(db)
+    put(db, "host_node_mem_used_pct", [95] * 10)
+    put(db, "host_node_mem_free_mb", [1500] * 10)                                                    # the VM would need 3072 MB more
+    item = next(s for s in kt.suggestions(db, VM, now=NOW) if s["id"] == "more-memory")
+    assert "the host has only 1500 MB free" in item["title"] and item["action"]["blocked_by_host"] is True and item["action"]["host_free_mb"] == 1500
+    assert "without pushing the host into swap" in item["benefit"]
+
+
+def test_more_cores_says_so_when_the_hosts_own_cpus_are_busy_too(db):
+    put(db, "cpu_psi_some10", [40] * 10)
+    put(db, "host_node_cpu_pct", [96] * 10)
+    item = next(s for s in kt.suggestions(db, VM, now=NOW) if s["id"] == "more-cores")
+    assert item["title"].endswith("(the host is busy too)") and any("less than its full share" in e for e in item["evidence"])
+    other = kt.open_db(":memory:")
+    put(other, "cpu_psi_some10", [40] * 10)
+    assert not next(s for s in kt.suggestions(other, VM, now=NOW) if s["id"] == "more-cores")["title"].endswith("(the host is busy too)")
+
+
+def test_a_host_that_is_swapping_is_called_out_as_the_hosts_problem_not_the_vms(db):
+    put(db, "host_node_swap_used_pct", [35] * 10)
+    item = next(s for s in kt.suggestions(db, VM, now=NOW) if s["id"] == "host-swapping")
+    assert "35%" in item["title"] and "not this VM alone" in item["benefit"]
+    quiet = kt.open_db(":memory:")
+    put(quiet, "host_node_swap_used_pct", [3] * 10)
+    assert not [s for s in kt.suggestions(quiet, VM, now=NOW) if s["id"] == "host-swapping"]

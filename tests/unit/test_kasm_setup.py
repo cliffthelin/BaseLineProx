@@ -698,3 +698,38 @@ def test_a_missing_curl_or_an_oversized_file_or_no_registry_means_no_icons_and_n
     assert big.fetch_registry_icons(100) == {"icons": 0, "skipped": ["a.png"]}
     quiet, _ = build(world, fake=Fake())                                                          # the guest answers nothing usable
     assert quiet.fetch_registry_icons(100) == {"icons": 0, "skipped": ["a.png"]}
+
+
+def test_proxmoxs_own_figures_for_the_vm_and_the_host_are_kept_with_the_guests_own(world):
+    import kasm_telemetry as kt
+
+    class Pve(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            if argv[:2] == ["pvesh", "get"] and argv[2].endswith("/qemu/100/status/current"):
+                self.calls.append(list(argv))
+                return 0, json.dumps({"cpu": 0.5, "mem": 2147483648, "maxmem": 4294967296, "pressurememorysome": 9.0}), ""
+            if argv[:2] == ["pvesh", "get"] and argv[2].endswith("/status") and "/qemu/" not in argv[2]:
+                return 0, json.dumps({"cpu": 0.2, "memory": {"total": 8589934592, "used": 4294967296}, "swap": {"total": 1073741824, "used": 0}}), ""
+            return super().__call__(argv, data, timeout)
+    setup, fake = build(world, fake=Pve())
+    setup.setup()
+    fake.state = "running"
+    setup.node_name = lambda: "pve"
+    got = setup.collect_telemetry(now=1_800_000_000.0)
+    assert got["host_metrics"] == 8
+    conn = setup.telemetry_db()
+    metrics = dict(conn.execute("SELECT metric, value FROM samples WHERE metric LIKE 'host_%'").fetchall())
+    assert metrics["host_vm_mem_used_pct"] == 50.0 and metrics["host_node_mem_free_mb"] == 4096 and metrics["host_vm_pressure_memory"] == 9.0
+    assert any(c[:3] == ["pvesh", "get", "/nodes/pve/qemu/100/status/current"] for c in fake.calls)
+
+
+def test_a_proxmox_that_does_not_answer_just_skips_the_host_view(world):
+    class Silent(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            if argv[:2] == ["pvesh", "get"] and "/nodes/" in argv[2]:
+                return 1, "", "no"
+            return super().__call__(argv, data, timeout)
+    setup, fake = build(world, fake=Silent())
+    setup.setup()
+    fake.state = "running"
+    assert setup.collect_telemetry()["host_metrics"] is None

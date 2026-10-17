@@ -459,11 +459,34 @@ class KasmSetup:
         try:
             kasm_telemetry.record(conn, metrics, events, now=now)
             kasm_telemetry.prune(conn, now - 30 * kasm_telemetry.DAY)
+            hosts = self._collect_host_view(vmid, conn, now)
             usage = self._collect_usage(vmid, conn, now)
             settings = self._collect_settings(vmid, conn, now, passphrase)
         finally:
             conn.close()
-        return {"collected": True, "metrics": len(metrics), "events": len(events), "usage_images": usage, "setting_changes": settings}
+        return {"collected": True, "metrics": len(metrics), "events": len(events), "host_metrics": hosts, "usage_images": usage, "setting_changes": settings}
+
+    def _collect_host_view(self, vmid, conn, now):
+        """Proxmox's own figures for the VM and for the host it runs on (through `pvesh`, the same data Proxmox's graphs use). None when Proxmox did not answer."""
+        node = self.node_name()
+
+        def read(path):
+            rc, out, _err = self.run(["pvesh", "get", path, "--output-format", "json"])
+            try:
+                data = json.loads(out) if rc == 0 else None
+            except ValueError:
+                return None
+            return data if isinstance(data, dict) else None
+        vm_status, node_status = read(f"/nodes/{node}/qemu/{vmid}/status/current"), read(f"/nodes/{node}/status")
+        if vm_status is None and node_status is None:
+            return None
+        metrics = kasm_telemetry.parse_host_view(vm_status or {}, node_status or {})
+        kasm_telemetry.record(conn, metrics, [], now=now)
+        return len(metrics)
+
+    def node_name(self) -> str:
+        import socket
+        return socket.gethostname().split(".")[0]
 
     def _collect_usage(self, vmid, conn, now):
         """Sessions per workspace image and how many ended in failure, from Kasm's own accounting. None when Kasm's database did not answer."""
