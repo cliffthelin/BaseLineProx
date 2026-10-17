@@ -304,7 +304,7 @@ def test_an_installed_vm_is_only_made_sure_of_not_rechecked_or_reinstalled(world
 
 def test_status_reports_without_changing_anything(world):
     setup, fake = build(world)
-    assert setup.status() == {"present": False, "installed": False, "dehydrated": False, "mode": None, "recorded_vmid": None, "workspaces": None, "recipe": None}
+    assert setup.status() == {"present": False, "installed": False, "dehydrated": False, "mode": None, "recorded_vmid": None, "workspaces": None, "recipe": None, "registry_sources": None}
     setup.setup()
     fake.state = "running"
     now = setup.status()

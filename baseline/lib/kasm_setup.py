@@ -381,7 +381,16 @@ class KasmSetup:
             document = json.loads((self.layout.base_dir / "registry" / kasm_registry.SCHEMA / "list.json").read_text())
         except (OSError, ValueError):
             return []
-        return kasm_registry.icon_names(document)
+        carried = {p.name for p in (self.layout.base_dir / "registry" / kasm_registry.SCHEMA / "icons").glob("*")}       # icons of workspaces from other registries travel with it
+        return [n for n in kasm_registry.icon_names(document) if n not in carried]
+
+    def carried_sources(self):
+        """What the carried registry took from other registries, and what it left out and why (the build's report); None when it took nothing."""
+        try:
+            report = json.loads((self.layout.base_dir / "registry" / "sources.json").read_text())
+        except (OSError, ValueError):
+            return None
+        return report if isinstance(report, dict) and report.get("workspaces") else None
 
     def fetch_registry_icons(self, vmid=None) -> dict:
         """Copy the workspace thumbnails from the running Kasm's own web UI (ordinary static files any browser gets from it) into the folder Baseline serves them from. Each is checked
@@ -735,11 +744,12 @@ class KasmSetup:
         mode = record.get("mode", DEFAULT_MODE) if record.get("layout") == LAYOUT else None
         if vmid is None:
             return {"present": False, "installed": bool(record.get("installed")), "dehydrated": bool(record.get("dehydrated")), "mode": mode,
-                    "recorded_vmid": self.recorded_vmid(), "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe()}
+                    "recorded_vmid": self.recorded_vmid(), "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe(),
+                    "registry_sources": self.carried_sources()}
         running = self.vm_status(vmid) == "running"
         return {"present": True, "vmid": vmid, "running": running, "installed": bool(record.get("installed")), "mode": mode,
                 "dehydrated": False, "url": self.address(vmid) if running else None, "memory_mb": record.get("memory_mb"), "cpus": record.get("cpus"),
-                "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe()}
+                "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe(), "registry_sources": self.carried_sources()}
 
     def _stopped(self, vmid):
         if self.vm_status(vmid) != "stopped":

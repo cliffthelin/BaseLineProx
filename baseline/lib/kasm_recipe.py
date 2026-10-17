@@ -8,7 +8,8 @@ A recipe is a template with the decisions written down, so a build is never "wha
   plugins     the Docker plugins the installer fetches (log driver, network sidecar), packed into the base
   workspaces  what a person can open (the entries `kasm_build` seeds)
   settings    server settings to set at install (name to value; checked against the release's own catalogue by kasm_settings; never secrets)
-  registry    whether Baseline acts as a Kasm workspace registry, and the address Kasm is told (kasm_registry builds the file)
+  registry    whether Baseline acts as a Kasm workspace registry, and the address Kasm is told (kasm_registry builds the file); `sources` are other registries whose named, reviewed
+              workspaces are offered through it (kasm_sources)
 A recipe is checked against the Kasm release's own compose files: every image the release starts must belong to exactly one component, and a component naming an image the
 release does not start is refused. So a new Kasm version that adds a component cannot slip into a build unnoticed: it has to be given a state first.
 The recipe is recorded in the base's manifest, so the host knows what its base holds.
@@ -34,6 +35,14 @@ class RecipeError(ValueError):
     pass
 
 
+# LinuxServer.io's own Kasm registry (https://kasmregistry.linuxserver.io/, schema 1.1): Chromium and Firefox built on Kasm's base. Reviewed 2026-10-17: run configuration is an entrypoint
+# /kasminit, user 1000, HOME, and `security_opt: seccomp=unconfined` (the one property accepted, by name; it weakens the container's syscall filter and is why Kasm flags these orange); exec is
+# the browser started on the session's URL. Their entries cover Kasm 1.16 to 1.18, so 1.19 is assumed to hold (reported as unverified) until it has been run on a 1.19 Kasm.
+DEFAULT_SOURCES = [{"id": "linuxserver", "name": "LinuxServer.io", "url": "https://kasmregistry.linuxserver.io/", "assume_compatible_from": "1.18.x",
+                    "include": [{"name": "Chromium", "reviewed": "09ed0e04afcb08b4", "accept": ["run_config.security_opt"]},
+                                {"name": "Firefox", "reviewed": "7db1220fdc97832a", "accept": ["run_config.security_opt"]}]}]
+
+
 def default(workspaces) -> dict:
     """The recipe this product builds when nobody has written another: all-in-one Kasm, no server connections in use."""
     return {
@@ -54,7 +63,8 @@ def default(workspaces) -> dict:
         ],
         "workspaces": [dict(w) for w in workspaces],
         "settings": {},
-        "registry": {"enabled": False, "name": "Baseline", "description": "Workspaces carried by this Baseline host.", "list_url": ""},
+        "registry": {"enabled": True, "name": "Baseline", "description": "Workspaces carried by this Baseline host, and a reviewed few from LinuxServer.io.", "list_url": "",
+                     "sources": json.loads(json.dumps(DEFAULT_SOURCES))},
     }
 
 
@@ -111,6 +121,10 @@ def validate(recipe, release_images=None) -> dict:
             raise RecipeError("a registry's list_url is empty (this host's own address is used) or an http(s) address ending in a slash")
         if not str(registry.get("name", "")).strip():
             raise RecipeError("a registry needs a name")
+    sources = registry.get("sources", [])
+    if sources and not registry.get("enabled"):
+        raise RecipeError("registry sources need the registry to be enabled: they are offered through it")
+    validate_sources(sources)
     if release_images is not None:
         missing = sorted(set(release_images) - set(owner))
         extra = sorted(set(owner) - set(release_images))
@@ -119,6 +133,42 @@ def validate(recipe, release_images=None) -> dict:
         if extra:
             raise RecipeError("the recipe names images this Kasm release does not start: " + ", ".join(extra))
     return recipe
+
+
+def validate_sources(sources) -> None:
+    """Other registries whose named workspaces Baseline offers (kasm_sources explains the reviewing). Each: an id, an https address ending in a slash, the workspaces it takes by friendly name
+    (with the hash they were reviewed at and the run-configuration properties accepted), and optionally the earlier version whose entry may be assumed to hold."""
+    import kasm_sources as ksrc
+    if not isinstance(sources, list):
+        raise RecipeError("registry sources are a list")
+    seen = set()
+    for source in sources:
+        if not isinstance(source, dict) or not ksrc.ID.fullmatch(str(source.get("id", ""))):
+            raise RecipeError("every registry source needs an id (lowercase letters, digits and dashes)")
+        if source["id"] in seen:
+            raise RecipeError(f"registry source {source['id']} is listed twice")
+        seen.add(source["id"])
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?/", str(source.get("url", ""))):
+            raise RecipeError(f"{source['id']}: url must be an https address ending in a slash")
+        if not isinstance(source.get("name", ""), str) or len(source.get("name", "")) > 40:
+            raise RecipeError(f"{source['id']}: name is short text")
+        include = source.get("include")
+        if not isinstance(include, list) or not include:
+            raise RecipeError(f"{source['id']}: include names the workspaces to take")
+        names = set()
+        for item in include:
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip() or len(item["name"]) > 60:
+                raise RecipeError(f"{source['id']}: every included workspace needs a name")
+            if item["name"] in names:
+                raise RecipeError(f"{source['id']}: {item['name']} is included twice")
+            names.add(item["name"])
+            if item.get("reviewed") is not None and not re.fullmatch(r"[0-9a-f]{16}", str(item["reviewed"])):
+                raise RecipeError(f"{source['id']}: reviewed is the 16-character hash the build reports")
+            accept = item.get("accept", [])
+            if not isinstance(accept, list) or not all(isinstance(a, str) and re.fullmatch(r"run_config\.[a-z_]{1,40}", a) for a in accept):
+                raise RecipeError(f"{source['id']}: accept lists run-configuration properties like run_config.security_opt")
+        if source.get("assume_compatible_from") is not None and not ksrc.VERSION.fullmatch(str(source["assume_compatible_from"])):
+            raise RecipeError(f"{source['id']}: assume_compatible_from is a version like 1.18.x")
 
 
 def service_images(recipe: dict) -> list:
@@ -151,4 +201,5 @@ def summary(recipe: dict) -> dict:
     """What a host needs to show: which components are in the base and whether anything offered uses them."""
     return {"components": [{k: c[k] for k in ("id", "role", "state", "images", "note") if k in c} for c in recipe["components"]],
             "plugins": [{k: p[k] for k in ("id", "state", "note") if k in p} for p in recipe.get("plugins", [])],
-            "settings": dict(recipe.get("settings", {})), "registry": {k: v for k, v in recipe.get("registry", {}).items() if k in ("enabled", "name", "list_url")}}
+            "settings": dict(recipe.get("settings", {})), "registry": {k: v for k, v in recipe.get("registry", {}).items() if k in ("enabled", "name", "list_url")},
+            "sources": [{"id": x["id"], "url": x["url"], "workspaces": [i["name"] for i in x["include"]]} for x in recipe.get("registry", {}).get("sources", [])]}

@@ -106,7 +106,7 @@ def test_the_plugins_the_build_packs_come_from_the_recipe_and_an_unknown_one_is_
 def test_the_summary_is_what_a_host_needs_and_carries_no_workspaces_or_images_of_the_user():
     summary = kr.summary(recipe())
     assert [c["id"] for c in summary["components"]] == ["database", "application", "agent", "proxy", "server-connections"]
-    assert set(summary) == {"components", "plugins", "settings", "registry"} and summary["settings"] == {} and summary["registry"]["enabled"] is False
+    assert set(summary) == {"components", "plugins", "settings", "registry", "sources"} and summary["settings"] == {} and summary["registry"]["enabled"] is True
 
 
 def test_the_committed_example_is_the_default_recipe_and_valid():

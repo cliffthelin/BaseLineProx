@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 
 WORKSPACES = (
     ("Browser (temporary)", "a clean browser each time; nothing is kept"),
@@ -42,6 +43,32 @@ def _report(report) -> str:
     return out
 
 
+def _sources(carried) -> str:
+    """Workspaces taken from other registries (LinuxServer.io ...): what is offered, what is not and why, and what a person must read before the next build will take a changed one."""
+    if not isinstance(carried, dict):
+        return ""
+    rows = carried.get("workspaces") or []
+    items = ""
+    for row in rows:
+        name = html.escape(str(row.get("name", "")))
+        where = html.escape(str(row.get("source", "")))
+        if row.get("status") == "included":
+            caveat = []
+            if row.get("unverified"):
+                caveat.append("not verified on this Kasm version")
+            if row.get("findings"):
+                caveat.append("accepted: " + ", ".join(row["findings"]))
+            if row.get("requires_network"):
+                caveat.append("pulled from its own registry when first started, so it needs internet")
+            items += f"<li><b>{name}</b> from {where}: offered" + (f" ({html.escape('; '.join(caveat))})" if caveat else "") + "</li>"
+        else:
+            detail = ""
+            if row.get("definition"):
+                detail = f"<details><summary>Read its definition</summary><pre>{html.escape(json.dumps(row['definition'], indent=1))}</pre></details>"
+            items += f"<li><b>{name}</b> from {where}: <b>left out</b>. {html.escape(str(row.get('reason', '')))}{detail}</li>"
+    return f"<h2>From other registries</h2><ul>{items}</ul>"
+
+
 def render(status: dict, notice: str = "", report=None) -> bytes:
     label, detail = _state(status)
     note = f"<p role='alert'>{html.escape(notice)}</p>" if notice else ""
@@ -78,10 +105,11 @@ def render(status: dict, notice: str = "", report=None) -> bytes:
                        for c in recipe.get("components", []))
         plugins = "".join(f"<li><b>{html.escape(str(p.get('id', '')))}</b> plugin ({html.escape(label_of.get(p.get('state'), str(p.get('state'))))})</li>" for p in recipe.get("plugins", []))
         parts = f"<h2>What this Kasm is built from</h2><ul>{rows}{plugins}</ul>"
+    others = _sources(status.get("registry_sources"))
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Workspaces</title></head><body><h1>Workspaces (Kasm)</h1>" + note
             + f"<p>State: <b>{html.escape(label)}</b>. {html.escape(detail)}</p>{opener}{build}"
             + ("<p><a href='/workspaces/settings'>Kasm settings</a> (everyday choices, or all of them) | <a href='/workspaces/suggestions'>Suggestions</a> (what the history says, and what an AI proposes)</p>" if status.get("running") else "") + controls
-            + f"<h2>What you can open</h2><ul>{items}</ul>" + parts + _report(report)
+            + f"<h2>What you can open</h2><ul>{items}</ul>" + others + parts + _report(report)
             + "<h2>Where things are kept</h2><ul>"
               "<li>Kasm's own settings, accounts and database: <b>APPDATA_ADMIN</b>.</li>"
               "<li>Your browser and desktop profiles: <b>APPDATA_PERSONAL</b>, one folder per person and workspace.</li>"

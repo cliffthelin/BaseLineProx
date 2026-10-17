@@ -85,12 +85,24 @@ def iso(label: str, files: dict, out: Path) -> None:
     shutil.rmtree(folder)
 
 
+def add_sources(document, sources, kasm_version, registry_out, cache_dir):
+    """Offer the named workspaces of other registries beside Baseline's own (kasm_sources), and say plainly what was and was not taken."""
+    if not sources:
+        return []
+    import kasm_sources
+    rows = kasm_sources.merge_into(document, sources, kasm_version, registry_out, cache_dir)
+    for row in rows:
+        say(f"registry source {row['source']}: {row['name']}: " + ("included" + (" (UNVERIFIED for this Kasm version)" if row.get("unverified") else "") if row["status"] == "included" else "left out: " + row["reason"]))
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--downloads", required=True, type=Path, help="holds the release bundle, its .sha256sum, and the Debian image with its SHA512SUMS")
     parser.add_argument("--debian-image", type=Path, help="default: the one in --downloads")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--recipe", type=Path, help="the Kasm recipe (default: config/local/kasm-recipe.json if there is one, else the built-in one); see kasm_recipe.py")
+    parser.add_argument("--sources-cache", type=Path, help="where the lists and icons of other registries are kept between builds (default: beside the output), so a build with no internet can still use them")
     parser.add_argument("--os-list", type=Path, help="the supported-OS list (default: the one on this machine, if any); its Kasm entry may name the workspaces to carry")
     args = parser.parse_args()
     downloads, out = args.downloads, args.output
@@ -127,6 +139,7 @@ def main():
         import kasm_registry
         document = kasm_registry.build(workspaces, seed.read_text(), name=registry.get("name") or "Baseline", description=registry.get("description") or "Workspaces carried by this Baseline host.",
                                        list_url=registry.get("list_url") or "http://baseline.invalid/kasm-registry/")     # the address a client sees is set when it is served
+        sources_report = add_sources(document, registry.get("sources") or [], recipe["kasm_version"], out / "registry", args.sources_cache or out / "sources-cache")
         for relative, text in kasm_registry.files(document).items():
             target = out / "registry" / relative
             target.parent.mkdir(parents=True, exist_ok=True)

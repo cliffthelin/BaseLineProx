@@ -1886,9 +1886,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
 
     def _serve_kasm_icon(self, deps, name: str) -> None:
         """One registry icon, by an exact file name from one folder (no link followed, nothing else in the folder reachable); anything else is a plain 404."""
-        target = Path(deps.get("kasm_registry_icons_dir") or DEFAULT_KASM_ICONS_DIR) / name
+        # the thumbnails copied from the running Kasm first, then those carried with the registry (the icons of workspaces taken from other registries)
+        folders = (Path(deps.get("kasm_registry_icons_dir") or DEFAULT_KASM_ICONS_DIR), Path(deps.get("kasm_registry_dir") or DEFAULT_KASM_REGISTRY_DIR) / "1.1" / "icons")
         try:
-            if target.is_symlink() or not target.is_file():
+            target = next((f / name for f in folders if (f / name).is_file() and not (f / name).is_symlink()), None)
+            if target is None:
                 raise FileNotFoundError
             body = target.read_bytes()
         except OSError:
