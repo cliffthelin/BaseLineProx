@@ -245,3 +245,50 @@ def test_a_host_that_is_swapping_is_called_out_as_the_hosts_problem_not_the_vms(
     quiet = kt.open_db(":memory:")
     put(quiet, "host_node_swap_used_pct", [3] * 10)
     assert not [s for s in kt.suggestions(quiet, VM, now=NOW) if s["id"] == "host-swapping"]
+
+
+PEM = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\n-----END PRIVATE KEY-----"
+
+
+def test_a_secret_is_recognised_without_kasm_saying_so_and_its_value_never_survives_the_host():
+    """Found live (2026-10-17): Kasm's get_settings has no sanitize flag, so only password-type settings were caught and a private key passed as an ordinary value."""
+    import json
+    rows = [{"name": "api_private_key", "type": "multiline_string", "value": PEM, "secret": False, "id": "1"},        # the VM wrongly said not secret
+            {"name": "rdp_private_jwt_key", "type": "multiline_string", "value": "x", "secret": False, "id": "2"},
+            {"name": "hec_token", "type": "password", "value": "tok", "secret": False, "id": "3"},
+            {"name": "mystery", "type": "string", "value": PEM, "secret": False, "id": "4"},                           # unknown name, but PEM material
+            {"name": "log_retention", "type": "int", "value": "7", "secret": False, "id": "5"},
+            {"name": "api_token_lifespan_seconds", "type": "int", "value": "259200", "secret": False, "id": "6"},       # has "token" in it but is an ordinary number
+            {"name": "api_public_cert", "type": "multiline_string", "value": "-----BEGIN CERTIFICATE-----\nabc", "secret": False, "id": "7"}]
+    full = {r["name"]: r for r in kt.parse_settings_full(json.dumps(rows))}
+    for name in ("api_private_key", "rdp_private_jwt_key", "hec_token", "mystery"):
+        assert full[name]["secret"] is True and full[name]["value"] is None, name
+    assert full["log_retention"]["value"] == "7" and full["api_token_lifespan_seconds"]["value"] == "259200" and full["api_token_lifespan_seconds"]["secret"] is False
+    assert full["api_public_cert"]["secret"] is False and full["api_public_cert"]["value"].startswith("-----BEGIN CERTIFICATE")        # a public certificate is not a secret
+    values, secrets_ = kt.parse_settings(json.dumps(rows))
+    assert PEM not in str(values) and "tok" not in values.values() and secrets_ >= {"api_private_key", "hec_token", "mystery"}
+
+
+def test_the_scripts_carry_the_metadata_the_screens_need_and_the_update_script_is_valid_shell():
+    assert subprocess.run(["bash", "-n"], input=kt.UPDATE_SETTINGS_SCRIPT, text=True).returncode == 0
+    assert "update_setting" in kt.UPDATE_SETTINGS_SCRIPT and "read -r pw" in kt.UPDATE_SETTINGS_SCRIPT and "echo \"$pw\"" not in kt.UPDATE_SETTINGS_SCRIPT
+    for field in ("title: .title", "category: .category", "description: .description", "id: .setting_id", "private"):
+        assert field in kt.SETTINGS_SCRIPT
+    assert "if $s then null else .value end" in kt.SETTINGS_SCRIPT
+
+
+def test_the_rule_catches_every_secret_the_release_itself_marks_and_spares_the_ordinary_ones():
+    """Checked against the release's own seed when it is on this machine: the nine it marks (sanitize or password type) are all caught; the policy numbers, certificates and site key are not."""
+    import kasm_settings as ks
+    from pathlib import Path
+    named = {"hec_token": "password", "registration_token": "password", "google_recaptcha_priv_key": "password", "token": "password", "object_storage_secret": "password",
+             "recording_object_storage_secret": "password", "api_private_key": "multiline_string", "rdp_private_key": "multiline_string", "rdp_private_jwt_key": "multiline_string"}
+    assert all(ks.looks_secret(n, t) for n, t in named.items()) and all(ks.looks_secret(n, "string") for n in named)               # by name alone, even if the type were not said
+    for ordinary in ("password_min_length", "password_require_uppercase", "api_public_cert", "rdp_signer_cert", "rdp_public_jwt_cert", "google_recaptcha_site_key", "object_storage_key",
+                     "recording_object_storage_key", "api_token_lifespan_seconds", "log_retention", "same_site", "session_lifetime"):
+        assert not ks.looks_secret(ordinary, "int"), ordinary
+    seeds = list(Path("/tmp").glob("**/kasm_release/conf/database/seed_data/default_properties.yaml"))
+    if seeds:
+        for entry in ks.catalogue(seeds[0].read_text()):
+            if entry["secret"]:                                           # the release's own list
+                assert ks.looks_secret(entry["name"], entry["type"]), entry["name"]

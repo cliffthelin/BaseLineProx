@@ -185,3 +185,9 @@ What it changes in the suggestions:
 - **More cores** notes when the host's own CPUs are busy too, so an extra core will give less than its full share.
 - **A swapping host** (swap use of 20% or more) is its own suggestion, as the host's problem and not this VM's.
 Still open: Proxmox's longer RRD history (not needed yet; the periodic collection builds its own), and acting on a suggestion automatically (only described, and only the person approves).
+
+## Defect found and fixed 2026-10-17: secret detection in the settings feed
+Kasm's `get_settings` response has no `sanitize` flag (its fields are category, description, name, services_restart, setting_id, title, value, value_type). The settings script and its tests assumed one, so only password-type settings were being withheld and a multi-line private key
+(for example `api_private_key`) would have passed to the host as an ordinary value and been stored in the history. Nothing stored a real key (the tests used invented data and the live check only printed counts), but the gap was real.
+Fixed in two places: the script in the VM and the host's parser both treat a setting as a secret if its type is `password`, its name ends in `_token`, `_secret`, `_password`, `_passwd`, or `_api_key`/`_secret_key`, is exactly `token`, contains `private` or ends `priv_key`, or its value is PEM PRIVATE key material (certificates are not secrets). A first, broader rule also hid the password-policy numbers, public certificates and a public site key,
+which a person needs to see; it was narrowed after a live run. **On a live Kasm the rule now flags exactly the nine settings the release itself marks as secret**, none of them leaves the VM with a value, and the five password-policy settings are visible. A test checks every one of the release's nine against the rule.

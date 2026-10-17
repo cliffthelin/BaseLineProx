@@ -37,6 +37,17 @@ def catalogue(seed_text: str) -> list:
     return out
 
 
+_SECRET_NAME = __import__("re").compile(r"(?i)(^token$|_token$|_secret$|_password$|_passwd$|private|priv_key$|api_key$|secret_key$)")
+_PRIVATE_KEY_PEM = __import__("re").compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+
+
+def looks_secret(name: str, value_type: str = "", value=None) -> bool:
+    """Whether a setting must be treated as a secret when Kasm does not say. Kasm's own `get_settings` carries no `sanitize` flag (found 2026-10-17: a private key would have passed as an ordinary
+    value), so a setting is a secret if its type is `password`, its name ends in a secret-like word or names a private key, or its value is PEM PRIVATE key material. Public certificates, a public
+    site key, an access key ID and the password-policy numbers are not secrets and stay visible; every one of the nine the release marks as secret is caught (tested against its own list)."""
+    return value_type == "password" or bool(_SECRET_NAME.search(name or "")) or bool(_PRIVATE_KEY_PEM.search(str(value or "")))
+
+
 def normalise(setting: dict, value) -> str:
     """The text Kasm stores for `value`, if it fits the setting's type."""
     kind, name = setting["type"], setting["name"]

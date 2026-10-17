@@ -163,14 +163,32 @@ ACCOUNTING_SQL = ("select coalesce(image_friendly_name, image_name, '?'), count(
 # The settings, through Kasm's own admin API (the one its web UI uses), from INSIDE the VM; the admin password arrives on stdin and is never printed. A secret's value is dropped
 # in the VM, so it never even reaches the host.
 SETTINGS_SCRIPT = r'''#!/bin/bash
-# Reads one line (the admin password) from stdin. Prints one JSON array: [{name, value, secret}], with value null for a secret.
+# Reads one line (the admin password) from stdin. Prints one JSON array of every setting Kasm reports: name, title, category, description, type, which services a change restarts, its id, whether it is a
+# secret, and its value (null for a secret: it never leaves the VM). Kasm's response has no sanitize flag, so a secret is a password-type setting, a name ending in a secret-like word or naming a
+# private key, or a value holding PEM private-key material (the same rule as kasm_settings.looks_secret).
 set +x
 read -r pw
 token=$(jq -n --arg p "$pw" '{username:"admin@kasm.local",password:$p,project_id:""}' | curl -sk -X POST https://localhost/api/authenticate -H 'Content-Type: application/json' -d @- | jq -r '.token // empty')
 [ -n "$token" ] || exit 3
 jq -n --arg t "$token" '{token:$t,username:"admin@kasm.local"}' | curl -sk -X POST https://localhost/api/admin/get_settings -H 'Content-Type: application/json' -d @- \
-  | jq -c '[.settings[] | ((((.sanitize // false)|tostring|ascii_downcase)=="true") or (.value_type=="password")) as $s | {name: .name, secret: $s, value: (if $s then null else .value end)}]'
+  | jq -c '[.settings[] | ((.value_type=="password") or (.name|test("(^token$|_token$|_secret$|_password$|_passwd$|private|priv_key$|api_key$|secret_key$)";"i")) or ((.value // "")|tostring|test("-----BEGIN [A-Z ]*PRIVATE KEY-----"))) as $s
+            | {name: .name, title: .title, category: .category, description: .description, type: .value_type, restart: .services_restart, id: .setting_id, secret: $s, value: (if $s then null else .value end)}]'
 '''
+
+# Changes settings through Kasm's own admin API (update_setting: a setting_id and a value), from inside the VM. stdin: line 1 the admin password, line 2 a JSON array [{id, value}].
+# Prints one result line per change. Values come in on stdin, never on a command line, and are never printed.
+UPDATE_SETTINGS_SCRIPT = r'''#!/bin/bash
+set +x
+read -r pw
+read -r changes
+token=$(jq -n --arg p "$pw" '{username:"admin@kasm.local",password:$p,project_id:""}' | curl -sk -X POST https://localhost/api/authenticate -H 'Content-Type: application/json' -d @- | jq -r '.token // empty')
+[ -n "$token" ] || exit 3
+echo "$changes" | jq -c '.[]' | while read -r change; do
+  reply=$(jq -n --arg t "$token" --argjson c "$change" '{token:$t,username:"admin@kasm.local",setting_id:$c.id,value:$c.value}' | curl -sk -X POST https://localhost/api/admin/update_setting -H 'Content-Type: application/json' -d @-)
+  echo "$change" | jq -r '.id' | tr '\n' ' '; echo "$reply" | jq -r 'if .error_message then "error: " + .error_message else "ok" end'
+done
+'''
+
 
 
 def parse_host_view(vm_status: dict, node_status: dict) -> dict:
@@ -235,22 +253,35 @@ def record_accounting(conn, rows: list, now=None):
     conn.commit()
 
 
-def parse_settings(text: str) -> tuple:
-    """({name: value} for the settings with a value, {names of secrets}) from the settings script's JSON."""
+def parse_settings_full(text: str) -> list:
+    """Every setting the settings script reported, as dicts {name, title, category, description, type, restart, id, secret, value}. A second check on the host: whatever the VM said, a setting
+    that looks like a secret has its value dropped here too, so a value that should have been withheld never reaches storage or a screen."""
     import json as _json
+    import kasm_settings as _ks
     try:
         rows = _json.loads(text.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        return {}, set()
-    values, secrets_ = {}, set()
+        return []
+    out = []
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict) or "name" not in row:
             continue
-        if row.get("secret"):
+        secret = bool(row.get("secret")) or _ks.looks_secret(row["name"], row.get("type") or "", row.get("value"))
+        out.append({"name": row["name"], "title": row.get("title") or row["name"], "category": row.get("category") or "", "description": row.get("description") or "",
+                    "type": row.get("type") or "string", "restart": [x for x in str(row.get("restart") or "").split(",") if x and x != "None"], "id": row.get("id"),
+                    "secret": secret, "value": None if secret or row.get("value") is None else str(row["value"])})
+    return out
+
+
+def parse_settings(text: str) -> tuple:
+    """({name: value} for the settings with a value, {names of secrets}) from the settings script's JSON."""
+    values, secrets_ = {}, set()
+    for row in parse_settings_full(text):
+        if row["secret"]:
             secrets_.add(row["name"])
             values[row["name"]] = "<secret>"            # only so that a change of it can be noticed; recorded as a change without a value
-        elif row.get("value") is not None:
-            values[row["name"]] = str(row["value"])
+        elif row["value"] is not None:
+            values[row["name"]] = row["value"]
     return values, secrets_
 
 
