@@ -94,14 +94,22 @@ def build_tile(vm: dict, *, os_id: str, node: str, kind: str = "vm") -> dict:
     }
 
 
-def available_to_create(listing, isos, vms) -> list:
+def available_to_create(listing, isos, vms, host_mb=None) -> list:
     """The operating systems the supported-OS list asks for that have no VM yet, as launcher entries (DR262): name, family, whether the image is carried, and the
     applications the list plans for it. Built ones are tiles already; Kasm is the workspaces component, not a guest OS."""
+    import os_profiles
     rows = environments.listed_catalogue(listing, isos, vms)
-    planned = {e["id"]: e["apps"] for e in listing}
-    return [{"id": r["id"], "name": r["name"], "os": {"family": r["os"], "release": r["release"]}, "iso": r["iso"] if r["image"] != "none listed" else "",
-             "image": r["image"], "apps": [{"key": a, "support": lvl} for a, lvl in r["apps"].items() if a in planned[r["id"]]]}
-            for r in rows if r["state"] == "not built"]
+    by_id = {e["id"]: e for e in listing}
+    out = []
+    for r in rows:
+        if r["state"] != "not built":
+            continue
+        entry = by_id[r["id"]]
+        item = {"id": r["id"], "name": r["name"], "os": {"family": r["os"], "release": r["release"]}, "iso": r["iso"] if r["image"] != "none listed" else "",
+                "image": r["image"], "apps": [{"key": a, "support": lvl} for a, lvl in r["apps"].items() if a in entry["apps"]]}
+        item.update(os_profiles.plan_for(entry, image_carried=r["image"] == "carried", host_mb=host_mb))
+        out.append(item)
+    return out
 
 
 def console_path(kind: str, vmid, name: str, node: str, mode: str) -> str:

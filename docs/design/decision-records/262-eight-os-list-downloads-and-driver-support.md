@@ -65,3 +65,12 @@ The launcher's home screen gains an "Available to create" row of dashed tiles, o
 name, whether its image is carried ("not built · create" or "not built · image missing"), and a link to Virtual machines to create it. Built systems stay ordinary tiles. A list that cannot be
 read is a notice and never hides the tiles; no list means no row. The tile does not create the VM itself: creation stays in Virtual machines. Checked in the browser with a sample state; the
 unit tests cover the model, the state and the real route.
+
+## Update: the tiles create the VM
+An "Available to create" tile now creates the VM: a confirmation names the sizes (disk, memory, CPUs, UEFI) and the image, then it posts the existing `create_iso` action, so it runs through the
+same job machinery and audit as Virtual machines. The VM is created stopped. Starting sizes per system are in `os_profiles.py` (Omarchy 64 GB / 8 GiB / 4 CPUs, CachyOS 64/6/4, Debian 32/4/2,
+NixOS 40/4/2, Bazzite 80/8/4, Ubuntu 40/4/2; anything else 32/4/2) and are starting points, not requirements published by the projects; memory is cut to half of a small host's, and a host with
+under 4 GiB is refused. Two entries are **refused with a reason shown on the tile** rather than created badly: **Qubes** (it runs its own Xen hypervisor and wants the hardware to itself) and
+**FydeOS** (an OVA appliance; importing appliances is not built). So is any entry whose image is not carried. Checked in the browser (blocked tile explains itself; an allowed tile posts exactly the
+create action); the plans and the route are unit-tested. Not yet run against a real Proxmox host.
+Also: `provision.sh` now stages `os_profiles.py`, `driver_profiles.py` and `baseline-drivers`; a guard test caught the first of these missing.

@@ -1793,7 +1793,9 @@ def _launcher_available(deps: dict, host, vms: list) -> tuple:
         isos = [i["name"] if isinstance(i, dict) else str(i) for i in vm_page.available_isos(host, deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)]
     except (vh.VmError, OSError, ValueError):
         isos = []
-    return launcher_model.available_to_create(listing, isos, [{"name": v.get("name")} for v in vms]), []
+    import os_profiles
+    host_mb = deps["host_memory_mb"]() if deps.get("host_memory_mb") else os_profiles.host_memory_mb()
+    return launcher_model.available_to_create(listing, isos, [{"name": v.get("name")} for v in vms], host_mb), []
 
 
 def _kvm_ok(deps: dict) -> bool:

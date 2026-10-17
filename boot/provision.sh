@@ -430,6 +430,10 @@ cp "$SRC/baseline/lib/tfa_setup.py" /opt/baseline/lib/tfa_setup.py
 cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py
 cp "$SRC/baseline/lib/kasm_setup.py" /opt/baseline/lib/kasm_setup.py
 cp "$SRC/baseline/lib/os_list.py" /opt/baseline/lib/os_list.py
+cp "$SRC/baseline/lib/os_profiles.py" /opt/baseline/lib/os_profiles.py
+cp "$SRC/baseline/lib/driver_profiles.py" /opt/baseline/lib/driver_profiles.py
+cp "$SRC/baseline/bin/baseline-drivers" /opt/baseline/bin/baseline-drivers
+chmod +x /opt/baseline/bin/baseline-drivers
 cp "$SRC/baseline/lib/kasm_page.py" /opt/baseline/lib/kasm_page.py
 cp "$SRC/baseline/bin/baseline-kasm" /opt/baseline/bin/baseline-kasm
 chmod +x /opt/baseline/bin/baseline-kasm

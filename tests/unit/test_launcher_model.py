@@ -189,3 +189,13 @@ def test_available_to_create_lists_only_listed_guest_systems_without_a_vm():
     got = lm.available_to_create(listing, ["bazzite-stable-amd64.iso"], [{"name": "debian-13-lab"}])
     assert [a["id"] for a in got] == ["bazzite"] and got[0]["image"] == "carried" and got[0]["os"]["family"] == "fedora"
     assert [a["key"] for a in lm.available_to_create(listing, [], [])[0]["apps"]] == ["chrome"]       # only the apps the list plans
+
+
+def test_available_entries_carry_a_plan_or_the_reason_they_cannot_be_created():
+    listing = [{"id": "bazzite", "name": "Bazzite", "kind": "vm", "iso": "bazzite-stable-amd64.iso", "apps": [], "notes": ""},
+               {"id": "qubes", "name": "Qubes OS", "kind": "vm", "iso": "Qubes-R4.3.2-x86_64.iso", "apps": [], "notes": ""},
+               {"id": "nixos", "name": "NixOS", "kind": "vm", "iso": "nixos.iso", "apps": [], "notes": ""}]
+    got = {a["id"]: a for a in lm.available_to_create(listing, ["bazzite-stable-amd64.iso", "Qubes-R4.3.2-x86_64.iso"], [], host_mb=65536)}
+    assert got["bazzite"]["plan"]["iso"] == "bazzite-stable-amd64.iso" and "blocked" not in got["bazzite"]
+    assert "Xen" in got["qubes"]["blocked"] and "plan" not in got["qubes"]
+    assert "not carried" in got["nixos"]["blocked"]

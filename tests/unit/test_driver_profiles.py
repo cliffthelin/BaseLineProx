@@ -59,3 +59,9 @@ def test_only_the_machine_that_was_read_is_marked_confirmed():
 def test_the_cli_reports_not_applicable_off_debian_instead_of_calling_firmware_missing():
     text = (Path(__file__).resolve().parents[2] / "baseline/bin/baseline-drivers").read_text()
     assert "not Debian" in text and '== "debian"' in text and "ID_LIKE" not in text
+
+
+def test_provision_stages_the_driver_tool_and_the_modules_it_and_the_launcher_need():
+    provision = (Path(__file__).resolve().parents[2] / "boot/provision.sh").read_text()
+    for staged in ("baseline/lib/driver_profiles.py", "baseline/bin/baseline-drivers", "baseline/lib/os_profiles.py", "baseline/lib/os_list.py"):
+        assert f'"$SRC/{staged}"' in provision

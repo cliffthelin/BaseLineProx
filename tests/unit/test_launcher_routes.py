@@ -31,6 +31,18 @@ class FakeHost:
         return []
 
 
+class RecordingHost:
+    """Only what the create action calls; records it."""
+    def __init__(self):
+        self.calls = []
+
+    def create_from_iso(self, name, **kw):
+        self.calls.append(("create_from_iso", name, kw))
+
+    def configure_uefi(self, name):
+        self.calls.append(("configure_uefi", name))
+
+
 @pytest.fixture
 def case(tmp_path):
     made = [tmp_path / n for n in ("admin", "user", "appdata", "session")]
@@ -260,6 +272,7 @@ def test_the_launcher_offers_listed_operating_systems_that_are_not_built_yet(cas
     available = json.loads(state)["available"]
     assert [a["id"] for a in available] == ["qubes"]       # debian-13-lab is built; Kasm is the workspaces component, not a guest OS
     assert available[0]["name"] == "Qubes OS 4.3" and available[0]["image"] == "missing" and len(available[0]["apps"]) == 5
+    assert "blocked" in available[0]                       # Qubes is never offered as a plain VM, and its image is missing here as well
     page = req(case, "GET", "/launcher")[2]
     assert "Available to create" in page and "drawAvailable" in page
     (isos / "Qubes-R4.3.2-x86_64.iso").write_bytes(b"x")
@@ -275,3 +288,21 @@ def test_without_a_list_or_with_a_bad_one_the_tiles_are_unaffected(case):
     case.server.deps["os_list_path"] = str(bad)            # type: ignore[attr-defined]
     state = json.loads(req(case, "GET", "/launcher/state")[2])
     assert state["available"] == [] and any("supported-OS list could not be used" in n for n in state["notices"]) and len(state["tiles"]) == 2
+
+
+def test_a_carried_listed_system_comes_with_a_plan_the_create_action_accepts(case):
+    listing = case.tmp / "supported-os.json"
+    listing.write_text(json.dumps({"os": [{"id": "debian", "name": "Debian 13", "iso": "debian-13.7.0-amd64-DVD-1.iso"}, {"id": "bazzite", "name": "Bazzite", "iso": "bazzite-stable-amd64.iso"}]}))
+    isos = case.tmp / "isos2"
+    isos.mkdir()
+    (isos / "bazzite-stable-amd64.iso").write_bytes(b"x")
+    case.server.deps.update(os_list_path=str(listing), vm_iso_dir=str(isos), host_memory_mb=lambda: 65536)      # type: ignore[attr-defined]
+    available = json.loads(req(case, "GET", "/launcher/state")[2])["available"]
+    plan = available[0]["plan"]
+    assert [a["id"] for a in available] == ["bazzite"] and plan["firmware"] == "uefi" and plan["name"] == "bazzite"
+    import vm_page
+    assert set(plan) == {"name", "iso", "disk_gb", "memory_mb", "cpus", "firmware"}                 # exactly the create_iso parameters
+    host = RecordingHost()                                                       # the plan, handed to the real create action, creates the VM with UEFI
+    vm_page.perform(host, "create_iso", dict(plan), iso_dir=str(isos))
+    assert host.calls == [("create_from_iso", "bazzite", {"iso": str(isos / "bazzite-stable-amd64.iso"), "disk_gb": 80, "memory_mb": 8192, "cpus": 4}),
+                          ("configure_uefi", "bazzite")]
