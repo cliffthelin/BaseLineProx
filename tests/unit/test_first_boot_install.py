@@ -503,7 +503,7 @@ def test_the_installer_cache_storage_is_named_for_the_volume_and_the_old_name_is
 GOOD_LIST = '{"os": [{"id": "debian", "name": "Debian 13", "iso": "debian.iso"}]}'
 
 
-def _os_list_step(tmp_path, monkeypatch, *, source_text=None, host_text=None):
+def _os_list_step(tmp_path, monkeypatch, *, source_text=None, host_text=None, ready=True):
     installer = _installer()
     marks = []
     monkeypatch.setattr(installer, "mark", lambda step, **facts: marks.append((step, facts)))
@@ -515,7 +515,7 @@ def _os_list_step(tmp_path, monkeypatch, *, source_text=None, host_text=None):
     if host_text is not None:
         dest.parent.mkdir(parents=True)
         dest.write_text(host_text)
-    installer.step_os_list(source=source, dest=dest)
+    installer.step_os_list(source=source, dest=dest, guard=lambda: ready)
     return dest, marks
 
 
@@ -543,3 +543,33 @@ def test_no_list_on_the_media_is_recorded_not_an_error(tmp_path, monkeypatch):
 def test_the_list_step_runs_before_provisioning_and_the_dev_user_stays_last():
     names = [n for n, _ in _installer().STEPS]
     assert names.index("os-isos") < names.index("os-list") < names.index("provision") and names[-1] == "dev-user"
+
+
+def test_the_list_is_not_carried_while_user_admin_is_not_set_up(tmp_path, monkeypatch):
+    dest, marks = _os_list_step(tmp_path, monkeypatch, source_text=GOOD_LIST, ready=False)
+    assert not dest.exists() and marks[0][1]["result"] == "skipped: USER_ADMIN not set up"
+
+
+def test_the_user_admin_step_sets_up_the_volume_for_this_install_and_runs_before_anything_writes_there(tmp_path, monkeypatch):
+    installer = _installer()
+    marks = []
+    monkeypatch.setattr(installer, "mark", lambda step, **facts: marks.append((step, facts)))
+    monkeypatch.setattr(installer, "log", lambda *a, **k: None)
+    host_id = tmp_path / "host-id"
+    host_id.write_text("4af8c95a-beea-aa01-10de-57575cce4d00\n")
+    root = tmp_path / "USER_ADMIN"
+    root.mkdir()
+    installer.step_user_admin(root=root, host_id_path=host_id, is_mount=lambda p: True)
+    assert marks[0][0] == "user-admin" and "vault" in marks[0][1]["created"] and marks[0][1]["host_id"] == "4af8c95a-beea-aa01-10de-57575cce4d00"
+    assert (root / "vault").is_dir() and (root / "config").is_dir()
+    names = [n for n, _ in installer.STEPS]
+    assert names.index("host-volumes") < names.index("user-admin") < names.index("os-list") and names.index("user-admin") < names.index("provision")
+
+
+def test_the_user_admin_step_stops_the_installation_when_the_volume_is_not_mounted(tmp_path, monkeypatch):
+    import user_admin
+    installer = _installer()
+    monkeypatch.setattr(installer, "mark", lambda *a, **k: None)
+    monkeypatch.setattr(installer, "log", lambda *a, **k: None)
+    with pytest.raises(user_admin.UserAdminError, match="not a mounted volume"):
+        installer.step_user_admin(root=tmp_path, host_id_path=tmp_path / "none", is_mount=lambda p: False)

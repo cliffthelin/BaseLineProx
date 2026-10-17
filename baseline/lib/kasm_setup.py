@@ -50,7 +50,7 @@ class Layout:
     profiles_dir: Path = Path("/mnt/APPDATA_PERSONAL/kasm")
     base_dir: Path = Path("/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/kasm")     # carried with the installer's offline cache
     vault_path: str = vault_mod.ADMIN_VAULT
-    mounts: tuple = field(default=("/mnt/SESSION_TEMP", "/mnt/APPDATA_ADMIN", "/mnt/APPDATA_PERSONAL", "/mnt/INSTALLER_CACHE"))
+    mounts: tuple = field(default=("/mnt/SESSION_TEMP", "/mnt/APPDATA_ADMIN", "/mnt/APPDATA_PERSONAL", "/mnt/INSTALLER_CACHE", "/mnt/USER_ADMIN"))   # USER_ADMIN holds the vault
 
     @property
     def base(self) -> Path:

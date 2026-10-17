@@ -127,3 +127,10 @@ What a name change must touch, found by reading the code, not guessed:
 - Steps 2-3 change shared code and the policy format that PC401 (Codex's lane) validates by rebuild: it must be agreed with Codex, not
   done from this lane alone. A drive built before the change keeps working through the compatibility path of step 3.
 - Until then the root is presented as the Proxmox storage `substrate` (boot/baseline-proxmox-defaults.sh).
+
+## Update 2026-10-17: USER_ADMIN is set up on each install (operator)
+"The host needs to set up the User Admin on each install." First boot now has a `user-admin` step (`user_admin.py`, after the host volumes and before anything writes there): it creates `config/`, `settings/`,
+`vault/` (0700), `chromium/` and `chromium/kiosk/`, and writes `.baseline-user-admin.json`, the record tying the volume to this install's identifier. Nothing from the machine that built the installer is carried into
+it. It refuses to write unless `/mnt/USER_ADMIN` is genuinely a mounted volume (a write to an unmounted path would land on the root volume, which is the publishable one), refuses a volume that belongs to a
+different install, never follows a link, tightens a looser vault folder, and is safe to run again. The OS-list step and Kasm's setup now check USER_ADMIN first. Verified on the installed rehearsal host: an existing
+USER_ADMIN (its Kasm vault, home, pve state redirects) was adopted without changing any of it, and an unmounted path was refused. The admin passphrase verifier is still not created here (the person chooses it, on /vault).

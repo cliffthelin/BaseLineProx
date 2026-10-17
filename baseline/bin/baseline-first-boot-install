@@ -413,17 +413,34 @@ def verify_carried_repository(cache):
                            "exactly as built, or first boot cannot verify it offline") from exc
 
 
+def step_user_admin(root=None, host_id_path=None, is_mount=os.path.ismount):
+    """Set up this install's USER_ADMIN (user_admin.py): its folders and the record that ties the volume to this install. Nothing from the build machine is
+    carried into it. Refuses, and stops the installation, when it is not a mounted volume or belongs to another install: later steps and every credential
+    depend on it being the real, private one."""
+    import references
+    import user_admin
+    host = references.current_host(host_id_path) or ""
+    report = user_admin.setup(Path(root) if root is not None else user_admin.ROOT, host_id=host, is_mount=is_mount)
+    log(f"user-admin: {json.dumps(report)}")
+    mark("user-admin", **report)
+
+
 OS_LIST_ON_MEDIA = SRC / "config" / "supported-os.json"
 OS_LIST_ON_HOST = Path("/mnt/USER_ADMIN/config/supported-os.json")
 
 
-def step_os_list(source=None, dest=None):
+def step_os_list(source=None, dest=None, guard=lambda: __import__('user_admin').is_ready()):
     """Carry the operator's supported-OS list (DR261/262) onto USER_ADMIN, where the host reads it. The list is private, so it is not in the repository: the
     installer media carries it next to the source. Never overwrites a list the host already has (the operator may have edited it), never copies one that
     does not check out, and never stops the installation: no list just means the host offers whatever images it carries."""
     import os_list
+    import user_admin
     source = Path(source) if source is not None else OS_LIST_ON_MEDIA
     dest = Path(dest) if dest is not None else OS_LIST_ON_HOST
+    if guard is not None and not guard():
+        log("os-list: USER_ADMIN is not set up, so the list is not carried (it would not be on the private volume)")
+        mark("os-list", result="skipped: USER_ADMIN not set up")
+        return
     if dest.exists():
         log(f"os-list: the host already has {dest}; leaving it as it is")
         mark("os-list", result="kept the host's own")
@@ -459,7 +476,7 @@ def step_provision():
     mark("provision")
 
 
-STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("installer", step_installer),
+STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("user-admin", step_user_admin), ("installer", step_installer),
          ("os-isos", step_os_isos), ("os-list", step_os_list), ("provision", step_provision), ("dev-user", step_dev_user)]
 
 

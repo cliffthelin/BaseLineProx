@@ -108,3 +108,7 @@ def test_a_base_that_does_not_vouch_for_itself_is_never_carried(tmp_path):
     cache.mkdir()
     with pytest.raises(RuntimeError, match="install state"):
         offline_cache.carry_kasm_base(_base(tmp_path, holds_install_state_or_secrets=True), cache)
+
+
+def test_kasm_setup_waits_for_user_admin_because_its_vault_lives_there():
+    assert "/mnt/USER_ADMIN" in ks.Layout().mounts
