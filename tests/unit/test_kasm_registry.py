@@ -54,3 +54,16 @@ def test_the_real_default_workspaces_build_from_the_real_release_seed_when_prese
         pytest.skip("no Kasm release seed on this machine")
     doc = kr.build(kb.WORKSPACES, seeds[0].read_text(), name="Baseline", description="d", list_url="https://h.example/kasm-registry/")
     assert doc["workspacecount"] == 5 and all(w["compatibility"][0]["image"].endswith(":1.19.0") for w in doc["workspaces"])
+
+
+def test_the_icon_file_is_the_one_kasm_itself_names_for_the_image():
+    seed = SEED.replace('{name: "kasmweb/firefox', '{image_src: img/thumbnails/ff.png, name: "kasmweb/firefox').replace('{name: "kasmweb/chrome', '{image_src: img/thumbnails/chrome.png, name: "kasmweb/chrome')
+    doc = kr.build(WS, seed, name="B", description="d", list_url="https://h.example/r/")
+    assert [w["image_src"] for w in doc["workspaces"]] == ["chrome.png", "ff.png"] and kr.icon_names(doc) == ["chrome.png", "ff.png"]
+    assert [w["image_src"] for w in build()["workspaces"]] == ["chrome.png", "firefox.png"]                  # no image_src in the seed: named after the image
+
+
+def test_an_icon_name_that_is_not_a_plain_file_name_is_never_used():
+    seed = SEED.replace('{name: "kasmweb/chrome', '{image_src: "../../etc/passwd", name: "kasmweb/chrome')
+    assert kr.build(WS, seed, name="B", description="d", list_url="https://h.example/r/")["workspaces"][0]["image_src"] == "chrome.png"
+    assert kr.icon_names({"workspaces": [{"image_src": "a/b.png"}, {"image_src": "ok.png"}, {"image_src": "ok.png"}, {}]}) == ["ok.png"]

@@ -15,9 +15,8 @@ import json
 import re
 import time
 
-import yaml
-
 SCHEMA = "1.1"
+ICON_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}\.(png|svg)$")
 _FIELDS = ("description", "docker_registry", "run_config", "exec_config", "categories", "cores", "gpu_count", "cpu_allocation_method", "notes")
 
 
@@ -33,7 +32,8 @@ def _image_entry(images_seed: dict, image: str) -> dict:
 
 
 def workspace(entry: dict, recipe_workspace: dict, *, kasm_version: str, image_tag: str) -> dict:
-    out = {"friendly_name": recipe_workspace["friendly_name"], "image_src": f"{recipe_workspace['image']}.png", "architecture": ["amd64"]}
+    icon = str(entry.get("image_src") or "").rsplit("/", 1)[-1]                        # the file Kasm itself calls it (ubuntu.png for the Ubuntu desktop image)
+    out = {"friendly_name": recipe_workspace["friendly_name"], "image_src": icon if ICON_NAME.fullmatch(icon) else f"{recipe_workspace['image']}.png", "architecture": ["amd64"]}
     for field in _FIELDS:
         if entry.get(field) is not None:
             out[field] = entry[field]
@@ -51,6 +51,7 @@ def build(workspaces, images_seed_text: str, *, name: str, description: str, lis
     how it keeps profiles is an install-time choice, not part of the registry."""
     if not name.strip() or not list_url.endswith("/") or not list_url.startswith(("https://", "http://")):
         raise RegistryError("a registry needs a name and a list_url that is an http(s) address ending in a slash")
+    import yaml            # only the build needs it; the host that serves and fetches icons does not
     seed = yaml.safe_load(images_seed_text) or {}
     seen, entries = set(), []
     for item in workspaces:
@@ -71,3 +72,13 @@ def files(document: dict) -> dict:
     """The whole static site, path to text: Kasm first reads `versions.txt` (the schema versions the registry offers; without it a live Kasm reports "does not appear to have a
     valid schema list", found 2026-10-17), then `<schema>/list.json`."""
     return {"versions.txt": SCHEMA + "\n", f"{SCHEMA}/list.json": render(document)}
+
+
+def icon_names(document: dict) -> list:
+    """The icon files a registry's workspaces name, in order, each once. They are served under `<root>/1.1/icons/` (the layout of Kasm's own registry)."""
+    seen = []
+    for entry in document.get("workspaces", []):
+        name = entry.get("image_src", "")
+        if ICON_NAME.fullmatch(str(name)) and name not in seen:
+            seen.append(name)
+    return seen

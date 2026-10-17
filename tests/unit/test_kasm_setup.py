@@ -656,3 +656,45 @@ def test_no_address_is_given_when_there_is_no_bridge_address_or_it_cannot_be_rea
     assert setup.registry_address({"enabled": True, "list_url": ""}) == ""                    # IPv6 only: nothing is offered rather than a wrong address
     broken, _ = build(world, fake=type("Broken", (Fake,), {"__call__": lambda self, argv, data=None, timeout=120: (1, "", "no vmbr0") if argv[0] == "ip" else Fake.__call__(self, argv, data, timeout)})())
     assert broken.registry_address({"enabled": True, "list_url": ""}) == ""
+
+
+def _registry_list(world, names=("chrome.png", "ubuntu.png")):
+    folder = world.base_dir / "registry" / "1.1"
+    folder.mkdir(parents=True)
+    (folder / "list.json").write_text(json.dumps({"workspaces": [{"image_src": n} for n in names]}))
+
+
+def test_the_icons_are_copied_from_the_running_kasms_web_ui_and_only_real_pngs_are_kept(world):
+    import base64
+    _registry_list(world)
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 40
+
+    class Kasm(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            joined = " ".join(argv)
+            if "img/thumbnails/chrome.png" in joined:
+                return 0, json.dumps({"exitcode": 0, "out-data": base64.b64encode(png).decode()}), ""
+            if "img/thumbnails/ubuntu.png" in joined:
+                return 0, json.dumps({"exitcode": 0, "out-data": base64.b64encode(b"<html>not an image</html>").decode()}), ""   # Kasm answered with a page
+            return super().__call__(argv, data, timeout)
+    setup, fake = build(world, fake=Kasm())
+    got = setup.fetch_registry_icons(100)
+    assert got == {"icons": 1, "skipped": ["ubuntu.png"]}
+    assert (world.admin_dir / "registry-icons" / "chrome.png").read_bytes() == png and not (world.admin_dir / "registry-icons" / "ubuntu.png").exists()
+
+
+def test_a_missing_curl_or_an_oversized_file_or_no_registry_means_no_icons_and_no_failure(world):
+    setup, _ = build(world)
+    assert setup.fetch_registry_icons(100) == {"icons": 0, "skipped": []}                          # no registry travelled with this base
+    _registry_list(world, ("a.png",))
+    import base64
+
+    class Big(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            if "img/thumbnails" in " ".join(argv):
+                return 0, json.dumps({"exitcode": 0, "out-data": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 400_000).decode()}), ""
+            return super().__call__(argv, data, timeout)
+    big, _ = build(world, fake=Big())
+    assert big.fetch_registry_icons(100) == {"icons": 0, "skipped": ["a.png"]}
+    quiet, _ = build(world, fake=Fake())                                                          # the guest answers nothing usable
+    assert quiet.fetch_registry_icons(100) == {"icons": 0, "skipped": ["a.png"]}

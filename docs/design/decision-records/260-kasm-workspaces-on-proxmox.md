@@ -168,3 +168,11 @@ On a scratch copy of the installed Proxmox host (nested, its own firewall enable
 `http://10.0.2.15:8100/kasm-registry/`; and from INSIDE the Kasm VM, across the bridge and through the firewall, `versions.txt` returned `1.1` and `1.1/list.json` returned the five workspaces with `list_url` set to the address the VM used. A page that needs a login (`/home`) still answered 303 to the same
 caller. So a fresh install can use the registry with no manual step. (Kasm's own fetch and acceptance of the list was verified earlier against the real route; this run proved the network path and the address derivation on a real host.)
 Still open for the registry: workspace icons, and a signature.
+
+## Update 2026-10-17: registry icons (verified live)
+Kasm's own registry serves each workspace's icon at `<root>/1.1/icons/<image_src>` (observed on the official site). Baseline now names each workspace's icon the way Kasm's own seed does (`ubuntu.png` for the Ubuntu desktop image) and serves it from the same path under its registry route.
+The release ships no icon files; Kasm's web UI serves the thumbnails as ordinary static files, so after Kasm is installed `baseline-kasm registry-icons` (and the end of `setup`, best effort) copies the five thumbnails from the running Kasm into `APPDATA_ADMIN/kasm/registry-icons/`, each checked to be a PNG of sane size first.
+`GET /kasm-registry/1.1/icons/<name>.png` joins the two registry files as the only public paths (an exact file name, one folder, links never followed; anything else is a 404).
+**Verified on a live Kasm:** the real fetch code copied all five thumbnails from it, byte-identical to Kasm's own copy (checked by hash); Baseline's real web handler served each with the right type and size; Kasm reloaded the registry listing the five workspaces and their icon names with no error; one icon rendered in a browser from Baseline's route.
+Not verified: that Kasm's admin screen draws these icons (that needs a person to open Workspaces > Workspace Registry and look; the layout follows the official registry's, which Kasm's own screen reads).
+The host needs no PyYAML for this (the import is lazy; a test imports the module with PyYAML blocked).

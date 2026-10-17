@@ -1646,6 +1646,8 @@ _PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/console", "/console/switc
 # only workspace names and images. GET only, exactly these paths, from one folder; nothing else under the prefix exists.
 _REGISTRY_FILES = {"/kasm-registry/versions.txt": ("versions.txt", "text/plain; charset=utf-8"), "/kasm-registry/1.1/list.json": ("1.1/list.json", "application/json")}
 DEFAULT_KASM_REGISTRY_DIR = "/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/kasm/registry"
+DEFAULT_KASM_ICONS_DIR = "/mnt/APPDATA_ADMIN/kasm/registry-icons"
+_REGISTRY_ICON = __import__("re").compile(r"^/kasm-registry/1\.1/icons/([a-z0-9][a-z0-9-]{0,40}\.(png|svg))$")
 
 
 def _console_context(deps: dict):
@@ -1882,6 +1884,27 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         self.end_headers()                       # the server's own end_headers adds Cache-Control: no-store to every response
         self.wfile.write(body)
 
+    def _serve_kasm_icon(self, deps, name: str) -> None:
+        """One registry icon, by an exact file name from one folder (no link followed, nothing else in the folder reachable); anything else is a plain 404."""
+        target = Path(deps.get("kasm_registry_icons_dir") or DEFAULT_KASM_ICONS_DIR) / name
+        try:
+            if target.is_symlink() or not target.is_file():
+                raise FileNotFoundError
+            body = target.read_bytes()
+        except OSError:
+            body = b"not found\n"
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png" if name.endswith(".png") else "image/svg+xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, fmt, *args):  # noqa: A002 - stdlib signature
         pass
 
@@ -2033,6 +2056,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
 
         if path in _REGISTRY_FILES:
             return self._serve_kasm_registry(deps, path)
+        icon = _REGISTRY_ICON.match(path)
+        if icon:
+            return self._serve_kasm_icon(deps, icon.group(1))
 
         if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path):
             return

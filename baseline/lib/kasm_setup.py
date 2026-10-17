@@ -372,6 +372,51 @@ class KasmSetup:
                     return f"http://{address}:{REGISTRY_PORT}/kasm-registry/"
         return ""
 
+    ICON_LIMIT = 300_000          # a workspace thumbnail is a few KB; anything much larger is not one
+
+    def registry_icon_names(self) -> list:
+        """The icon file names the carried registry's workspaces name (read from the registry list that travels with the base)."""
+        import kasm_registry
+        try:
+            document = json.loads((self.layout.base_dir / "registry" / kasm_registry.SCHEMA / "list.json").read_text())
+        except (OSError, ValueError):
+            return []
+        return kasm_registry.icon_names(document)
+
+    def fetch_registry_icons(self, vmid=None) -> dict:
+        """Copy the workspace thumbnails from the running Kasm's own web UI (ordinary static files any browser gets from it) into the folder Baseline serves them from. Each is checked
+        to be a PNG of sane size before it is kept; one that is missing or wrong is skipped, never fatal."""
+        import base64
+        import kasm_registry
+        vmid = vmid or self.existing_vmid()
+        names = self.registry_icon_names()
+        if vmid is None or not names:
+            return {"icons": 0, "skipped": names}
+        folder = self.layout.admin_dir / "registry-icons"
+        folder.mkdir(parents=True, exist_ok=True)
+        kept, skipped = [], []
+        for name in names:
+            if not kasm_registry.ICON_NAME.fullmatch(name):
+                skipped.append(name)
+                continue
+            out = self._guest_output(vmid, f"curl -sk -m 20 --fail https://localhost/img/thumbnails/{name} | base64 -w0")
+            try:
+                data = base64.b64decode(out or "", validate=True)
+            except ValueError:
+                data = b""
+            if not data or len(data) > self.ICON_LIMIT or not (data.startswith(b"\x89PNG\r\n\x1a\n") if name.endswith(".png") else data.lstrip().startswith(b"<")):
+                skipped.append(name)
+                continue
+            target = folder / name
+            if target.is_symlink():
+                skipped.append(name)
+                continue
+            tmp = folder / (name + ".part")
+            tmp.write_bytes(data)
+            os.replace(tmp, target)
+            kept.append(name)
+        return {"icons": len(kept), "skipped": skipped}
+
     DOCKER_DROPIN = "/etc/systemd/system/docker.service.d/baseline-kasm-install.conf"
 
     def _guest_shell(self, vmid, script, timeout=120):
@@ -541,6 +586,10 @@ class KasmSetup:
         self.wait_for_agent(vmid)
         creds = self.credentials(passphrase)
         self.run_install(vmid, creds)               # a no-op in the guest when it is already installed
+        try:
+            self.fetch_registry_icons(vmid)            # best effort: a registry without icons still works
+        except (KasmSetupError, OSError):
+            pass
         state = self._write_record(vmid=vmid, kasm_version=manifest.get("kasm_version"), base_sha256=manifest.get("sha256"), installed=True,
                                    layout=LAYOUT, mode=mode, dehydrated=False, **size)
         return {**state, "created": created, "url": self.address(vmid)}

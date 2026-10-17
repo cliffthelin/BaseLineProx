@@ -183,3 +183,11 @@ def test_the_registry_files_travel_with_the_base_into_the_offline_cache(tmp_path
     other = _base(tmp_path / "x")
     offline_cache.carry_kasm_base(other, bare)
     assert not (bare / "kasm" / "registry").exists()                                                # no registry in the base: none invented
+
+
+def test_the_host_stages_the_registry_module_and_it_needs_no_yaml_unless_building():
+    assert '"$SRC/baseline/lib/kasm_registry.py"' in PROVISION
+    import subprocess, sys
+    probe = "import sys; sys.modules['yaml'] = None; import kasm_registry as r; r.icon_names({'workspaces': []}); print('ok')"
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, cwd=str(REPO / "baseline/lib"))
+    assert out.stdout.strip() == "ok", out.stderr                                         # importing it and listing icons works with no PyYAML (the host)

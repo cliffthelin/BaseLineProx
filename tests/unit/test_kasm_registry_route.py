@@ -72,3 +72,30 @@ def test_a_missing_link_or_broken_file_is_a_plain_not_found(registry, tmp_path):
         assert get(empty, "/kasm-registry/versions.txt")[0] == 404                                 # no registry carried: not found
     finally:
         empty.close()
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"icon"
+
+
+def test_a_registry_icon_is_served_by_its_exact_name_without_a_login(registry, tmp_path):
+    icons = tmp_path / "icons"
+    icons.mkdir()
+    (icons / "chrome.png").write_bytes(PNG)
+    (icons / "secret.txt").write_text("private")
+    registry.server.deps["kasm_registry_icons_dir"] = str(icons)
+    conn = http.client.HTTPConnection("127.0.0.1", registry.port, timeout=10)
+    conn.request("GET", "/kasm-registry/1.1/icons/chrome.png")
+    r = conn.getresponse()
+    assert (r.status, r.getheader("Content-Type"), r.read()) == (200, "image/png", PNG)
+    for path in ("/kasm-registry/1.1/icons/secret.txt", "/kasm-registry/1.1/icons/../secret.txt", "/kasm-registry/1.1/icons/missing.png", "/kasm-registry/1.1/icons/", "/kasm-registry/1.1/icons/Chrome.png"):
+        assert get(registry, path)[0] in (303, 401, 404) and "private" not in get(registry, path)[3], path
+
+
+def test_an_icon_that_is_a_link_is_never_followed(registry, tmp_path):
+    icons = tmp_path / "icons2"
+    icons.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(PNG)
+    (icons / "link.png").symlink_to(outside)
+    registry.server.deps["kasm_registry_icons_dir"] = str(icons)
+    assert get(registry, "/kasm-registry/1.1/icons/link.png")[0] == 404
