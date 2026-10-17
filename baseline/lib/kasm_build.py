@@ -44,6 +44,15 @@ class KasmBuildError(RuntimeError):
     pass
 
 
+def workspaces_from_list(entries) -> tuple:
+    """The workspaces the base carries: the supported-OS list's Kasm entry when it names them (DR262), else this module's default set. A change here is a change to
+    what the base holds, so it takes effect when the base is rebuilt."""
+    for entry in entries or []:
+        if entry.get("kind") == "kasm" and entry.get("workspaces"):
+            return tuple(dict(w) for w in entry["workspaces"])
+    return WORKSPACES
+
+
 def image_ref(name: str, tag: str = IMAGE_TAG) -> str:
     return f"kasmweb/{name}:{tag}"
 

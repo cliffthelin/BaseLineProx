@@ -270,3 +270,10 @@ def test_the_registry_plugins_are_packed_in_the_base_and_handed_to_the_offline_i
     assert "plugins.tar.gz" in prepare and "docker plugin rm" in prepare   # packed, then removed: the base keeps no install state
     install = kb.guest_files()["/usr/local/sbin/baseline-kasm-install"][1]
     assert "--offline-logger-plugin" in install and "--offline-network-plugin" in install
+
+
+def test_the_lists_kasm_entry_chooses_the_workspaces_the_base_carries_else_the_default_set():
+    chosen = [{"key": "browser", "image": "chrome", "friendly_name": "Browser", "persistent": True}]
+    assert kb.workspaces_from_list([{"kind": "vm"}, {"kind": "kasm", "workspaces": chosen}]) == tuple(chosen)
+    assert kb.workspaces_from_list([{"kind": "kasm", "workspaces": None}]) == kb.WORKSPACES and kb.workspaces_from_list([]) == kb.WORKSPACES
+    assert kb.carried_images(kb.workspaces_from_list([{"kind": "kasm", "workspaces": chosen}])) == ["kasmweb/chrome:1.19.0"]    # a smaller list is a smaller base

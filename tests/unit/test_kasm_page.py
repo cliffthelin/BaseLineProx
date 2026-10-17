@@ -88,3 +88,13 @@ def test_the_page_is_linked_from_navigation_and_home():
         assert 'href="/workspaces"' in req(case, "GET", "/hardware")[2] and 'href="/workspaces"' in req(case, "GET", "/home")[2]
     finally:
         case.close()
+
+
+def test_the_page_lists_the_workspaces_the_base_carries_when_it_says_so():
+    case, _ = make(Machine({"present": False, "installed": False, "workspaces": [{"friendly_name": "My Browser", "persistent": True}, {"friendly_name": "Scratch", "persistent": False}]}))
+    try:
+        page = req(case, "GET", "/workspaces")[2]
+        assert "My Browser" in page and "its profile is kept" in page and "Scratch" in page and "nothing is kept" in page
+        assert "Development desktop" not in page                                    # the default set is shown only when the base does not say
+    finally:
+        case.close()

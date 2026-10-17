@@ -44,3 +44,30 @@ def test_qubes_fydeos_and_bazzite_are_recognised_and_marked_helper_not_native():
     assert (rows["Qubes-R4.3.2-x86_64.iso"]["os"], rows["FydeOS-VMWare-v23.0-Preview2-x86_64-io.ova"]["os"], rows["bazzite-stable-amd64.iso"]["os"]) == ("qubes", "chromeos", "fedora")
     assert rows["omarchy-4.0.4.iso"]["os"] == "arch"
     assert all(set(r["apps"].values()) == {"helper"} for r in rows.values())
+
+
+LISTING = [
+    {"id": "debian", "name": "Debian 13", "kind": "vm", "iso": "debian-13.7.0-amd64-DVD-1.iso", "apps": ["vscode", "chrome"], "notes": ""},
+    {"id": "qubes", "name": "Qubes OS 4.3", "kind": "vm", "iso": "Qubes-R4.3.2-x86_64.iso", "apps": list(env.APPS), "notes": ""},
+    {"id": "bazzite", "name": "Bazzite", "kind": "vm", "iso": "bazzite-stable-amd64.iso", "apps": [], "notes": ""},
+    {"id": "kasm-workspaces", "name": "Kasm", "kind": "kasm", "iso": None, "apps": [], "notes": ""},
+]
+
+
+def test_the_listed_catalogue_follows_the_list_not_the_images_on_the_drive():
+    rows = env.listed_catalogue(LISTING, ["debian-13.7.0-amd64-DVD-1.iso", "Qubes-R4.3.2-x86_64.iso", "something-else.iso"], [])
+    assert [r["id"] for r in rows] == ["debian", "qubes", "bazzite"]                      # in the list's order; Kasm is not a guest OS; the stray image is not shown
+    assert rows[0]["apps"] == {"vscode": "native", "spotify": "not planned", "chrome": "native", "chatgpt": "not planned", "claude": "not planned"}
+    assert set(rows[1]["apps"].values()) == {"helper"} and set(rows[2]["apps"].values()) == {"not planned"}
+
+
+def test_an_image_the_list_names_but_the_drive_lacks_is_marked_missing_not_hidden():
+    rows = env.listed_catalogue(LISTING, ["debian-13.7.0-amd64-DVD-1.iso"], [])
+    assert [r["image"] for r in rows] == ["carried", "missing", "missing"]
+    page = env.render(rows).decode()
+    assert "image missing" in page and "not planned" in page and "Debian 13" in page
+
+
+def test_a_listed_os_is_built_when_a_vm_of_that_id_or_family_exists():
+    rows = env.listed_catalogue(LISTING, [], [{"name": "debian-13-dev"}])
+    assert rows[0]["state"] == "built" and rows[0]["vm"] == "debian-13-dev" and rows[1]["state"] == "not built"

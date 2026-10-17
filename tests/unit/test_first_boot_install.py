@@ -498,3 +498,48 @@ def test_the_installer_cache_storage_is_named_for_the_volume_and_the_old_name_is
     assert os_isos.ISO_STORAGE == "installer-cache"
     assert commands[0] == ["pvesm", "remove", "baseline-isos"]
     assert commands[1][:4] == ["pvesm", "add", "dir", "installer-cache"] and str(root) in commands[1]
+
+
+GOOD_LIST = '{"os": [{"id": "debian", "name": "Debian 13", "iso": "debian.iso"}]}'
+
+
+def _os_list_step(tmp_path, monkeypatch, *, source_text=None, host_text=None):
+    installer = _installer()
+    marks = []
+    monkeypatch.setattr(installer, "mark", lambda step, **facts: marks.append((step, facts)))
+    monkeypatch.setattr(installer, "log", lambda *a, **k: None)
+    source, dest = tmp_path / "media" / "supported-os.json", tmp_path / "USER_ADMIN" / "config" / "supported-os.json"
+    if source_text is not None:
+        source.parent.mkdir(parents=True)
+        source.write_text(source_text)
+    if host_text is not None:
+        dest.parent.mkdir(parents=True)
+        dest.write_text(host_text)
+    installer.step_os_list(source=source, dest=dest)
+    return dest, marks
+
+
+def test_the_list_on_the_installer_media_is_carried_to_user_admin(tmp_path, monkeypatch):
+    dest, marks = _os_list_step(tmp_path, monkeypatch, source_text=GOOD_LIST)
+    assert dest.read_text() == GOOD_LIST and marks == [("os-list", {"result": "carried", "entries": 1})]
+    assert not dest.with_name(dest.name + ".part").exists()
+
+
+def test_a_list_the_host_already_has_is_never_overwritten(tmp_path, monkeypatch):
+    dest, marks = _os_list_step(tmp_path, monkeypatch, source_text=GOOD_LIST, host_text='{"os": []}')
+    assert dest.read_text() == '{"os": []}' and marks[0][1]["result"] == "kept the host's own"
+
+
+def test_a_bad_list_is_not_carried_and_does_not_stop_the_installation(tmp_path, monkeypatch):
+    dest, marks = _os_list_step(tmp_path, monkeypatch, source_text='{"os": [{"id": "Bad Id"}]}')
+    assert not dest.exists() and marks[0][1]["result"].startswith("refused")
+
+
+def test_no_list_on_the_media_is_recorded_not_an_error(tmp_path, monkeypatch):
+    dest, marks = _os_list_step(tmp_path, monkeypatch)
+    assert not dest.exists() and marks[0][1]["result"] == "none carried"
+
+
+def test_the_list_step_runs_before_provisioning_and_the_dev_user_stays_last():
+    names = [n for n, _ in _installer().STEPS]
+    assert names.index("os-isos") < names.index("os-list") < names.index("provision") and names[-1] == "dev-user"

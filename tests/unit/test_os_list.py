@@ -16,7 +16,7 @@ def listing(*rows):
 
 def test_a_good_list_is_read_with_defaults_filled_in():
     rows = os_list.parse(listing({"id": "fedora", "name": "Fedora"}, {"id": "kasm", "name": "Kasm", "kind": "kasm", "iso": "x.iso"}))
-    assert rows[0] == {"id": "fedora", "name": "Fedora", "kind": "vm", "iso": None, "apps": list(os_list.APPS), "notes": ""} and rows[1]["kind"] == "kasm"
+    assert rows[0] == {"id": "fedora", "name": "Fedora", "kind": "vm", "iso": None, "apps": list(os_list.APPS), "workspaces": None, "notes": ""} and rows[1]["kind"] == "kasm"
 
 
 @pytest.mark.parametrize("bad,why", [
@@ -80,3 +80,21 @@ def test_an_unknown_or_repeated_app_is_refused():
 def test_the_apps_are_the_five_the_environments_catalogue_knows():
     import environments
     assert tuple(os_list.APPS) == tuple(environments.APPS)
+
+
+WS = {"key": "browser", "image": "chrome", "friendly_name": "Browser", "persistent": True}
+
+
+def test_a_kasm_entry_may_name_its_workspaces_and_others_may_not():
+    rows = os_list.parse(listing({"id": "k", "name": "K", "kind": "kasm", "workspaces": [WS]}))
+    assert rows[0]["workspaces"] == [WS]
+    assert os_list.parse(listing({"id": "k", "name": "K", "kind": "kasm"}))[0]["workspaces"] is None
+    with pytest.raises(os_list.OsListError, match="only a kasm entry"):
+        os_list.parse(listing({"id": "a", "name": "A", "workspaces": [WS]}))
+
+
+@pytest.mark.parametrize("bad", [[], [{"key": "X", "image": "chrome", "friendly_name": "B", "persistent": True}],
+                                 [dict(WS, persistent="yes")], [WS, dict(WS, friendly_name="Other")], [WS, dict(WS, key="two")], [dict(WS, friendly_name="")]])
+def test_bad_workspace_definitions_are_refused(bad):
+    with pytest.raises(os_list.OsListError):
+        os_list.parse(listing({"id": "k", "name": "K", "kind": "kasm", "workspaces": bad}))

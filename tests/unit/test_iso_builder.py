@@ -277,3 +277,20 @@ def test_real_source_staging_carries_root_platform_documentation(tmp_path):
     assert (staged / "AGENTS.md").read_text(encoding="utf-8") == "Build and safety instructions"
     assert (staged / "tools" / "content.txt").read_text(encoding="utf-8") == "tools"
     assert (staged / "docs" / "content.txt").read_text(encoding="utf-8") == "docs"
+
+
+def test_the_private_supported_os_list_rides_on_the_media_next_to_the_source_when_there_is_one(tmp_path):
+    source = tmp_path / "repo"
+    for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
+        (source / name).mkdir(parents=True)
+    (source / "README.md").write_text("x\n")
+    (source / "AGENTS.md").write_text("x\n")
+    staging = tmp_path / "with"
+    ib.stage_baseline_source(ib.RealIsoBuilderRunner(), repo_root=source, staging_dir=staging)
+    assert not (staging / "config").exists()                                             # no list: nothing is invented
+    (source / "config/local").mkdir(parents=True)
+    (source / "config/local/supported-os.json").write_text('{"os": []}')
+    (source / "config/local/other-private.txt").write_text("not carried")
+    staging = tmp_path / "without"
+    ib.stage_baseline_source(ib.RealIsoBuilderRunner(), repo_root=source, staging_dir=staging)
+    assert (staging / "config/supported-os.json").read_text() == '{"os": []}' and not (staging / "config/other-private.txt").exists()

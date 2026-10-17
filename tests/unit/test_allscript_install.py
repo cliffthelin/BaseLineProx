@@ -275,3 +275,29 @@ def test_the_rehearsal_vm_disk_is_small_and_leaves_room_for_the_baseline_volumes
     assert 32 * 2**30 <= allscript.REHEARSAL_DISK_BYTES <= 128 * 2**30 < allscript.SIZE
     used = (allscript.REHEARSAL_LVM["lvm_maxroot"] + allscript.REHEARSAL_LVM["lvm_maxvz"] + allscript.REHEARSAL_LVM["lvm_swapsize"]) * 2**30
     assert allscript.REHEARSAL_DISK_BYTES - used >= 24 * 2**30
+
+
+def test_a_cache_without_the_kasm_base_is_stale_only_when_one_is_wanted(tmp_path):
+    cache = tmp_path / "cache"
+    (cache / "apps").mkdir(parents=True)
+    (cache / "MANIFEST.json").write_text("{}")
+    assert allscript.cache_status(cache, None, kasm_base=None) == "complete"
+    assert allscript.cache_status(cache, None, kasm_base=tmp_path / "base") == "stale"
+    (cache / "kasm").mkdir()
+    (cache / "kasm" / "KASM.json").write_text("{}")
+    assert allscript.cache_status(cache, None, kasm_base=tmp_path / "base") == "complete"
+
+
+def test_the_supported_os_list_chooses_the_images_offered_including_an_ova(monkeypatch):
+    available = ["a.iso", "b.iso", "f.ova", "extra.iso", "proxmox-ve-source.iso"]
+    listing = [{"iso": "b.iso"}, {"iso": "f.ova"}, {"iso": None}, {"iso": "gone.iso"}]
+    listed = allscript.listed_os_images(available, listing)
+    assert listed == ["b.iso", "f.ova"]                                                     # the list's order; the one that is not on hand is reported, not offered
+    assert allscript.select_os_isos([], available, rehearsal=False, listed=listed) == ["b.iso", "f.ova"]
+
+
+def test_an_explicit_request_and_the_rehearsal_default_still_win_over_the_list():
+    available = ["a.iso", "b.iso"]
+    assert allscript.select_os_isos(["a.iso"], available, rehearsal=False, listed=["b.iso"]) == ["a.iso"]
+    assert allscript.select_os_isos([], available, rehearsal=True, sizes={"a.iso": 9, "b.iso": 1}, listed=["a.iso"]) == ["b.iso"]
+    assert allscript.select_os_isos([], available, rehearsal=False, listed=[]) == ["a.iso", "b.iso"]       # no list: every .iso, as before

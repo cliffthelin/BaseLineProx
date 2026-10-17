@@ -45,3 +45,17 @@ database: `wireless-regdb`; CPU microcode: `amd64-microcode`/`intel-microcode`.
 ## Not done
 Rebuilding the offline cache and the installer ISO with the new images and packages; reading the Latitude's real hardware; wiring the list into the launcher and the installer's image
 offer; the per-OS application lists beyond the five-for-all default; the Qubes-specific handling (it is Xen-based and needs its own install path); FydeOS is a preview OVA.
+
+## Update (same day): Baseline owns the list; Proxmox and Kasm read it
+Operator agreed to the split proposed after DR262 was first written.
+- **Carried by the installer:** the installer ISO's staging copies the private working list to `config/supported-os.json` next to the source; first boot's new `os-list` step copies it to
+  `/mnt/USER_ADMIN/config/supported-os.json` (validated first; a list the host already has is never overwritten; a bad or absent list never stops the install).
+  It travels on the ISO rather than in the offline cache so a list change does not mean rebuilding the 19 GB cache.
+- **Which images the installer offers** follow the list (in its order, FydeOS's OVA included; an image the list names but the cache lacks is reported). An explicit `--os-iso`
+  and the rehearsal's smallest-image default still win.
+- **Proxmox side:** the Environments page is built from the list's VM entries (their apps, "not planned" for the rest, "image missing" when the cache lacks the file); with no usable
+  list it shows every carried image as before and says why.
+- **Kasm side:** a Kasm entry may name its workspaces (`workspaces: [{key, image, friendly_name, persistent}]`); `baseline-build-kasm-base` carries exactly those, and the Workspaces page
+  shows what the carried base's manifest says it holds. A different set means rebuilding the base (the images are preloaded), not editing it live.
+- **`baseline-allscript-install --kasm-base DIR`** makes the cache carry the base, and treats a cache without it as stale; the rehearsal VM is now 16 GiB with a 128 GiB sparse disk so Kasm's VM
+  fits inside it.

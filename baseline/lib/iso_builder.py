@@ -182,6 +182,12 @@ def stage_baseline_source(runner: IsoBuilderRunner, *, repo_root: Path, staging_
     ignore_generated = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".pytest_cache", ".mypy_cache")
     for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
         runner.copytree(repo_root / name, staging_dir / name, ignore=ignore_generated)
+    # The operator's supported-OS list is private (git-ignored, DR261), so it is not part of the repository tree above: the installer media carries a copy of
+    # the working one next to the source, and first boot puts it on USER_ADMIN.
+    listing = repo_root / "config" / "local" / "supported-os.json"
+    if listing.is_file():
+        runner.makedirs(staging_dir / "config")
+        runner.copy_file(listing, staging_dir / "config" / "supported-os.json")
     runner.copy_file(repo_root / "README.md", staging_dir / "README.md")
     runner.copy_file(repo_root / "AGENTS.md", staging_dir / "AGENTS.md")
 

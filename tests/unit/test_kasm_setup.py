@@ -280,7 +280,7 @@ def test_an_installed_vm_is_only_made_sure_of_not_rechecked_or_reinstalled(world
 
 def test_status_reports_without_changing_anything(world):
     setup, fake = build(world)
-    assert setup.status() == {"present": False, "installed": False, "recorded_vmid": None}
+    assert setup.status() == {"present": False, "installed": False, "recorded_vmid": None, "workspaces": None}
     setup.setup()
     fake.state = "running"
     now = setup.status()
@@ -304,3 +304,11 @@ def test_a_volume_that_cannot_grow_stops_the_build_with_its_reason(world):
     with pytest.raises(ks.KasmSetupError, match="APPDATA_ADMIN cannot be given the room.*no free space"):
         setup.setup()
     assert not fake.named("qm", "create") and not fake.named("qemu-img")
+
+
+def test_status_reports_the_workspaces_the_carried_base_holds(world):
+    (world.base_dir / "KASM.json").write_text(json.dumps({"workspaces": [{"friendly_name": "Browser", "persistent": True}], "holds_install_state_or_secrets": False}))
+    setup, _ = build(world)
+    assert setup.status()["workspaces"] == [{"friendly_name": "Browser", "persistent": True}]
+    (world.base_dir / "KASM.json").unlink()
+    assert setup.status()["workspaces"] is None

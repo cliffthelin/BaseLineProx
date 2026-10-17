@@ -24,6 +24,32 @@ class OsListError(ValueError):
     pass
 
 
+_KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+
+
+def _workspaces(ident, raw, kind):
+    """A Kasm entry may name the workspaces its base carries: [{key, image, friendly_name, persistent}]. None means the build's own default set."""
+    if raw is None:
+        return None
+    if kind != "kasm":
+        raise OsListError(f"{ident}: only a kasm entry has workspaces")
+    if not isinstance(raw, list) or not raw:
+        raise OsListError(f"{ident}: workspaces must be a non-empty list")
+    out, keys, names = [], set(), set()
+    for number, item in enumerate(raw, 1):
+        if not isinstance(item, dict) or not _KEY.fullmatch(str(item.get("key", ""))) or not _KEY.fullmatch(str(item.get("image", ""))):
+            raise OsListError(f"{ident}: workspace {number} needs a key and an image (lowercase letters, digits and dashes)")
+        friendly = item.get("friendly_name")
+        if not isinstance(friendly, str) or not friendly.strip() or len(friendly) > 60 or not isinstance(item.get("persistent"), bool):
+            raise OsListError(f"{ident}: workspace {item['key']} needs a friendly_name (up to 60 characters) and persistent true or false")
+        if item["key"] in keys or friendly in names:
+            raise OsListError(f"{ident}: workspace keys and names must be unique")
+        keys.add(item["key"])
+        names.add(friendly)
+        out.append({"key": item["key"], "image": item["image"], "friendly_name": friendly.strip(), "persistent": item["persistent"]})
+    return out
+
+
 def _entry(raw, position: int) -> dict:
     if not isinstance(raw, dict):
         raise OsListError(f"entry {position + 1} is not an object")
@@ -41,10 +67,11 @@ def _entry(raw, position: int) -> dict:
     apps = raw.get("apps", list(APPS) if kind != "kasm" else [])
     if not isinstance(apps, list) or any(a not in APPS for a in apps) or len(set(apps)) != len(apps):
         raise OsListError(f"{ident}: apps must be a list without repeats from {', '.join(APPS)}")
+    workspaces = _workspaces(ident, raw.get("workspaces"), kind)
     notes = raw.get("notes", "")
     if not isinstance(notes, str) or len(notes) > 300:
         raise OsListError(f"{ident}: notes must be text up to 300 characters")
-    return {"id": ident, "name": name.strip(), "kind": kind, "iso": iso, "apps": apps, "notes": notes}
+    return {"id": ident, "name": name.strip(), "kind": kind, "iso": iso, "apps": apps, "workspaces": workspaces, "notes": notes}
 
 
 def parse(text: str) -> list:

@@ -2175,16 +2175,24 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
 
         if path == "/environments":
             import environments
+            import os_list
+            notes = b""
             try:
                 host = _vm_host_for(deps)
                 isos = [i["name"] if isinstance(i, dict) else str(i)
                         for i in vm_page.available_isos(host, deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)]
                 vms = host.list_vms()
             except (vh.VmError, OSError, ValueError) as exc:
-                return self._html_response(200, _with_nav(environments.render([]).replace(
-                    b"<table>", ("<p role='alert'>Inventory unavailable: " + html.escape(str(exc))).encode() + b"</p><table>"), path))
-            return self._html_response(200, _with_nav(environments.render(environments.catalogue(
-                isos, [{"name": getattr(v, "name", None) or (v.get("name") if isinstance(v, dict) else None)} for v in vms])), path))
+                isos, vms = [], []
+                notes += ("<p role='alert'>Inventory unavailable: " + html.escape(str(exc)) + "</p>").encode()
+            vm_rows = [{"name": getattr(v, "name", None) or (v.get("name") if isinstance(v, dict) else None)} for v in vms]
+            try:
+                listing = os_list.load(deps.get("os_list_path")) if deps.get("os_list_path") is not None else os_list.load()
+            except (os_list.OsListError, OSError) as exc:
+                listing = []
+                notes += ("<p role='alert'>The supported-OS list could not be used (" + html.escape(str(exc)) + "); showing every carried image instead.</p>").encode()
+            rows = environments.listed_catalogue(listing, isos, vm_rows) if any(e["kind"] != "kasm" for e in listing) else environments.catalogue(isos, vm_rows)
+            return self._html_response(200, _with_nav(environments.render(rows).replace(b"<table>", notes + b"<table>", 1), path))
 
         if path == "/shell":
             import chat_page

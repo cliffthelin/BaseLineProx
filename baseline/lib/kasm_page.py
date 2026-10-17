@@ -33,7 +33,12 @@ def render(status: dict, notice: str = "") -> bytes:
     build = ('<form method="post" action="/workspaces/setup"><button type="submit">Set up Kasm now</button></form>'
              "<p>Builds the VM from the base this installer carries, then installs Kasm in it. It also happens on its own once the machine is configured.</p>"
              ) if not status.get("installed") else ""
-    items = "".join(f"<li><b>{html.escape(name)}</b>: {html.escape(what)}</li>" for name, what in WORKSPACES)
+    carried = status.get("workspaces")
+    if isinstance(carried, list) and carried:        # what the base on this machine really holds (it follows your supported-OS list)
+        items = "".join(f"<li><b>{html.escape(str(w.get('friendly_name', '')))}</b>: "
+                        f"{'its profile is kept' if w.get('persistent') else 'nothing is kept'}</li>" for w in carried)
+    else:
+        items = "".join(f"<li><b>{html.escape(name)}</b>: {html.escape(what)}</li>" for name, what in WORKSPACES)
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Workspaces</title></head><body><h1>Workspaces (Kasm)</h1>" + note
             + f"<p>State: <b>{html.escape(label)}</b>. {html.escape(detail)}</p>{opener}{build}"
             + f"<h2>What you can open</h2><ul>{items}</ul>"

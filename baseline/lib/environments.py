@@ -49,15 +49,42 @@ def catalogue(isos, vms) -> list:
     return rows
 
 
+def listed_catalogue(listing, isos, vms) -> list:
+    """The catalogue built from the operator's supported-OS list (DR261/262) instead of from whatever images happen to be on the drive: one row per VM entry, in the
+    list's order, with the applications that entry asks for (others are "not planned") and "image missing" when the cache does not carry its file. Kasm entries are
+    the workspaces component, not a guest OS, so they are not rows here."""
+    carried = set(isos)
+    names = {vm.get("name"): vm for vm in vms}
+    rows = []
+    for entry in listing:
+        if entry["kind"] == "kasm":
+            continue
+        iso = entry.get("iso") or ""
+        family, release = classify(iso) if iso else ("unknown", "")
+        level = "native" if (family, release) in NATIVE else "none" if family == "rescue" else "helper"
+        built = next((n for n in names if n and (entry["id"] in n.lower() or (family != "unknown" and family in n.lower() and (not release or release in n)))), None)
+        rows.append({"iso": iso or entry["name"], "id": entry["id"], "name": entry["name"], "os": family, "release": release,
+                     "apps": {a: (level if a in entry["apps"] else "not planned") for a in APPS},
+                     "image": "carried" if iso in carried else ("missing" if iso else "none listed"),
+                     "state": "built" if built else "not built", "vm": built})
+    return rows
+
+
+def _image_cell(row) -> str:
+    if "name" not in row:
+        return html.escape(row["iso"])
+    return f"<b>{html.escape(row['name'])}</b><br><small>{html.escape(row['iso'])}: image {html.escape(row['image'])}</small>"
+
+
 def render(rows) -> bytes:
     head = "".join(f"<th>{html.escape(a)}</th>" for a in APPS)
     body = "".join(
-        f"<tr><td>{html.escape(r['iso'])}</td><td>{html.escape(r['os'])} {html.escape(r['release'])}</td>"
+        f"<tr><td>{_image_cell(r)}</td><td>{html.escape(r['os'])} {html.escape(r['release'])}</td>"
         + "".join(f"<td>{html.escape(r['apps'][a])}</td>" for a in APPS)
         + f"<td>{html.escape(r['state'])}{(' (' + html.escape(r['vm']) + ')') if r['vm'] else ''}</td></tr>" for r in rows)
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Environments</title></head><body><h1>Environments</h1>"
             "<p>Every OS image this drive carries, against the five guest applications. <b>native</b>: the application bundle supports "
-            "the platform; <b>helper</b>: needs an adapter that is not built yet; <b>none</b>: nothing of ours runs there. "
+            "the platform; <b>helper</b>: needs an adapter that is not built yet; <b>none</b>: nothing of ours runs there; <b>not planned</b>: your list does not ask for it on that OS. "
             "No environment has the applications set up yet; create an environment from <a href='/vms'>Virtual machines</a>.</p>"
             f"<table><thead><tr><th>Image</th><th>OS</th>{head}<th>Environment</th></tr></thead><tbody>{body}</tbody></table>"
             "</body></html>").encode()

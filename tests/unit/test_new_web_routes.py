@@ -262,6 +262,17 @@ def test_the_environments_page_lists_the_images_and_needs_a_session(case):
     assert status == 200 and "five guest applications" in page and "baseline-nav" in page
 
 
+def test_the_environments_page_follows_the_supported_os_list_when_there_is_one(case):
+    listing = case.tmp / "supported-os.json"
+    listing.write_text('{"os": [{"id": "qubes", "name": "Qubes OS 4.3", "iso": "Qubes-R4.3.2-x86_64.iso", "apps": ["chrome"]}]}')
+    case.server.deps["os_list_path"] = str(listing)             # type: ignore[attr-defined]
+    page = req(case, "GET", "/environments")[2]
+    assert "Qubes OS 4.3" in page and "image missing" in page and "not planned" in page
+    listing.write_text("not json")
+    page = req(case, "GET", "/environments")[2]
+    assert "could not be used" in page and "five guest applications" in page             # a bad list falls back to the carried images, with the reason
+
+
 # --- Two-factor setup -------------------------------------------------------------------------------------------------------------
 
 def test_two_factor_is_set_up_only_after_the_authenticator_proves_itself(case):
