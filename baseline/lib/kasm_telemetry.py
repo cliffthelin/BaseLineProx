@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS events (ts REAL NOT NULL, source TEXT NOT NULL, sever
 CREATE INDEX IF NOT EXISTS idx_events ON events (fingerprint, ts);
 CREATE TABLE IF NOT EXISTS setting_changes (ts REAL NOT NULL, name TEXT NOT NULL, old_value TEXT, new_value TEXT, secret INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_changes ON setting_changes (name, ts);
+CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS launches (ts REAL NOT NULL, image TEXT NOT NULL, total INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_launches ON launches (image, ts);
 """
@@ -53,7 +54,6 @@ cores=$(nproc); echo "M cores $cores"; echo "M load1_per_core $(awk -v c="$cores
 for m in / /opt/kasm /mnt/kasm_profiles; do
   mountpoint -q "$m" && echo "M disk_$(echo "$m" | tr '/' '_' | sed 's/^_//; s/^$/root/')_used_pct $(df -P "$m" | awk 'NR==2{gsub("%","",$5); print $5}')"
 done
-echo "M disk_root_used_pct $(df -P / | awk 'NR==2{gsub("%","",$5); print $5}')"
 systemctl --failed --no-legend --plain 2>/dev/null | awk '{print "E error service_failed " $1}'
 if command -v docker >/dev/null; then
   docker ps -a --format '{{.Names}}' 2>/dev/null | while read -r c; do
@@ -66,8 +66,11 @@ for f in /opt/kasm/current/log/*_json.log; do
 done
 '''
 
-_REDACT = [(re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key|authorization|bearer)\"?\s*[:=]\s*\"?[^\s\",;}]+"), r"\1=<redacted>"),
-           (re.compile(r"\b[A-Za-z0-9+/_=-]{28,}\b"), "<redacted>"),
+_NAME = r"(?:password|passwd|secret|token|api[_-]?key|authorization|private[_-]?key)"
+_REDACT = [(re.compile(r'(?i)("' + _NAME + r'"\s*:\s*")[^"]*(")'), r"\1<redacted>\2"),             # "password": "value" in a JSON line: the value goes, the words stay
+           (re.compile(r"(?i)\b(" + _NAME + r")=[^\s&\"',;}]+"), r"\1=<redacted>"),                   # password=value
+           (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer <redacted>"),
+           (re.compile(r"\b[A-Za-z0-9+/_=-]{28,}\b"), "<redacted>"),                                  # anything that looks like a token or key
            (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*"), "<redacted key>")]
 
 
@@ -83,6 +86,21 @@ def fingerprint(source: str, message: str) -> str:
     return hashlib.sha1(f"{source}|{re.sub(chr(32) + '+', chr(32), generic).strip()}".encode()).hexdigest()[:12]
 
 
+def _kasm_message(raw: str) -> str:
+    """Kasm's structured log line reduced to what happened: the function and the message. Its other fields (request address, user agent, token lifetimes ...) are not kept."""
+    import json as _json
+    try:
+        entry = _json.loads(raw)
+    except ValueError:
+        return raw
+    if not isinstance(entry, dict):
+        return raw
+    message = entry.get("message", "")
+    message = " ".join(str(m) for m in message) if isinstance(message, list) else str(message)
+    where = entry.get("funcName") or entry.get("name") or ""
+    return f"{where}: {message}".strip(": ").strip()
+
+
 def parse_probe(output: str) -> tuple:
     """(metrics {name: float}, events [{severity, source, message}]) from the probe's lines; anything else is ignored."""
     metrics, events = {}, []
@@ -94,7 +112,8 @@ def parse_probe(output: str) -> tuple:
             except ValueError:
                 continue
         elif parts[0] == "E" and len(parts) == 4 and parts[1] in SEVERITIES:
-            events.append({"severity": parts[1], "source": parts[2], "message": redact(parts[3][:300])})
+            text = _kasm_message(parts[3]) if parts[2].startswith("kasm:") and parts[3].lstrip().startswith("{") else parts[3]
+            events.append({"severity": parts[1], "source": parts[2], "message": redact(text[:300])})
     return metrics, events
 
 
@@ -121,6 +140,8 @@ def record_settings(conn, previous: dict, current: dict, secret_names=(), now=No
         if name in previous and str(old) == str(new):
             continue
         secret = name in secret_names
+        if secret and name in previous and previous[name] == "<secret>":
+            continue                                    # a secret is noted once; its value is never seen, so there is nothing to compare
         row = (now, name, None if secret else (None if old is None else str(old)), None if secret else str(new), 1 if secret else 0)
         conn.execute("INSERT INTO setting_changes VALUES (?,?,?,?,?)", row)
         stored.append({"name": name, "old": row[2], "new": row[3], "secret": secret})
@@ -132,6 +153,79 @@ def prune(conn, older_than: float):
     for table in ("samples", "events", "launches"):
         conn.execute(f"DELETE FROM {table} WHERE ts < ?", (older_than,))
     conn.commit()
+
+
+# ---- Kasm's own records, read the way Kasm offers them --------------------------------------------------------------------------------
+# One row per workspace image from Kasm's accounting (a record per session): how many sessions, hours used, and how many ended in a failure. No user name or address is read.
+ACCOUNTING_SQL = ("select coalesce(image_friendly_name, image_name, '?'), count(*), coalesce(round(sum(usage_hours)::numeric, 2), 0), "
+                  "count(*) filter (where destroy_reason ~* 'fail|error|crash') from accounting group by 1")
+
+# The settings, through Kasm's own admin API (the one its web UI uses), from INSIDE the VM; the admin password arrives on stdin and is never printed. A secret's value is dropped
+# in the VM, so it never even reaches the host.
+SETTINGS_SCRIPT = r'''#!/bin/bash
+# Reads one line (the admin password) from stdin. Prints one JSON array: [{name, value, secret}], with value null for a secret.
+set +x
+read -r pw
+token=$(jq -n --arg p "$pw" '{username:"admin@kasm.local",password:$p,project_id:""}' | curl -sk -X POST https://localhost/api/authenticate -H 'Content-Type: application/json' -d @- | jq -r '.token // empty')
+[ -n "$token" ] || exit 3
+jq -n --arg t "$token" '{token:$t,username:"admin@kasm.local"}' | curl -sk -X POST https://localhost/api/admin/get_settings -H 'Content-Type: application/json' -d @- \
+  | jq -c '[.settings[] | ((((.sanitize // false)|tostring|ascii_downcase)=="true") or (.value_type=="password")) as $s | {name: .name, secret: $s, value: (if $s then null else .value end)}]'
+'''
+
+
+def parse_accounting(output: str) -> list:
+    rows = []
+    for line in output.splitlines():
+        parts = line.split("|")
+        if len(parts) == 4:
+            try:
+                rows.append((parts[0].strip(), int(parts[1]), float(parts[2]), int(parts[3])))
+            except ValueError:
+                continue
+    return rows
+
+
+def record_accounting(conn, rows: list, now=None):
+    """Keep each image's running session total, and note a failure only when the total grew since the last look (so a failure is one event, not one per collection)."""
+    import json as _json
+    now = time.time() if now is None else now
+    record_launches(conn, {image: total for image, total, _h, _f in rows}, now=now)
+    for image, _total, hours, failures in rows:
+        key = f"failed_sessions:{image}"
+        previous = conn.execute("SELECT value FROM counters WHERE name=?", (key,)).fetchone()
+        if failures and (previous is None or failures > previous[0]):
+            grew = failures - (previous[0] if previous else 0)
+            conn.execute("INSERT INTO events VALUES (?,?,?,?,?)", (now, "workspace_failed", "warning", fingerprint("workspace_failed", image),
+                                                                    f"{image}: {grew} more session(s) ended in a failure ({failures} in all, {hours:g} hours used in all)"))
+        conn.execute("INSERT INTO counters VALUES (?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", (key, failures))
+    conn.commit()
+
+
+def parse_settings(text: str) -> tuple:
+    """({name: value} for the settings with a value, {names of secrets}) from the settings script's JSON."""
+    import json as _json
+    try:
+        rows = _json.loads(text.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {}, set()
+    values, secrets_ = {}, set()
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or "name" not in row:
+            continue
+        if row.get("secret"):
+            secrets_.add(row["name"])
+            values[row["name"]] = "<secret>"            # only so that a change of it can be noticed; recorded as a change without a value
+        elif row.get("value") is not None:
+            values[row["name"]] = str(row["value"])
+    return values, secrets_
+
+
+def latest_settings(conn) -> dict:
+    """The last value kept for each setting (a secret shows as the marker), so the next look can tell what changed."""
+    latest = {}
+    for name, new, secret in conn.execute("SELECT name, new_value, secret FROM setting_changes ORDER BY ts, rowid"):
+        latest[name] = "<secret>" if secret else new
+    return latest
 
 
 # ---- reports ---------------------------------------------------------------------------------------------------------------------------

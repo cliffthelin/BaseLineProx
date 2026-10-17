@@ -251,7 +251,7 @@ while IFS= read -r line; do
             [[ "$value" =~ ^[A-Za-z0-9]{{12,64}}$ ]] || {{ echo "$key must be 12 to 64 letters and digits" >&2; exit 2; }}
             secret[$key]="$value" ;;
         KASM_REGISTRY_URL)      # not a secret: the workspace registry Kasm is pointed at (Baseline's own, when it acts as one)
-            [[ "$value" =~ ^https?://[A-Za-z0-9.:\\[\\]-]+(/[A-Za-z0-9._~/-]*)?/$ ]] || {{ echo "KASM_REGISTRY_URL must be an http(s) address ending in a slash" >&2; exit 2; }}
+            [[ "$value" =~ ^https?://[][A-Za-z0-9.:-]+(/[A-Za-z0-9._~/-]*)?/$ ]] || {{ echo "KASM_REGISTRY_URL must be an http(s) address ending in a slash" >&2; exit 2; }}
             registry_url="$value" ;;
         *) echo "unexpected setting" >&2; exit 2 ;;
     esac

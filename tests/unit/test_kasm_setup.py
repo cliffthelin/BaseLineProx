@@ -65,6 +65,11 @@ class Fake:
             return 0, json.dumps([{"name": "lo", "ip-addresses": [{"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}]},
                                   {"name": "ens18", "ip-addresses": [{"ip-address": "192.168.1.50", "ip-address-type": "ipv4"}]}]), ""
         if head == ["qm", "guest"]:
+            if "Reads one line" in argv[-1]:                                                                 # the settings script (Kasm's admin API, inside the VM)
+                self.settings_stdin = data
+                return 0, json.dumps({"exited": 1, "exitcode": 0, "out-data": getattr(self, "settings_output", "")}), ""
+            if "from accounting" in argv[-1]:
+                return 0, json.dumps({"exited": 1, "exitcode": 0, "out-data": getattr(self, "accounting_output", "")}), ""
             if "Read-only." in argv[-1]:                                                                      # the telemetry probe
                 return 0, json.dumps({"exited": 1, "exitcode": 0, "out-data": getattr(self, "probe_output", "")}), ""
             code = self.install_exit if argv[-1] == "/usr/local/sbin/baseline-kasm-install" else 0          # only the installer itself can fail here
@@ -546,7 +551,8 @@ def test_telemetry_is_collected_from_the_running_vm_and_kept_and_reported(world)
     fake.state = "running"
     fake.probe_output = "M mem_avail_pct 5\nM memory_psi_some10 30\nE error service_failed docker.service\nE error container_oom kasm_api was killed for lack of memory\n"
     for _ in range(3):
-        assert setup.collect_telemetry(now=1_800_000_000.0 - 600 * _) == {"collected": True, "metrics": 2, "events": 2}
+        got = setup.collect_telemetry(now=1_800_000_000.0 - 600 * _)
+        assert (got["collected"], got["metrics"], got["events"]) == (True, 2, 2)
     report = setup.telemetry_report(now=1_800_000_000.0)
     memory = next(s for s in report["suggestions"] if s["id"] == "more-memory")
     assert memory["action"]["memory_mb"] == int(setup.read_record()["memory_mb"] * 1.5) // 512 * 512 and memory["severity"] == "error"
@@ -575,3 +581,51 @@ def test_nothing_is_collected_when_the_vm_is_not_running_or_does_not_answer(worl
 def test_the_report_is_empty_and_safe_with_no_history_or_no_vm(world):
     setup, _ = build(world)
     assert setup.telemetry_report() == {"suggestions": [], "errors": [], "setting_changes": [], "launches": {}}
+
+
+SETTINGS_JSON = '[{"name":"log_retention","secret":false,"value":"7"},{"name":"hec_token","secret":true,"value":null},{"name":"https_insecure","secret":false,"value":"True"}]'
+
+
+def test_settings_are_read_through_kasms_admin_api_with_the_password_on_stdin_and_changes_are_kept_with_their_values(world):
+    import kasm_telemetry as kt
+    setup, fake = installed(world)
+    fake.state = "running"
+    fake.probe_output = ""
+    fake.settings_output = SETTINGS_JSON
+    first = setup.collect_telemetry(now=1_800_000_000.0 - 3600)
+    assert first["setting_changes"] == 3                                                      # the first look: every setting is a first observation
+    assert fake.settings_stdin == (setup.vault.get("KASM_ADMIN_PASSWORD") + "\n").encode()
+    assert not [c for c in fake.calls if setup.vault.get("KASM_ADMIN_PASSWORD") in " ".join(c)]   # the password is on no command line
+    assert setup.collect_telemetry(now=1_800_000_000.0 - 1800)["setting_changes"] == 0         # nothing changed, nothing recorded (a secret is noted once)
+    fake.settings_output = SETTINGS_JSON.replace('"7"', '"14"')
+    assert setup.collect_telemetry(now=1_800_000_000.0)["setting_changes"] == 1
+    conn = setup.telemetry_db()
+    report = {r["name"]: r for r in kt.setting_report(conn, 0)}
+    assert (report["log_retention"]["last_old"], report["log_retention"]["last_new"], report["log_retention"]["changes"]) == ("7", "14", 2)
+    assert report["hec_token"]["secret"] and "<secret>" not in str(conn.execute("SELECT new_value FROM setting_changes WHERE name='hec_token'").fetchall())
+
+
+def test_a_sealed_vault_or_a_silent_kasm_just_skips_the_settings_look(world):
+    setup, fake = installed(world)
+    fake.state = "running"
+    fake.settings_output = ""                                                                  # Kasm did not answer
+    assert setup.collect_telemetry()["setting_changes"] is None
+    setup.vault.set_passphrase("a long enough passphrase")
+    fake.settings_output = SETTINGS_JSON
+    assert setup.collect_telemetry()["setting_changes"] is None                                # sealed, no passphrase given: skipped, not an error
+    assert setup.collect_telemetry(passphrase="a long enough passphrase")["setting_changes"] == 3
+
+
+def test_usage_and_failed_sessions_come_from_kasms_accounting_and_a_failure_is_one_event(world):
+    import kasm_telemetry as kt
+    setup, fake = installed(world)
+    fake.state = "running"
+    fake.accounting_output = "Chrome|12|3.50|0\nVS Code|3|1.00|2\n"
+    assert setup.collect_telemetry(now=1_800_000_000.0 - 7200)["usage_images"] == 2
+    setup.collect_telemetry(now=1_800_000_000.0 - 3600)                                         # the same totals again: no new failure event
+    fake.accounting_output = "Chrome|20|5.00|0\nVS Code|4|1.50|3\n"
+    setup.collect_telemetry(now=1_800_000_000.0)
+    conn = setup.telemetry_db()
+    failures = [r for r in kt.error_report(conn, 0) if r["source"] == "workspace_failed"]
+    assert failures[0]["count"] == 2 and "VS Code" in failures[0]["message"]                  # the first failure total, then the growth; the unchanged look added nothing
+    assert kt.launches_report(conn, 1_800_000_000.0 - 8000) == {"Chrome": 8, "VS Code": 1}

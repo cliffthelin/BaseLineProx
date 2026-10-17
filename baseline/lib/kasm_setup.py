@@ -363,9 +363,10 @@ class KasmSetup:
             return False
         return rc == 0 and isinstance(result, dict) and result.get("exitcode") == 0 and not result.get("signal")
 
-    def _guest_output(self, vmid, script, timeout=120):
-        """What a read-only command printed inside the guest, or None when it could not run or did not exit 0."""
-        rc, out, _err = self.run(["qm", "guest", "exec", str(vmid), "--synchronous", "1", "--timeout", str(timeout), "--", "/bin/bash", "-c", script], timeout=timeout + 30)
+    def _guest_output(self, vmid, script, timeout=120, stdin=None):
+        """What a read-only command printed inside the guest, or None when it could not run or did not exit 0. `stdin` (never on a command line) is for a secret the command reads."""
+        argv = ["qm", "guest", "exec", str(vmid), "--synchronous", "1", "--timeout", str(timeout)] + (["--pass-stdin", "1"] if stdin is not None else []) + ["--", "/bin/bash", "-c", script]
+        rc, out, _err = self.run(argv, data=stdin.encode(), timeout=timeout + 30) if stdin is not None else self.run(argv, timeout=timeout + 30)
         try:
             result = json.loads(out)
         except (ValueError, TypeError):
@@ -378,7 +379,7 @@ class KasmSetup:
         self.layout.admin_dir.mkdir(parents=True, exist_ok=True)
         return kasm_telemetry.open_db(self.layout.admin_dir / "telemetry.sqlite")
 
-    def collect_telemetry(self, now=None) -> dict:
+    def collect_telemetry(self, now=None, passphrase=None) -> dict:
         """Ask the running VM how it is doing and keep the answer. Quiet when there is nothing to ask (no VM, not running, no agent)."""
         vmid = self.existing_vmid()
         if vmid is None or self.vm_status(vmid) != "running":
@@ -392,9 +393,35 @@ class KasmSetup:
         try:
             kasm_telemetry.record(conn, metrics, events, now=now)
             kasm_telemetry.prune(conn, now - 30 * kasm_telemetry.DAY)
+            usage = self._collect_usage(vmid, conn, now)
+            settings = self._collect_settings(vmid, conn, now, passphrase)
         finally:
             conn.close()
-        return {"collected": True, "metrics": len(metrics), "events": len(events)}
+        return {"collected": True, "metrics": len(metrics), "events": len(events), "usage_images": usage, "setting_changes": settings}
+
+    def _collect_usage(self, vmid, conn, now):
+        """Sessions per workspace image and how many ended in failure, from Kasm's own accounting. None when Kasm's database did not answer."""
+        out = self._guest_output(vmid, "docker exec kasm_db psql -U kasmapp -d kasm -tAF'|' -c " + json.dumps(kasm_telemetry.ACCOUNTING_SQL))
+        if out is None:
+            return None
+        rows = kasm_telemetry.parse_accounting(out)
+        kasm_telemetry.record_accounting(conn, rows, now=now)
+        return len(rows)
+
+    def _collect_settings(self, vmid, conn, now, passphrase=None):
+        """The settings as Kasm itself reports them (through its admin API, inside the VM); what changed since the last look is kept WITH the values. None when it could not be read
+        (a sealed vault without the passphrase, or Kasm not answering): that is not an error, the next look tries again."""
+        try:
+            password = self.vault.get("KASM_ADMIN_PASSWORD", passphrase=passphrase)
+        except vault_mod.VaultError:
+            return None
+        if not password:
+            return None
+        out = self._guest_output(vmid, kasm_telemetry.SETTINGS_SCRIPT, stdin=password + "\n")
+        current, secrets_ = kasm_telemetry.parse_settings(out or "")
+        if not current:
+            return None
+        return len(kasm_telemetry.record_settings(conn, kasm_telemetry.latest_settings(conn), current, secret_names=secrets_, now=now))
 
     def telemetry_report(self, now=None) -> dict:
         """What the history says to change, why, and what it buys, plus the repeating errors and the settings changed, with their values."""

@@ -296,3 +296,14 @@ def test_the_installer_accepts_a_registry_address_that_is_not_a_secret_and_nothi
     assert "KASM_REGISTRY_URL" in script and '--default-registry-url "$registry_url"' in script
     assert script.count('*) echo "unexpected setting"') == 1                                  # anything else is still refused
     assert "secret[KASM_REGISTRY_URL]" not in script and 'registry_url="$value"' in script
+
+
+@pytest.mark.parametrize("url,ok", [("https://baseline.invalid:8100/kasm-registry/", True), ("http://10.0.0.5/", True), ("https://[fe80::1]:8100/r/", True),
+                                    ("https://h.example/no-slash", False), ("ftp://h/", False), ("https://h/ x/", False), ("https://h/$(id)/", False), ("", False)])
+def test_the_installers_registry_check_really_accepts_and_refuses_in_bash(url, ok):
+    """Run in bash itself: a string match on the script missed that `\\]` does not escape a bracket in a POSIX regex (found 2026-10-17, when a good address was refused)."""
+    script = kb.guest_files()["/usr/local/sbin/baseline-kasm-install"][1]
+    line = next(l for l in script.splitlines() if l.strip().startswith('[[ "$value" =~ ^https?://'))
+    check = line.strip().split(" || ")[0]
+    result = subprocess.run(["bash", "-c", f'value="$1"; {check}', "x", url], capture_output=True)
+    assert (result.returncode == 0) is ok, (url, result.returncode)
