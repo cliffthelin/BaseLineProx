@@ -142,3 +142,26 @@ def test_mode_and_dehydrate_reach_the_machine_with_the_confirmation(monkeypatch,
     assert cli.main(["baseline-kasm", "dehydrate", "--yes"]) == 0
     assert cli.main(["baseline-kasm", "reset-root", "--yes"]) == 0
     assert calls == [("mode", "reset"), ("dehydrate",), ("reset-root", True)]
+
+
+def test_telemetry_commands_reach_the_machine_and_need_a_verb(monkeypatch, capsys, tmp_path):
+    cli = _cli()
+    assert cli.main(["baseline-kasm", "telemetry"]) == 2 and cli.main(["baseline-kasm", "telemetry", "wipe"]) == 2
+    calls = []
+
+    class Machine:
+        layout = ks.Layout(base_dir=tmp_path)
+        def collect_telemetry(self): calls.append("collect"); return {"collected": True}
+        def telemetry_report(self): calls.append("report"); return {"suggestions": []}
+
+    monkeypatch.setattr(cli.kasm_setup, "KasmSetup", lambda **_k: Machine())
+    assert cli.main(["baseline-kasm", "telemetry", "collect"]) == 0 and cli.main(["baseline-kasm", "telemetry", "report"]) == 0
+    assert calls == ["collect", "report"]
+
+
+def test_the_telemetry_timer_is_staged_and_enabled_and_waits_for_a_configured_machine():
+    for staged in ("boot/baseline-kasm-telemetry.service", "boot/baseline-kasm-telemetry.timer", "baseline/lib/kasm_telemetry.py"):
+        assert (REPO / staged).is_file() and f'"$SRC/{staged}"' in PROVISION
+    assert "systemctl enable baseline-kasm-telemetry.timer" in PROVISION
+    unit = (REPO / "boot/baseline-kasm-telemetry.service").read_text()
+    assert "ConditionPathExists=/var/lib/baseline-firstboot/complete" in unit and "telemetry collect" in unit and "ReadOnlyPaths=/opt/baseline" in unit

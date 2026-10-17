@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import kasm_telemetry
 import vault as vault_mod
 
 VM_NAME = "baseline-kasm"
@@ -362,6 +363,53 @@ class KasmSetup:
             return False
         return rc == 0 and isinstance(result, dict) and result.get("exitcode") == 0 and not result.get("signal")
 
+    def _guest_output(self, vmid, script, timeout=120):
+        """What a read-only command printed inside the guest, or None when it could not run or did not exit 0."""
+        rc, out, _err = self.run(["qm", "guest", "exec", str(vmid), "--synchronous", "1", "--timeout", str(timeout), "--", "/bin/bash", "-c", script], timeout=timeout + 30)
+        try:
+            result = json.loads(out)
+        except (ValueError, TypeError):
+            return None
+        if rc or not isinstance(result, dict) or result.get("exitcode") != 0 or result.get("signal"):
+            return None
+        return str(result.get("out-data", ""))
+
+    def telemetry_db(self):
+        self.layout.admin_dir.mkdir(parents=True, exist_ok=True)
+        return kasm_telemetry.open_db(self.layout.admin_dir / "telemetry.sqlite")
+
+    def collect_telemetry(self, now=None) -> dict:
+        """Ask the running VM how it is doing and keep the answer. Quiet when there is nothing to ask (no VM, not running, no agent)."""
+        vmid = self.existing_vmid()
+        if vmid is None or self.vm_status(vmid) != "running":
+            return {"collected": False, "reason": "the Kasm VM is not running"}
+        out = self._guest_output(vmid, kasm_telemetry.PROBE)
+        if out is None:
+            return {"collected": False, "reason": "the VM did not answer the probe"}
+        metrics, events = kasm_telemetry.parse_probe(out)
+        now = time.time() if now is None else now
+        conn = self.telemetry_db()
+        try:
+            kasm_telemetry.record(conn, metrics, events, now=now)
+            kasm_telemetry.prune(conn, now - 30 * kasm_telemetry.DAY)
+        finally:
+            conn.close()
+        return {"collected": True, "metrics": len(metrics), "events": len(events)}
+
+    def telemetry_report(self, now=None) -> dict:
+        """What the history says to change, why, and what it buys, plus the repeating errors and the settings changed, with their values."""
+        record = self.read_record()
+        now = time.time() if now is None else now
+        vm = {"memory_mb": record.get("memory_mb") or 0, "cpus": record.get("cpus") or 0}
+        conn = self.telemetry_db()
+        try:
+            since = now - 7 * kasm_telemetry.DAY
+            return {"suggestions": kasm_telemetry.suggestions(conn, vm, now=now) if vm["memory_mb"] and vm["cpus"] else [],
+                    "errors": kasm_telemetry.error_report(conn, since), "setting_changes": kasm_telemetry.setting_report(conn, now - 90 * kasm_telemetry.DAY),
+                    "launches": kasm_telemetry.launches_report(conn, now - 30 * kasm_telemetry.DAY)}
+        finally:
+            conn.close()
+
     def run_install(self, vmid, creds):
         """Kasm's installer restarts Docker several times in a row; on a slow host that trips systemd's start-rate limit ("start of the service was attempted too
         often") and the install stops half-way (found on a nested Proxmox, 2026-10-17). So the limit is lifted for the install and put back afterwards.
@@ -372,7 +420,11 @@ class KasmSetup:
         self._guest_shell(vmid, f"mkdir -p {os.path.dirname(self.DOCKER_DROPIN)} && printf '[Unit]\\nStartLimitIntervalSec=0\\n' > {self.DOCKER_DROPIN} && "
                                 "systemctl daemon-reload && systemctl reset-failed docker.service docker.socket || true")
         try:
-            data = "".join(f"{name}={creds[name]}\n" for name in SECRET_NAMES).encode()
+            data = "".join(f"{name}={creds[name]}\n" for name in SECRET_NAMES)
+            registry = (self.carried_recipe() or {}).get("registry") or {}
+            if registry.get("enabled") and registry.get("list_url"):
+                data += f"KASM_REGISTRY_URL={registry['list_url']}\n"            # not a secret: where Kasm finds workspaces (Baseline's own registry)
+            data = data.encode()
             rc, out, _err = self.run(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", str(INSTALL_TIMEOUT_S),
                                       "--", "/usr/local/sbin/baseline-kasm-install"], data=data, timeout=INSTALL_TIMEOUT_S + 60)
         finally:

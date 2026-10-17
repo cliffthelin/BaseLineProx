@@ -2130,11 +2130,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import kasm_page
             import kasm_setup
             try:
-                status = (deps.get("kasm_machine") or kasm_setup.KasmSetup()).status()
+                machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+                status = machine.status()
+                report = machine.telemetry_report() if hasattr(machine, "telemetry_report") else None
                 notice = qs.get("notice", [""])[0][:300].replace("+", " ")
             except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
-                status, notice = {"present": False, "installed": False}, "Kasm's state could not be read: " + str(exc)
-            return self._html_response(200, _with_nav(kasm_page.render(status, notice), path))
+                status, report, notice = {"present": False, "installed": False}, None, "Kasm's state could not be read: " + str(exc)
+            return self._html_response(200, _with_nav(kasm_page.render(status, notice, report), path))
 
         if path == "/power":
             import power_control

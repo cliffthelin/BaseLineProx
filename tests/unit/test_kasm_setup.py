@@ -65,6 +65,8 @@ class Fake:
             return 0, json.dumps([{"name": "lo", "ip-addresses": [{"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}]},
                                   {"name": "ens18", "ip-addresses": [{"ip-address": "192.168.1.50", "ip-address-type": "ipv4"}]}]), ""
         if head == ["qm", "guest"]:
+            if "Read-only." in argv[-1]:                                                                      # the telemetry probe
+                return 0, json.dumps({"exited": 1, "exitcode": 0, "out-data": getattr(self, "probe_output", "")}), ""
             code = self.install_exit if argv[-1] == "/usr/local/sbin/baseline-kasm-install" else 0          # only the installer itself can fail here
             return 0, json.dumps({"exited": 1, "exitcode": code, "out-data": "boom" if code else ""}), ""
         return 0, "", ""
@@ -520,3 +522,56 @@ def test_status_reports_the_recipe_the_carried_base_recorded(world):
     assert [c["id"] for c in got["components"]][-1] == "server-connections" and got["components"][-1]["state"] == "unused"
     (world.base_dir / "KASM.json").write_text(json.dumps({"recipe": "nonsense"}))
     assert setup.status()["recipe"] is None
+
+
+def test_the_registry_address_is_handed_to_the_guest_only_when_the_base_was_built_with_one(world):
+    import kasm_recipe
+    def recipe_with(registry):
+        recipe = kasm_recipe.default([{"key": "k", "image": "chrome", "friendly_name": "K", "persistent": True}])
+        recipe["registry"] = registry
+        (world.base_dir / "KASM.json").write_text(json.dumps({"recipe": kasm_recipe.summary(recipe)}))
+    recipe_with({"enabled": False, "name": "B", "list_url": ""})
+    setup, fake = build(world)
+    setup.run_install(100, {n: "x" * 20 for n in ks.SECRET_NAMES})
+    assert b"KASM_REGISTRY_URL" not in fake.inputs[-1]
+    recipe_with({"enabled": True, "name": "B", "list_url": "https://h.example:8100/kasm-registry/"})
+    again, fake2 = build(world)
+    again.run_install(100, {n: "x" * 20 for n in ks.SECRET_NAMES})
+    assert b"KASM_REGISTRY_URL=https://h.example:8100/kasm-registry/\n" in fake2.inputs[-1]
+
+
+def test_telemetry_is_collected_from_the_running_vm_and_kept_and_reported(world):
+    import kasm_telemetry as kt
+    setup, fake = installed(world)
+    fake.state = "running"
+    fake.probe_output = "M mem_avail_pct 5\nM memory_psi_some10 30\nE error service_failed docker.service\nE error container_oom kasm_api was killed for lack of memory\n"
+    for _ in range(3):
+        assert setup.collect_telemetry(now=1_800_000_000.0 - 600 * _) == {"collected": True, "metrics": 2, "events": 2}
+    report = setup.telemetry_report(now=1_800_000_000.0)
+    memory = next(s for s in report["suggestions"] if s["id"] == "more-memory")
+    assert memory["action"]["memory_mb"] == int(setup.read_record()["memory_mb"] * 1.5) // 512 * 512 and memory["severity"] == "error"
+    assert report["errors"][0]["count"] == 3 and (world.admin_dir / "telemetry.sqlite").is_file()
+
+
+def test_nothing_is_collected_when_the_vm_is_not_running_or_does_not_answer(world):
+    class Silent(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            if "Read-only." in " ".join(argv):
+                self.calls.append(list(argv))
+                return 255, "", "no agent"
+            return super().__call__(argv, data, timeout)
+
+    setup, fake = installed(world)
+    fake.state = "stopped"
+    assert setup.collect_telemetry() == {"collected": False, "reason": "the Kasm VM is not running"}
+    silent, silent_fake = build(world, fake=Silent())
+    silent_fake.state = "running"
+    silent_fake.vms.append({"name": ks.VM_NAME, "vmid": 100})
+    (world.pve_conf_dir).mkdir(parents=True, exist_ok=True)
+    (world.pve_conf_dir / "100.conf").write_text("x")
+    assert silent.collect_telemetry() == {"collected": False, "reason": "the VM did not answer the probe"}
+
+
+def test_the_report_is_empty_and_safe_with_no_history_or_no_vm(world):
+    setup, _ = build(world)
+    assert setup.telemetry_report() == {"suggestions": [], "errors": [], "setting_changes": [], "launches": {}}

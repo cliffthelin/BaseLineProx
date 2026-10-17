@@ -436,10 +436,13 @@ cp "$SRC/baseline/lib/driver_profiles.py" /opt/baseline/lib/driver_profiles.py
 cp "$SRC/baseline/bin/baseline-drivers" /opt/baseline/bin/baseline-drivers
 chmod +x /opt/baseline/bin/baseline-drivers
 cp "$SRC/baseline/lib/kasm_page.py" /opt/baseline/lib/kasm_page.py
+cp "$SRC/baseline/lib/kasm_telemetry.py" /opt/baseline/lib/kasm_telemetry.py
 cp "$SRC/baseline/bin/baseline-kasm" /opt/baseline/bin/baseline-kasm
 chmod +x /opt/baseline/bin/baseline-kasm
 cp "$SRC/boot/baseline-kasm-setup.service" /etc/systemd/system/baseline-kasm-setup.service
 cp "$SRC/boot/baseline-kasm-setup.timer" /etc/systemd/system/baseline-kasm-setup.timer
+cp "$SRC/boot/baseline-kasm-telemetry.service" /etc/systemd/system/baseline-kasm-telemetry.service
+cp "$SRC/boot/baseline-kasm-telemetry.timer" /etc/systemd/system/baseline-kasm-telemetry.timer
 cp "$SRC/baseline/bin/baseline-harness-install" /opt/baseline/bin/baseline-harness-install
 chmod +x /opt/baseline/bin/baseline-harness-install
 cp "$SRC/boot/baseline-harness-install.service" /etc/systemd/system/baseline-harness-install.service
@@ -687,6 +690,7 @@ systemctl enable baseline-bridge-port.service
 systemctl enable baseline-bridge-port-retry.timer
 systemctl enable baseline-harness-install.timer
 systemctl enable baseline-kasm-setup.timer
+systemctl enable baseline-kasm-telemetry.timer
 systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-machine-check.timer
 systemctl enable baseline-network-retry.timer

@@ -54,13 +54,13 @@ def debian_sum(downloads: Path, image: Path) -> str:
     raise kb.KasmBuildError(f"{image.name} is not in the published SHA512SUMS")
 
 
-def bundle_seed_yaml(bundle: Path) -> str:
-    """The release's own seeded workspace list (conf/database/seed_data/default_images_amd64.yaml), read out of the verified bundle."""
+def bundle_seed_yaml(bundle: Path, name: str = "default_images_amd64.yaml") -> str:
+    """One of the release's own seed files (conf/database/seed_data/<name>), read out of the verified bundle."""
     with tarfile.open(bundle, "r:gz") as tar:
         for member in tar:
-            if member.name.lstrip("./").endswith("conf/database/seed_data/default_images_amd64.yaml"):
+            if member.name.lstrip("./").endswith(f"conf/database/seed_data/{name}"):
                 return tar.extractfile(member).read().decode()
-    raise kb.KasmBuildError("the release bundle has no default_images_amd64.yaml")
+    raise kb.KasmBuildError(f"the release bundle has no {name}")
 
 
 def bundle_compose_text(bundle: Path) -> str:
@@ -114,7 +114,15 @@ def main():
     service_refs = [kb.image_ref(name) for name in kasm_recipe.service_images(recipe)]
     seed = work / "default_images_amd64.yaml"
     seed.write_text(kb.trim_seed_yaml(bundle_seed_yaml(downloads / kb.BUNDLE), workspaces))
-    iso("KASMPAYLOAD", {kb.BUNDLE: downloads / kb.BUNDLE, "default_images_amd64.yaml": seed}, work / "payload.iso")
+    payload = {kb.BUNDLE: downloads / kb.BUNDLE, "default_images_amd64.yaml": seed}
+    overrides = recipe.get("settings") or {}
+    if overrides:                       # slip-stream (documented by Kasm): our settings seed replaces the release's, and Kasm's own installer seeds and encrypts it
+        import kasm_settings
+        properties, changes = kasm_settings.apply_overrides(bundle_seed_yaml(downloads / kb.BUNDLE, "default_properties.yaml"), overrides)
+        (work / "default_properties.yaml").write_text(properties)
+        payload["default_properties.yaml"] = work / "default_properties.yaml"
+        print("[kasm-base] settings set:", ", ".join(f"{c['name']}={c['to']}" for c in changes), flush=True)
+    iso("KASMPAYLOAD", payload, work / "payload.iso")
     iso("cidata", {"user-data": kb.build_user_data(service_refs, wanted, recipe.get("plugins")), "meta-data": "instance-id: kasm-base-build\nlocal-hostname: kasm-base\n"}, work / "cidata.iso")
 
     disk = work / "build.qcow2"

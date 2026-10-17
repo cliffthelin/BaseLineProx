@@ -164,3 +164,29 @@ def test_the_page_says_which_components_are_in_the_base_and_which_nothing_here_u
         assert "network</b> plugin (carried, not used)" in page
     finally:
         case.close()
+
+
+def test_the_page_shows_what_the_history_suggests_and_the_settings_that_changed_with_their_values():
+    report = {"suggestions": [{"id": "more-memory", "severity": "warning", "title": "Give the VM more memory (6144 MB to 9216 MB)", "evidence": ["memory stalls reached 30%"],
+                               "benefit": "fewer stalls", "action": {"memory_mb": 9216}}],
+              "errors": [], "launches": {}, "setting_changes": [{"name": "log_retention", "changes": 2, "last_old": "7", "last_new": "14", "secret": False},
+                                                              {"name": "hec_token", "changes": 1, "last_old": None, "last_new": None, "secret": True}]}
+
+    class WithReport(Machine):
+        def telemetry_report(self):
+            return report
+    case, _ = make(WithReport(STATUS))
+    try:
+        page = req(case, "GET", "/workspaces")[2]
+        assert "What the history suggests" in page and "6144 MB to 9216 MB" in page and "Benefit: fewer stalls" in page
+        assert "log_retention</b> changed 2 time(s); last: 7 to 14" in page and "a secret (its value is not kept)" in page
+    finally:
+        case.close()
+
+
+def test_a_machine_with_no_history_shows_no_report_section():
+    case, _ = make(Machine(STATUS))
+    try:
+        assert "What the history suggests" not in req(case, "GET", "/workspaces")[2]
+    finally:
+        case.close()

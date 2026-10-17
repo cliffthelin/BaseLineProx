@@ -1,5 +1,5 @@
 {
- "_note": "Copy to config/local/kasm-recipe.json (git-ignored) and edit; the build then uses it. states: required (Kasm does not run without it), used, unused (carried because the all-in-one install starts it). A Kasm entry in the supported-OS list may name the workspaces instead.",
+ "_note": "Copy to config/local/kasm-recipe.json (git-ignored) and edit; the build then uses it. states: required (Kasm does not run without it), used, unused (carried because the all-in-one install starts it). settings: server settings to set at install (not secrets). registry: set enabled and list_url to have Kasm pointed at Baseline's own workspace registry. A Kasm entry in the supported-OS list may name the workspaces instead.",
  "format": "baseline.kasm-recipe/v1",
  "kasm_version": "1.19.0",
  "components": [
@@ -105,5 +105,12 @@
    "friendly_name": "Terminal",
    "persistent": false
   }
- ]
+ ],
+ "settings": {},
+ "registry": {
+  "enabled": false,
+  "name": "Baseline",
+  "description": "Workspaces carried by this Baseline host.",
+  "list_url": ""
+ }
 }

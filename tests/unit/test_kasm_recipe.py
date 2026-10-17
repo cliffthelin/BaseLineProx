@@ -106,7 +106,7 @@ def test_the_plugins_the_build_packs_come_from_the_recipe_and_an_unknown_one_is_
 def test_the_summary_is_what_a_host_needs_and_carries_no_workspaces_or_images_of_the_user():
     summary = kr.summary(recipe())
     assert [c["id"] for c in summary["components"]] == ["database", "application", "agent", "proxy", "server-connections"]
-    assert set(summary) == {"components", "plugins"}
+    assert set(summary) == {"components", "plugins", "settings", "registry"} and summary["settings"] == {} and summary["registry"]["enabled"] is False
 
 
 def test_the_committed_example_is_the_default_recipe_and_valid():
@@ -114,3 +114,20 @@ def test_the_committed_example_is_the_default_recipe_and_valid():
     example = json.loads((Path(__file__).resolve().parents[2] / "config/kasm-recipe.example.json").read_text())
     assert "config/local/kasm-recipe.json" in example.pop("_note")
     assert kr.validate(example) == recipe()                     # the example never drifts from what the build does by default
+
+
+def test_settings_and_registry_are_validated():
+    r = recipe()
+    r["settings"] = {"log_retention": 14}
+    assert kr.validate(r)
+    for bad in ({"Bad Name": 1}, {"x": 1}, [1]):
+        r["settings"] = bad
+        with pytest.raises(kr.RecipeError, match="settings are a mapping"):
+            kr.validate(r)
+    r = recipe()
+    r["registry"] = {"enabled": True, "name": "Baseline", "list_url": "https://host.example:8100/kasm-registry/"}
+    assert kr.validate(r)
+    for url in ("", "ftp://x/", "https://host/no-trailing-slash", "https://ho st/"):
+        r["registry"]["list_url"] = url
+        with pytest.raises(kr.RecipeError, match="list_url"):
+            kr.validate(r)

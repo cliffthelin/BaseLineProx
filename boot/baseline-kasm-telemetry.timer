@@ -1,0 +1,10 @@
+[Unit]
+Description=Keep a history of how the Kasm VM is doing
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

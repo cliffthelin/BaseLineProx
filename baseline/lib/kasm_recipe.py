@@ -7,6 +7,8 @@ A recipe is a template with the decisions written down, so a build is never "wha
                 unused    nothing we offer uses it, yet it is carried because the all-in-one install starts it; the note says what dropping it would take
   plugins     the Docker plugins the installer fetches (log driver, network sidecar), packed into the base
   workspaces  what a person can open (the entries `kasm_build` seeds)
+  settings    server settings to set at install (name to value; checked against the release's own catalogue by kasm_settings; never secrets)
+  registry    whether Baseline acts as a Kasm workspace registry, and the address Kasm is told (kasm_registry builds the file)
 A recipe is checked against the Kasm release's own compose files: every image the release starts must belong to exactly one component, and a component naming an image the
 release does not start is refused. So a new Kasm version that adds a component cannot slip into a build unnoticed: it has to be given a state first.
 The recipe is recorded in the base's manifest, so the host knows what its base holds.
@@ -51,6 +53,8 @@ def default(workspaces) -> dict:
              "note": "The network sidecar (VPN and egress features). Nothing offered here uses it; the installer installs it regardless."},
         ],
         "workspaces": [dict(w) for w in workspaces],
+        "settings": {},
+        "registry": {"enabled": False, "name": "Baseline", "description": "Workspaces carried by this Baseline host.", "list_url": ""},
     }
 
 
@@ -95,6 +99,17 @@ def validate(recipe, release_images=None) -> dict:
             raise RecipeError("a plugin needs an id, an image, a numeric tag and a state")
     if not isinstance(recipe.get("workspaces"), list) or not recipe["workspaces"]:
         raise RecipeError("a recipe lists its workspaces")
+    settings = recipe.get("settings", {})
+    if not isinstance(settings, dict) or not all(isinstance(k, str) and re.fullmatch(r"[a-z][a-z0-9_]{1,60}", k) for k in settings):
+        raise RecipeError("settings are a mapping from a setting name to its value")
+    registry = recipe.get("registry", {})
+    if not isinstance(registry, dict) or not isinstance(registry.get("enabled", False), bool):
+        raise RecipeError("registry says whether it is enabled")
+    if registry.get("enabled"):
+        if not re.fullmatch(r"https?://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~/-]*)?/", str(registry.get("list_url", ""))):
+            raise RecipeError("an enabled registry needs a list_url: an http(s) address ending in a slash")
+        if not str(registry.get("name", "")).strip():
+            raise RecipeError("a registry needs a name")
     if release_images is not None:
         missing = sorted(set(release_images) - set(owner))
         extra = sorted(set(owner) - set(release_images))
@@ -134,4 +149,5 @@ def load(workspaces, path=None) -> dict:
 def summary(recipe: dict) -> dict:
     """What a host needs to show: which components are in the base and whether anything offered uses them."""
     return {"components": [{k: c[k] for k in ("id", "role", "state", "images", "note") if k in c} for c in recipe["components"]],
-            "plugins": [{k: p[k] for k in ("id", "state", "note") if k in p} for p in recipe.get("plugins", [])]}
+            "plugins": [{k: p[k] for k in ("id", "state", "note") if k in p} for p in recipe.get("plugins", [])],
+            "settings": dict(recipe.get("settings", {})), "registry": {k: v for k, v in recipe.get("registry", {}).items() if k in ("enabled", "name", "list_url")}}

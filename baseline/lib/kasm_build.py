@@ -144,6 +144,10 @@ mkdir -p /mnt/payload /opt/kasm-installer/seed /opt/kasm-installer/offline
 mount -o ro LABEL=KASMPAYLOAD /mnt/payload
 tar -xf /mnt/payload/{BUNDLE} -C /opt/kasm-installer
 cp /mnt/payload/default_images_amd64.yaml /opt/kasm-installer/seed/default_images_amd64.yaml
+# slip-stream (documented by Kasm): our settings seed replaces the release's own before its installer runs, so Kasm itself seeds and encrypts every setting
+if [ -f /mnt/payload/default_properties.yaml ]; then
+    cp /mnt/payload/default_properties.yaml /opt/kasm-installer/kasm_release/conf/database/seed_data/default_properties.yaml
+fi
 # the users Kasm's installer would create on the root: made here with fixed numbers, so a fresh root has them and ownership on the persistent disk is stable
 groupadd -g {KASM_GID} kasm
 useradd -u {KASM_UID} -g {KASM_GID} -M -s /usr/sbin/nologin kasm
@@ -239,11 +243,18 @@ _INSTALL = f'''#!/bin/bash
 # vault on USER_ADMIN; nothing here writes them to disk except Kasm's own configuration on the admin disk, and nothing is echoed.
 set -euo pipefail
 declare -A secret
+registry_url=""
 while IFS= read -r line; do
     key="${{line%%=*}}"; value="${{line#*=}}"
-    case "$key" in KASM_ADMIN_PASSWORD|KASM_USER_PASSWORD|KASM_DB_PASSWORD|KASM_MANAGER_TOKEN) ;; *) echo "unexpected setting" >&2; exit 2;; esac
-    [[ "$value" =~ ^[A-Za-z0-9]{{12,64}}$ ]] || {{ echo "$key must be 12 to 64 letters and digits" >&2; exit 2; }}
-    secret[$key]="$value"
+    case "$key" in
+        KASM_ADMIN_PASSWORD|KASM_USER_PASSWORD|KASM_DB_PASSWORD|KASM_MANAGER_TOKEN)
+            [[ "$value" =~ ^[A-Za-z0-9]{{12,64}}$ ]] || {{ echo "$key must be 12 to 64 letters and digits" >&2; exit 2; }}
+            secret[$key]="$value" ;;
+        KASM_REGISTRY_URL)      # not a secret: the workspace registry Kasm is pointed at (Baseline's own, when it acts as one)
+            [[ "$value" =~ ^https?://[A-Za-z0-9.:\\[\\]-]+(/[A-Za-z0-9._~/-]*)?/$ ]] || {{ echo "KASM_REGISTRY_URL must be an http(s) address ending in a slash" >&2; exit 2; }}
+            registry_url="$value" ;;
+        *) echo "unexpected setting" >&2; exit 2 ;;
+    esac
 done
 for key in KASM_ADMIN_PASSWORD KASM_USER_PASSWORD KASM_DB_PASSWORD KASM_MANAGER_TOKEN; do
     [ -n "${{secret[$key]:-}}" ] || {{ echo "$key was not given" >&2; exit 2; }}
@@ -256,7 +267,7 @@ VOLUME=kasm_db_{KASM_VERSION}
 # Kasm's installer, offline and without starting anything: its own database initialisation seeds before the stack starts.
 bash /opt/kasm-installer/kasm_release/install.sh --install-profile noninteractive --accept-eula --no-start --use-static-images \\
     --admin-password "${{secret[KASM_ADMIN_PASSWORD]}}" --user-password "${{secret[KASM_USER_PASSWORD]}}" \\
-    --db-password "${{secret[KASM_DB_PASSWORD]}}" --manager-token "${{secret[KASM_MANAGER_TOKEN]}}" \\
+    --db-password "${{secret[KASM_DB_PASSWORD]}}" --manager-token "${{secret[KASM_MANAGER_TOKEN]}}" ${{registry_url:+--default-registry-url "$registry_url"}} \\
     --offline-service /opt/kasm-installer/offline/service_images.tar.gz \\
     --offline-logger-plugin /opt/kasm-installer/offline/plugins.tar.gz --offline-network-plugin /opt/kasm-installer/offline/plugins.tar.gz --skip-egress --no-swap-check --ignore-dep-failures --proxy-port 443 >/var/log/kasm-install.log 2>&1
 # the carried workspaces, with persistent profiles where asked, seeded by Kasm's own tool in its local-database mode (-q false, as the installer calls it)

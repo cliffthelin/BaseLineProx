@@ -27,7 +27,22 @@ def _state(status: dict) -> tuple:
     return "Running", "Kasm is ready."
 
 
-def render(status: dict, notice: str = "") -> bytes:
+def _report(report) -> str:
+    if not isinstance(report, dict):
+        return ""
+    out = ""
+    suggestions = report.get("suggestions") or []
+    if suggestions:
+        items = "".join(f"<li data-severity=\"{html.escape(s['severity'])}\"><b>{html.escape(s['title'])}</b><br>Seen: {html.escape('; '.join(s.get('evidence', [])))}<br>Benefit: {html.escape(s['benefit'])}</li>" for s in suggestions)
+        out += f"<h2>What the history suggests</h2><ul>{items}</ul>"
+    changes = report.get("setting_changes") or []
+    if changes:
+        rows = "".join(f"<li><b>{html.escape(c['name'])}</b> changed {c['changes']} time(s); last: " + ("a secret (its value is not kept)" if c.get('secret') else f"{html.escape(str(c['last_old']))} to {html.escape(str(c['last_new']))}") + "</li>" for c in changes)
+        out += f"<h2>Settings that changed</h2><ul>{rows}</ul>"
+    return out
+
+
+def render(status: dict, notice: str = "", report=None) -> bytes:
     label, detail = _state(status)
     note = f"<p role='alert'>{html.escape(notice)}</p>" if notice else ""
     url = status.get("url")
@@ -65,7 +80,7 @@ def render(status: dict, notice: str = "") -> bytes:
         parts = f"<h2>What this Kasm is built from</h2><ul>{rows}{plugins}</ul>"
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Workspaces</title></head><body><h1>Workspaces (Kasm)</h1>" + note
             + f"<p>State: <b>{html.escape(label)}</b>. {html.escape(detail)}</p>{opener}{build}{controls}"
-            + f"<h2>What you can open</h2><ul>{items}</ul>" + parts
+            + f"<h2>What you can open</h2><ul>{items}</ul>" + parts + _report(report)
             + "<h2>Where things are kept</h2><ul>"
               "<li>Kasm's own settings, accounts and database: <b>APPDATA_ADMIN</b>.</li>"
               "<li>Your browser and desktop profiles: <b>APPDATA_PERSONAL</b>, one folder per person and workspace.</li>"

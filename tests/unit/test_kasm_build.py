@@ -283,3 +283,16 @@ def test_the_data_disks_are_up_before_the_installer_asks_whether_kasm_is_already
     """Found on a rebuilt VM (2026-10-17): the agent answers before the start-up service has mounted the disks; the marker is on them."""
     script = kb.guest_files()["/usr/local/sbin/baseline-kasm-install"][1]
     assert script.index("baseline-kasm-disks") < script.index("already installed")
+
+
+def test_a_settings_seed_replaces_the_releases_own_before_the_installer_runs_and_only_when_there_is_one():
+    script = kb.prepare_script(["kasmweb/api:1.19.0"], [])
+    assert "default_properties.yaml" in script and "if [ -f /mnt/payload/default_properties.yaml ]" in script
+    assert script.index("tar -xf") < script.index("default_properties.yaml")                  # after the release is unpacked, so it can overwrite the seed in it
+
+
+def test_the_installer_accepts_a_registry_address_that_is_not_a_secret_and_nothing_else_unexpected():
+    script = kb.guest_files()["/usr/local/sbin/baseline-kasm-install"][1]
+    assert "KASM_REGISTRY_URL" in script and '--default-registry-url "$registry_url"' in script
+    assert script.count('*) echo "unexpected setting"') == 1                                  # anything else is still refused
+    assert "secret[KASM_REGISTRY_URL]" not in script and 'registry_url="$value"' in script
