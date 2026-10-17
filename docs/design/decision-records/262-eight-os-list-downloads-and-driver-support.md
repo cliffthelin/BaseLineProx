@@ -74,3 +74,9 @@ under 4 GiB is refused. Two entries are **refused with a reason shown on the til
 **FydeOS** (an OVA appliance; importing appliances is not built). So is any entry whose image is not carried. Checked in the browser (blocked tile explains itself; an allowed tile posts exactly the
 create action); the plans and the route are unit-tested. Not yet run against a real Proxmox host.
 Also: `provision.sh` now stages `os_profiles.py`, `driver_profiles.py` and `baseline-drivers`; a guard test caught the first of these missing.
+
+## Verified: the list reaches USER_ADMIN on a real installed host
+The installed system from rehearsal run 24 (whose ISO predated the `os-list` step) was booted as a throwaway overlay (the original disk untouched) with this repository shared read-only into it, and
+the real `step_os_list` from `baseline-first-boot-install` was run inside it against the real working list: 9 entries were carried to `/mnt/USER_ADMIN/config/supported-os.json` (root, mode 0644, folder
+created), the step's record was written, and `os_list.load()` with no arguments then read the 9 ids back from that host copy. Not exercised: the ISO staging copy end to end in a rebuilt installer
+(unit-tested), and a second run being a no-op (unit-tested).
