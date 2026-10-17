@@ -297,7 +297,7 @@ def test_an_installed_vm_is_only_made_sure_of_not_rechecked_or_reinstalled(world
 
 def test_status_reports_without_changing_anything(world):
     setup, fake = build(world)
-    assert setup.status() == {"present": False, "installed": False, "dehydrated": False, "mode": None, "recorded_vmid": None, "workspaces": None}
+    assert setup.status() == {"present": False, "installed": False, "dehydrated": False, "mode": None, "recorded_vmid": None, "workspaces": None, "recipe": None}
     setup.setup()
     fake.state = "running"
     now = setup.status()
@@ -509,3 +509,14 @@ def test_the_data_disks_are_brought_up_in_the_guest_before_the_installer_runs_an
     with pytest.raises(ks.KasmSetupError, match="data disks could not be brought up"):
         bad.run_install(100, {n: "x" * 20 for n in ks.SECRET_NAMES})
     assert not [c for c in bad_fake.calls if c[-1] == "/usr/local/sbin/baseline-kasm-install"]
+
+
+def test_status_reports_the_recipe_the_carried_base_recorded(world):
+    import kasm_recipe
+    recipe = kasm_recipe.summary(kasm_recipe.default([{"key": "k", "image": "chrome", "friendly_name": "K", "persistent": True}]))
+    (world.base_dir / "KASM.json").write_text(json.dumps({"recipe": recipe, "holds_install_state_or_secrets": False}))
+    setup, _ = build(world)
+    got = setup.status()["recipe"]
+    assert [c["id"] for c in got["components"]][-1] == "server-connections" and got["components"][-1]["state"] == "unused"
+    (world.base_dir / "KASM.json").write_text(json.dumps({"recipe": "nonsense"}))
+    assert setup.status()["recipe"] is None

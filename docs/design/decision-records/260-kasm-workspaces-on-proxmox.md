@@ -113,3 +113,16 @@ all three markers back); reset mode (changes visible during the run, all gone af
 Two real defects found and fixed on the way: Kasm's installer restarts Docker in quick succession and tripped systemd's start-rate limit on a slow host (the limit is lifted for the install and restored); and after a rebuild the guest
 agent answers before the VM has mounted its data disks, so the installer's "already installed?" check looked at an unmounted folder (the disks are now brought up first, host-side, and in the script for the next base build).
 Not yet: the script-order fix is in the source but the carried base predates it (the host-side step covers it until the base is rebuilt).
+
+## Update 2026-10-17: the Kasm recipe (components used and not used)
+Operator: build the recipe/templates so the components used and not used are known and considered when building, and a future build can adapt.
+`kasm_recipe.py` is that template: Kasm's components named by the installer roles Kasm itself gives them (`db`, `app`, `agent`, `proxy`, `guac`), each with its images and a state (`required`, `used`, `unused`), the plugins, and the
+workspaces. It is checked against the release's OWN `docker-compose-all.yaml` at build time: every image the release starts must have a state, and a component naming an image the release does not start is refused, so a new Kasm
+version that adds a component cannot be built until someone decides what it is. The recipe is recorded in the base's manifest and the Workspaces page shows it.
+What it records for this setup: the database, application, agent and proxy are required; **the `guac` role (RDP, VNC and SSH to other machines: `kasm-guac`, `rdp-gateway`, `rdp-https-gateway`) is carried but unused** by every workspace offered, because
+Kasm's all-in-one install starts it; the network sidecar plugin is likewise carried and unused. Dropping the unused ones is possible through Kasm's separate roles (db, app, agent, proxy) but is not built, and the recipe says so next to them.
+A recipe file (`config/local/kasm-recipe.json`, git-ignored; `config/kasm-recipe.example.json` shows it) replaces the default; the supported-OS list's Kasm entry can still name the workspaces.
+**Verified against the real release:** the default recipe validates against Kasm 1.19.0's actual compose file and covers exactly the eight service images the build had been carrying by hand.
+**Not decided here (to discuss with the operator): what to record about settings changes and errors, and whether that is Baseline's own SQLite or Kasm's.** Facts read from a running Kasm 1.19.0:
+its database holds 87 server settings (name, title, category, value, description, whether a restart is needed; many values encrypted) with NO history of changes and no audit-log table; it keeps a `logs` table (561 rows after one test run), metrics tables
+(`system_metrics`, `metrics_components`), session records and accounting; and each service writes structured JSON log files under `/opt/kasm/current/log/` (on the persisted admin disk).

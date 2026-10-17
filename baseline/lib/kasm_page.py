@@ -55,9 +55,17 @@ def render(status: dict, notice: str = "") -> bytes:
                         f"{'its profile is kept' if w.get('persistent') else 'nothing is kept'}</li>" for w in carried)
     else:
         items = "".join(f"<li><b>{html.escape(name)}</b>: {html.escape(what)}</li>" for name, what in WORKSPACES)
+    recipe = status.get("recipe")
+    parts = ""
+    if isinstance(recipe, dict):
+        label_of = {"required": "required", "used": "used", "unused": "carried, not used"}
+        rows = "".join(f"<li><b>{html.escape(str(c.get('id', '')))}</b> ({html.escape(label_of.get(c.get('state'), str(c.get('state'))))}): {html.escape(str(c.get('note', '')))}</li>"
+                       for c in recipe.get("components", []))
+        plugins = "".join(f"<li><b>{html.escape(str(p.get('id', '')))}</b> plugin ({html.escape(label_of.get(p.get('state'), str(p.get('state'))))})</li>" for p in recipe.get("plugins", []))
+        parts = f"<h2>What this Kasm is built from</h2><ul>{rows}{plugins}</ul>"
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Workspaces</title></head><body><h1>Workspaces (Kasm)</h1>" + note
             + f"<p>State: <b>{html.escape(label)}</b>. {html.escape(detail)}</p>{opener}{build}{controls}"
-            + f"<h2>What you can open</h2><ul>{items}</ul>"
+            + f"<h2>What you can open</h2><ul>{items}</ul>" + parts
             + "<h2>Where things are kept</h2><ul>"
               "<li>Kasm's own settings, accounts and database: <b>APPDATA_ADMIN</b>.</li>"
               "<li>Your browser and desktop profiles: <b>APPDATA_PERSONAL</b>, one folder per person and workspace.</li>"

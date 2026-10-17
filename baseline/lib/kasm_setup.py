@@ -453,6 +453,14 @@ class KasmSetup:
             return None
         return rows if isinstance(rows, list) else None
 
+    def carried_recipe(self):
+        """The recipe summary the carried base's manifest records (its components and whether anything offered uses them), or None."""
+        try:
+            recipe = json.loads((self.layout.base_dir / "KASM.json").read_text()).get("recipe")
+        except (OSError, ValueError):
+            return None
+        return recipe if isinstance(recipe, dict) and isinstance(recipe.get("components"), list) else None
+
     def status(self) -> dict:
         """What is there now, without changing anything."""
         vmid = self.existing_vmid()
@@ -460,11 +468,11 @@ class KasmSetup:
         mode = record.get("mode", DEFAULT_MODE) if record.get("layout") == LAYOUT else None
         if vmid is None:
             return {"present": False, "installed": bool(record.get("installed")), "dehydrated": bool(record.get("dehydrated")), "mode": mode,
-                    "recorded_vmid": self.recorded_vmid(), "workspaces": self.carried_workspaces()}
+                    "recorded_vmid": self.recorded_vmid(), "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe()}
         running = self.vm_status(vmid) == "running"
         return {"present": True, "vmid": vmid, "running": running, "installed": bool(record.get("installed")), "mode": mode,
                 "dehydrated": False, "url": self.address(vmid) if running else None, "memory_mb": record.get("memory_mb"), "cpus": record.get("cpus"),
-                "workspaces": self.carried_workspaces()}
+                "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe()}
 
     def _stopped(self, vmid):
         if self.vm_status(vmid) != "stopped":

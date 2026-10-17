@@ -15,13 +15,14 @@ import re
 
 import yaml
 
+import kasm_recipe
+
 KASM_VERSION = "1.19.0"
 LOGGING_PLUGIN_TAG = "1.1"      # the plugin release lines install.sh of this Kasm version asks for (its release/1.1 and release/1.5 branches)
 NETWORK_PLUGIN_TAG = "1.5"
 IMAGE_TAG = KASM_VERSION                     # the static tag; the seed list's own `-rolling-daily` names are rewritten to it, so nothing is pulled at run time
 BUNDLE = f"kasm_release_{KASM_VERSION}.tar.gz"
 DOWNLOAD_BASE = "https://kasm-static-content.s3.amazonaws.com"
-SERVICE_IMAGES = ("postgres", "api", "manager", "agent", "kasm-guac", "rdp-gateway", "rdp-https-gateway", "proxy")     # install.sh's own service list for 1.19.0
 # What a fresh setup can launch without internet, as the user's choices rather than as images: the same Docker image can be offered twice, once with its own
 # persistent profile and once without (a temporary browser). VS Code and Chrome are two of the five default applications. Kasm warns against sharing a profile
 # directory between workspaces, and each entry below has its own image_id, so each keeps its own. The seed list is trimmed to exactly these, so nothing Kasm
@@ -34,6 +35,8 @@ WORKSPACES = (
     {"key": "firefox", "image": "firefox", "friendly_name": "Firefox", "persistent": True},
     {"key": "terminal", "image": "terminal", "friendly_name": "Terminal", "persistent": False},
 )
+SERVICE_IMAGES = tuple(kasm_recipe.service_images(kasm_recipe.default(WORKSPACES)))        # from the recipe (checked against the release's own compose file at build time)
+PLUGIN_ALIASES = {"logging": "kasmweb/logger", "network": "kasmweb/sidecar"}              # the names install.sh looks the plugins up by
 PROFILE_PATH = "/mnt/kasm_profiles/{user_id}/{image_id}"        # a person's profiles together (Kasm's own documented example); not shared between workspaces
 GUEST_PACKAGES = ("docker.io", "docker-compose", "lsof", "jq", "curl", "openssl", "ca-certificates", "qemu-guest-agent", "iptables", "fuse3")
 KASM_UID = KASM_GID = 6500       # fixed in the base: files on the persistent admin disk are owned by this number, so it must mean the same on every root
@@ -51,6 +54,15 @@ def workspaces_from_list(entries) -> tuple:
         if entry.get("kind") == "kasm" and entry.get("workspaces"):
             return tuple(dict(w) for w in entry["workspaces"])
     return WORKSPACES
+
+
+def recipe_for(entries, recipe_path=None) -> dict:
+    """The recipe a build uses: the recipe file (or the default), with the supported-OS list's Kasm entry naming the workspaces when it does."""
+    recipe = kasm_recipe.load(WORKSPACES, recipe_path)
+    chosen = next((e["workspaces"] for e in entries or [] if e.get("kind") == "kasm" and e.get("workspaces")), None)
+    if chosen:
+        recipe = dict(recipe, workspaces=[dict(w) for w in chosen])
+    return kasm_recipe.validate(recipe)
 
 
 def image_ref(name: str, tag: str = IMAGE_TAG) -> str:
@@ -114,9 +126,14 @@ def trim_seed_yaml(text: str, workspaces=WORKSPACES, *, profile_path: str = PROF
     return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
 
 
-def prepare_script(service_refs: list, workspace_refs: list) -> str:
+def prepare_script(service_refs: list, workspace_refs: list, plugins=None) -> str:
     """Runs once inside the build VM (as root, from cloud-init). Progress goes to the serial console so the builder can follow it."""
     pulls = "\n".join(f"pull {ref}" for ref in [*service_refs, *workspace_refs])
+    plugins = plugins if plugins is not None else kasm_recipe.default(WORKSPACES)["plugins"]
+    for plugin in plugins:
+        if plugin["id"] not in PLUGIN_ALIASES:
+            raise KasmBuildError(f"the recipe names a plugin this build does not know how to pack: {plugin['id']}")
+    specs = " ".join(f'"{PLUGIN_ALIASES[p["id"]]} {p["image"]} amd64-{p["tag"]}"' for p in plugins)
     return f'''#!/bin/bash
 set -euo pipefail
 exec > >(tee /dev/ttyS0) 2>&1
@@ -147,7 +164,7 @@ tar -czf /opt/kasm-installer/offline/service_images.tar.gz -C /tmp/offline servi
 rm -rf /tmp/offline
 # the two Docker plugins Kasm's installer would fetch from the registry (log driver and sidecar network): installed here, packed the way its offline mode
 # unpacks them, then removed again so the base itself holds none of Kasm's install state
-for spec in "kasmweb/logger kasmweb/kasm-logging-plugin amd64-{LOGGING_PLUGIN_TAG}" "kasmweb/sidecar kasmweb/kasm-network-plugin amd64-{NETWORK_PLUGIN_TAG}"; do
+for spec in {specs}; do
     set -- $spec
     docker plugin install --alias "$1:$3" "$2:$3" --grant-all-permissions >/dev/null
     docker plugin disable "$1:$3" >/dev/null
@@ -287,8 +304,8 @@ def guest_files() -> dict:
     }
 
 
-def build_user_data(service_refs: list, workspace_refs: list) -> str:
-    files = [{"path": "/root/prepare-kasm.sh", "permissions": "0700", "owner": "root:root", "content": prepare_script(service_refs, workspace_refs)}]
+def build_user_data(service_refs: list, workspace_refs: list, plugins=None) -> str:
+    files = [{"path": "/root/prepare-kasm.sh", "permissions": "0700", "owner": "root:root", "content": prepare_script(service_refs, workspace_refs, plugins)}]
     files += [{"path": path, "permissions": mode, "owner": "root:root", "content": content} for path, (mode, content) in guest_files().items()]
     config = {"disable_root": True, "ssh_pwauth": False, "package_update": True, "package_upgrade": False, "packages": list(GUEST_PACKAGES),
               "write_files": files, "runcmd": [["bash", "/root/prepare-kasm.sh"]]}

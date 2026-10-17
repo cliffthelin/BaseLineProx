@@ -151,3 +151,16 @@ def test_removal_needs_the_confirmation_and_passes_the_yes_the_command_requires(
         assert {"event": "kasm_dehydrate_requested"} in audit
     finally:
         case.close()
+
+
+def test_the_page_says_which_components_are_in_the_base_and_which_nothing_here_uses():
+    import kasm_recipe
+    import kasm_build
+    recipe = kasm_recipe.summary(kasm_recipe.default(kasm_build.WORKSPACES))
+    case, _ = make(Machine({"present": False, "installed": False, "recipe": recipe}))
+    try:
+        page = req(case, "GET", "/workspaces")[2]
+        assert "What this Kasm is built from" in page and "server-connections</b> (carried, not used)" in page and "database</b> (required)" in page
+        assert "network</b> plugin (carried, not used)" in page
+    finally:
+        case.close()
