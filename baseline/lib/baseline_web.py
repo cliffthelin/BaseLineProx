@@ -2220,6 +2220,18 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._html_response(200, _with_nav(kasm_settings_ui.render_customize(live["settings"], kasm_settings_ui.default_shown() if shown is None else shown, notice), "/workspaces"))
             return self._html_response(200, _with_nav(kasm_settings_ui.render_simple(live["settings"], notice, shown), "/workspaces"))
 
+        if path == "/workspaces/suggestions":
+            import kasm_advice
+            import kasm_advice_page
+            import kasm_setup
+            advice = deps.get("kasm_advice") or kasm_advice.Advice(deps.get("kasm_machine") or kasm_setup.KasmSetup())
+            notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            try:
+                overview = advice.overview()
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                return self._html_response(200, _with_nav(kasm_advice_page.ui.render_unavailable(str(exc)), "/workspaces"))
+            return self._html_response(200, _with_nav(kasm_advice_page.render(overview, notice), "/workspaces"))
+
         if path == "/power":
             import power_control
             return self._html_response(200, _with_nav(power_control.render(qs.get("notice", [""])[0][:200].replace("+", " ")), path))
@@ -2863,6 +2875,38 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 deps["audit"](event)
             notice = f"Started: {action}. This page shows the result." if done.returncode == 0 else "Could not start it: " + (done.stderr or "").strip()[-120:]
             return self._redirect("/workspaces?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path.startswith("/workspaces/suggestions/"):
+            import kasm_advice
+            import kasm_proposals
+            import kasm_setup
+            action = path.rsplit("/", 1)[1]
+            advice = deps.get("kasm_advice") or kasm_advice.Advice(deps.get("kasm_machine") or kasm_setup.KasmSetup())
+            ident, note = str(body.get("id", "")), str(body.get("note", ""))[:300]
+            try:
+                if action not in ("refresh", "try", "finish", "archive"):
+                    raise kasm_proposals.ProposalError("Unknown action.")
+                if action != "refresh" and str(body.get("confirm", "")) != "yes":
+                    raise kasm_proposals.ProposalError("Tick the box to confirm; nothing was changed.")
+                if action == "refresh":
+                    done = advice.refresh()
+                    intake = done["proposals"]
+                    notice = (f"The Wiki is up to date ({done['wiki']['concerns']} concern(s)). " + (f"{len(intake['accepted'])} new proposal(s) to decide on. " if intake["accepted"] else "No new proposals. ")
+                              + (f"{len(intake['rejected'])} did not fit Kasm's settings and were archived with the reason." if intake["rejected"] else ""))
+                elif action == "try":
+                    done = advice.try_it(ident)
+                    notice = "Trial started: " + ", ".join(done["applied"]) + "." + (f" Kasm needs {' and '.join(done['restart'])} restarted before it takes effect." if done["restart"] else "")
+                elif action == "finish":
+                    done = advice.finish(ident, str(body.get("verdict", "")), note)
+                    notice = "Kept." if done["kept"] else "Put back as it was." + (" Left alone because they changed again since: " + ", ".join(done["left_as_found"]) if done["left_as_found"] else "")
+                else:
+                    advice.archive(ident, note)
+                    notice = "Archived."
+                if deps.get("audit"):
+                    deps["audit"]({"event": "kasm_suggestion_" + action, "id": ident[:61]})
+            except (kasm_proposals.ProposalError, kasm_setup.KasmSetupError, kasm_proposals.ui.SettingsError, OSError, ValueError) as exc:
+                notice = str(exc)
+            return self._redirect("/workspaces/suggestions?notice=" + html.escape(notice[:280]).replace(" ", "+"))
 
         if path == "/workspaces/settings/customize":
             import kasm_settings_ui

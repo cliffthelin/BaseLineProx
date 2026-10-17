@@ -440,6 +440,10 @@ cp "$SRC/baseline/lib/kasm_telemetry.py" /opt/baseline/lib/kasm_telemetry.py
 cp "$SRC/baseline/lib/kasm_registry.py" /opt/baseline/lib/kasm_registry.py
 cp "$SRC/baseline/lib/kasm_settings_ui.py" /opt/baseline/lib/kasm_settings_ui.py
 cp "$SRC/baseline/lib/kasm_settings.py" /opt/baseline/lib/kasm_settings.py
+cp "$SRC/baseline/lib/kasm_wiki.py" /opt/baseline/lib/kasm_wiki.py
+cp "$SRC/baseline/lib/kasm_proposals.py" /opt/baseline/lib/kasm_proposals.py
+cp "$SRC/baseline/lib/kasm_advice.py" /opt/baseline/lib/kasm_advice.py
+cp "$SRC/baseline/lib/kasm_advice_page.py" /opt/baseline/lib/kasm_advice_page.py
 cp "$SRC/baseline/bin/baseline-kasm" /opt/baseline/bin/baseline-kasm
 chmod +x /opt/baseline/bin/baseline-kasm
 cp "$SRC/boot/baseline-kasm-setup.service" /etc/systemd/system/baseline-kasm-setup.service

@@ -464,7 +464,20 @@ class KasmSetup:
             settings = self._collect_settings(vmid, conn, now, passphrase)
         finally:
             conn.close()
-        return {"collected": True, "metrics": len(metrics), "events": len(events), "host_metrics": hosts, "usage_images": usage, "setting_changes": settings}
+        result = {"collected": True, "metrics": len(metrics), "events": len(events), "host_metrics": hosts, "usage_images": usage, "setting_changes": settings}
+        result["wiki"] = self._refresh_advice(now, passphrase)
+        return result
+
+    def _refresh_advice(self, now, passphrase=None):
+        """Keep the Wiki current and take in proposals left for it. A failure is reported in the result, and never stops the telemetry that was just collected."""
+        import sqlite3
+
+        import kasm_advice
+        try:
+            done = kasm_advice.Advice(self).refresh(now, passphrase)
+        except (OSError, ValueError, sqlite3.Error, KasmSetupError) as exc:
+            return {"error": str(exc)}
+        return {"concerns": done["wiki"]["concerns"], "new_proposals": len(done["proposals"]["accepted"]), "rejected_proposals": len(done["proposals"]["rejected"])}
 
     def _collect_host_view(self, vmid, conn, now):
         """Proxmox's own figures for the VM and for the host it runs on (through `pvesh`, the same data Proxmox's graphs use). None when Proxmox did not answer."""
