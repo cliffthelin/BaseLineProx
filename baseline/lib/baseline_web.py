@@ -2762,6 +2762,24 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 notice = str(exc)
             return self._redirect("/memory?notice=" + html.escape(notice).replace(" ", "+"))
 
+        if path in ("/workspaces/mode", "/workspaces/dehydrate"):
+            import repair
+            if str(body.get("confirm", "")) != "yes":
+                return self._redirect("/workspaces?notice=" + html.escape("Tick the box to confirm; nothing was changed").replace(" ", "+"))
+            if path == "/workspaces/mode":
+                mode = str(body.get("mode", ""))
+                if mode not in ("persist", "reset"):
+                    return self._redirect("/workspaces?notice=" + html.escape("Choose keep everything or reset at every start").replace(" ", "+"))
+                action, args, event = f"mode {mode}", ["mode", mode], {"event": "kasm_mode_requested", "mode": mode}
+            else:
+                action, args, event = "removal", ["dehydrate", "--yes"], {"event": "kasm_dehydrate_requested"}
+            done = (deps.get("kasm_runner") or repair.RealRunner()).run(
+                ["systemd-run", "--no-block", "--unit=baseline-kasm-action", "/opt/baseline/bin/baseline-kasm", *args], timeout=30)
+            if deps.get("audit"):
+                deps["audit"](event)
+            notice = f"Started: {action}. This page shows the result." if done.returncode == 0 else "Could not start it: " + (done.stderr or "").strip()[-120:]
+            return self._redirect("/workspaces?notice=" + html.escape(notice).replace(" ", "+"))
+
         if path == "/workspaces/setup":
             import repair
             done = (deps.get("kasm_runner") or repair.RealRunner()).run(["systemctl", "start", "--no-block", "baseline-kasm-setup.service"], timeout=30)

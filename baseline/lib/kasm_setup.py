@@ -1,18 +1,23 @@
-"""Kasm Workspaces as a Proxmox VM, built on the overlay-and-persistence design (DR260, DR257/258/259).
+"""Kasm Workspaces as a Proxmox VM, built on the overlay and persistence design (DR260, DR257/258/259; operator 2026-10-17).
 
-What goes where (the disks are attached by serial, so the guest never depends on device letters):
-  root     overlay on SESSION_TEMP whose backing file is the vanilla base in INSTALLER_CACHE (read only: checked, never written). Disposable:
-           a rebuilt or reset OS is a new overlay over the same base.
-  admin    APPDATA_ADMIN: Kasm's own state (configuration, certificates, keys, logs, the Postgres data).
-  profiles APPDATA_PERSONAL: the browser/desktop profiles people keep, mounted by Kasm at /mnt/kasm_profiles/{user_id}/{image_id}.
-  secrets  the four Kasm credentials are generated here and stored in the USER_ADMIN vault BEFORE the guest is told them; nothing is installed
-           with a password that is not on record. They reach the guest on stdin through the guest agent, never in a file, a command line or a log.
+The VM is not permanent; what it holds is. Everything is layers over a vanilla base:
 
-Every disk is a sparse qcow2 (space is reserved, never written). Existing disks are reused, never replaced: a rebuild finds the admin and profile
-disks under the same VMID and attaches them again. Everything outside Proxmox's own commands goes through the Layout, so tests run in a temp tree.
+  base       the read-only Debian + Docker + Kasm image in INSTALLER_CACHE (checked against its manifest, never written).
+  persisted  an overlay on that base that keeps ALL configuration and data: the OS layer (docker state, anything set in the VM) and the Kasm state on
+             APPDATA_ADMIN, the people's profiles on APPDATA_PERSONAL. With these, the VM can be removed ("dehydrated") and built again ("rehydrated") exactly as it was.
+  session    only in `reset` mode: a layer on SESSION_TEMP over the persisted one, made fresh at every start, so everything done during a run is discarded and
+             the VM comes back as it was when it started. In `persist` mode (the default) there is no session layer and nothing is lost.
+
+  secrets    the four Kasm credentials are generated here and stored in the USER_ADMIN vault BEFORE the guest is told them; nothing is installed with a password
+             that is not on record. They reach the guest on stdin through the guest agent, never in a file, a command line or a log.
+
+Every disk is a sparse qcow2 (space is reserved, never written). Existing disks are reused, never replaced. A persisted overlay records the base it was made on and is
+not used with a different one. Everything outside Proxmox's own commands goes through the Layout, so tests run in a temp tree.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -36,11 +41,18 @@ GIB = 2**30
 # Room asked of each role volume before the VM is built. The disks are sparse, so their size is only a limit; what Kasm actually writes in its first
 # minutes (Docker's container layers and sessions, the database and logs, a first profile) must already fit, because the periodic growth check is slower
 # than an install. Beyond this the volumes grow as they fill.
-ROOM_NEEDED = {"SESSION_TEMP": 8 * GIB, "APPDATA_ADMIN": 4 * GIB, "APPDATA_PERSONAL": 2 * GIB}
+ROOM_NEEDED = {"SESSION_TEMP": 8 * GIB, "APPDATA_ADMIN": 12 * GIB, "APPDATA_PERSONAL": 2 * GIB}      # the persisted OS layer is on APPDATA_ADMIN now
+MODES = ("persist", "reset")
+DEFAULT_MODE = "persist"
+LAYOUT = 2            # 1 was the first build: the OS layer was disposable and on SESSION_TEMP. Records without a layout are that one.
 
 
 class KasmSetupError(Exception):
     """Never carries a secret value."""
+
+
+class Busy(KasmSetupError):
+    """Another Kasm action (a mode change, a removal, a setup) is running."""
 
 
 @dataclass(frozen=True)
@@ -50,6 +62,7 @@ class Layout:
     profiles_dir: Path = Path("/mnt/APPDATA_PERSONAL/kasm")
     base_dir: Path = Path("/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/kasm")     # carried with the installer's offline cache
     vault_path: str = vault_mod.ADMIN_VAULT
+    pve_conf_dir: Path = Path("/etc/pve/qemu-server")       # where Proxmox keeps a VM's definition (removing it, with the disks left alone, is what "dehydrate" does)
     mounts: tuple = field(default=("/mnt/SESSION_TEMP", "/mnt/APPDATA_ADMIN", "/mnt/APPDATA_PERSONAL", "/mnt/INSTALLER_CACHE", "/mnt/USER_ADMIN"))   # USER_ADMIN holds the vault
 
     @property
@@ -100,6 +113,20 @@ class KasmSetup:
         self.vault = vault if vault is not None else vault_mod.Vault(layout.vault_path)
         self._host_mb, self._host_cores = host_mb, host_cores
         self.ensure_room = ensure_room      # callable(label, needed_bytes) that extends a Baseline role volume; None where volumes do not grow
+
+    @contextlib.contextmanager
+    def _exclusive(self):
+        """One action at a time: the timer that keeps the VM running must not start it while a mode change or a removal has it stopped on purpose."""
+        self.layout.admin_dir.mkdir(parents=True, exist_ok=True)
+        handle = open(self.layout.admin_dir / ".action.lock", "a")
+        try:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise Busy("another Kasm action is running; try again when it has finished") from None
+            yield
+        finally:
+            handle.close()
 
     # ---- Proxmox -----------------------------------------------------------------------------------------------------
     def _command(self, argv, **kwargs):
@@ -187,6 +214,13 @@ class KasmSetup:
     def _disk_path(self, directory: Path, vmid, index) -> Path:
         return directory / "images" / str(vmid) / self.disk_name(vmid, index)
 
+    def persisted_path(self, vmid, index) -> Path:
+        """0 the OS layer and 1 Kasm's state (APPDATA_ADMIN), 2 the profiles (APPDATA_PERSONAL)."""
+        return self._disk_path(self.layout.profiles_dir if index == 2 else self.layout.admin_dir, vmid, index)
+
+    def session_path(self, vmid, index) -> Path:
+        return self._disk_path(self.layout.root_dir, vmid, index)
+
     def _make_disk(self, path: Path, options: list, size: str = ""):
         """Created only when absent; an existing disk is the user's data and is never replaced or resized here. Always a bare sparse qcow2."""
         if path.is_symlink():
@@ -197,14 +231,39 @@ class KasmSetup:
         self._command(["qemu-img", "create", "-q", "-f", "qcow2", *options, str(path), *([size] if size else [])])
         return True
 
-    def create_root(self, vmid) -> Path:
-        path = self._disk_path(self.layout.root_dir, vmid, 0)
-        self._make_disk(path, ["-b", str(self.layout.base), "-F", "qcow2"])
-        return path
+    def create_persisted(self, vmid, admin_gb=ADMIN_DISK_GB, profiles_gb=PROFILES_DISK_GB):
+        """The layers that keep everything, each only if absent."""
+        self._make_disk(self.persisted_path(vmid, 0), ["-b", str(self.layout.base), "-F", "qcow2"])
+        self._make_disk(self.persisted_path(vmid, 1), [], f"{int(admin_gb)}G")
+        self._make_disk(self.persisted_path(vmid, 2), [], f"{int(profiles_gb)}G")
 
-    def create_data_disks(self, vmid, admin_gb=ADMIN_DISK_GB, profiles_gb=PROFILES_DISK_GB):
-        self._make_disk(self._disk_path(self.layout.admin_dir, vmid, 1), [], f"{int(admin_gb)}G")
-        self._make_disk(self._disk_path(self.layout.profiles_dir, vmid, 2), [], f"{int(profiles_gb)}G")
+    def fresh_session_layer(self, vmid):
+        """A new, empty layer over each persisted disk (reset mode); whatever an earlier run wrote is gone."""
+        for index in range(3):
+            self.drop_session_disk(vmid, index)
+            path = self.session_path(vmid, index)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._command(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(self.persisted_path(vmid, index)), "-F", "qcow2", str(path)])
+
+    def drop_session_disk(self, vmid, index):
+        path = self.session_path(vmid, index)
+        if path.is_symlink():
+            raise KasmSetupError(f"{path} is a link; refusing to remove it")
+        path.unlink(missing_ok=True)
+
+    def drop_session_layer(self, vmid):
+        for index in range(3):
+            self.drop_session_disk(vmid, index)
+
+    def disk_arguments(self, vmid, mode) -> list:
+        """The `--virtioN` attachments for a mode: the persisted disks themselves, or the session layer over them. Data disks keep their serials."""
+        store = {0: "baseline-kasm-admin", 1: "baseline-kasm-admin", 2: "baseline-kasm-prof"}
+        out = []
+        for index in range(3):
+            volume = f"{'baseline-kasm-root' if mode == 'reset' else store[index]}:{vmid}/{self.disk_name(vmid, index)}"
+            serial = {1: f",serial={ADMIN_SERIAL}", 2: f",serial={PROFILES_SERIAL}"}.get(index, "")
+            out += [f"--virtio{index}", volume + serial]
+        return out
 
     def make_seed(self, vmid) -> str:
         """The cloud-init seed: names the machine and turns password sign-in off. It holds no secret. Returns the Proxmox volume id."""
@@ -220,14 +279,21 @@ class KasmSetup:
         return f"baseline-kasm-root:iso/{target.name}"
 
     # ---- the VM ------------------------------------------------------------------------------------------------------
-    def create_vm(self, vmid, size, seed_volume):
+    def create_vm(self, vmid, size, seed_volume, mode=DEFAULT_MODE, mac=None):
+        net = "virtio" + (f"={mac}" if mac else "") + ",bridge=vmbr0"
         self._command(["qm", "create", str(vmid), "--name", VM_NAME, "--memory", str(size["memory_mb"]), "--cores", str(size["cpus"]),
-                       "--machine", "q35", "--cpu", "host", "--ostype", "l26", "--net0", "virtio,bridge=vmbr0", "--agent", "enabled=1",
-                       "--serial0", "socket", "--vga", "serial0", "--onboot", "1",
-                       "--virtio0", f"baseline-kasm-root:{vmid}/{self.disk_name(vmid, 0)}",
-                       "--virtio1", f"baseline-kasm-admin:{vmid}/{self.disk_name(vmid, 1)},serial={ADMIN_SERIAL}",
-                       "--virtio2", f"baseline-kasm-prof:{vmid}/{self.disk_name(vmid, 2)},serial={PROFILES_SERIAL}",
+                       "--machine", "q35", "--cpu", "host", "--ostype", "l26", "--net0", net, "--agent", "enabled=1",
+                       "--serial0", "socket", "--vga", "serial0", "--onboot", "1", *self.disk_arguments(vmid, mode),
                        "--ide2", f"{seed_volume},media=cdrom", "--boot", "order=virtio0"])
+
+    def start_vm(self, vmid, record=None):
+        """Starts the VM. In reset mode the session layer is made fresh first, so the VM begins from the persisted state, never from a past run's changes."""
+        record = self.read_record() if record is None else record
+        if record.get("layout") == LAYOUT and record.get("mode") == "reset":
+            if self.vm_status(vmid) == "running":
+                raise KasmSetupError("the VM is running; a reset-mode start needs it stopped first")
+            self.fresh_session_layer(vmid)
+        self._command(["qm", "start", str(vmid)])
 
     def wait_for_agent(self, vmid, timeout=AGENT_WAIT_S):
         end = self.clock() + timeout
@@ -284,47 +350,99 @@ class KasmSetup:
             raise KasmSetupError("the credential vault cannot be written (is it unlocked?); nothing is installed without a recorded password") from None
         return fresh
 
+    DOCKER_DROPIN = "/etc/systemd/system/docker.service.d/baseline-kasm-install.conf"
+
+    def _guest_shell(self, vmid, script, timeout=120):
+        """True only when the command ran in the guest AND exited 0 (`qm guest exec` itself succeeds whatever the command's own exit code is)."""
+        rc, out, _err = self.run(["qm", "guest", "exec", str(vmid), "--synchronous", "1", "--timeout", str(timeout), "--", "/bin/bash", "-c", script],
+                                 timeout=timeout + 30)
+        try:
+            result = json.loads(out)
+        except (ValueError, TypeError):
+            return False
+        return rc == 0 and isinstance(result, dict) and result.get("exitcode") == 0 and not result.get("signal")
+
     def run_install(self, vmid, creds):
-        data = "".join(f"{name}={creds[name]}\n" for name in SECRET_NAMES).encode()
-        rc, out, _err = self.run(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", str(INSTALL_TIMEOUT_S),
-                                  "--", "/usr/local/sbin/baseline-kasm-install"], data=data, timeout=INSTALL_TIMEOUT_S + 60)
+        """Kasm's installer restarts Docker several times in a row; on a slow host that trips systemd's start-rate limit ("start of the service was attempted too
+        often") and the install stops half-way (found on a nested Proxmox, 2026-10-17). So the limit is lifted for the install and put back afterwards.
+        The data disks are brought up first, too: after a rebuild the guest agent answers before the VM's own start-up has mounted them, and the installer's
+        "already installed?" check would look at an unmounted folder (found the same day)."""
+        if not self._guest_shell(vmid, "/usr/local/sbin/baseline-kasm-disks"):
+            raise KasmSetupError("the VM's data disks could not be brought up; nothing was installed")
+        self._guest_shell(vmid, f"mkdir -p {os.path.dirname(self.DOCKER_DROPIN)} && printf '[Unit]\\nStartLimitIntervalSec=0\\n' > {self.DOCKER_DROPIN} && "
+                                "systemctl daemon-reload && systemctl reset-failed docker.service docker.socket || true")
+        try:
+            data = "".join(f"{name}={creds[name]}\n" for name in SECRET_NAMES).encode()
+            rc, out, _err = self.run(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", str(INSTALL_TIMEOUT_S),
+                                      "--", "/usr/local/sbin/baseline-kasm-install"], data=data, timeout=INSTALL_TIMEOUT_S + 60)
+        finally:
+            self._guest_shell(vmid, f"rm -f {self.DOCKER_DROPIN}; systemctl daemon-reload")
         try:
             result = json.loads(out)
         except (ValueError, TypeError):
             result = {}
         if rc or not isinstance(result, dict) or result.get("exitcode") != 0 or result.get("signal"):
-            tail = str(result.get("out-data", "") if isinstance(result, dict) else "")[-300:]
-            raise KasmSetupError(f"the Kasm install did not finish successfully{(': ' + tail) if tail else ''}")
+            # the installer's own log (in the VM) holds the reason; it also holds Kasm's generated tokens, so none of it is quoted here
+            raise KasmSetupError("the Kasm install did not finish successfully; the reason is in /var/log/kasm-install.log inside the VM")
 
     # ---- the whole thing ---------------------------------------------------------------------------------------------
     def setup(self, *, passphrase=None, admin_gb=ADMIN_DISK_GB, profiles_gb=PROFILES_DISK_GB) -> dict:
-        """Idempotent: a VM that is already there and installed is only made sure of (cheap: no base check, no guest work); a rebuild after the VM
-        was destroyed reattaches the persistent disks under their old VMID."""
+        try:
+            with self._exclusive():
+                return self._setup(passphrase=passphrase, admin_gb=admin_gb, profiles_gb=profiles_gb)
+        except Busy:
+            return {"busy": True}                     # the timer's call: another action has the VM in hand; nothing is done and nothing is wrong
+
+    def set_mode(self, mode) -> dict:
+        with self._exclusive():
+            return self._set_mode(mode)
+
+    def dehydrate(self) -> dict:
+        with self._exclusive():
+            return self._dehydrate()
+
+    def reset_root(self, confirm=False) -> dict:
+        with self._exclusive():
+            return self._reset_root(confirm=confirm)
+
+    def _write_record(self, **updates) -> dict:
+        record = {**self.read_record(), **updates}
+        self.layout.record.parent.mkdir(parents=True, exist_ok=True)
+        self.layout.record.write_text(json.dumps(record, indent=1))
+        return record
+
+    def _setup(self, *, passphrase=None, admin_gb=ADMIN_DISK_GB, profiles_gb=PROFILES_DISK_GB) -> dict:
+        """Idempotent. A VM that is there and installed is only made sure of (cheap: no base check, no guest work). A VM that is gone (dehydrated, or lost) is
+        built again from its persisted layers under the same VMID, memory, cores and address, in the mode it had."""
         vmid = self.existing_vmid()
         record = self.read_record()
         if vmid is not None and record.get("vmid") == vmid and record.get("installed"):
             if self.vm_status(vmid) != "running":
-                self._command(["qm", "start", str(vmid)])
+                self.start_vm(vmid, record)
             return {**record, "created": False, "url": self.address(vmid)}
         self.check_volumes()
         manifest = self.check_base()
-        size = self.sizing()
+        legacy = bool(record) and record.get("layout") != LAYOUT
+        if not legacy and record.get("base_sha256") and record["base_sha256"] != manifest.get("sha256") and self.persisted_path(record.get("vmid", 0), 0).exists():
+            raise KasmSetupError("the persisted layers were made on a different Kasm base than the one carried now; they are not used with it")
+        size = {k: record[k] for k in ("memory_mb", "cpus") if record.get(k)} if record.get("memory_mb") else self.sizing()
         self._ensure_storages()
         self.make_room()
+        mode = record.get("mode", DEFAULT_MODE) if not legacy else DEFAULT_MODE
         created = vmid is None
         if created:
             vmid = self.recorded_vmid() or int(self._command(["pvesh", "get", "/cluster/nextid"]).strip())
-            self.create_root(vmid)
-            self.create_data_disks(vmid, admin_gb, profiles_gb)
-            self.create_vm(vmid, size, self.make_seed(vmid))
+            self.create_persisted(vmid, admin_gb, profiles_gb)
+            if mode == "reset":
+                self.fresh_session_layer(vmid)
+            self.create_vm(vmid, size, self.make_seed(vmid), mode, mac=(record.get("definition") or {}).get("mac"))
         if self.vm_status(vmid) != "running":
             self._command(["qm", "start", str(vmid)])
         self.wait_for_agent(vmid)
         creds = self.credentials(passphrase)
         self.run_install(vmid, creds)               # a no-op in the guest when it is already installed
-        state = {"vmid": vmid, "kasm_version": manifest.get("kasm_version"), "base_sha256": manifest.get("sha256"), "installed": True, **size}
-        self.layout.record.parent.mkdir(parents=True, exist_ok=True)
-        self.layout.record.write_text(json.dumps(state, indent=1))
+        state = self._write_record(vmid=vmid, kasm_version=manifest.get("kasm_version"), base_sha256=manifest.get("sha256"), installed=True,
+                                   layout=LAYOUT, mode=mode, dehydrated=False, **size)
         return {**state, "created": created, "url": self.address(vmid)}
 
     def carried_workspaces(self):
@@ -339,28 +457,91 @@ class KasmSetup:
         """What is there now, without changing anything."""
         vmid = self.existing_vmid()
         record = self.read_record()
+        mode = record.get("mode", DEFAULT_MODE) if record.get("layout") == LAYOUT else None
         if vmid is None:
-            return {"present": False, "installed": False, "recorded_vmid": self.recorded_vmid(), "workspaces": self.carried_workspaces()}
+            return {"present": False, "installed": bool(record.get("installed")), "dehydrated": bool(record.get("dehydrated")), "mode": mode,
+                    "recorded_vmid": self.recorded_vmid(), "workspaces": self.carried_workspaces()}
         running = self.vm_status(vmid) == "running"
-        return {"present": True, "vmid": vmid, "running": running, "installed": bool(record.get("installed")),
-                "url": self.address(vmid) if running else None, "memory_mb": record.get("memory_mb"), "cpus": record.get("cpus"),
+        return {"present": True, "vmid": vmid, "running": running, "installed": bool(record.get("installed")), "mode": mode,
+                "dehydrated": False, "url": self.address(vmid) if running else None, "memory_mb": record.get("memory_mb"), "cpus": record.get("cpus"),
                 "workspaces": self.carried_workspaces()}
 
-    def reset_root(self) -> dict:
-        """Throw the OS away and boot a new one over the same base; the admin and profile disks are not touched (the persistence proof)."""
+    def _stopped(self, vmid):
+        if self.vm_status(vmid) != "stopped":
+            self._command(["qm", "shutdown", str(vmid), "--timeout", "180", "--forceStop", "1"])
+        if self.vm_status(vmid) != "stopped":
+            raise KasmSetupError("the VM did not stop")
+
+    def _set_mode(self, mode) -> dict:
+        """persist: everything done is kept. reset: everything done during a run is discarded and the VM starts from where it was. Needs a restart of the VM."""
+        if mode not in MODES:
+            raise KasmSetupError(f"the run mode is one of: {', '.join(MODES)}")
+        vmid = self.existing_vmid()
+        record = self.read_record()
+        if vmid is None:
+            raise KasmSetupError("there is no Kasm VM; set it up first")
+        if record.get("layout") != LAYOUT:
+            raise KasmSetupError("this VM was built with the first layout, which has no run modes; remove it and set it up again to use them")
+        self.check_volumes()
+        self._stopped(vmid)
+        for index in range(3):                                   # the layers the VM is attached to
+            self.drop_session_disk(vmid, index)
+        if mode == "reset":
+            self.fresh_session_layer(vmid)
+        arguments = self.disk_arguments(vmid, mode)
+        self._command(["qm", "set", str(vmid), *arguments])
+        if mode == "persist":
+            self.drop_session_layer(vmid)
+        self._write_record(mode=mode)
+        self._command(["qm", "start", str(vmid)])
+        self.wait_for_agent(vmid)
+        return {"vmid": vmid, "mode": mode, "url": self.address(vmid)}
+
+    def _dehydrate(self) -> dict:
+        """Remove the VM and keep everything it held: its definition is recorded, its persisted layers stay where they are, and `setup` builds it again exactly as it was.
+        The VM must be stopped (it is shut down first). Only this module's own VM is touched, by its recorded id and name."""
+        vmid = self.existing_vmid()
+        record = self.read_record()
+        if vmid is None:
+            raise KasmSetupError("there is no Kasm VM to remove")
+        if record.get("layout") != LAYOUT or record.get("vmid") != vmid:
+            raise KasmSetupError("this VM was not built with the persisted layers, so removing it would lose its OS layer; not removed")
+        conf = Path(self.layout.pve_conf_dir) / f"{vmid}.conf"
+        if conf.is_symlink() or not conf.is_file():
+            raise KasmSetupError("the VM's definition is not where Proxmox keeps it; not removed")
+        self._stopped(vmid)
+        text = self._command(["qm", "config", str(vmid)])
+        fields = dict(line.split(": ", 1) for line in text.splitlines() if ": " in line)
+        if fields.get("name") != VM_NAME or "lock" in fields:
+            raise KasmSetupError("the VM's name or lock is not what this module made; not removed")
+        mac = next((part.split("=", 1)[1] for part in fields.get("net0", "").split(",") if part.startswith("virtio=")), None)
+        for index in range(3):
+            if not self.persisted_path(vmid, index).is_file():
+                raise KasmSetupError("a persisted layer is missing; removing the VM would lose more than its definition; not removed")
+        self._write_record(dehydrated=True, definition={"mac": mac, "memory": fields.get("memory"), "cores": fields.get("cores")})
+        conf.unlink()                                            # the VM's definition only; Proxmox is left holding no reference to the disks
+        self.drop_session_layer(vmid)
+        if self.existing_vmid() is not None:
+            raise KasmSetupError("Proxmox still lists the VM after its definition was removed")
+        return {"vmid": vmid, "dehydrated": True, "kept": [str(self.persisted_path(vmid, i)) for i in range(3)]}
+
+    def _reset_root(self, confirm=False) -> dict:
+        """Throw the OS layer away and boot a new one over the same base; Kasm's state and the profiles are not touched. This DISCARDS the persisted OS layer, so it
+        needs `confirm` (the run mode `reset` is the way to discard a run's changes without losing the OS layer)."""
+        if not confirm:
+            raise KasmSetupError("this discards the persisted OS layer; it needs explicit confirmation")
         vmid = self.existing_vmid()
         if vmid is None:
             raise KasmSetupError("there is no Kasm VM to reset")
         self.check_volumes()
         self.check_base()
-        if self.vm_status(vmid) != "stopped":
-            self._command(["qm", "shutdown", str(vmid), "--timeout", "120", "--forceStop", "1"])
-        root = self._disk_path(self.layout.root_dir, vmid, 0)
-        if root.is_symlink():
+        record = self.read_record()
+        self._stopped(vmid)
+        persisted = self.persisted_path(vmid, 0) if record.get("layout") == LAYOUT else self.session_path(vmid, 0)
+        if persisted.is_symlink():
             raise KasmSetupError("the root disk is a link; refusing to replace it")
-        root.unlink(missing_ok=True)
-        self.create_root(vmid)
-        self._command(["qm", "start", str(vmid)])
+        persisted.unlink(missing_ok=True)
+        self._make_disk(persisted, ["-b", str(self.layout.base), "-F", "qcow2"])
+        self.start_vm(vmid, record)
         self.wait_for_agent(vmid)
         return {"vmid": vmid, "url": self.address(vmid)}
-

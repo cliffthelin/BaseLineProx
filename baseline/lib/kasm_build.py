@@ -231,8 +231,8 @@ done
 for key in KASM_ADMIN_PASSWORD KASM_USER_PASSWORD KASM_DB_PASSWORD KASM_MANAGER_TOKEN; do
     [ -n "${{secret[$key]:-}}" ] || {{ echo "$key was not given" >&2; exit 2; }}
 done
+/usr/local/sbin/baseline-kasm-disks                 # first: the persisted state is on these disks, so "already installed?" can only be answered once they are mounted
 [ ! -f /opt/kasm/.baseline/installed.json ] || {{ echo "already installed"; exit 0; }}
-/usr/local/sbin/baseline-kasm-disks
 systemctl start docker
 [ -z "$(ls -A /opt/kasm/data/db 2>/dev/null)" ] || {{ echo "refusing: /opt/kasm/data/db already holds data" >&2; exit 3; }}
 VOLUME=kasm_db_{KASM_VERSION}

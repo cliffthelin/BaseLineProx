@@ -277,3 +277,9 @@ def test_the_lists_kasm_entry_chooses_the_workspaces_the_base_carries_else_the_d
     assert kb.workspaces_from_list([{"kind": "vm"}, {"kind": "kasm", "workspaces": chosen}]) == tuple(chosen)
     assert kb.workspaces_from_list([{"kind": "kasm", "workspaces": None}]) == kb.WORKSPACES and kb.workspaces_from_list([]) == kb.WORKSPACES
     assert kb.carried_images(kb.workspaces_from_list([{"kind": "kasm", "workspaces": chosen}])) == ["kasmweb/chrome:1.19.0"]    # a smaller list is a smaller base
+
+
+def test_the_data_disks_are_up_before_the_installer_asks_whether_kasm_is_already_installed():
+    """Found on a rebuilt VM (2026-10-17): the agent answers before the start-up service has mounted the disks; the marker is on them."""
+    script = kb.guest_files()["/usr/local/sbin/baseline-kasm-install"][1]
+    assert script.index("baseline-kasm-disks") < script.index("already installed")

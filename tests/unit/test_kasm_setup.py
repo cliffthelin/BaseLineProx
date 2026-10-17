@@ -11,8 +11,9 @@ import vault as vault_mod
 class Fake:
     """Scripted Proxmox: remembers calls, answers the few commands setup uses, and creates the files qemu-img would."""
 
-    def __init__(self, vms=None, storages=None, agent_after=0, install_exit=0):
+    def __init__(self, vms=None, storages=None, agent_after=0, install_exit=0, conf_dir=None):
         self.calls, self.inputs = [], []
+        self.conf_dir, self.config = conf_dir, {}
         self.vms = list(vms or [])
         self.storages = list(storages or [])
         self.agent_after, self.pings = agent_after, 0
@@ -26,7 +27,8 @@ class Fake:
         head = argv[:2]
         if head == ["pvesh", "get"]:
             if argv[2] == "/cluster/resources":
-                return 0, json.dumps(self.vms), ""
+                listed = [v for v in self.vms if self.conf_dir is None or (self.conf_dir / f"{v['vmid']}.conf").exists()]
+                return 0, json.dumps(listed), ""
             if argv[2] == "/storage":
                 return 0, json.dumps(self.storages), ""
             if argv[2] == "/cluster/nextid":
@@ -41,6 +43,15 @@ class Fake:
             Path(argv[argv.index("-o") + 1]).write_bytes(b"iso")
         if head == ["qm", "create"]:
             self.vms.append({"name": argv[argv.index("--name") + 1], "vmid": int(argv[2])})
+            self.config = {argv[i][2:]: argv[i + 1] for i in range(3, len(argv), 2)}
+            self.config["net0"] = self.config.get("net0", "virtio,bridge=vmbr0") if "=" in self.config.get("net0", "").split(",")[0] else "virtio=BC:24:11:AA:BB:CC,bridge=vmbr0"
+            if self.conf_dir is not None:
+                self.conf_dir.mkdir(parents=True, exist_ok=True)
+                (self.conf_dir / f"{argv[2]}.conf").write_text("x")
+        if head == ["qm", "set"]:
+            self.config.update({argv[i][2:]: argv[i + 1] for i in range(3, len(argv), 2)})
+        if head == ["qm", "config"]:
+            return 0, "\n".join(f"{k}: {v}" for k, v in self.config.items()), ""
         if head == ["qm", "start"]:
             self.state = "running"
         if head == ["qm", "shutdown"]:
@@ -54,7 +65,8 @@ class Fake:
             return 0, json.dumps([{"name": "lo", "ip-addresses": [{"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}]},
                                   {"name": "ens18", "ip-addresses": [{"ip-address": "192.168.1.50", "ip-address-type": "ipv4"}]}]), ""
         if head == ["qm", "guest"]:
-            return 0, json.dumps({"exited": 1, "exitcode": self.install_exit, "out-data": "boom" if self.install_exit else ""}), ""
+            code = self.install_exit if argv[-1] == "/usr/local/sbin/baseline-kasm-install" else 0          # only the installer itself can fail here
+            return 0, json.dumps({"exited": 1, "exitcode": code, "out-data": "boom" if code else ""}), ""
         return 0, "", ""
 
     def named(self, *prefix):
@@ -64,7 +76,7 @@ class Fake:
 @pytest.fixture
 def world(tmp_path):
     layout = ks.Layout(root_dir=tmp_path / "temp" / "kasm", admin_dir=tmp_path / "admin" / "kasm", profiles_dir=tmp_path / "personal" / "kasm",
-                       base_dir=tmp_path / "cache" / "kasm", vault_path=str(tmp_path / "vault"), mounts=())
+                       base_dir=tmp_path / "cache" / "kasm", vault_path=str(tmp_path / "vault"), mounts=(), pve_conf_dir=tmp_path / "pve")
     layout.base_dir.mkdir(parents=True)
     layout.base.write_bytes(b"base image")
     (layout.base_dir / "KASM.json").write_text(json.dumps({"sha256": "abc", "kasm_version": "1.19.0", "holds_install_state_or_secrets": False}))
@@ -73,6 +85,7 @@ def world(tmp_path):
 
 def build(world, fake=None, **kwargs):
     fake = fake or Fake()
+    fake.conf_dir = fake.conf_dir or world.pve_conf_dir
     options = dict(run=fake, is_mount=lambda _m: True, sleep=lambda _s: None, hash_file=lambda _p: "abc", host_mb=32768, host_cores=8)
     options.update(kwargs)
     return ks.KasmSetup(world, **options), fake
@@ -110,27 +123,28 @@ def test_unmounted_volumes_are_named_and_nothing_is_created(world):
     assert not fake.named("qm", "create") and not fake.named("qemu-img")
 
 
-def test_setup_builds_the_vm_with_each_disk_on_its_own_volume_attached_by_serial(world):
+def test_setup_builds_the_vm_on_persisted_layers_attached_by_serial_with_no_session_layer(world):
     setup, fake = build(world)
     result = setup.setup()
     config = fake.named("qm", "create")[0]
-    assert result["vmid"] == 100 and result["created"] and result["url"] == "https://192.168.1.50"
-    assert "baseline-kasm-root:100/vm-100-disk-0.qcow2" in config
+    assert result["vmid"] == 100 and result["created"] and result["url"] == "https://192.168.1.50" and result["mode"] == "persist" and result["layout"] == ks.LAYOUT
+    assert "baseline-kasm-admin:100/vm-100-disk-0.qcow2" in config                      # the OS layer is persisted too (on APPDATA_ADMIN)
     assert f"baseline-kasm-admin:100/vm-100-disk-1.qcow2,serial={ks.ADMIN_SERIAL}" in config
     assert f"baseline-kasm-prof:100/vm-100-disk-2.qcow2,serial={ks.PROFILES_SERIAL}" in config
-    assert (world.root_dir / "images/100/vm-100-disk-0.qcow2").is_file() and (world.admin_dir / "images/100/vm-100-disk-1.qcow2").is_file()
+    assert (world.admin_dir / "images/100/vm-100-disk-0.qcow2").is_file() and (world.admin_dir / "images/100/vm-100-disk-1.qcow2").is_file()
     assert (world.profiles_dir / "images/100/vm-100-disk-2.qcow2").is_file()
+    assert not (world.root_dir / "images/100").exists()                                 # persist mode has no session layer
     assert len(ks.ADMIN_SERIAL) <= 20 and len(ks.PROFILES_SERIAL) <= 20
 
 
-def test_the_root_is_an_overlay_on_the_vanilla_base_and_the_data_disks_are_bare_sparse(world):
+def test_the_os_layer_is_an_overlay_on_the_vanilla_base_and_the_data_disks_are_bare_sparse(world):
     setup, fake = build(world)
     setup.setup()
     creates = {c[-2] if c[-1].endswith("G") else c[-1]: c for c in fake.named("qemu-img", "create")}
-    root = creates[str(world.root_dir / "images/100/vm-100-disk-0.qcow2")]
+    root = creates[str(world.admin_dir / "images/100/vm-100-disk-0.qcow2")]
     assert ["-b", str(world.base), "-F", "qcow2"] == root[root.index("-b"):root.index("-b") + 4]
-    for name in ("admin", "personal"):
-        argv = next(c for p, c in creates.items() if f"/{name}/" in p)
+    for path in (world.admin_dir / "images/100/vm-100-disk-1.qcow2", world.profiles_dir / "images/100/vm-100-disk-2.qcow2"):
+        argv = creates[str(path)]
         assert "-b" not in argv and "-o" not in argv and not [a for a in argv if "prealloc" in a]       # reserved, never written
 
 
@@ -138,7 +152,7 @@ def test_the_installer_cache_base_is_only_ever_read(world):
     setup, fake = build(world)
     setup.setup()
     before = world.base.read_bytes()
-    setup.reset_root()
+    setup.reset_root(confirm=True)
     assert world.base.read_bytes() == before
     assert not [c for c in fake.calls if str(world.base_dir) in " ".join(c) and c[0] not in ("qemu-img",)]
 
@@ -193,7 +207,7 @@ def test_a_sealed_vault_stops_the_install_before_any_guest_work(world):
 
 def test_a_failed_install_is_reported_without_the_secrets_and_leaves_no_record(world):
     setup, fake = build(world, fake=Fake(install_exit=1))
-    with pytest.raises(ks.KasmSetupError, match="did not finish") as info:
+    with pytest.raises(ks.KasmSetupError, match="did not finish.*kasm-install.log") as info:
         setup.setup()
     assert not any(setup.vault.get(n) in str(info.value) for n in ks.SECRET_NAMES)
     assert not world.record.exists()
@@ -208,32 +222,32 @@ def test_setup_twice_does_not_rebuild_or_replace_anything(world):
     assert not result["created"] and not fake2.named("qm", "create") and not fake2.named("qemu-img") and not fake2.named("qm", "start")
 
 
-def test_a_rebuild_after_the_vm_was_destroyed_reattaches_the_persistent_disks_under_the_same_vmid(world):
+def test_a_vm_that_is_gone_is_built_again_from_its_persisted_layers_without_creating_or_changing_any(world):
     setup, _ = build(world)
     setup.setup()
-    marker = world.profiles_dir / "images/100/vm-100-disk-2.qcow2"
-    marker.write_bytes(b"the user's profiles")
-    (world.admin_dir / "images/100/vm-100-disk-1.qcow2").write_bytes(b"kasm state")
-    again, fake = build(world)                                                              # Proxmox no longer lists the VM; the disks and record remain
-    again.layout.root_dir.joinpath("images/100/vm-100-disk-0.qcow2").unlink()
+    contents = {0: b"the OS layer, with everything set in the VM", 1: b"kasm state", 2: b"the user's profiles"}
+    for index, data in contents.items():
+        setup.persisted_path(100, index).write_bytes(data)
+    (world.pve_conf_dir / "100.conf").unlink()                                              # Proxmox no longer lists the VM; every layer and the record remain
+    again, fake = build(world)
     result = again.setup()
     assert result["vmid"] == 100 and result["created"]
-    assert marker.read_bytes() == b"the user's profiles" and (world.admin_dir / "images/100/vm-100-disk-1.qcow2").read_bytes() == b"kasm state"
-    assert not [c for c in fake.named("qemu-img", "create") if c[-1].endswith("G") or "disk-1" in c[-1] or "disk-2" in c[-1]]
-    assert not fake.named("pvesh", "get", "/cluster/nextid")
+    assert {i: again.persisted_path(100, i).read_bytes() for i in contents} == contents
+    assert not fake.named("qemu-img") and not fake.named("pvesh", "get", "/cluster/nextid")
 
 
-def test_reset_root_replaces_only_the_root_disk(world):
+def test_reset_root_needs_confirmation_and_replaces_only_the_os_layer(world):
     setup, fake = build(world)
     setup.setup()
-    (world.admin_dir / "images/100/vm-100-disk-1.qcow2").write_bytes(b"kasm state")
-    (world.profiles_dir / "images/100/vm-100-disk-2.qcow2").write_bytes(b"profiles")
-    root = world.root_dir / "images/100/vm-100-disk-0.qcow2"
-    root.write_bytes(b"old root with a lot of writes")
-    result = setup.reset_root()
-    assert result["vmid"] == 100 and root.read_bytes() == b"qcow2"                           # a fresh overlay
-    assert (world.admin_dir / "images/100/vm-100-disk-1.qcow2").read_bytes() == b"kasm state"
-    assert (world.profiles_dir / "images/100/vm-100-disk-2.qcow2").read_bytes() == b"profiles"
+    setup.persisted_path(100, 1).write_bytes(b"kasm state")
+    setup.persisted_path(100, 2).write_bytes(b"profiles")
+    setup.persisted_path(100, 0).write_bytes(b"old os layer with a lot of writes")
+    with pytest.raises(ks.KasmSetupError, match="explicit confirmation"):
+        setup.reset_root()
+    assert setup.persisted_path(100, 0).read_bytes() == b"old os layer with a lot of writes"           # nothing was touched
+    result = setup.reset_root(confirm=True)
+    assert result["vmid"] == 100 and setup.persisted_path(100, 0).read_bytes() == b"qcow2"            # a fresh overlay on the base
+    assert setup.persisted_path(100, 1).read_bytes() == b"kasm state" and setup.persisted_path(100, 2).read_bytes() == b"profiles"
 
 
 def test_a_linked_disk_is_never_followed(world, tmp_path):
@@ -256,6 +270,9 @@ def test_a_storage_id_taken_by_something_else_is_refused(world):
 
 
 def test_two_vms_with_the_name_are_refused_not_guessed_at(world):
+    world.pve_conf_dir.mkdir(parents=True)
+    for vmid in (100, 101):
+        (world.pve_conf_dir / f"{vmid}.conf").write_text("x")
     setup, _ = build(world, fake=Fake(vms=[{"name": ks.VM_NAME, "vmid": 100}, {"name": ks.VM_NAME, "vmid": 101}]))
     with pytest.raises(ks.KasmSetupError, match="more than one"):
         setup.setup()
@@ -280,11 +297,11 @@ def test_an_installed_vm_is_only_made_sure_of_not_rechecked_or_reinstalled(world
 
 def test_status_reports_without_changing_anything(world):
     setup, fake = build(world)
-    assert setup.status() == {"present": False, "installed": False, "recorded_vmid": None, "workspaces": None}
+    assert setup.status() == {"present": False, "installed": False, "dehydrated": False, "mode": None, "recorded_vmid": None, "workspaces": None}
     setup.setup()
     fake.state = "running"
     now = setup.status()
-    assert now["present"] and now["running"] and now["installed"] and now["url"] == "https://192.168.1.50"
+    assert now["present"] and now["running"] and now["installed"] and now["mode"] == "persist" and now["url"] == "https://192.168.1.50"
     assert not fake.named("qm", "stop") and len(fake.named("qm", "start")) == 1
 
 
@@ -312,3 +329,183 @@ def test_status_reports_the_workspaces_the_carried_base_holds(world):
     assert setup.status()["workspaces"] == [{"friendly_name": "Browser", "persistent": True}]
     (world.base_dir / "KASM.json").unlink()
     assert setup.status()["workspaces"] is None
+
+
+
+# ---- run modes, dehydrate and rehydrate (operator 2026-10-17) ---------------------------------------------------------------
+
+def installed(world, **kw):
+    setup, fake = build(world, **kw)
+    setup.setup()
+    return setup, fake
+
+
+def test_reset_mode_runs_on_a_fresh_session_layer_over_the_persisted_one_and_persist_mode_has_none(world):
+    setup, fake = installed(world)
+    result = setup.set_mode("reset")
+    assert result["mode"] == "reset" and setup.read_record()["mode"] == "reset"
+    for index in range(3):                                                               # a layer on SESSION_TEMP, backed by the persisted disk
+        made = [c for c in fake.named("qemu-img", "create") if c[-1] == str(setup.session_path(100, index))][-1]
+        assert made[made.index("-b") + 1] == str(setup.persisted_path(100, index)) and "-F" in made
+    assert fake.config["virtio0"] == "baseline-kasm-root:100/vm-100-disk-0.qcow2"
+    assert fake.config["virtio1"].endswith(f"serial={ks.ADMIN_SERIAL}") and fake.config["virtio1"].startswith("baseline-kasm-root:")
+    setup.set_mode("persist")
+    assert fake.config["virtio0"] == "baseline-kasm-admin:100/vm-100-disk-0.qcow2" and not (world.root_dir / "images/100/vm-100-disk-0.qcow2").exists()
+
+
+def test_every_start_in_reset_mode_begins_from_a_fresh_layer_so_a_runs_changes_are_gone(world):
+    setup, fake = installed(world)
+    setup.set_mode("reset")
+    session = setup.session_path(100, 0)
+    session.write_bytes(b"everything done during that run")                              # what the guest wrote
+    fake.state = "stopped"
+    setup.setup()                                                                       # the timer starts a stopped VM
+    assert session.read_bytes() == b"qcow2"                                             # fresh, empty layer
+    assert setup.persisted_path(100, 0).read_bytes() == b"qcow2"                        # and the persisted layer was never written
+
+
+def test_persist_mode_start_keeps_whatever_the_guest_wrote(world):
+    setup, fake = installed(world)
+    setup.persisted_path(100, 0).write_bytes(b"kept")
+    fake.state = "stopped"
+    setup.setup()
+    assert setup.persisted_path(100, 0).read_bytes() == b"kept" and not fake.named("qemu-img", "create")[3:]
+
+
+def test_a_reset_mode_start_refuses_a_running_vm_instead_of_pulling_the_layer_from_under_it(world):
+    setup, fake = installed(world)
+    setup.set_mode("reset")
+    fake.state = "running"
+    with pytest.raises(ks.KasmSetupError, match="stopped first"):
+        setup.start_vm(100)
+
+
+def test_an_unknown_mode_is_refused(world):
+    setup, _ = installed(world)
+    with pytest.raises(ks.KasmSetupError, match="one of: persist, reset"):
+        setup.set_mode("snapshot")
+
+
+def test_dehydrate_removes_only_the_definition_and_rehydrate_brings_back_the_same_vm(world):
+    setup, fake = installed(world)
+    for index in range(3):
+        setup.persisted_path(100, index).write_bytes(f"layer {index}".encode())
+    first_mac = fake.config["net0"]
+    report = setup.dehydrate()
+    assert report["dehydrated"] and not (world.pve_conf_dir / "100.conf").exists()
+    assert [p.read_bytes() for p in map(lambda i: setup.persisted_path(100, i), range(3))] == [b"layer 0", b"layer 1", b"layer 2"]       # every layer is kept
+    assert setup.status()["present"] is False and setup.status()["dehydrated"] and setup.status()["installed"]
+    assert not [c for c in fake.calls if c[:2] in (["qm", "destroy"], ["pvesm", "free"])]                                                   # nothing was deleted through Proxmox
+    again, fake2 = build(world)
+    result = again.setup()
+    assert result["created"] and result["vmid"] == 100 and result["memory_mb"] == setup.read_record()["memory_mb"]
+    assert f"virtio={first_mac.split('virtio=')[1].split(',')[0]}" in fake2.named("qm", "create")[0][fake2.named("qm", "create")[0].index("--net0") + 1]   # the same address
+    assert [p.read_bytes() for p in map(lambda i: again.persisted_path(100, i), range(3))] == [b"layer 0", b"layer 1", b"layer 2"]
+    assert not fake2.named("qemu-img")
+
+
+def test_dehydrate_in_reset_mode_drops_the_session_layer_and_keeps_the_persisted_ones(world):
+    setup, fake = installed(world)
+    setup.set_mode("reset")
+    setup.dehydrate()
+    assert not any(setup.session_path(100, i).exists() for i in range(3)) and all(setup.persisted_path(100, i).exists() for i in range(3))
+
+
+def test_dehydrate_refuses_when_a_layer_is_missing_or_the_vm_is_not_ours_or_the_definition_is_elsewhere(world):
+    setup, fake = installed(world)
+    setup.persisted_path(100, 2).unlink()
+    with pytest.raises(ks.KasmSetupError, match="persisted layer is missing"):
+        setup.dehydrate()
+    assert (world.pve_conf_dir / "100.conf").exists()
+    setup.persisted_path(100, 2).write_bytes(b"x")
+    fake.config["name"] = "someone-elses-vm"
+    with pytest.raises(ks.KasmSetupError, match="name or lock"):
+        setup.dehydrate()
+    fake.config["name"] = ks.VM_NAME
+    conf = world.pve_conf_dir / "100.conf"
+    conf.unlink()
+    elsewhere = world.pve_conf_dir.parent / "elsewhere.conf"
+    elsewhere.write_text("x")
+    conf.symlink_to(elsewhere)                                                          # a link where Proxmox keeps the definition: never followed or removed
+    with pytest.raises(ks.KasmSetupError, match="not where Proxmox keeps it"):
+        setup.dehydrate()
+
+
+def test_a_vm_from_the_first_layout_can_neither_change_mode_nor_be_dehydrated_and_is_otherwise_unchanged(world):
+    setup, fake = installed(world)
+    setup._write_record(layout=None)
+    record = setup.read_record()
+    record.pop("layout")
+    world.record.write_text(json.dumps(record))
+    with pytest.raises(ks.KasmSetupError, match="first layout"):
+        setup.set_mode("reset")
+    with pytest.raises(ks.KasmSetupError, match="not built with the persisted layers"):
+        setup.dehydrate()
+    fake.state = "stopped"
+    assert setup.setup()["created"] is False and fake.named("qm", "start")                   # the existing fast path still just makes sure it runs
+
+
+def test_persisted_layers_made_on_another_base_are_not_used_with_this_one(world):
+    setup, fake = installed(world)
+    setup.dehydrate()
+    again, fake2 = build(world, hash_file=lambda _p: "different")
+    (world.base_dir / "KASM.json").write_text(json.dumps({"sha256": "different", "kasm_version": "1.19.1", "holds_install_state_or_secrets": False}))
+    with pytest.raises(ks.KasmSetupError, match="different Kasm base"):
+        again.setup()
+    assert not fake2.named("qm", "create")
+
+
+def test_the_persisted_os_layer_gets_the_room_it_needs_on_the_admin_volume():
+    assert ks.ROOM_NEEDED["APPDATA_ADMIN"] >= 12 * ks.GIB and ks.MODES == ("persist", "reset") and ks.DEFAULT_MODE == "persist"
+
+
+def test_only_one_action_runs_at_a_time_and_the_timers_setup_just_steps_aside(world):
+    setup, fake = installed(world)
+    fake.state = "stopped"                                                              # stopped on purpose by a mode change that is in progress
+    with setup._exclusive():
+        other, other_fake = build(world)
+        assert other.setup() == {"busy": True} and not other_fake.named("qm", "start")      # the timer does not start it from under the action
+        with pytest.raises(ks.Busy, match="another Kasm action"):
+            other.set_mode("reset")
+        with pytest.raises(ks.Busy):
+            other.dehydrate()
+    assert setup.setup()["created"] is False and fake.named("qm", "start")                  # once the action is done the timer's call works again
+
+
+def test_dockers_start_limit_is_lifted_for_the_install_and_put_back_even_when_the_install_fails(world):
+    """Found on a nested Proxmox (2026-10-17): the installer's quick Docker restarts tripped systemd's start-rate limit and stopped the install half-way."""
+    for exit_code in (0, 1):
+        setup, fake = build(world, fake=Fake(install_exit=exit_code))
+        try:
+            setup.run_install(100, {n: "x" * 20 for n in ks.SECRET_NAMES})
+        except ks.KasmSetupError:
+            assert exit_code == 1
+        guests = [c for c in fake.calls if c[:3] == ["qm", "guest", "exec"]]
+        scripts = [c[-1] for c in guests if c[-2] == "-c"]
+        installs = [i for i, c in enumerate(guests) if c[-1] == "/usr/local/sbin/baseline-kasm-install"]
+        before = next(x for x in scripts if "StartLimitIntervalSec=0" in x)
+        after = next(x for x in scripts if x.startswith("rm -f /etc/systemd/system/docker.service.d/"))
+        assert "StartLimitIntervalSec=0" in before and "reset-failed docker" in before and "daemon-reload" in before
+        assert guests.index([c for c in guests if c[-1] == before][0]) < installs[0] < guests.index([c for c in guests if c[-1] == after][0])
+        assert "rm -f /etc/systemd/system/docker.service.d/baseline-kasm-install.conf" in after
+
+
+def test_the_data_disks_are_brought_up_in_the_guest_before_the_installer_runs_and_a_failure_stops_it(world):
+    setup, fake = build(world)
+    setup.run_install(100, {n: "x" * 20 for n in ks.SECRET_NAMES})
+    guests = [c for c in fake.calls if c[:3] == ["qm", "guest", "exec"]]
+    disks = [i for i, c in enumerate(guests) if c[-1] == "/usr/local/sbin/baseline-kasm-disks"]
+    installs = [i for i, c in enumerate(guests) if c[-1] == "/usr/local/sbin/baseline-kasm-install"]
+    assert disks and disks[0] < installs[0]
+
+    class DisksFail(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            if argv[:3] == ["qm", "guest", "exec"] and argv[-1] == "/usr/local/sbin/baseline-kasm-disks":
+                self.calls.append(list(argv))
+                return 0, json.dumps({"exited": 1, "exitcode": 1}), ""                     # qm itself succeeds; the command inside did not
+            return super().__call__(argv, data, timeout)
+
+    bad, bad_fake = build(world, fake=DisksFail())
+    with pytest.raises(ks.KasmSetupError, match="data disks could not be brought up"):
+        bad.run_install(100, {n: "x" * 20 for n in ks.SECRET_NAMES})
+    assert not [c for c in bad_fake.calls if c[-1] == "/usr/local/sbin/baseline-kasm-install"]

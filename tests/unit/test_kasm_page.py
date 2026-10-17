@@ -98,3 +98,56 @@ def test_the_page_lists_the_workspaces_the_base_carries_when_it_says_so():
         assert "Development desktop" not in page                                    # the default set is shown only when the base does not say
     finally:
         case.close()
+
+
+STATUS = {"present": True, "installed": True, "running": True, "url": "https://10.0.0.5", "mode": "persist"}
+
+
+def test_the_page_offers_the_run_mode_and_removing_the_vm_with_the_data_kept():
+    case, _ = make(Machine(STATUS))
+    try:
+        page = req(case, "GET", "/workspaces")[2]
+        assert 'value="persist" checked' in page and 'value="reset"' in page and "Keep everything" in page and "Reset at every start" in page
+        assert "/workspaces/dehydrate" in page and "Nothing is deleted" in page
+        assert "sits over all of these" in page
+    finally:
+        case.close()
+
+
+def test_a_removed_vm_is_shown_as_removed_with_its_data_kept_and_can_be_rebuilt():
+    case, _ = make(Machine({"present": False, "installed": True, "dehydrated": True, "mode": "reset"}))
+    try:
+        page = req(case, "GET", "/workspaces")[2]
+        assert "Removed (its data is kept)" in page and "Rebuild the VM" in page and "same address" in page
+        assert "/workspaces/mode" not in page                                     # nothing to change while there is no VM
+    finally:
+        case.close()
+
+
+def test_changing_the_mode_runs_the_command_as_its_own_unit_only_with_a_valid_mode_and_confirmation():
+    runner = Runner()
+    case, audit = make(Machine(STATUS), runner)
+    try:
+        assert req(case, "POST", "/workspaces/mode", {"mode": "reset"})[0] == 303 and runner.calls == []              # no confirmation: nothing runs
+        req(case, "POST", "/workspaces/mode", {"mode": "snapshot", "confirm": "yes"})
+        assert runner.calls == []                                                                                    # not a mode: nothing runs
+        status, location, _ = req(case, "POST", "/workspaces/mode", {"mode": "reset", "confirm": "yes"})
+        assert status == 303 and location.startswith("/workspaces?notice=")
+        assert runner.calls == [["systemd-run", "--no-block", "--unit=baseline-kasm-action", "/opt/baseline/bin/baseline-kasm", "mode", "reset"]]
+        assert {"event": "kasm_mode_requested", "mode": "reset"} in audit
+        assert req(case, "POST", "/workspaces/mode", {"mode": "reset", "confirm": "yes"}, cookie=False)[0] in (303, 401) and len(runner.calls) == 1
+    finally:
+        case.close()
+
+
+def test_removal_needs_the_confirmation_and_passes_the_yes_the_command_requires():
+    runner = Runner()
+    case, audit = make(Machine(STATUS), runner)
+    try:
+        req(case, "POST", "/workspaces/dehydrate", {})
+        assert runner.calls == []
+        req(case, "POST", "/workspaces/dehydrate", {"confirm": "yes"})
+        assert runner.calls == [["systemd-run", "--no-block", "--unit=baseline-kasm-action", "/opt/baseline/bin/baseline-kasm", "dehydrate", "--yes"]]
+        assert {"event": "kasm_dehydrate_requested"} in audit
+    finally:
+        case.close()

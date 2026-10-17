@@ -112,3 +112,33 @@ def test_a_base_that_does_not_vouch_for_itself_is_never_carried(tmp_path):
 
 def test_kasm_setup_waits_for_user_admin_because_its_vault_lives_there():
     assert "/mnt/USER_ADMIN" in ks.Layout().mounts
+
+
+def test_the_destructive_and_mode_commands_need_their_arguments(capsys):
+    cli = _cli()
+    assert cli.main(["baseline-kasm", "dehydrate"]) == 2 and cli.main(["baseline-kasm", "reset-root"]) == 2
+    assert cli.main(["baseline-kasm", "mode"]) == 2 and cli.main(["baseline-kasm", "mode", "snapshot"]) == 2
+    assert "needs --yes" in capsys.readouterr().err
+
+
+def test_mode_and_dehydrate_reach_the_machine_with_the_confirmation(monkeypatch, capsys, tmp_path):
+    cli = _cli()
+    calls = []
+
+    class Machine:
+        layout = ks.Layout(base_dir=tmp_path)
+
+        def set_mode(self, mode):
+            calls.append(("mode", mode)); return {"mode": mode}
+
+        def dehydrate(self):
+            calls.append(("dehydrate",)); return {"dehydrated": True}
+
+        def reset_root(self, confirm=False):
+            calls.append(("reset-root", confirm)); return {"vmid": 100}
+
+    monkeypatch.setattr(cli.kasm_setup, "KasmSetup", lambda **_k: Machine())
+    assert cli.main(["baseline-kasm", "mode", "reset"]) == 0
+    assert cli.main(["baseline-kasm", "dehydrate", "--yes"]) == 0
+    assert cli.main(["baseline-kasm", "reset-root", "--yes"]) == 0
+    assert calls == [("mode", "reset"), ("dehydrate",), ("reset-root", True)]

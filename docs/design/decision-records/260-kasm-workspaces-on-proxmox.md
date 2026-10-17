@@ -98,3 +98,18 @@ Not exercised in that run: the supported-OS list step (the ISO predated it; it i
   open). Used without activation; its limits apply. The page says so.
 - Smaller base: the Ubuntu desktop image alone is about 11 GB uncompressed; dropping it (or carrying only Chrome and VS Code) cuts the base to a fraction.
   Open choice for the operator.
+
+
+## Update 2026-10-17: persisted layers, run modes, dehydrate/rehydrate (operator decision)
+"Kasm should use overlays that persist ALL configuration and user data to allow rehydration of the VM without the VM becoming permanent; or run a VM with reset to where it was when started up."
+The first build kept the OS layer disposable (on SESSION_TEMP); that is replaced. Layers, over the read-only base in INSTALLER_CACHE:
+- **persisted** (all of it): the OS layer (Docker state, anything set in the VM) and Kasm's state on APPDATA_ADMIN, the profiles on APPDATA_PERSONAL. The VM itself is not permanent: `baseline-kasm dehydrate --yes` removes
+  only its Proxmox definition (recording memory, cores and address) and leaves every layer; `setup` builds it again under the same VMID and address. A persisted layer records the base it was made on and is not used with a different one.
+- **session** (reset mode only): a layer on SESSION_TEMP over all three, made fresh at every start, so everything done during a run is discarded and the VM comes back as it was when it started.
+`baseline-kasm mode persist|reset` switches (restarting the VM); the Workspaces page has both choices and the removal. `reset-root` now discards the persisted OS layer and needs `--yes`. One action runs at a time (a lock), so the
+timer that keeps the VM running cannot start it while a mode change or a removal has it stopped.
+**Verified on a real Proxmox (the installed rehearsal host, scratch copy):** a fresh layout-2 setup; markers in the OS layer, Kasm's state and the profiles; dehydrate (VM gone from Proxmox, all layers kept) then rehydrate (same address,
+all three markers back); reset mode (changes visible during the run, all gone after a restart); persist mode (changes kept after a restart).
+Two real defects found and fixed on the way: Kasm's installer restarts Docker in quick succession and tripped systemd's start-rate limit on a slow host (the limit is lifted for the install and restored); and after a rebuild the guest
+agent answers before the VM has mounted its data disks, so the installer's "already installed?" check looked at an unmounted folder (the disks are now brought up first, host-side, and in the script for the next base build).
+Not yet: the script-order fix is in the source but the carried base predates it (the host-side step covers it until the base is rebuilt).
