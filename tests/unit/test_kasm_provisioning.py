@@ -165,3 +165,21 @@ def test_the_telemetry_timer_is_staged_and_enabled_and_waits_for_a_configured_ma
     assert "systemctl enable baseline-kasm-telemetry.timer" in PROVISION
     unit = (REPO / "boot/baseline-kasm-telemetry.service").read_text()
     assert "ConditionPathExists=/var/lib/baseline-firstboot/complete" in unit and "telemetry collect" in unit and "ReadOnlyPaths=/opt/baseline" in unit
+
+
+def test_the_registry_files_travel_with_the_base_into_the_offline_cache(tmp_path):
+    base = _base(tmp_path)
+    (base / "registry" / "1.1").mkdir(parents=True)
+    (base / "registry" / "versions.txt").write_text("1.1\n")
+    (base / "registry" / "1.1" / "list.json").write_text("{}")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    offline_cache.carry_kasm_base(base, cache)
+    assert (cache / "kasm/registry/versions.txt").read_text() == "1.1\n" and (cache / "kasm/registry/1.1/list.json").is_file()
+    assert "kasm/registry/1.1/list.json" in offline_cache.build_manifest(cache)                    # covered by the cache's manifest like everything else
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (tmp_path / "x").mkdir()
+    other = _base(tmp_path / "x")
+    offline_cache.carry_kasm_base(other, bare)
+    assert not (bare / "kasm" / "registry").exists()                                                # no registry in the base: none invented

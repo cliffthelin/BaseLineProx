@@ -106,8 +106,9 @@ def validate(recipe, release_images=None) -> dict:
     if not isinstance(registry, dict) or not isinstance(registry.get("enabled", False), bool):
         raise RecipeError("registry says whether it is enabled")
     if registry.get("enabled"):
-        if not re.fullmatch(r"https?://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~/-]*)?/", str(registry.get("list_url", ""))):
-            raise RecipeError("an enabled registry needs a list_url: an http(s) address ending in a slash")
+        url = str(registry.get("list_url", ""))
+        if url and not re.fullmatch(r"https?://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~/-]*)?/", url):         # empty means: this host's own address, worked out when Kasm is installed
+            raise RecipeError("a registry's list_url is empty (this host's own address is used) or an http(s) address ending in a slash")
         if not str(registry.get("name", "")).strip():
             raise RecipeError("a registry needs a name")
     if release_images is not None:

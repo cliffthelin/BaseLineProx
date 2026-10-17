@@ -1642,6 +1642,10 @@ DEFAULT_STATE_DIR = Path("/var/lib/baseline")     # audit log, signing key and s
 # The only routes reachable without a session: the login screen itself.
 # /console only acts for a request from this machine itself (console_switch.is_local), so it needs no login: the person is at the screen.
 _PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/console", "/console/switch"})
+# The Kasm workspace registry (DR260): the one deliberate read-only exception to "nothing without a login". Kasm's own servers fetch these two files and cannot sign in; they list
+# only workspace names and images. GET only, exactly these paths, from one folder; nothing else under the prefix exists.
+_REGISTRY_FILES = {"/kasm-registry/versions.txt": ("versions.txt", "text/plain; charset=utf-8"), "/kasm-registry/1.1/list.json": ("1.1/list.json", "application/json")}
+DEFAULT_KASM_REGISTRY_DIR = "/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/kasm/registry"
 
 
 def _console_context(deps: dict):
@@ -1847,6 +1851,37 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _serve_kasm_registry(self, deps, path: str) -> None:
+        """The two static registry files. `list_url` in the list is set to the address the client actually used (its Host header, checked), so the registry is correct
+        whatever address this host has; a missing file, a link, or a malformed list is a plain 404, never a stack trace."""
+        import re as _re
+        relative, content_type = _REGISTRY_FILES[path]
+        target = Path(deps.get("kasm_registry_dir") or DEFAULT_KASM_REGISTRY_DIR) / relative
+        try:
+            if target.is_symlink() or not target.is_file():
+                raise FileNotFoundError
+            text = target.read_text()
+            if relative.endswith("list.json"):
+                host = self.headers.get("Host", "")
+                document = json.loads(text)
+                if _re.fullmatch(r"[A-Za-z0-9.:\[\]-]{1,100}", host):
+                    document["list_url"] = f"http://{host}/kasm-registry/"
+                text = json.dumps(document, indent=1) + "\n"
+        except (OSError, ValueError, TypeError):
+            body = b"not found\n"
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        body = text.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()                       # the server's own end_headers adds Cache-Control: no-store to every response
+        self.wfile.write(body)
+
     def log_message(self, fmt, *args):  # noqa: A002 - stdlib signature
         pass
 
@@ -1995,6 +2030,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         path = parsed.path
+
+        if path in _REGISTRY_FILES:
+            return self._serve_kasm_registry(deps, path)
 
         if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path):
             return

@@ -65,3 +65,9 @@ def build(workspaces, images_seed_text: str, *, name: str, description: str, lis
 
 def render(document: dict) -> str:
     return json.dumps(document, indent=1, sort_keys=False) + "\n"
+
+
+def files(document: dict) -> dict:
+    """The whole static site, path to text: Kasm first reads `versions.txt` (the schema versions the registry offers; without it a live Kasm reports "does not appear to have a
+    valid schema list", found 2026-10-17), then `<schema>/list.json`."""
+    return {"versions.txt": SCHEMA + "\n", f"{SCHEMA}/list.json": render(document)}

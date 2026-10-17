@@ -127,7 +127,9 @@ def test_settings_and_registry_are_validated():
     r = recipe()
     r["registry"] = {"enabled": True, "name": "Baseline", "list_url": "https://host.example:8100/kasm-registry/"}
     assert kr.validate(r)
-    for url in ("", "ftp://x/", "https://host/no-trailing-slash", "https://ho st/"):
+    for url in ("ftp://x/", "https://host/no-trailing-slash", "https://ho st/"):
         r["registry"]["list_url"] = url
         with pytest.raises(kr.RecipeError, match="list_url"):
             kr.validate(r)
+    r["registry"]["list_url"] = ""                                  # empty is allowed: this host's own address is used when Kasm is installed
+    assert kr.validate(r)

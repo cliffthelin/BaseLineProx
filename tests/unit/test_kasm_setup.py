@@ -629,3 +629,30 @@ def test_usage_and_failed_sessions_come_from_kasms_accounting_and_a_failure_is_o
     failures = [r for r in kt.error_report(conn, 0) if r["source"] == "workspace_failed"]
     assert failures[0]["count"] == 2 and "VS Code" in failures[0]["message"]                  # the first failure total, then the growth; the unchanged look added nothing
     assert kt.launches_report(conn, 1_800_000_000.0 - 8000) == {"Chrome": 8, "VS Code": 1}
+
+
+BRIDGE = json.dumps([{"ifname": "vmbr0", "addr_info": [{"family": "inet6", "scope": "link", "local": "fe80::1"}, {"family": "inet", "scope": "global", "local": "192.168.50.7"}]}])
+
+
+def test_the_registry_address_is_this_hosts_own_bridge_address_unless_the_recipe_gives_one(world):
+    class Ip(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            if argv[:3] == ["ip", "-j", "address"]:
+                return 0, BRIDGE, ""
+            return super().__call__(argv, data, timeout)
+    setup, _ = build(world, fake=Ip())
+    assert setup.registry_address({"enabled": True, "list_url": ""}) == "http://192.168.50.7:8100/kasm-registry/"
+    assert setup.registry_address({"enabled": True, "list_url": "https://given.example/r/"}) == "https://given.example/r/"
+    assert setup.registry_address({"enabled": False, "list_url": ""}) == ""
+
+
+def test_no_address_is_given_when_there_is_no_bridge_address_or_it_cannot_be_read(world):
+    class NoBridge(Fake):
+        def __call__(self, argv, data=None, timeout=120):
+            if argv[:3] == ["ip", "-j", "address"]:
+                return 0, json.dumps([{"ifname": "vmbr0", "addr_info": [{"family": "inet6", "scope": "global", "local": "fec0::1"}]}]), ""
+            return super().__call__(argv, data, timeout)
+    setup, _ = build(world, fake=NoBridge())
+    assert setup.registry_address({"enabled": True, "list_url": ""}) == ""                    # IPv6 only: nothing is offered rather than a wrong address
+    broken, _ = build(world, fake=type("Broken", (Fake,), {"__call__": lambda self, argv, data=None, timeout=120: (1, "", "no vmbr0") if argv[0] == "ip" else Fake.__call__(self, argv, data, timeout)})())
+    assert broken.registry_address({"enabled": True, "list_url": ""}) == ""

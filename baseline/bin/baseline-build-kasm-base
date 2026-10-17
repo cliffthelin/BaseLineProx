@@ -122,6 +122,16 @@ def main():
         (work / "default_properties.yaml").write_text(properties)
         payload["default_properties.yaml"] = work / "default_properties.yaml"
         print("[kasm-base] settings set:", ", ".join(f"{c['name']}={c['to']}" for c in changes), flush=True)
+    registry = recipe.get("registry") or {}
+    if registry.get("enabled"):
+        import kasm_registry
+        document = kasm_registry.build(workspaces, seed.read_text(), name=registry.get("name") or "Baseline", description=registry.get("description") or "Workspaces carried by this Baseline host.",
+                                       list_url=registry.get("list_url") or "http://baseline.invalid/kasm-registry/")     # the address a client sees is set when it is served
+        for relative, text in kasm_registry.files(document).items():
+            target = out / "registry" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+        print("[kasm-base] registry files:", ", ".join(sorted(kasm_registry.files(document))), flush=True)
     iso("KASMPAYLOAD", payload, work / "payload.iso")
     iso("cidata", {"user-data": kb.build_user_data(service_refs, wanted, recipe.get("plugins")), "meta-data": "instance-id: kasm-base-build\nlocal-hostname: kasm-base\n"}, work / "cidata.iso")
 

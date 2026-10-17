@@ -194,4 +194,6 @@ def carry_kasm_base(source, target) -> dict:
     target.mkdir(parents=True)
     shutil.copyfile(image, target / image.name)
     shutil.copyfile(source / "KASM.json", target / "KASM.json")
+    if (source / "registry").is_dir():                       # the workspace registry files (versions.txt, <schema>/list.json) Baseline serves
+        shutil.copytree(source / "registry", target / "registry")
     return {"base": image.name, "bytes": image.stat().st_size, "kasm_version": manifest.get("kasm_version")}

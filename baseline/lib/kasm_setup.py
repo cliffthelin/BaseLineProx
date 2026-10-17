@@ -21,6 +21,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -38,6 +39,7 @@ SECRET_NAMES = ("KASM_ADMIN_PASSWORD", "KASM_USER_PASSWORD", "KASM_DB_PASSWORD",
 MIN_HOST_MB, MIN_VM_MB, MAX_VM_MB = 12288, 6144, 16384
 ADMIN_DISK_GB, PROFILES_DISK_GB = 20, 100
 AGENT_WAIT_S, INSTALL_TIMEOUT_S = 300, 1800
+REGISTRY_PORT = 8100            # Baseline's own web app, which serves the workspace registry (no login) to the Kasm VM on the bridge
 GIB = 2**30
 # Room asked of each role volume before the VM is built. The disks are sparse, so their size is only a limit; what Kasm actually writes in its first
 # minutes (Docker's container layers and sessions, the database and logs, a first profile) must already fit, because the periodic growth check is slower
@@ -351,6 +353,25 @@ class KasmSetup:
             raise KasmSetupError("the credential vault cannot be written (is it unlocked?); nothing is installed without a recorded password") from None
         return fresh
 
+    def registry_address(self, recipe_registry: dict) -> str:
+        """Where the Kasm VM is told to find workspaces: the recipe's own address, or this host's address on the VM bridge (vmbr0) when the recipe leaves it empty. Empty text when
+        there is no registry to offer or no address to give it."""
+        if not recipe_registry.get("enabled"):
+            return ""
+        if recipe_registry.get("list_url"):
+            return recipe_registry["list_url"]
+        rc, out, _err = self.run(["ip", "-j", "address", "show", "dev", "vmbr0"])
+        try:
+            interfaces = json.loads(out) if rc == 0 else []
+        except ValueError:
+            return ""
+        for interface in interfaces:
+            for item in interface.get("addr_info", []):
+                address = item.get("local", "")
+                if item.get("family") == "inet" and item.get("scope") == "global" and re.fullmatch(r"[0-9.]+", address) and not address.startswith(("127.", "169.254.")):
+                    return f"http://{address}:{REGISTRY_PORT}/kasm-registry/"
+        return ""
+
     DOCKER_DROPIN = "/etc/systemd/system/docker.service.d/baseline-kasm-install.conf"
 
     def _guest_shell(self, vmid, script, timeout=120):
@@ -448,9 +469,9 @@ class KasmSetup:
                                 "systemctl daemon-reload && systemctl reset-failed docker.service docker.socket || true")
         try:
             data = "".join(f"{name}={creds[name]}\n" for name in SECRET_NAMES)
-            registry = (self.carried_recipe() or {}).get("registry") or {}
-            if registry.get("enabled") and registry.get("list_url"):
-                data += f"KASM_REGISTRY_URL={registry['list_url']}\n"            # not a secret: where Kasm finds workspaces (Baseline's own registry)
+            address = self.registry_address((self.carried_recipe() or {}).get("registry") or {})
+            if address:
+                data += f"KASM_REGISTRY_URL={address}\n"            # not a secret: where Kasm finds workspaces (Baseline's own registry)
             data = data.encode()
             rc, out, _err = self.run(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", str(INSTALL_TIMEOUT_S),
                                       "--", "/usr/local/sbin/baseline-kasm-install"], data=data, timeout=INSTALL_TIMEOUT_S + 60)
