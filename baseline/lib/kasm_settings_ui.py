@@ -69,8 +69,9 @@ def _stored(control: dict, shown: str) -> str:
             number = float(shown)
         except ValueError:
             raise SettingsError(f"{control['label']} must be a number") from None
-        if number < control["min"] or number > control["max"]:
-            raise SettingsError(f"{control['label']} must be between {control['min']} and {control['max']} {control['unit']}")
+        low, high = control.get("min"), control.get("max")
+        if (low is not None and number < low) or (high is not None and number > high):
+            raise SettingsError(f"{control['label']} must be between {low} and {high} {control['unit']}".replace("  ", " ").strip())
         number *= control.get("scale", 1)
         return str(int(number)) if number == int(number) else str(number)
     if control["kind"] == "toggle":
@@ -101,16 +102,45 @@ def plan(live: list, requested: dict) -> list:
     return changes
 
 
-def simple_requested(live: list, form: dict) -> dict:
-    """The change set a plain-language form asks for: {setting name: stored value}, converted from the shown units and limited by each control's own bounds."""
+def default_shown() -> list:
+    """The everyday view as shipped: the curated controls, in order."""
+    return [c["setting"] for item in SIMPLE for c in item["controls"]]
+
+
+def _generic(row: dict) -> dict:
+    """A control for a setting the curated list does not know: its type decides the input, and Kasm's own title and description are all the wording there is."""
+    kind = "toggle" if row["type"] == "bool" else "number" if row["type"] in ("int", "float") else "text"
+    control = {"setting": row["name"], "label": row["title"], "kind": kind, "help": row["description"]}
+    if kind == "number":
+        control["unit"] = ""
+    else:
+        control["max"], control["multiline"] = 2000, row["type"] in ("multiline_string", "json")
+    return control
+
+
+def ordered_controls(live: list, shown=None) -> list:
+    """[(group, control)] in the order the person chose (`shown`, names; the shipped list when None). A name this Kasm does not have, or a secret, is simply left out. A curated control keeps
+    its plain wording, unit and bounds; any other setting gets a control made from its own type. A group is the curated group, or Kasm's own category for the others."""
     rows = _index(live)
-    out = {}
-    for item in SIMPLE:
-        for control in item["controls"]:
-            key = f"c:{control['setting']}"
-            if key in form and control["setting"] in rows and not rows[control["setting"]]["secret"]:
-                out[control["setting"]] = _stored(control, str(form[key]))
+    curated = {c["setting"]: (item, c) for item in SIMPLE for c in item["controls"]}
+    out = []
+    for name in (default_shown() if shown is None else shown):
+        row = rows.get(name)
+        if row is None or row["secret"]:
+            continue
+        if name in curated:
+            item, control = curated[name]
+            out.append(({"id": item["id"], "title": item["title"], "help": item["help"]}, control))
+        else:
+            category = row["category"] or "other"
+            out.append(({"id": f"cat:{category}", "title": category.replace("_", " ").capitalize() + " (as Kasm describes them)", "help": ""}, _generic(row)))
     return out
+
+
+def simple_requested(live: list, form: dict, shown=None) -> dict:
+    """The change set a plain-language form asks for: {setting name: stored value}, converted from the shown units and limited by each control's own bounds. Only what is in the view counts."""
+    return {control["setting"]: _stored(control, str(form[f"c:{control['setting']}"]))
+            for _group, control in ordered_controls(live, shown) if f"c:{control['setting']}" in form}
 
 
 def advanced_requested(live: list, form: dict) -> dict:
@@ -132,7 +162,7 @@ def _head(title: str) -> str:
 def _tabs(active: str) -> str:
     def tab(path, label, key):
         return f"<b>{label}</b>" if key == active else f"<a href='{path}'>{label}</a>"
-    return "<p>" + tab("/workspaces/settings", "Everyday settings", "simple") + " | " + tab("/workspaces/settings/advanced", "All settings", "advanced") + " | <a href='/workspaces'>Back to Workspaces</a></p>"
+    return "<p>" + tab("/workspaces/settings", "Everyday settings", "simple") + " | " + tab("/workspaces/settings/advanced", "All settings", "advanced") + " | " + tab("/workspaces/settings/customize", "Choose what appears", "customize") + " | <a href='/workspaces'>Back to Workspaces</a></p>"
 
 
 def _control(control: dict, row: dict) -> str:
@@ -143,29 +173,35 @@ def _control(control: dict, row: dict) -> str:
         on = value.lower() == "true"
         field = (f"<select name='{html.escape(name)}'><option value='True'{' selected' if on else ''}>On</option><option value='False'{'' if on else ' selected'}>Off</option></select>")
     elif control["kind"] == "number":
-        field = (f"<input type='number' step='any' name='{html.escape(name)}' value='{html.escape(value)}' min='{control['min']}' max='{control['max']}'> {html.escape(control['unit'])}")
+        bounds = "".join(f" {k}='{control[k]}'" for k in ("min", "max") if control.get(k) is not None)
+        field = f"<input type='number' step='any' name='{html.escape(name)}' value='{html.escape(value)}'{bounds}> {html.escape(control['unit'])}"
     elif control.get("multiline"):
         field = f"<textarea name='{html.escape(name)}' maxlength='{control.get('max', 2000)}'>{html.escape(value)}</textarea>"
     else:
         field = f"<input type='text' name='{html.escape(name)}' value='{html.escape(value)}' maxlength='{control.get('max', 200)}'>"
-    return f"<div class='row'><label>{html.escape(control['label'])}</label>{field} {restart}</div>"
+    note = f"<div class='help'>{html.escape(control['help'])}</div>" if control.get("help") else ""
+    return f"<div class='row'><label>{html.escape(control['label'])}</label>{field} {restart}</div>{note}"
 
 
-def render_simple(live: list, notice: str = "") -> bytes:
+def render_simple(live: list, notice: str = "", shown=None) -> bytes:
     rows = _index(live)
     out = [_head("Kasm settings"), "<h1>Kasm settings</h1>", _tabs("simple")]
     if notice:
         out.append(f"<p role='alert'>{html.escape(notice)}</p>")
-    out.append("<p>The everyday choices, in plain words. Every setting Kasm has is under <a href='/workspaces/settings/advanced'>All settings</a>. Changes are made in Kasm itself and checked afterwards.</p>")
+    out.append("<p>The everyday choices, in plain words. <a href='/workspaces/settings/customize'>Choose which settings appear here</a>; every setting Kasm has is under "
+               "<a href='/workspaces/settings/advanced'>All settings</a>. Changes are made in Kasm itself and checked afterwards.</p>")
     out.append("<form method='post' action='/workspaces/settings/apply'><input type='hidden' name='mode' value='simple'>")
-    for item in SIMPLE:
-        controls = [c for c in item["controls"] if c["setting"] in rows and not rows[c["setting"]]["secret"]]
-        if not controls:
-            continue                                        # this Kasm has none of these settings: nothing to offer
-        out.append(f"<fieldset><legend>{html.escape(item['title'])}</legend><p class='help'>{html.escape(item['help'])}</p>")
-        out.extend(_control(c, rows[c["setting"]]) for c in controls)
-        out.append("</fieldset>")
-    out.append("<p><label><input type='checkbox' name='confirm' value='yes' required> Make these changes in Kasm now</label> <button type='submit'>Apply</button></p></form></body></html>")
+    previous, open_ = None, False
+    for group, control in ordered_controls(live, shown):
+        if group["id"] != previous:                                  # settings next to each other that belong together share one box
+            out.append("</fieldset>" if open_ else "")
+            out.append(f"<fieldset><legend>{html.escape(group['title'])}</legend>" + (f"<p class='help'>{html.escape(group['help'])}</p>" if group["help"] else ""))
+            previous, open_ = group["id"], True
+        out.append(_control(control, rows[control["setting"]]))
+    out.append("</fieldset>" if open_ else "<p>Nothing is chosen to appear here yet. <a href='/workspaces/settings/customize'>Choose some</a>.</p>")
+    if open_:
+        out.append("<p><label><input type='checkbox' name='confirm' value='yes' required> Make these changes in Kasm now</label> <button type='submit'>Apply</button></p>")
+    out.append("</form></body></html>")
     return "".join(out).encode()
 
 
@@ -228,3 +264,79 @@ def render_result(result: dict) -> bytes:
 def render_unavailable(reason: str) -> bytes:
     return (_head("Kasm settings") + "<h1>Kasm settings</h1>" + _tabs("") + f"<p role='alert'>{html.escape(reason)}</p>"
             "<p>The settings are read from the running Kasm itself, so the VM must be running.</p></body></html>").encode()
+
+
+# ---- choosing what the everyday screen shows (a toggle for every setting and an ordered list, like choosing what goes on a toolbar) -------
+_CUSTOMIZE_CSS = ("<style>.pick{display:grid;grid-template-columns:minmax(16rem,1fr) minmax(20rem,2fr);gap:1.2rem;align-items:start}@media(max-width:46rem){.pick{grid-template-columns:1fr}}"
+                  ".panel{border:1px solid #8884;border-radius:6px;padding:.6rem .8rem}.panel h2{margin:.1rem 0 .5rem;font-size:1rem}"
+                  "#order{list-style:none;margin:0;padding:0}#order li{display:flex;align-items:center;gap:.4rem;padding:.3rem .2rem;border-bottom:1px solid #8883}"
+                  "#order li span.t{flex:1}#order button{padding:.1rem .45rem}.sw{display:flex;align-items:flex-start;gap:.7rem;padding:.35rem 0;border-bottom:1px solid #8883}"
+                  ".sw input{position:absolute;opacity:0}.sw .track{flex:none;width:2.4rem;height:1.3rem;border-radius:1rem;background:#555a6e;position:relative;transition:background .15s;margin-top:.15rem}"
+                  ".sw .track::after{content:'';position:absolute;top:.15rem;left:.15rem;width:1rem;height:1rem;border-radius:50%;background:#fff;transition:transform .15s}"
+                  ".sw input:checked+.track{background:#3f8f5f}.sw input:checked+.track::after{transform:translateX(1.1rem)}"
+                  ".sw input:focus-visible+.track{outline:2px solid #7fa4ec;outline-offset:2px}.sw .d{color:#9aa4b8;font-size:.85em}"
+                  "@media(prefers-reduced-motion:reduce){.sw .track,.sw .track::after{transition:none}}</style>")
+
+_CUSTOMIZE_JS = """<script>
+(function(){
+  var order=document.getElementById('order'),field=document.getElementById('orderfield'),empty=document.getElementById('empty');
+  var titles={};document.querySelectorAll('.sw input[data-name]').forEach(function(b){titles[b.dataset.name]=b.dataset.title;});
+  function sync(){var names=[];order.querySelectorAll('li').forEach(function(li){names.push(li.dataset.name);});field.value=names.join(',');empty.hidden=names.length>0;}
+  function add(name){if(order.querySelector('li[data-name="'+name+'"]'))return;var li=document.createElement('li');li.dataset.name=name;
+    li.innerHTML='<span class="t"></span><button type="button" data-act="up" aria-label="Move up">&#9650;</button><button type="button" data-act="down" aria-label="Move down">&#9660;</button><button type="button" data-act="off" aria-label="Remove">&#10005;</button>';
+    li.querySelector('.t').textContent=titles[name]||name;order.appendChild(li);}
+  function remove(name){var li=order.querySelector('li[data-name="'+name+'"]');if(li)li.remove();var b=document.querySelector('.sw input[data-name="'+name+'"]');if(b)b.checked=false;}
+  order.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;var li=b.closest('li'),act=b.dataset.act;
+    if(act==='up'&&li.previousElementSibling)order.insertBefore(li,li.previousElementSibling);
+    if(act==='down'&&li.nextElementSibling)order.insertBefore(li.nextElementSibling,li);
+    if(act==='off')remove(li.dataset.name);sync();});
+  document.querySelectorAll('.sw input[data-name]').forEach(function(b){b.addEventListener('change',function(){if(b.checked)add(b.dataset.name);else remove(b.dataset.name);sync();});});
+  var q=document.getElementById('find');q.addEventListener('input',function(){var n=q.value.toLowerCase();
+    document.querySelectorAll('.sw').forEach(function(r){r.hidden=n&&r.dataset.text.indexOf(n)<0;});
+    document.querySelectorAll('details.cat').forEach(function(d){d.hidden=!d.querySelector('.sw:not([hidden])');if(n&&!d.hidden)d.open=true;});});
+  sync();
+})();
+</script>"""
+
+
+def shown_from_form(live: list, form: dict) -> list:
+    """The everyday list a customise form asks for: the names ticked, in the order the page's list gave (a tick with no place in the list goes last). Unknown names and secrets are left out."""
+    rows = _index(live)
+    ticked = {k[5:] for k, v in form.items() if k.startswith("show:") and v == "on"}
+    listed = [n for n in str(form.get("order", "")).split(",") if n]
+    ordered = [n for n in dict.fromkeys(listed) if n in ticked] + sorted(n for n in ticked if n not in listed)
+    return [n for n in ordered if n in rows and not rows[n]["secret"]]
+
+
+def render_customize(live: list, shown: list, notice: str = "") -> bytes:
+    rows = _index(live)
+    chosen = [n for n in shown if n in rows and not rows[n]["secret"]]
+    titles = {n: rows[n]["title"] or n for n in chosen}
+    out = [_head("Choose what appears"), _CUSTOMIZE_CSS, "<h1>Choose what appears in everyday settings</h1>", _tabs("customize")]
+    if notice:
+        out.append(f"<p role='alert'>{html.escape(notice)}</p>")
+    out.append("<p>Switch a setting on to put it on the everyday screen; switch it off to take it away. The list on the left is the order they appear in. "
+               "Secrets are not offered. Nothing here changes Kasm itself, only what you see.</p>")
+    out.append("<form method='post' action='/workspaces/settings/customize'><div class='pick'>")
+    out.append("<div class='panel'><h2>On the everyday screen</h2><ol id='order'>" + "".join(
+        f"<li data-name='{html.escape(n)}'><span class='t'>{html.escape(titles[n])}</span>"
+        "<button type='button' data-act='up' aria-label='Move up'>&#9650;</button><button type='button' data-act='down' aria-label='Move down'>&#9660;</button>"
+        "<button type='button' data-act='off' aria-label='Remove'>&#10005;</button></li>" for n in chosen) + "</ol>"
+        f"<p id='empty' class='help'{' hidden' if chosen else ''}>Nothing is switched on yet.</p>"
+        f"<input type='hidden' id='orderfield' name='order' value='{html.escape(','.join(chosen))}'></div>")
+    out.append("<div class='panel'><h2>All settings</h2><p><input type='search' id='find' placeholder='Search settings' autocomplete='off'></p>")
+    categories: dict = {}
+    for row in sorted(live, key=lambda r: (r["category"], r["title"])):
+        if not row["secret"]:
+            categories.setdefault(row["category"] or "other", []).append(row)
+    for category, items in categories.items():
+        out.append(f"<details class='cat'><summary>{html.escape(category.replace('_', ' '))} ({len(items)})</summary>")
+        for row in items:
+            text = f"{row['name']} {row['title']} {row['description']}".lower()
+            out.append(f"<label class='sw' data-text='{html.escape(text, quote=True)}'><input type='checkbox' name='show:{html.escape(row['name'])}' value='on' data-name='{html.escape(row['name'])}' "
+                       f"data-title='{html.escape(row['title'] or row['name'], quote=True)}'{' checked' if row['name'] in chosen else ''}><span class='track'></span>"
+                       f"<span><b>{html.escape(row['title'] or row['name'])}</b><br><span class='d'>{html.escape(row['description'])}</span></span></label>")
+        out.append("</details>")
+    out.append("</div></div><p><button type='submit'>Save</button> <button type='submit' name='reset' value='yes' formnovalidate>Back to the shipped list</button></p></form>")
+    out.append(_CUSTOMIZE_JS + "</body></html>")
+    return "".join(out).encode()

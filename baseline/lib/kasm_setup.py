@@ -512,6 +512,28 @@ class KasmSetup:
             return None
         return len(kasm_telemetry.record_settings(conn, kasm_telemetry.latest_settings(conn), current, secret_names=secrets_, now=now))
 
+    @property
+    def view_path(self) -> Path:
+        return self.layout.admin_dir / "settings-view.json"
+
+    def read_view(self):
+        """The names the person chose for the everyday settings screen, in order; None when they have not chosen (the shipped list applies)."""
+        try:
+            names = json.loads(self.view_path.read_text()).get("shown")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return [n for n in names if isinstance(n, str)] if isinstance(names, list) else None
+
+    def write_view(self, names):
+        """Keep the everyday-screen choice (None puts the shipped list back). It is a view only; it changes nothing in Kasm."""
+        if names is None:
+            self.view_path.unlink(missing_ok=True)
+            return
+        self.layout.admin_dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.view_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"shown": list(names)}))
+        os.replace(tmp, self.view_path)
+
     def _admin_password(self, passphrase=None):
         try:
             return self.vault.get("KASM_ADMIN_PASSWORD", passphrase=passphrase) or None

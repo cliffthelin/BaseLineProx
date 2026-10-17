@@ -2202,7 +2202,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 status, report, notice = {"present": False, "installed": False}, None, "Kasm's state could not be read: " + str(exc)
             return self._html_response(200, _with_nav(kasm_page.render(status, notice, report), path))
 
-        if path in ("/workspaces/settings", "/workspaces/settings/advanced"):
+        if path in ("/workspaces/settings", "/workspaces/settings/advanced", "/workspaces/settings/customize"):
             import kasm_settings_ui
             import kasm_setup
             machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
@@ -2213,9 +2213,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 live = {"ok": False, "reason": str(exc)}
             if not live["ok"]:
                 return self._html_response(200, _with_nav(kasm_settings_ui.render_unavailable(live["reason"]), "/workspaces"))
+            shown = machine.read_view()
             if path.endswith("/advanced"):
                 return self._html_response(200, _with_nav(kasm_settings_ui.render_advanced(live["settings"], notice, qs.get("q", [""])[0][:100]), "/workspaces"))
-            return self._html_response(200, _with_nav(kasm_settings_ui.render_simple(live["settings"], notice), "/workspaces"))
+            if path.endswith("/customize"):
+                return self._html_response(200, _with_nav(kasm_settings_ui.render_customize(live["settings"], kasm_settings_ui.default_shown() if shown is None else shown, notice), "/workspaces"))
+            return self._html_response(200, _with_nav(kasm_settings_ui.render_simple(live["settings"], notice, shown), "/workspaces"))
 
         if path == "/power":
             import power_control
@@ -2861,6 +2864,27 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             notice = f"Started: {action}. This page shows the result." if done.returncode == 0 else "Could not start it: " + (done.stderr or "").strip()[-120:]
             return self._redirect("/workspaces?notice=" + html.escape(notice).replace(" ", "+"))
 
+        if path == "/workspaces/settings/customize":
+            import kasm_settings_ui
+            import kasm_setup
+            machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+            try:
+                if str(body.get("reset", "")) == "yes":
+                    machine.write_view(None)
+                    notice = "The everyday screen is back to the shipped list."
+                else:
+                    live = machine.read_settings()
+                    if not live["ok"]:
+                        raise kasm_setup.KasmSetupError(live["reason"])
+                    names = kasm_settings_ui.shown_from_form(live["settings"], body)
+                    machine.write_view(names)
+                    notice = f"Saved: {len(names)} setting(s) on the everyday screen."
+                if deps.get("audit"):
+                    deps["audit"]({"event": "kasm_settings_view_changed"})
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                notice = str(exc)
+            return self._redirect("/workspaces/settings/customize?notice=" + html.escape(notice[:250]).replace(" ", "+"))
+
         if path == "/workspaces/settings/apply":
             import kasm_settings_ui
             import kasm_setup
@@ -2874,7 +2898,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     raise kasm_setup.KasmSetupError(live["reason"])
                 form = {k: v for k, v in body.items() if k not in ("mode", "confirm")}
                 requested = (kasm_settings_ui.advanced_requested(live["settings"], form) if back.endswith("advanced")
-                             else kasm_settings_ui.simple_requested(live["settings"], form))
+                             else kasm_settings_ui.simple_requested(live["settings"], form, machine.read_view()))
                 result = machine.apply_settings(requested)
             except (kasm_settings_ui.SettingsError, kasm_setup.KasmSetupError, OSError, ValueError) as exc:
                 return self._redirect(back + "?notice=" + html.escape(str(exc)[:250]).replace(" ", "+"))

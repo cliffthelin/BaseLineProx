@@ -19,7 +19,8 @@ def row(name, value, type_="int", title=None, category="auth", restart=None, ide
 LIVE = [row("log_retention", "7", title="Log retention (days)"), row("debug_retention", "1", title="Debug retention (hours)", restart="kasm_api"),
         row("session_lifetime", "43200", title="Session lifetime"), row("max_login_attempts", "5"), row("password_min_length", "8"),
         row("password_require_uppercase", "True", "bool"), row("notice_title", "", "string"), row("notice_message", "", "multiline_string"),
-        row("hec_token", None, "password", secret=True), row("auto_agent", "False", "bool"), row("update_check", "True", "bool")]
+        row("hec_token", None, "password", secret=True), row("auto_agent", "False", "bool"), row("update_check", "True", "bool"),
+        row("max_sessions_note", "3", "int", title="Sessions note limit", description="Kasm's own words about sessions"), row("odd_flag", "False", "bool", title="Odd flag")]
 
 
 class Vm(Fake):
@@ -161,7 +162,13 @@ def test_settings_cannot_be_read_or_changed_while_the_vm_is_not_running(world):
 # ---- through the web app ---------------------------------------------------------------------------------------------------------------
 class Machine:
     def __init__(self):
-        self.applied, self.ok = [], True
+        self.applied, self.ok, self.view = [], True, None
+
+    def read_view(self):
+        return self.view
+
+    def write_view(self, names):
+        self.view = names
 
     def status(self):
         return {"present": True, "installed": True, "running": True, "url": "https://x"}
@@ -231,3 +238,60 @@ def test_the_scripts_run_inside_the_vm_are_valid_bash():
     import kasm_telemetry as kt
     for script in (kt.SETTINGS_SCRIPT, kt.UPDATE_SETTINGS_SCRIPT):
         assert subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True).returncode == 0
+
+
+# ---- choosing what the everyday screen shows -------------------------------------------------------------------------------------------
+def test_the_shipped_everyday_list_is_what_shows_until_the_person_chooses():
+    rows = live_rows()
+    assert [c["setting"] for _g, c in ui.ordered_controls(rows)] == [n for n in ui.default_shown() if n in {r["name"] for r in rows}]
+
+
+def test_any_setting_can_be_put_on_the_everyday_screen_with_a_control_made_from_its_type_and_kasms_own_words():
+    rows = live_rows()
+    page = ui.render_simple(rows, shown=["max_sessions_note", "odd_flag", "notice_message"]).decode()
+    assert "Sessions note limit" in page and "Kasm&#x27;s own words about sessions" in page                           # Kasm's own title and description
+    assert 'name="c:odd_flag"' in page.replace("'", '"') and "<select" in page and "<textarea" in page               # a switch for a bool, a box for multiline text
+    assert "password_min_length" not in page and "How long a sign-in lasts" not in page                                 # what was not chosen is not there
+    assert ui.simple_requested(rows, {"c:max_login_attempts": "7", "c:log_retention": "30"}, shown=["max_login_attempts"]) == {"max_login_attempts": "7"}   # only what is in the view can be sent from it
+
+
+def test_the_order_chosen_is_the_order_shown_and_settings_that_belong_together_still_share_a_box():
+    rows = live_rows()
+    page = ui.render_simple(rows, shown=["debug_retention", "update_check", "log_retention"]).decode()
+    assert page.index("Debug logs") < page.index("Update check") < page.index("Normal logs")
+    assert page.count("<fieldset>") == 3                                                                                # the log group is split by the one between
+
+
+def test_the_customise_form_keeps_ticked_settings_in_list_order_and_never_a_secret_or_an_unknown_name():
+    rows = live_rows()
+    form = {"order": "update_check,log_retention,max_login_attempts,hec_token,ghost", "show:log_retention": "on", "show:update_check": "on", "show:hec_token": "on",
+            "show:ghost": "on", "show:auto_agent": "on"}
+    assert ui.shown_from_form(rows, form) == ["update_check", "log_retention", "auto_agent"]                            # unticked dropped, a tick without a place last
+    page = ui.render_customize(rows, ["log_retention"]).decode()
+    assert 'name="show:log_retention"' in page.replace("'", '"') and "show:hec_token" not in page and "checked" in page
+    assert page.count("type='checkbox'") == len(rows) - 1                                                              # one switch per setting, none for the secret
+
+
+def test_the_customise_page_and_save_work_through_the_web_app_and_persist_the_choice(web):
+    case, machine, audit = web
+    assert "Choose what appears" in req(case, "GET", "/workspaces/settings/customize")[2]
+    assert req(case, "POST", "/workspaces/settings/customize", {"order": "update_check", "show:update_check": "on"}, cookie=False)[0] in (303, 401) and machine.view is None
+    status, location, _ = req(case, "POST", "/workspaces/settings/customize", {"order": "update_check", "show:update_check": "on"})
+    assert status == 303 and machine.view == ["update_check"]
+    page = req(case, "GET", "/workspaces/settings")[2]
+    assert 'name="c:update_check"' in page.replace("'", '"') and "How long a sign-in lasts" not in page
+    req(case, "POST", "/workspaces/settings/customize", {"reset": "yes"})
+    assert machine.view is None and "How long a sign-in lasts" in req(case, "GET", "/workspaces/settings")[2]
+    assert [a["event"] for a in audit].count("kasm_settings_view_changed") == 2
+
+
+def test_the_choice_is_kept_on_the_admin_volume_and_does_not_touch_kasm(world):
+    setup, fake = running(world)
+    assert setup.read_view() is None
+    before = len(fake.calls)
+    setup.write_view(["update_check", "log_retention"])
+    assert setup.read_view() == ["update_check", "log_retention"] and len(fake.calls) == before                         # a file only; nothing sent to Kasm
+    setup.view_path.write_text("not json")
+    assert setup.read_view() is None                                                                                    # damaged: the shipped list, not a failure
+    setup.write_view(None)
+    assert not setup.view_path.exists()
