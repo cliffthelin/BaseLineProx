@@ -51,3 +51,26 @@ Kasm's agent pulls with its own Docker daemon, so a workspace whose image is `ls
 3. Do you want Baseline to build Kasm-based wrapper images for apps that have no Kasm workspace (the documented custom-image route)?
 4. Docker Sandbox kits: leave out of Kasm; record as a possible separate "agent sandbox" feature only if you want that.
 5. Adding the LinuxServer registry by hand in Kasm's own UI remains possible; its address is `https://kasmregistry.linuxserver.io/`. Baseline's route (reviewed subset, one address) was chosen here; say so if you would rather have Kasm point at theirs directly.
+
+## Operator answers and recommendations (2026-10-17, after the above)
+**Operator**: asked how much space the mirror needs; suggested it could be read from a local drive or hosted on the network by a file server and asked for a recommendation; said Kasm is not meant to be limited to its verified library (the reason for sharing the registry material), that wrapper images for apps without a Kasm workspace are wanted (decision 3: yes), that if there is no clear reason for Baseline to run its own registry now it can be built in later, and asked whether Baseline's registry could be improved or replaced by an open, battle-tested one such as Distribution.
+
+**Space** (measured on ghcr.io today from the real manifests; a registry stores layers compressed, as pushed):
+| What | Compressed, in the mirror |
+|---|---|
+| Chromium `:kasm`, linux/amd64 | 1,062 MB |
+| Firefox `:kasm`, linux/amd64 | 1,027 MB (no layer is shared with Chromium: 28 layers, 28 distinct) |
+| Both, amd64 only | about 2.1 GB |
+| Their build attestations (provenance, SBOM) | about 0.1 GB |
+| Both, amd64 and arm64 | about 4.1 GB, 4.3 GB with attestations |
+| Each further browser of this kind | about 1 GB |
+Registry bookkeeping is a few KB per image. Building it by copying straight from the source into a temporary registry needs no extra scratch; staging an OCI layout first needs about the same again while building. For scale: the carried Kasm base is 16.6 GB, so amd64-only is about 13% more; inside the Kasm VM Docker keeps the images uncompressed, so using both takes about 2.5 GB of the VM's 20 GB admin disk (1,250 and 1,230 MB by the registry's own figures). Every host here is amd64; arm64 is only worth carrying for an arm machine.
+
+**Where it is served from** (Docker cannot pull from a drive or a file share; it needs a registry API, or images loaded into it):
+- A. Load the images into the Kasm VM's base (no server, fully offline, but a copy inside every base, and every added workspace means rebuilding a 16 GB base, which is the opposite of "not limited to a verified library").
+- B. **A read-only Distribution on the Proxmox host serving from a read-only drive (INSTALLER_CACHE), listening on the VM bridge only. Recommended.** One copy; adding a workspace adds blobs, not a rebuild; it needs only the mirror address in the Kasm VM's Docker `insecure-registries` (or TLS), and nothing private is ever on that drive.
+- C. A network file server: a share is only somewhere to keep B's storage. To share one mirror across several Baseline hosts, run B on one host or on the file server and let the others pull over the LAN, with TLS and credentials because it is then exposed beyond the bridge. Because image names are rewritten from one setting, moving B to the network later is a one-address change.
+
+**Replacing Baseline's registry with Distribution**: they are two different layers. Distribution is an OCI/Docker IMAGE registry (blobs and manifests). What Kasm calls a workspace registry is a static JSON catalogue (`versions.txt`, `1.1/list.json`, icons), which Kasm's own and LinuxServer's are plain static sites (LinuxServer generates theirs from a public template and hosts it on GitHub Pages). Distribution cannot serve the catalogue and the catalogue cannot serve images. So: images, when the mirror is built, should be a battle-tested Distribution (not something of Baseline's own); the catalogue should stay a few static files. Baseline's route for them is small and verified, but it is one of the few unauthenticated exceptions in an authenticated web app. Recommendation: keep it as it is now (no clear reason to change it yet), and when the mirror is built serve the catalogue from the same small read-only service that fronts Distribution, so Baseline's own web app has no public routes at all. Until then the catalogue generator is the only part that is Baseline-specific, and it stays small enough to replace with LinuxServer's template if that is ever preferred.
+
+**Decided / deferred**: wrapper images for apps with no Kasm workspace: wanted, to be built later. The mirror: not built now; build it when an imported or wrapper workspace is needed on a machine without internet, or when the first wrapper image exists. Docker Sandbox kits: left out.
