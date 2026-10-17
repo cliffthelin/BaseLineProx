@@ -1,7 +1,7 @@
 # 260 - Kasm Workspaces on top of Proxmox, aligned with the overlay and persistence design
 
-Date: 2026-10-16. Status: built and verified end to end on a Proxmox host that is itself a QEMU VM (nested KVM, no network); NOT yet on real hardware and NOT yet from a
-fresh installer ISO. Each claim says which. Builds on DR257 (volume roles), DR258 (environments, application containers) and DR259 (layered settings, launcher, Proxmox overlay).
+Date: 2026-10-16. Status: built and verified end to end on a Proxmox host that is itself a QEMU VM (nested KVM, no network), including from a freshly built installer; NOT yet on real
+hardware. Each claim says which. Builds on DR257 (volume roles), DR258 (environments, application containers) and DR259 (layered settings, launcher, Proxmox overlay).
 
 ## Operator instruction (2026-10-16)
 "Build in Kasm on top of Proxmox and align Kasm to build the overlays and persistence data like I have been designing to. Include configuring Kasm to do these
@@ -83,11 +83,17 @@ even in offline mode (now packed in the base).
 Found and fixed on the way: the AppData volumes start at 1 GiB and the growth check runs every ten minutes, which Kasm's first writes would outrun; setup now asks
 each volume for room first (`ROOM_NEEDED`) and stops with the volume's own reason if it cannot be given.
 
+## Verified from a fresh installer (rehearsal run 24, 2026-10-16/17)
+A new offline cache was built (406 packages, 531 files, 18.9 GB, carrying the Kasm base and the new firmware packages), an installer ISO built from it, and the self-contained installer
+run in a QEMU VM (16 GiB, 128 GiB sparse disk, no network) with the normal first-boot flow: all nine first-boot steps ran, the CONFIRM screen appeared and was confirmed, and the kiosk
+showed the Proxmox login. **Without any further step**, `baseline-kasm-setup.timer` fired, and `baseline-kasm setup` built VM 100 (`baseline-kasm`, 3 cores, 6 GiB, sized from the 16 GiB host)
+from the carried base, generated the four credentials into the vault, installed Kasm through the guest agent, and finished: Kasm reported healthy, eight containers were running, and all six
+workspaces were seeded. The persistence and rebuild proofs above were run earlier on the same code path.
+Not exercised in that run: the supported-OS list step (the ISO predated it; it is covered by unit tests only), a browser session in a workspace (the rehearsal host has no IPv4 to reach it).
+
 ## Not verified (each a step of the plan, not an assumption to hide)
 - Real hardware (the Proxmox here was itself a VM; KVM-in-KVM is slower and the sizes were small).
-- The carried base inside the installer ISO and the first-boot path from a fresh installer (a rehearsal of a whole new setup with Kasm): the unit and timer
-  are enabled by `provision.sh` and the cache builder carries the base, but that chain was not run end to end. The ISO grows by the base's size (about 15.5 GiB)
-  and INSTALLER_CACHE holds it twice (the ISO and its expanded copy).
+- A browser session inside a workspace on the fresh-installer setup (the earlier proofs used the same code on a nested Proxmox that had an address for it).
 - Kasm Workspaces Community Edition is free to use and is **not fully open source** (the platform's license restricts it; KasmVNC and the workspace images are
   open). Used without activation; its limits apply. The page says so.
 - Smaller base: the Ubuntu desktop image alone is about 11 GB uncompressed; dropping it (or carrying only Chrome and VS Code) cuts the base to a fraction.
