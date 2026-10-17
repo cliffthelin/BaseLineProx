@@ -199,3 +199,9 @@ def test_available_entries_carry_a_plan_or_the_reason_they_cannot_be_created():
     assert got["bazzite"]["plan"]["iso"] == "bazzite-stable-amd64.iso" and "blocked" not in got["bazzite"]
     assert "Xen" in got["qubes"]["blocked"] and "plan" not in got["qubes"]
     assert "not carried" in got["nixos"]["blocked"]
+
+
+def test_the_plan_names_the_image_the_way_the_host_lists_it():
+    listing = [{"id": "debian", "name": "Debian 13", "kind": "vm", "iso": "debian-13.7.0-amd64-DVD-1.iso", "apps": [], "notes": ""}]
+    got = lm.available_to_create(listing, ["installer-cache:iso/debian-13.7.0-amd64-DVD-1.iso"], [], host_mb=65536)[0]
+    assert got["plan"]["iso"] == "installer-cache:iso/debian-13.7.0-amd64-DVD-1.iso" and got["image"] == "carried"      # what create_iso looks up on Proxmox

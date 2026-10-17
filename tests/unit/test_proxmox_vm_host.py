@@ -222,3 +222,26 @@ def test_redirected_proxmox_storage_refuses_login_reset_before_guest_access(tmp_
     def forbidden(*args):raise AssertionError('redirected storage reached guest or generated a secret')
     h.run_input=forbidden
     with pytest.raises(ue.UbuntuError,match='storage'):ue.reset_login(h,'work',password_factory=forbidden)
+
+
+def test_the_kasm_seed_storage_is_not_offered_as_an_operating_system_image(tmp_path):
+    """Found on a real Proxmox (2026-10-17): the Kasm VM's cloud-init seed ISO appeared first in the picker of images to install."""
+    h, run = host(tmp_path)
+    stores = [{"storage": "installer-cache", "content": "iso,backup"}, {"storage": "baseline-kasm-root", "content": "images,iso"},
+              {"storage": "baseline-os", "content": "images,iso", "disable": 1}]
+    listing = {"installer-cache": [{"volid": "installer-cache:iso/debian.iso", "size": 5}],
+               "baseline-kasm-root": [{"volid": "baseline-kasm-root:iso/baseline-kasm-seed.iso", "size": 1}]}
+    base = run.__call__
+
+    def answer(argv):
+        if argv[:3] == ["pvesh", "get", "/storage"]:
+            return 0, json.dumps(stores), ""
+        if argv[:2] == ["pvesh", "get"] and "/content" in argv[2]:
+            return 0, json.dumps(listing[argv[2].split("/storage/")[1].split("/")[0]]), ""
+        if argv[:2] == ["pvesm", "path"]:
+            return 0, "/x/" + argv[2].split("/")[-1], ""
+        return base(argv)
+
+    h.run = answer
+    assert [i["name"] for i in h.available_isos()] == ["installer-cache:iso/debian.iso"]
+    assert "baseline-kasm-root" in pv.HIDDEN_ISO_STORAGES

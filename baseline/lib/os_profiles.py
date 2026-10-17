@@ -24,8 +24,9 @@ OVA_REASON = "this image is an appliance (OVA), not an installer ISO, and import
 HOST_SHARE = 2         # a VM may be given at most half of the host's memory
 
 
-def plan_for(entry: dict, *, image_carried: bool, host_mb=None) -> dict:
-    """{plan: {...}} or {blocked: reason} for one VM entry of the supported-OS list."""
+def plan_for(entry: dict, *, image_carried: bool, host_mb=None, carried_as=None) -> dict:
+    """{plan: {...}} or {blocked: reason} for one VM entry of the supported-OS list. `carried_as` is the image's name as the host lists it (a Proxmox volume name
+    differs from the list's file name); the plan names the image that way, because that is what the create action looks up."""
     ident, iso = entry["id"], entry.get("iso") or ""
     if ident in BLOCKED:
         return {"blocked": BLOCKED[ident]}
@@ -41,7 +42,7 @@ def plan_for(entry: dict, *, image_carried: bool, host_mb=None) -> dict:
         if fits < 2048:
             return {"blocked": f"this machine has {host_mb // GIB_MB} GiB of memory; too little to share with a desktop VM."}
         memory_mb = fits
-    return {"plan": {"name": ident, "iso": iso, "disk_gb": disk_gb, "memory_mb": memory_mb, "cpus": cpus, "firmware": "uefi"}}
+    return {"plan": {"name": ident, "iso": carried_as or iso, "disk_gb": disk_gb, "memory_mb": memory_mb, "cpus": cpus, "firmware": "uefi"}}
 
 
 def host_memory_mb() -> int | None:

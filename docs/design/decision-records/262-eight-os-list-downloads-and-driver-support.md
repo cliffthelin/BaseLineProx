@@ -80,3 +80,13 @@ The installed system from rehearsal run 24 (whose ISO predated the `os-list` ste
 the real `step_os_list` from `baseline-first-boot-install` was run inside it against the real working list: 9 entries were carried to `/mnt/USER_ADMIN/config/supported-os.json` (root, mode 0644, folder
 created), the step's record was written, and `os_list.load()` with no arguments then read the 9 ids back from that host copy. Not exercised: the ISO staging copy end to end in a rebuilt installer
 (unit-tested), and a second run being a no-op (unit-tested).
+
+## Verified: a tile's plan creates a VM on a real Proxmox, and two bugs that only a real host showed
+On the installed rehearsal host (a throwaway overlay of it, the real VM library, nested KVM) the launcher's plan for a listed entry was handed to the real `create_iso` action: VM 101 was created with
+OVMF firmware and an EFI disk, the carried 2.2 GB image attached as its cdrom, a 32 GB disk on the user volume, 4 GiB of memory, and it started and ran.
+That first run found, and a second run confirmed fixed:
+- **Image names:** Proxmox names images by volume (`installer-cache:iso/<file>`), while the list gives plain file names. Matching whole names would have marked every listed image "missing" on a real host (the
+  unit tests had used a local folder's plain names). Matching is now on the file name (`environments.match_image`), and the plan carries the name the host itself uses, which is what `create_iso` looks up.
+- **The Kasm seed in the image picker:** the Kasm VM's cloud-init seed ISO was listed first among the images to install, because its storage is registered with ISO content. That storage is now hidden from the
+  image list (`HIDDEN_ISO_STORAGES`).
+Still the case (not mine, left as it was): the per-VM installer copies in `baseline-os` also appear in that image list.

@@ -49,23 +49,33 @@ def catalogue(isos, vms) -> list:
     return rows
 
 
+def match_image(iso: str, carried) -> str | None:
+    """The carried image the list's file name refers to, or None. A local image folder names images by file name; Proxmox names them by volume
+    (`installer-cache:iso/<file>`), so the match is on the file name, and what is returned is the name the host itself uses (what its create action takes)."""
+    wanted = iso.rsplit("/", 1)[-1]
+    for name in carried:
+        if name == iso or name.rsplit("/", 1)[-1] == wanted:
+            return name
+    return None
+
+
 def listed_catalogue(listing, isos, vms) -> list:
     """The catalogue built from the operator's supported-OS list (DR261/262) instead of from whatever images happen to be on the drive: one row per VM entry, in the
     list's order, with the applications that entry asks for (others are "not planned") and "image missing" when the cache does not carry its file. Kasm entries are
     the workspaces component, not a guest OS, so they are not rows here."""
-    carried = set(isos)
     names = {vm.get("name"): vm for vm in vms}
     rows = []
     for entry in listing:
         if entry["kind"] == "kasm":
             continue
         iso = entry.get("iso") or ""
+        carried_as = match_image(iso, isos) if iso else None
         family, release = classify(iso) if iso else ("unknown", "")
         level = "native" if (family, release) in NATIVE else "none" if family == "rescue" else "helper"
         built = next((n for n in names if n and (entry["id"] in n.lower() or (family != "unknown" and family in n.lower() and (not release or release in n)))), None)
         rows.append({"iso": iso or entry["name"], "id": entry["id"], "name": entry["name"], "os": family, "release": release,
                      "apps": {a: (level if a in entry["apps"] else "not planned") for a in APPS},
-                     "image": "carried" if iso in carried else ("missing" if iso else "none listed"),
+                     "image": "carried" if carried_as else ("missing" if iso else "none listed"), "carried_as": carried_as,
                      "state": "built" if built else "not built", "vm": built})
     return rows
 

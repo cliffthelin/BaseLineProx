@@ -107,7 +107,7 @@ def available_to_create(listing, isos, vms, host_mb=None) -> list:
         entry = by_id[r["id"]]
         item = {"id": r["id"], "name": r["name"], "os": {"family": r["os"], "release": r["release"]}, "iso": r["iso"] if r["image"] != "none listed" else "",
                 "image": r["image"], "apps": [{"key": a, "support": lvl} for a, lvl in r["apps"].items() if a in entry["apps"]]}
-        item.update(os_profiles.plan_for(entry, image_carried=r["image"] == "carried", host_mb=host_mb))
+        item.update(os_profiles.plan_for(entry, image_carried=r["image"] == "carried", host_mb=host_mb, carried_as=r.get("carried_as")))
         out.append(item)
     return out
 

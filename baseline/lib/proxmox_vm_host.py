@@ -21,6 +21,7 @@ from pathlib import Path
 import vm_host as vh
 
 OS_STORAGE = "baseline-os"
+HIDDEN_ISO_STORAGES = ("baseline-kasm-root",)      # holds the Kasm VM's own cloud-init seed, which is not an operating system anyone installs
 USER_STORAGE = "baseline-user"
 
 
@@ -196,7 +197,7 @@ class ProxmoxVmHost(vh.VmHost):
         stores = json.loads(self._command(["pvesh", "get", "/storage", "--output-format", "json"]))
         result = []
         for store in stores:
-            if "iso" not in str(store.get("content", "")).split(",") or store.get("disable"):
+            if "iso" not in str(store.get("content", "")).split(",") or store.get("disable") or store.get("storage") in HIDDEN_ISO_STORAGES:
                 continue
             ident = store["storage"]
             items = json.loads(self._command(["pvesh", "get", f"/nodes/{node}/storage/{ident}/content",

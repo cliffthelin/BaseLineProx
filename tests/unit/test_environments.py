@@ -71,3 +71,14 @@ def test_an_image_the_list_names_but_the_drive_lacks_is_marked_missing_not_hidde
 def test_a_listed_os_is_built_when_a_vm_of_that_id_or_family_exists():
     rows = env.listed_catalogue(LISTING, [], [{"name": "debian-13-dev"}])
     assert rows[0]["state"] == "built" and rows[0]["vm"] == "debian-13-dev" and rows[1]["state"] == "not built"
+
+
+def test_the_lists_file_names_match_proxmox_volume_names_and_the_hosts_own_name_is_kept():
+    """Found on a real Proxmox (2026-10-17): it names images `installer-cache:iso/<file>`; matching whole names marked every listed image missing."""
+    listing = [{"id": "debian", "name": "Debian 13", "kind": "vm", "iso": "debian-13.7.0-amd64-DVD-1.iso", "apps": [], "notes": ""}]
+    carried = ["baseline-os:iso/debian-installer.iso", "installer-cache:iso/debian-13.7.0-amd64-DVD-1.iso"]
+    row = env.listed_catalogue(listing, carried, [])[0]
+    assert row["image"] == "carried" and row["carried_as"] == "installer-cache:iso/debian-13.7.0-amd64-DVD-1.iso"
+    assert env.listed_catalogue(listing, ["debian-13.7.0-amd64-DVD-1.iso"], [])[0]["carried_as"] == "debian-13.7.0-amd64-DVD-1.iso"      # a local folder: plain names
+    assert env.listed_catalogue(listing, ["installer-cache:iso/other.iso"], [])[0]["image"] == "missing"
+    assert env.match_image("a.iso", ["x:iso/xa.iso"]) is None                                   # the whole file name, never a suffix of it
