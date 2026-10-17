@@ -3,6 +3,7 @@
 Pure functions. The console addresses are Proxmox's own console pages; that they open a real console is not provable without a Proxmox."""
 import pytest
 
+import environments
 import launcher_model as lm
 
 VM = {"name": "ubuntu-desk", "vmid": 101, "running": True, "kind": "overlay", "base": "ubuntu-24.04-base", "memory_mb": 4096, "cpus": 2,
@@ -179,3 +180,12 @@ def test_container_details_list_its_facts():
     d = dict(lm.details(ct_tile()))
     assert d["Identifier"] == "O_L_00001" and d["Proxmox ID"] == "200" and d["Template"].startswith("debian-12")
     assert d["Storage"] == "session-temp" and d["Data folder"].startswith("/mnt/APPDATA_PERSONAL")
+
+
+def test_available_to_create_lists_only_listed_guest_systems_without_a_vm():
+    listing = [{"id": "debian", "name": "Debian 13", "kind": "vm", "iso": "debian-13.7.0-amd64-DVD-1.iso", "apps": ["chrome"], "notes": ""},
+               {"id": "bazzite", "name": "Bazzite", "kind": "vm", "iso": "bazzite-stable-amd64.iso", "apps": list(environments.APPS), "notes": ""},
+               {"id": "kasm", "name": "Kasm", "kind": "kasm", "iso": None, "apps": [], "notes": ""}]
+    got = lm.available_to_create(listing, ["bazzite-stable-amd64.iso"], [{"name": "debian-13-lab"}])
+    assert [a["id"] for a in got] == ["bazzite"] and got[0]["image"] == "carried" and got[0]["os"]["family"] == "fedora"
+    assert [a["key"] for a in lm.available_to_create(listing, [], [])[0]["apps"]] == ["chrome"]       # only the apps the list plans

@@ -53,7 +53,7 @@ def _tile(vm, kind, node, roots, id_for, app_ids, app_error):
     return tile
 
 
-def collect(vms: list, *, node: str, roots, os_id_for, app_id_for, containers=(), container_id_for=None, containers_error: str = "") -> dict:
+def collect(vms: list, *, node: str, roots, os_id_for, app_id_for, containers=(), container_id_for=None, containers_error: str = "", available=()) -> dict:
     app_error = ""
     try:
         app_ids = {key: app_id_for(key) for key in APP_LABELS}
@@ -63,4 +63,4 @@ def collect(vms: list, *, node: str, roots, os_id_for, app_id_for, containers=()
     tiles += [_tile(ct, "ct", node, roots, container_id_for, app_ids, app_error) for ct in (containers or ())]
     notices = [f"Containers unavailable: {containers_error}"] if containers_error else []
     apps = [{"key": key, "label": label, "id": app_ids.get(key)} for key, label in APP_LABELS.items()]
-    return {"host": node, "tiles": tiles, "apps": apps, "schema": schema(), "notices": notices}
+    return {"host": node, "tiles": tiles, "apps": apps, "schema": schema(), "notices": notices, "available": list(available)}

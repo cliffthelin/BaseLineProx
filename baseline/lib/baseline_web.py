@@ -1768,10 +1768,32 @@ def _launcher_state(deps: dict) -> dict:
     except (vh.VmError, OSError, ValueError, KeyError) as exc:
         containers_error = str(exc)
     import naming
-    return launcher_state.collect(host.list_vms(), node=socket.gethostname().split(".")[0], roots=_launcher_roots(deps),
+    vms = host.list_vms()
+    available, notices = _launcher_available(deps, host, vms)
+    state = launcher_state.collect(vms, node=socket.gethostname().split(".")[0], roots=_launcher_roots(deps),
                                   os_id_for=os_id_for, app_id_for=app_id_for, containers=containers,
                                   container_id_for=lambda ct: naming.allocate("O", "L", "ct:" + ct["name"]),
-                                  containers_error=containers_error)
+                                  containers_error=containers_error, available=available)
+    state["notices"] = state["notices"] + notices
+    return state
+
+
+def _launcher_available(deps: dict, host, vms: list) -> tuple:
+    """(entries, notices): the operating systems the supported-OS list asks for that are not built yet. A list that cannot be read is a notice, never a
+    reason to hide the tiles; no list means no entries."""
+    import launcher_model
+    import os_list
+    try:
+        listing = os_list.load(deps.get("os_list_path")) if deps.get("os_list_path") is not None else os_list.load()
+    except (os_list.OsListError, OSError) as exc:
+        return [], [f"The supported-OS list could not be used: {exc}"]
+    if not any(e["kind"] != "kasm" for e in listing):
+        return [], []
+    try:
+        isos = [i["name"] if isinstance(i, dict) else str(i) for i in vm_page.available_isos(host, deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)]
+    except (vh.VmError, OSError, ValueError):
+        isos = []
+    return launcher_model.available_to_create(listing, isos, [{"name": v.get("name")} for v in vms]), []
 
 
 def _kvm_ok(deps: dict) -> bool:

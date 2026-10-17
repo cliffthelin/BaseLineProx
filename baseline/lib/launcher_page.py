@@ -84,6 +84,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .badge.native{background:rgba(94,226,160,.16);color:var(--ok)}.badge.helper{background:rgba(255,207,92,.15);color:var(--warn)}
 #toast{position:fixed;left:50%;top:3.2rem;transform:translateX(-50%);z-index:60;max-width:90vw;padding:.65rem 1.1rem;border-radius:14px;background:var(--glass);
 border:1px solid var(--line);backdrop-filter:blur(18px)}#toast[hidden]{display:none}
+.tile.ghost{opacity:.62;border-style:dashed;text-decoration:none}.tile.ghost:hover,.tile.ghost:focus-visible{opacity:1}h2.section{margin:1.4rem 0 .4rem;font-size:1rem}
 </style></head>
 <body class="phone">
 <div class="status" role="status"><span class="clock" id="clock"></span><span id="host"></span><span class="grow"></span><span class="live" id="live"></span></div>
@@ -139,6 +140,22 @@ function draw(){
     wire(b, t); grid.append(el('li', {}, b));
   }
   home.append(grid, el('p', {className:'hint'}, 'Click a running tile to open it. Right-click (or long-press) a tile for its menu.'));
+  drawAvailable(home);
+}
+
+function drawAvailable(home){
+  const list = S.available || [];
+  if (!list.length) return;
+  const row = el('ul', {className:'grid available'});
+  for (const a of list){
+    const link = el('a', {className:'tile ghost', href:'/vms', title: a.image === 'carried' ? 'Create it from the carried image' : 'Its image is not carried on this machine yet'});
+    link.dataset.image = a.image; link.style.setProperty('--h', (a.os.family.length * 47) % 360);
+    link.append(el('span', {className:'icon'}, (a.name[0] || '?').toUpperCase()), el('span', {className:'label'}, a.name),
+      el('span', {className:'sub'}, a.image === 'carried' ? 'not built · create' : 'not built · image ' + a.image));
+    row.append(el('li', {}, link));
+  }
+  home.append(el('h2', {className:'section'}, 'Available to create'), row,
+    el('p', {className:'hint'}, 'From your supported-OS list. Choose one to create it from Virtual machines.'));
 }
 
 function wire(b, t){

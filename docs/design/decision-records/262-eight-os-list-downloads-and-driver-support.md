@@ -59,3 +59,9 @@ Operator agreed to the split proposed after DR262 was first written.
   shows what the carried base's manifest says it holds. A different set means rebuilding the base (the images are preloaded), not editing it live.
 - **`baseline-allscript-install --kasm-base DIR`** makes the cache carry the base, and treats a cache without it as stale; the rehearsal VM is now 16 GiB with a 128 GiB sparse disk so Kasm's VM
   fits inside it.
+
+## Update: the launcher shows what the list asks for and is not built yet
+The launcher's home screen gains an "Available to create" row of dashed tiles, one per VM entry in the supported-OS list that has no VM yet (Kasm is not a guest OS and is not a tile): the OS
+name, whether its image is carried ("not built · create" or "not built · image missing"), and a link to Virtual machines to create it. Built systems stay ordinary tiles. A list that cannot be
+read is a notice and never hides the tiles; no list means no row. The tile does not create the VM itself: creation stays in Virtual machines. Checked in the browser with a sample state; the
+unit tests cover the model, the state and the real route.

@@ -94,6 +94,16 @@ def build_tile(vm: dict, *, os_id: str, node: str, kind: str = "vm") -> dict:
     }
 
 
+def available_to_create(listing, isos, vms) -> list:
+    """The operating systems the supported-OS list asks for that have no VM yet, as launcher entries (DR262): name, family, whether the image is carried, and the
+    applications the list plans for it. Built ones are tiles already; Kasm is the workspaces component, not a guest OS."""
+    rows = environments.listed_catalogue(listing, isos, vms)
+    planned = {e["id"]: e["apps"] for e in listing}
+    return [{"id": r["id"], "name": r["name"], "os": {"family": r["os"], "release": r["release"]}, "iso": r["iso"] if r["image"] != "none listed" else "",
+             "image": r["image"], "apps": [{"key": a, "support": lvl} for a, lvl in r["apps"].items() if a in planned[r["id"]]]}
+            for r in rows if r["state"] == "not built"]
+
+
 def console_path(kind: str, vmid, name: str, node: str, mode: str) -> str:
     if kind not in ("vm", "ct"):
         raise ValueError("kind must be vm or ct")

@@ -239,3 +239,39 @@ def test_the_shared_swap_setting_is_not_pushed_into_containers(case):
     ct = state(case)["tiles"][2]
     assert post(case, {"id": ct["id"], "layer": "user", "changes": {"swap_mb": 512}})[0] == 200
     assert rec.calls == []                       # "all my OSes" is a default for new ones, not a change to every running container
+
+
+# ---- the supported-OS list: operating systems that are asked for and not built yet ---------------------------------------------
+
+LISTING = {"os": [
+    {"id": "debian", "name": "Debian 13", "iso": "debian-13.7.0-amd64-DVD-1.iso", "apps": ["vscode", "chrome"]},
+    {"id": "qubes", "name": "Qubes OS 4.3", "iso": "Qubes-R4.3.2-x86_64.iso"},
+    {"id": "kasm-workspaces", "name": "Kasm", "kind": "kasm"}]}
+
+
+def test_the_launcher_offers_listed_operating_systems_that_are_not_built_yet(case):
+    listing = case.tmp / "supported-os.json"
+    listing.write_text(json.dumps(LISTING))
+    isos = case.tmp / "isos"
+    isos.mkdir()
+    case.server.deps["os_list_path"] = str(listing)        # type: ignore[attr-defined]
+    case.server.deps["vm_iso_dir"] = str(isos)             # type: ignore[attr-defined]  # not this machine's real cache
+    state = req(case, "GET", "/launcher/state")[2]
+    available = json.loads(state)["available"]
+    assert [a["id"] for a in available] == ["qubes"]       # debian-13-lab is built; Kasm is the workspaces component, not a guest OS
+    assert available[0]["name"] == "Qubes OS 4.3" and available[0]["image"] == "missing" and len(available[0]["apps"]) == 5
+    page = req(case, "GET", "/launcher")[2]
+    assert "Available to create" in page and "drawAvailable" in page
+    (isos / "Qubes-R4.3.2-x86_64.iso").write_bytes(b"x")
+    assert json.loads(req(case, "GET", "/launcher/state")[2])["available"][0]["image"] == "carried"
+
+
+def test_without_a_list_or_with_a_bad_one_the_tiles_are_unaffected(case):
+    case.server.deps["os_list_path"] = str(case.tmp / "none.json")        # type: ignore[attr-defined]
+    state = json.loads(req(case, "GET", "/launcher/state")[2])
+    assert state["available"] == [] and [t["name"] for t in state["tiles"]] == ["ubuntu-desk", "debian-13-lab"]
+    bad = case.tmp / "bad.json"
+    bad.write_text("not json")
+    case.server.deps["os_list_path"] = str(bad)            # type: ignore[attr-defined]
+    state = json.loads(req(case, "GET", "/launcher/state")[2])
+    assert state["available"] == [] and any("supported-OS list could not be used" in n for n in state["notices"]) and len(state["tiles"]) == 2
