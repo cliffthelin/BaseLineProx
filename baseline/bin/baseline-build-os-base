@@ -400,7 +400,9 @@ def build_omarchy(args, work: Path, out: Path):
     cidata = work / "cidata"
     shutil.rmtree(cidata, ignore_errors=True)
     cidata.mkdir()
-    for name, text in ob.omarchy_cidata(disk_bytes=args.disk_gb * 1024 ** 3).items():
+    seed_files = {"/etc/baseline-seed/omarchy_owner.py": (REPO / "baseline/lib/omarchy_owner.py").read_text()}
+    install_seed = ob.seed_runner_install_script((REPO / "baseline/lib/seed_runner.py").read_text(), seed_files)     # run by archinstall inside the new system, so a VM's owner comes from its seed disk
+    for name, text in ob.omarchy_cidata(disk_bytes=args.disk_gb * 1024 ** 3, custom_commands=[install_seed]).items():
         (cidata / name).write_text(text)
     make_iso("cidata", cidata, work / "cidata.iso")
     base = ["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", "6", "-m", "8192", "-machine", "q35", "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
@@ -414,7 +416,7 @@ def build_omarchy(args, work: Path, out: Path):
         raise ob.BuildError("the installed Omarchy did not reach its first-boot setup: " + json.dumps(results))
     manifest = {"os": "omarchy-4.0.4", "source_image": iso.name, "source_sha256": sha256(iso), "install": "the ISO's cidata path with defer-provisioning (full disk, unencrypted)",
                 "apps_needing_a_helper": ["vscode", "spotify", "chrome", "chatgpt", "claude"], "checks": results,
-                "first_boot": "the owner is created at the first boot by Omarchy's own setup (omarchy-provision-owner); the base has no account"}
+                "first_boot": "the owner is made at the first boot from the seed disk by baseline-seed, through Omarchy's own provisioning (omarchy_owner); with no seed disk Omarchy's own interactive setup runs; the base has no account"}
     finalize("omarchy", disk, out, manifest)
 
 
