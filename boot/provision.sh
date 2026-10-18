@@ -9,6 +9,12 @@
 # expected on real hardware, but Node 22 is required regardless).
 set -euo pipefail
 
+# A file that is already there with the same content is not copied again: an unchanged file costs the drive a read, not a write.
+cp() {
+  if [ "$#" -eq 2 ] && [ -f "$1" ] && [ -f "$2" ] && cmp -s "$1" "$2"; then return 0; fi
+  command cp "$@"
+}
+
 # Self-contained installs (baseline-first-boot-install) set BASELINE_PACKAGE_CACHE to the drive's own offline
 # package cache and APT_CONFIG to sources that point only at it: nothing below then reaches the internet.
 if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
@@ -374,6 +380,7 @@ cp "$SRC/baseline/lib/hitl.py" /opt/baseline/lib/hitl.py
 cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
 cp "$SRC/baseline/INSTALLER_UUID" /opt/baseline/INSTALLER_UUID
 cp "$SRC/baseline/lib/cardinality.py" /opt/baseline/lib/cardinality.py         # exactly-one checks and the read-only host survey
+cp "$SRC/baseline/lib/write_once.py" /opt/baseline/lib/write_once.py
 cp "$SRC/baseline/lib/twin_sync.py" /opt/baseline/lib/twin_sync.py               # keeps two paired Baseline drives the same (DR272)
 cp "$SRC/baseline/lib/data_vault.py" /opt/baseline/lib/data_vault.py               # every data volume under git; backed up at a rebuild
 cp "$SRC/baseline/bin/baseline-twin" /opt/baseline/bin/baseline-twin

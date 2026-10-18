@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import twin_sync
+from write_once import write_if_changed
 
 VAULT = ".baseline-vault"
 MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -72,9 +73,7 @@ def snapshot(runner, volume, role: str, *, message: str, tag: str | None = None)
     info = ensure(runner, volume, role)
     roots = tuple(r for r in tracked_roots(role) if r == "." or (Path(volume) / r).is_dir())      # a folder that does not exist yet has nothing to record
     big = oversize(volume, roots)
-    exclude = Path(volume) / VAULT / "info" / "exclude"
-    exclude.parent.mkdir(parents=True, exist_ok=True)
-    exclude.write_text("\n".join([*_NEVER_TRACKED, *("/" + b for b in big)]) + "\n")
+    write_if_changed(Path(volume) / VAULT / "info" / "exclude", "\n".join([*_NEVER_TRACKED, *("/" + b for b in big)]) + "\n")
     if roots:
         _git(runner, volume, "add", "-A", "--", *roots)
     dirty = bool(roots) and bool(_git(runner, volume, "status", "--porcelain", "--", *roots))
@@ -87,18 +86,19 @@ def snapshot(runner, volume, role: str, *, message: str, tag: str | None = None)
     return dict(info, commit=commit, changed=dirty, left_out_too_large=big)
 
 
-def bundle(runner, volume, destination, *, name: str) -> str:
-    """A self-contained copy of the volume's whole history, as one file `<destination>/<name>.bundle`."""
+def bundle(runner, volume, destination, *, name: str, commit: str | None = None) -> str:
+    """A self-contained copy of the volume's whole history, as one file. When `commit` is given the file is named for it: a history that has not moved since its last bundle is not written again."""
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    target = destination / f"{name}.bundle"
+    target = destination / (f"{name}-{commit[:12]}.bundle" if commit else f"{name}.bundle")
+    if commit and target.exists():
+        return str(target)
     _git(runner, volume, "bundle", "create", str(target), "--all")
     return str(target)
 
 
 def backup_all(runner, volumes: dict, destination, *, message: str, tag: str) -> list:
     """Snapshot and bundle every data volume found ({role: mount path}); a volume that is missing is reported, never skipped silently."""
-    stamp = time.strftime("%Y%m%dT%H%M%S")
     report = []
     for role in DATA_ROLES:
         path = volumes.get(role)
@@ -106,6 +106,6 @@ def backup_all(runner, volumes: dict, destination, *, message: str, tag: str) ->
             report.append({"role": role, "skipped": "not mounted"})
             continue
         snap = snapshot(runner, path, role, message=message, tag=tag)
-        snap["bundle"] = bundle(runner, path, destination, name=f"{role}-{stamp}")
+        snap["bundle"] = bundle(runner, path, destination, name=role, commit=snap["commit"])
         report.append(snap)
     return report

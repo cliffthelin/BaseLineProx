@@ -21,6 +21,8 @@ import shutil
 import time
 from pathlib import Path
 
+from write_once import write_if_changed
+
 MARKER = ".baseline-twin-pair"
 STATE_DIR = ".baseline-twin"
 CONFLICT_SUFFIX = ".twin-conflict"
@@ -241,7 +243,7 @@ def load_twin_config(path=None):
 def save_twin_config(path, *, peer: str) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({"peer": _valid_child(peer)}) + "\n")
+    write_if_changed(target, json.dumps({"peer": _valid_child(peer)}) + "\n")
 
 
 def _own_disk(survey, runner):
@@ -403,9 +405,12 @@ def installed_digest(root="/") -> str:
 
 
 def write_installed(root="/", *, now=None) -> dict:
-    info = {"digest": installed_digest(root), "installed_at": int(now if now is not None else time.time())}
-    target = Path(root) / INSTALLED_FILE
-    target.write_text(json.dumps(info) + "\n")
+    digest = installed_digest(root)
+    current = read_installed(root)
+    if current and current["digest"] == digest:                       # the same build is already recorded: nothing is rewritten, and its install time stays what it was
+        return current
+    info = {"digest": digest, "installed_at": int(now if now is not None else time.time())}
+    write_if_changed(Path(root) / INSTALLED_FILE, json.dumps(info) + "\n")
     return info
 
 
@@ -427,7 +432,9 @@ def health_mark(runner, *, root="/") -> dict:
         return {"healthy": False, "digest": installed["digest"], "inactive": down}
     folder = Path(root) / HEALTH_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{installed['digest']}.ok").write_text(time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")
+    marker = folder / f"{installed['digest']}.ok"
+    if not marker.exists():                                           # already marked healthy: not written again
+        marker.write_text(time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")
     return {"healthy": True, "digest": installed["digest"], "inactive": []}
 
 

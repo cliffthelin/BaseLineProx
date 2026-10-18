@@ -75,8 +75,15 @@ def cmd_sync(args):
     except ts.TwinError as exc:
         say("STOPPED:", exc)
         return 1
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(json.dumps(dict(result, at=time.strftime("%Y-%m-%dT%H:%M:%S"))) + "\n")
+    previous = {}
+    try:
+        previous = json.loads(REPORT.read_text())
+        previous.pop("at", None)
+    except (OSError, ValueError):
+        pass
+    if json.loads(json.dumps(result)) != previous:                      # an unchanged result is not written again every 30 seconds; `at` is when it last changed
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        REPORT.write_text(json.dumps(dict(result, at=time.strftime("%Y-%m-%dT%H:%M:%S"))) + "\n")
     errors = {k: v for k, v in result["volumes"].items() if "error" in v}
     say(json.dumps({k: {x: y for x, y in v.items() if x != "mode"} for k, v in result["volumes"].items()}))
     return 1 if errors else 0
