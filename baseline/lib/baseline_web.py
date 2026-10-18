@@ -98,6 +98,7 @@ NAV_TABS = (
     ("/master-config", "Master Config"),
     ("/installation-readiness", "Installation readiness"),
     ("/installer-cache", "Installer Cache"),
+    ("/managed-mode", "Managed server mode"),
     ("/app-isolation", "App Isolation"),
     ("/recipes", "Environment recipes"),
     ("/install-plan", "Installer plan"),
@@ -2458,6 +2459,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 status = 503
             return self._html_response(status, _with_nav(audit, path))
 
+        if path == "/managed-mode":
+            import managed_mode, managed_mode_page
+            return self._html_response(200, _with_nav(managed_mode_page.render(managed_mode.load(deps.get("managed_file"))), path))
+
         if path == "/remote-access":
             status = deps["remote_status"]() if deps.get("remote_status") else remote_access.collect(deps["runner"])
             configuration = deps['source'].current_settings() if deps.get('source') else None
@@ -3425,6 +3430,19 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(400, {'ok':False,'message':str(exc)})
             except (OSError, sqlite3.Error) as exc:
                 return self._json(503, {'ok':False,'message':'Draft could not be saved: ' + str(exc)})
+
+        if path == "/managed-mode":
+            import managed_mode
+            if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
+                return self._json(403,{'message':'Changing managed server mode requires an operator account'})
+            if not isinstance(body,dict) or set(body)-{'mode','parent_vault','remote_rebuild'} or not isinstance(body.get('parent_vault'),(str,type(None))) or not isinstance(body.get('remote_rebuild',False),bool):
+                return self._json(400,{'message':'Provide a mode, a parent folder and whether remote rebuild is allowed'})
+            try:
+                saved=managed_mode.save(body,deps.get("managed_file"))
+            except (managed_mode.ManagedError,OSError) as exc:
+                return self._json(400,{'message':str(exc)})
+            if deps.get('audit'):deps['audit']({'event':'managed_mode_changed','mode':saved['mode'],'remote_rebuild':saved['remote_rebuild']})
+            return self._json(200,{'ok':True,'mode':saved['mode']})
 
         if path == '/installer-cache/acquire':
             import installer_sources,installer_cache

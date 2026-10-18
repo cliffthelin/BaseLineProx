@@ -1345,3 +1345,28 @@ def test_cache_page_offers_typed_native_source_acquisition_and_actual_file_link(
     assert '/installer-cache/acquire' in html
     assert '/installer-cache/source?source=ubuntu_base' in html
     assert 'crypto.randomUUID' not in html
+
+
+def test_managed_mode_page_defaults_to_standalone_and_saves_a_change(tmp_path):
+    f = tmp_path / "managed.json"
+    case = _RealServerCase(_base_deps(managed_file=f))
+    try:
+        status, body = case.get('/managed-mode')
+        assert status == 200 and b"standalone" in body and b"do not have to run" in body
+        assert any(p == "/managed-mode" for p, _ in bw.NAV_TABS)
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': None, 'remote_rebuild': False})[0] == 400
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': str(tmp_path / 'v'), 'remote_rebuild': False})[0] == 200
+        assert json.loads(f.read_text())["mode"] == "managed"
+        assert case.post_json('/managed-mode', {'mode': 'standalone', 'parent_vault': None})[0] == 200
+        assert json.loads(f.read_text())["mode"] == "standalone"
+    finally:
+        case.close()
+
+
+def test_managed_mode_needs_an_operator_account(tmp_path):
+    case = _RealServerCase(_base_deps(managed_file=tmp_path / "m.json"))
+    try:
+        case.token = case.server.deps['sessions'].create('viewer', now=1700000000, role='viewer').token
+        assert case.post_json('/managed-mode', {'mode': 'standalone', 'parent_vault': None})[0] == 403
+    finally:
+        case.close()
