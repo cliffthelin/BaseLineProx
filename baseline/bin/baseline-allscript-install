@@ -92,6 +92,7 @@ BUILD = Path("/run/media/cane/CACHE/baseline-build")   # build workspace only; n
 CACHE_DIR = BUILD / "offline-cache"
 APPS_DIR = BUILD / "apps"                                 # the five applications, prepared on this machine
 OS_OFFER = None                                           # folder of OS images offered to the installer VM
+CURRENT_BUILD = None                                      # the source state the install stage records (set by main)
 INSTALL_VM = None                                         # the install stage's KVM session, continued by later stages
 OPENED_PATH = None                                        # the device node that session opened (a USB reset changes it)
 
@@ -597,7 +598,7 @@ def stage_install(r):
     # authorization. Nothing here reads console text (no OCR, by design): a person or vision-capable agent watches
     # the screendump and records each checkpoint.
     watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)", opened_path=target["path"])
-    record("install", workspace=str(workspace))
+    record("install", workspace=str(workspace), build=CURRENT_BUILD)
 
 
 def clear_stale_checkpoint(path):
@@ -832,10 +833,12 @@ def main():
                         help="a prepared Kasm base (the folder baseline-build-kasm-base wrote); the cache then carries it (about 15 GiB) so Kasm is built on the new setup")
     parser.add_argument("--os-bases", type=Path, metavar="DIR",
                         help="the folder baseline-build-os-base wrote; the cache then carries each ready-made VM base that passes its checks, so the listed systems can be created already set up")
+    parser.add_argument("--force", action="store_true",
+                        help="install even when the drive's recorded build is exactly the one about to be carried")
     parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
                         help="authorize erasing the target (after its verified recovery image); its exact serial")
     args = parser.parse_args()
-    global CONFIRMED_WIPE, WORK, KASM_BASE, OS_BASES
+    global CONFIRMED_WIPE, WORK, KASM_BASE, OS_BASES, CURRENT_BUILD
     CONFIRMED_WIPE = args.confirm_wipe
     KASM_BASE = args.kasm_base
     OS_BASES = args.os_bases
@@ -860,6 +863,16 @@ def main():
         else:
             say("no OS images in", OS_ISOS, "- the drive will carry none")
     r = runner()
+    if "install" in stages and TARGET_NAME:
+        import build_currency
+        CURRENT_BUILD = build_currency.source_state(r, REPO)
+        verdict = build_currency.assess(journal()["stages"].get("install", {}).get("build"), CURRENT_BUILD)
+        say(f"build check for {TARGET_NAME}: {verdict['action']} - {verdict['reason']}")
+        if verdict["action"] == "skip" and not args.force:
+            stages = [s for s in stages if s not in ("recovery", "install", "firstboot", "kiosk")]
+            say(f"{TARGET_NAME} is left as it is (nothing erased); add --force to install anyway")
+            if not stages:
+                return
     functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,
                  "rehearse": stage_rehearse, "install": stage_install, "firstboot": stage_session_firstboot,
                  "kiosk": stage_session_kiosk, "identity": lambda r: finalize_target_identity()}
