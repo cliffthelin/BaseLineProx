@@ -154,7 +154,7 @@ def test_each_system_signs_the_owner_in_through_the_login_manager_it_actually_ha
     cachyos = _seed("cachyos")
     paths = {w["path"]: w["content"] for w in cachyos["write_files"]}
     assert "User=cliff" in paths["/etc/plasmalogin.conf.d/baseline-autologin.conf"] and "Session=plasma" in paths["/etc/plasmalogin.conf.d/baseline-autologin.conf"]
-    assert "User=cliff" in paths["/etc/sddm.conf.d/baseline-autologin.conf"]
+    assert "User=cliff" in paths["/etc/sddm.conf.d/baseline-autologin.conf"] and "Session=plasma.desktop" in paths["/etc/sddm.conf.d/baseline-autologin.conf"]   # SDDM signs in only when told which session
     assert "/etc/systemd/system/plasmalogin.service.d/baseline-home.conf" in paths
     nixos = _seed("nixos")
     rewrite = [c for c in nixos["bootcmd"][1:] if "/etc/gdm/custom.conf" in c[2]]
@@ -162,3 +162,11 @@ def test_each_system_signs_the_owner_in_through_the_login_manager_it_actually_ha
     assert any("display-manager" in " ".join(c) for c in nixos["runcmd"])                                         # a greeter already up is restarted so the sign-in applies
     for os_id in ("debian", "ubuntu"):
         assert not any("display-manager" in " ".join(c) for c in _seed(os_id)["runcmd"])
+
+
+def test_the_retained_home_gets_its_selinux_label_on_systems_that_have_one():
+    """Found on the rehearsal: a freshly formatted disk's root has no label, and Bazzite's login manager could not enter the owner's home on it."""
+    for os_id in ("bazzite", "debian", "nixos"):
+        script = _seed(os_id)["bootcmd"][0][2]
+        assert 'command -v restorecon' in script and 'restorecon -F "$(readlink -f /home)"' in script
+        assert script.index("restorecon") < script.index("touch /run/baseline-home-ready")                 # labelled before anything may sign in

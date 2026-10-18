@@ -106,6 +106,7 @@ topmost() {
 if [ "$(topmost)" != "$(readlink -f "$disk")" ]; then mount -t ext4 "$disk" /home; fi
 [ "$(topmost)" = "$(readlink -f "$disk")" ] ||
     { echo 'Wrong filesystem mounted at /home' >&2; exit 1; }
+if command -v restorecon >/dev/null 2>&1; then restorecon -F "$(readlink -f /home)" || true; fi
 touch /run/baseline-home-ready
 """
     config = {
@@ -125,7 +126,7 @@ touch /run/baseline-home-ready
     if "plasmalogin" in spec["greeter"]:                 # CachyOS's Plasma Login Manager (SDDM's successor); the older name is covered too
         config["write_files"].append({"path": "/etc/plasmalogin.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\nSession=plasma\n"})
     if "sddm" in spec["greeter"]:
-        config["write_files"].append({"path": "/etc/sddm.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\n"})
+        config["write_files"].append({"path": "/etc/sddm.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\nSession=plasma.desktop\n"})
     if spec.get("owner_step") == "omarchy":              # Omarchy makes its owner with its own first-boot script, fed from the seed (baseline/lib/omarchy_owner.py)
         config["users"] = []
         config["runcmd"].append(["/usr/bin/python3", "/etc/baseline-seed/omarchy_owner.py", owner, hostname])
