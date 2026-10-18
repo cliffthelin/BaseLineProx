@@ -194,26 +194,56 @@ def plan_code(mine, twin, *, healthy: bool) -> dict:
 
 # --- the pair: configuration, attaching the twin's volumes, and running the whole pair -------------------------------------------------------------
 TWIN_CONFIG = "/etc/baseline/twin.json"
+PAIR_SCHEME = "baseline-twin-pair-v1"
 _SERIAL_OK = __import__("re").compile(r"^[A-Za-z0-9_.-]{8,64}$")
 
 
+def pair_id_for(serial_a: str, serial_b: str) -> str:
+    """The identity of a pair of drives: their two serials, sorted and joined, then hashed. It is built only from what distinguishes the two DRIVES (never from the machine they are attached to, because a
+    drive moves between machines), it is the same whichever drive computes it and in whichever order, and nothing random has to be stored or exchanged."""
+    import hashlib
+    if not (_SERIAL_OK.match(serial_a or "") and _SERIAL_OK.match(serial_b or "")):
+        raise TwinError("a drive's serial is plain letters, digits and ._- , 8 to 64 characters")
+    if serial_a == serial_b:
+        raise TwinError("a drive cannot be its own twin")
+    low, high = sorted((serial_a, serial_b))
+    return hashlib.sha256(f"{PAIR_SCHEME}:{low}+{high}".encode()).hexdigest()[:32]
+
+
 def load_twin_config(path=None):
-    """{pair, peer_serial} from this drive's own pairing data (runtime data on the persistent admin volume, never in the repository), or None when not paired or the data is not well formed."""
+    """{peer_serial} from this drive's own pairing data (runtime data on the persistent admin volume, never in the repository), or None when not paired or the data is not well formed."""
     try:
         data = json.loads(Path(path or TWIN_CONFIG).read_text())
-        if isinstance(data.get("pair"), str) and data["pair"] and isinstance(data.get("peer_serial"), str) and _SERIAL_OK.match(data["peer_serial"]):
-            return {"pair": data["pair"], "peer_serial": data["peer_serial"]}
+        if isinstance(data.get("peer_serial"), str) and _SERIAL_OK.match(data["peer_serial"]):
+            return {"peer_serial": data["peer_serial"]}
     except (OSError, ValueError, AttributeError):
         pass
     return None
 
 
-def save_twin_config(path, *, pair_id: str, peer_serial: str) -> None:
-    if not pair_id or not _SERIAL_OK.match(peer_serial or ""):
-        raise TwinError("a pair id and the peer's plain serial are needed")
+def save_twin_config(path, *, peer_serial: str) -> None:
+    if not _SERIAL_OK.match(peer_serial or ""):
+        raise TwinError("the peer's plain serial is needed")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({"pair": pair_id, "peer_serial": peer_serial}) + "\n")
+    target.write_text(json.dumps({"peer_serial": peer_serial}) + "\n")
+
+
+def own_serial(runner) -> str:
+    """The serial of the drive the running system lives on: the one disk that carries a physical volume of the running root's volume group."""
+    import cardinality
+    try:
+        host = cardinality.host_vg(runner)
+        if host is None:
+            raise TwinError("the running system is not on LVM, so its drive cannot be identified for pairing")
+        survey = cardinality.survey(runner)
+        group = cardinality.exactly_one([g for g in survey.vgs if g.uuid == host["uuid"]], "volume group of the running system", describe=lambda g: g.uuid)
+        disk = cardinality.exactly_one([d for d in survey.disks if any(pv.startswith(d.path) for pv in group.pvs)], "drive carrying the running system", describe=lambda d: d.path)
+    except cardinality.CardinalityError as exc:
+        raise TwinError(str(exc)) from None
+    if not disk.serial:
+        raise TwinError("the running drive reports no serial")
+    return disk.serial
 
 
 def _cmd(runner, argv, what, timeout=120):
@@ -269,8 +299,11 @@ def local_mounts(base: str = "/mnt") -> dict:
     return {label: str(Path(base) / label) for label in _RULES}
 
 
-def pair_drives(runner, peer_serial: str, *, pair_id: str, config_path=None, mount_base: str = "/mnt/TWIN", local_base: str = "/mnt") -> dict:
-    """First-time pairing: mark every syncable volume on BOTH drives with the pair id and record the pairing on both. Refuses a volume already marked for a different pair."""
+def pair_drives(runner, peer_serial: str, *, config_path=None, mount_base: str = "/mnt/TWIN", local_base: str = "/mnt") -> dict:
+    """First-time pairing: mark every syncable volume on BOTH drives with the pair id (derived from the two serials) and record the pairing on both, so either drive finds the other when it is the one that
+    boots. Refuses a volume already marked for a different pair."""
+    pair_id = pair_id_for(own_serial(runner), peer_serial)
+    mine = own_serial(runner)
     attached = attach_twin(runner, peer_serial, mount_base=mount_base)
     try:
         here = local_mounts(local_base)
@@ -284,7 +317,9 @@ def pair_drives(runner, peer_serial: str, *, pair_id: str, config_path=None, mou
                     raise TwinError(f"{root} is already part of a different pair")
             for root in (Path(here[label]), Path(twin_root)):
                 write_pair_marker(root, pair_id, role=label)
-        save_twin_config(config_path or TWIN_CONFIG, pair_id=pair_id, peer_serial=peer_serial)
+        save_twin_config(config_path or TWIN_CONFIG, peer_serial=peer_serial)
+        if "USER_ADMIN" in attached["mounts"]:                              # the twin's own copy of the pairing, where ITS /etc/baseline lives, naming this drive as its peer
+            save_twin_config(Path(attached["mounts"]["USER_ADMIN"]) / "etc-baseline" / "twin.json", peer_serial=mine)
         return {"pair": pair_id, "volumes": sorted(attached["mounts"])}
     finally:
         detach_twin(runner, attached, mount_base=mount_base)
@@ -295,6 +330,7 @@ def sync_pair(runner, *, config_path=None, mount_base: str = "/mnt/TWIN", local_
     config = load_twin_config(config_path)
     if config is None:
         raise TwinError("this drive is not paired with a twin")
+    pair_id = pair_id_for(own_serial(runner), config["peer_serial"])
     stamp = stamp or time.strftime("%Y%m%dT%H%M%S")
     attached = attach_twin(runner, config["peer_serial"], mount_base=mount_base)
     results = {}
@@ -302,12 +338,12 @@ def sync_pair(runner, *, config_path=None, mount_base: str = "/mnt/TWIN", local_
         here = local_mounts(local_base)
         for label, twin_root in sorted(attached["mounts"].items()):
             try:
-                results[label] = sync_volume(runner, here[label], twin_root, mode=mode_for(label), pair_id=config["pair"], stamp=stamp, role=label, deep=deep)
+                results[label] = sync_volume(runner, here[label], twin_root, mode=mode_for(label), pair_id=pair_id, stamp=stamp, role=label, deep=deep)
             except TwinError as exc:
                 results[label] = {"error": str(exc)}
     finally:
         detach_twin(runner, attached, mount_base=mount_base)
-    return {"pair": config["pair"], "stamp": stamp, "volumes": results}
+    return {"pair": pair_id, "stamp": stamp, "volumes": results}
 
 
 # --- the code layer's version and the boot-health gate ---------------------------------------------------------------------------------------------

@@ -218,13 +218,43 @@ def test_the_twin_is_refused_when_it_is_missing_or_is_the_running_drive_itself(t
         ts.attach_twin(Recorder(twin_vg_uuid="uuid-host"), "SYNTHTWIN0000001", mount_base=str(tmp_path / "T"))
 
 
-def test_a_pair_config_names_the_peer_and_pair_and_nothing_else(tmp_path):
+def test_a_pair_config_names_the_peer_and_nothing_else(tmp_path):
     f = tmp_path / "twin.json"
     assert ts.load_twin_config(f) is None
-    ts.save_twin_config(f, pair_id="p1", peer_serial="SYNTHTWIN0000001")
-    assert ts.load_twin_config(f) == {"pair": "p1", "peer_serial": "SYNTHTWIN0000001"}
-    f.write_text(json.dumps({"pair": "p1", "peer_serial": "bad serial; x"}))
+    ts.save_twin_config(f, peer_serial="SYNTHTWIN0000001")
+    assert ts.load_twin_config(f) == {"peer_serial": "SYNTHTWIN0000001"}
+    f.write_text(json.dumps({"peer_serial": "bad serial; x"}))
     assert ts.load_twin_config(f) is None                                                                     # malformed data is treated as no pairing, never trusted
+
+
+def test_the_pair_identity_is_the_two_drives_serials_joined_and_hashed_and_never_the_machine():
+    """Unique by concatenation: built only from what tells the two DRIVES apart, so it is the same whichever drive computes it, in either order, on any machine."""
+    a, b = "SYNTHDRIVEA00001", "SYNTHDRIVEB00002"
+    assert ts.pair_id_for(a, b) == ts.pair_id_for(b, a) and len(ts.pair_id_for(a, b)) == 32
+    assert ts.pair_id_for(a, b) != ts.pair_id_for(a, "SYNTHDRIVEC00003") and ts.pair_id_for(a, b) != ts.pair_id_for(b, "SYNTHDRIVEC00003")
+    assert a not in ts.pair_id_for(a, b)                                                                      # the serials themselves are not stored in what is written to the volumes
+    with pytest.raises(ts.TwinError, match="its own twin"):
+        ts.pair_id_for(a, a)
+    with pytest.raises(ts.TwinError):
+        ts.pair_id_for(a, "bad serial")
+    import ast
+    import inspect
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(ts.pair_id_for)))
+    used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)} | {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    assert not (used & {"socket", "gethostname", "uuid4", "random", "getnode", "environ", "platform"})                       # nothing about the machine or chance goes in
+
+
+def test_the_running_drives_serial_is_the_one_disk_under_the_running_roots_volume_group():
+    assert ts.own_serial(Recorder()) == "SYNTHHOST0000001"
+    with pytest.raises(ts.TwinError, match="not on LVM"):
+        class NoLvm(Recorder):
+            def run(self, argv, timeout=60):
+                p = super().run(argv, timeout)
+                if argv[0] == "findmnt":
+                    p.stdout = "/dev/nvme0n1p2\n"
+                return p
+        ts.own_serial(NoLvm())
 
 
 def test_a_drives_installed_version_is_a_digest_of_its_source_and_only_a_healthy_one_is_offered(tmp_path):

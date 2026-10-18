@@ -25,14 +25,14 @@ def test_sync_when_not_paired_does_nothing_and_succeeds(cli, monkeypatch, capsys
 
 
 def test_sync_when_the_twin_is_not_attached_does_nothing_and_succeeds(cli, monkeypatch, capsys):
-    monkeypatch.setattr(ts, "load_twin_config", lambda path=None: {"pair": "p", "peer_serial": "SYNTHTWIN0000001"})
+    monkeypatch.setattr(ts, "load_twin_config", lambda path=None: {"peer_serial": "SYNTHTWIN0000001"})
     monkeypatch.setattr(ts, "peer_attached", lambda runner, serial: False)
     monkeypatch.setattr(cli, "runner", lambda: object())
     assert cli.main(["sync"]) == 0 and "not attached" in capsys.readouterr().out
 
 
 def test_a_sync_that_reports_a_volume_error_exits_nonzero_and_writes_the_report(cli, monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(ts, "load_twin_config", lambda path=None: {"pair": "p", "peer_serial": "SYNTHTWIN0000001"})
+    monkeypatch.setattr(ts, "load_twin_config", lambda path=None: {"peer_serial": "SYNTHTWIN0000001"})
     monkeypatch.setattr(ts, "peer_attached", lambda runner, serial: True)
     monkeypatch.setattr(cli, "runner", lambda: object())
     monkeypatch.setattr(cli, "REPORT", tmp_path / "twin" / "last.json")
