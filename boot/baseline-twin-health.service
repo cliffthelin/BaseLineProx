@@ -1,0 +1,9 @@
+[Unit]
+Description=Baseline twin gate: record this version as healthy once its core services are active
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-twin health-mark
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
+RemainAfterExit=no

@@ -2747,7 +2747,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 additional=additional, errors=errors), path))
 
         if path == "/api/detect":
-            result = cpw.handle_detect(deps["runner"], vg_name=deps.get("vg_name", drive_installer.DEFAULT_VG_NAME))
+            result = cpw.handle_detect(deps["runner"], vg_name=deps.get("vg_name"))
             return self._json(result.status, {"outcome": result.outcome, **result.body})
 
         if path == "/api/active-persona":
@@ -3755,7 +3755,7 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
                                             store_mac_marker=state / "settings-store.initialized", on_tamper=on_tamper)
     deps = dict(settings_server.deps)
     deps["sessions"] = sw.SessionStore(path=state / "sessions.sqlite",mac_key=wg.derive_key(root_key,"login-sessions"))
-    deps["vg_name"] = drive_installer.DEFAULT_VG_NAME
+    deps["vg_name"] = None                      # resolved when used, from the running root (cardinality.host_vg_name), never a bare default name
     deps["config_path"] = cpw.DEFAULT_CONFIG_PATH
     deps["network_interface"] = "eno1"
     deps["pds_runner"] = pds.Runner()

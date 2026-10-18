@@ -1,0 +1,31 @@
+# 272 - Twin drives: two Baseline drives kept the same, by layer
+
+Date: 2026-10-18. Status: the data and cache layers are built and were run for real on the rehearsal's Proxmox host with a genuine second drive; the code layer has its version record and its boot-health gate but NO automatic push yet (below).
+
+## Operator direction (2026-10-18)
+Either of the two 512 GB drives can be disconnected and tested alone. Whenever both are attached to one machine, writing to one writes the same to both. No staggered release just because git exists; if something else is better, say so. The operator chose, from the options put to them: **layered sync** (not a block mirror, not one primary), and **updates gated on a boot test** (not both at once).
+
+## Why layered, in one paragraph
+A block mirror (RAID1) writes every block to both, but if both drives were changed while apart (each tested on its own machine) one side is overwritten wholesale on reconnect. File-level, layer-aware sync loses nothing: the newest copy wins and the replaced version is kept. Git protects the source, not the installed drives, so an update that breaks boot would land on both drives at once; gating the push on a boot test here keeps the twin as the known-good one until the new version has actually booted.
+
+## What each layer does (`baseline/lib/twin_sync.py`, `baseline/bin/baseline-twin`)
+- **Data** (USER_ADMIN, USER_PERSONAL, APPDATA_ADMIN, APPDATA_PERSONAL): newest wins on both sides; the version replaced is kept under that side's `.baseline-twin/backup/<stamp>`. Files that differ although neither side is newer are conflicts: found before any copy, left out of the passes, and each side gets the other's as `<name>.twin-conflict`. Deletions never propagate (the file comes back), so nothing is lost. USER_ADMIN syncs only `home`, `settings`, `config`, `dump`: it also holds each host's own identity and state (Proxmox's cluster database, Baseline's databases and credentials, host keys), which must never be copied between two hosts. Everywhere, live databases and journals, running VMs' disk images, sockets, pid and lock files are skipped.
+- **INSTALLER_CACHE:** union: only missing files are added, both ways; an existing file is never replaced.
+- **Not file-synced:** SESSION_TEMP (disposable), SUBSTRATE (rebuilt by the code layer), BASELINE (running VMs' disks), and any role not known to be safe.
+- **Code** (Proxmox, Baseline's source): not copied file by file. Each drive records the digest of its installed source and when it was installed (`/opt/baseline/INSTALLED.json`, written by provisioning); `baseline-twin health-mark` (a timer, 5 min after boot and every 10) records a version healthy only when `pveproxy`, `pvedaemon` and `baseline-web` are active; `plan_code` offers a push only for a newer version that has passed that test, holds an untested one, never pushes backwards, and says `unknown` rather than guess.
+
+## Safety rules (each tested)
+A volume pair must carry the same pair id on both sides; a volume that is not a mounted filesystem, the same volume twice, one inside the other, or both on one filesystem is refused (a sync can never land on the wrong disk). A pass that would not fit on the receiving volume is refused before anything is copied (found on the rehearsal: the 60 GB cache on a small twin). The twin is found by its serial as exactly one attached drive, its volume group is activated **by UUID** (both drives may carry groups of the same name), and it is refused if its group is the running system's own. Nothing here formats, resizes or deletes a volume. Pairing needs root, a peer that is this lane's own or enrolled drive, and an explicit `--yes`; the pairing (pair id, peer serial) is runtime data in `/etc/baseline/twin.json` on the persistent admin volume, never in the repository.
+
+## What was run for real (rehearsal host, second virtual drive with the project's own volume names and labels)
+Pairing marked both drives' volumes and left nothing attached (group inactive, no mounts); a sync copied files both ways and a second run changed nothing; the newer copy won and the older was in the backup folder; a same-age conflict left both versions; Proxmox's own state on USER_ADMIN was not copied; the oversized cache was refused with the numbers; `baseline-twin-health.service` wrote the health marker; `baseline-twin-sync.service` ran under systemd (its own mount namespace) and detached cleanly; both timers enabled.
+
+## Not done
+- **Pushing the code layer is not automated.** The gate exists; the push would use the existing guarded offline updater (`installed_drive_update`), which needs a recovery snapshot of the target and was not wired here. Until then the operator updates the twin with that updater, and `plan_code` says when it is allowed. A twin that is NEWER than the running drive is likewise only reported, not pulled.
+- **Live VM disks are not synced** (running VMs' qcow2/raw images and Kasm's stores are excluded): a user disk of a VM travels only when the VM is stopped and by a separate step that does not exist yet.
+- **Latency is about 30 s** (a timer), not per write: block mirroring was the option not chosen.
+- **A failing volume repeats its error every 30 s** (for example a twin too small for the cache); it is reported, not backed off.
+- Not yet run on the two real drives (PC601 and PC401): PC401 still holds the other lane's install and has not been cleared; it is wiped by the installer when the new build goes on, with the operator's `--confirm-wipe`.
+
+## Operating it
+Install both drives from the same build. On a machine with both attached: enroll the peer (existing enroll action, typed serial), then `sudo baseline-twin pair --peer-serial <serial> --yes` once. From then on the timer syncs whenever the twin is attached and does nothing when it is not. `baseline-twin status` shows pairing, version, health and the last report.

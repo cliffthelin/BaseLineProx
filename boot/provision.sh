@@ -374,6 +374,9 @@ cp "$SRC/baseline/lib/hitl.py" /opt/baseline/lib/hitl.py
 cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
 cp "$SRC/baseline/INSTALLER_UUID" /opt/baseline/INSTALLER_UUID
 cp "$SRC/baseline/lib/cardinality.py" /opt/baseline/lib/cardinality.py         # exactly-one checks and the read-only host survey
+cp "$SRC/baseline/lib/twin_sync.py" /opt/baseline/lib/twin_sync.py               # keeps two paired Baseline drives the same (DR272)
+cp "$SRC/baseline/bin/baseline-twin" /opt/baseline/bin/baseline-twin
+chmod 755 /opt/baseline/bin/baseline-twin
 # Deliberate drive enrollment and the installer plan (discover/autofill/validate/compile), 2026-10-03.
 cp "$SRC/baseline/lib/drive_enrollment.py" /opt/baseline/lib/drive_enrollment.py
 cp "$SRC/baseline/lib/install_plan.py" /opt/baseline/lib/install_plan.py
@@ -542,6 +545,7 @@ cp "$SRC/boot/baseline-persist-bind-mounts.service" /etc/systemd/system/baseline
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
 cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sensors-collect.service
 cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-sensors-collect.timer
+for u in baseline-twin-sync.service baseline-twin-sync.timer baseline-twin-health.service baseline-twin-health.timer; do cp "$SRC/boot/$u" "/etc/systemd/system/$u"; done
 cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
 # baseline-web.service supersedes baseline-settings-web.service
 # (decision record 83) - the merged app is a strict superset, so the
@@ -705,6 +709,8 @@ systemctl enable baseline-volume-growth.timer
 systemctl enable baseline-machine-check.timer
 systemctl enable baseline-network-retry.timer
 systemctl enable baseline-sensors-collect.timer
+systemctl enable baseline-twin-sync.timer baseline-twin-health.timer
+/opt/baseline/bin/baseline-twin version-write || echo "WARNING: could not record the installed version (the twin gate will report unknown)"
 # Unit files are data: copied from the source tree they kept its execute bit, which systemd warns about at every boot.
 chmod 644 /etc/systemd/system/baseline*.service /etc/systemd/system/baseline*.timer 2>/dev/null || true
 # The browser's bookmarks bar: where Proxmox's tools and Baseline are, visible on every page.

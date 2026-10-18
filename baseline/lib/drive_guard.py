@@ -46,9 +46,13 @@ def own_drives_file() -> Path:
     return Path(os.environ.get("BASELINE_OWN_DRIVES_FILE") or OWN_DRIVES_PATH)
 
 
-def own_drive_serials(path=None, lane_uuid=..., *, disposable_only: bool = False) -> frozenset:
-    """The serials in the lane's own-drives file: `SERIAL` or `SERIAL disposable` per line (blank lines and # comments ignored). The drives are this lane's allowed targets; the `disposable` ones are the
-    development lock (they may be reinstalled over old data), and only the operator marks one so. Without a valid lane identity there are none; an absent or unreadable file means none."""
+_FLAGS = ("disposable", "released")
+
+
+def own_drive_serials(path=None, lane_uuid=..., *, disposable_only: bool = False, released_only: bool = False) -> frozenset:
+    """The serials in the lane's own-drives file: `SERIAL [disposable] [released]` per line (blank lines and # comments ignored). The drives are this lane's allowed targets; `disposable` is the
+    development lock (reinstallable over old data) and `released` is a deliberate hand-over of a drive another installer lane stamped (it no longer counts as that lane's). Only the operator marks
+    either. Without a valid lane identity there are none; an absent or unreadable file means none."""
     if lane_uuid is ...:
         lane_uuid = _installer_lane_uuid()
     if not lane_uuid:
@@ -60,15 +64,15 @@ def own_drive_serials(path=None, lane_uuid=..., *, disposable_only: bool = False
     found = set()
     for line in lines:
         words = line.split("#", 1)[0].split()
-        if not words or not _SERIAL_LINE.match(words[0]) or len(words) > 2 or (len(words) == 2 and words[1] != "disposable"):
+        if not words or not _SERIAL_LINE.match(words[0]) or any(w not in _FLAGS for w in words[1:]) or len(set(words[1:])) != len(words[1:]):
             continue
-        if disposable_only and "disposable" not in words[1:]:
+        if (disposable_only and "disposable" not in words[1:]) or (released_only and "released" not in words[1:]):
             continue
         found.add(words[0])
     return frozenset(found)
 
 
-def record_own_drive(serial: str, path=None, *, disposable: bool = False) -> bool:
+def record_own_drive(serial: str, path=None, *, disposable: bool = False, released: bool = False) -> bool:
     """Add one serial to the own-drives file (idempotent; a plain serial only; `disposable` only when the operator says so). Returns whether it was newly added."""
     if not isinstance(serial, str) or not _SERIAL_LINE.match(serial):
         raise ValueError("a drive serial is plain letters, digits and ._- , 8 to 64 characters")
@@ -77,7 +81,7 @@ def record_own_drive(serial: str, path=None, *, disposable: bool = False) -> boo
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "a") as handle:
-        handle.write(serial + (" disposable" if disposable else "") + "\n")
+        handle.write(serial + (" disposable" if disposable else "") + (" released" if released else "") + "\n")
     return True
 
 
@@ -213,7 +217,7 @@ def _authorize_format(device_path: str, state: DriveState, *, serial: str | None
     if serial is None:
         raise DataProtectionError(
             f"refused: {device_path} serial could not be read unambiguously; no override")
-    if lane_verdict(state.ptuuid, serial) == "other":
+    if lane_verdict(state.ptuuid, serial) == "other" and serial not in own_drive_serials(released_only=True):
         raise DataProtectionError(f"refused: {device_path} carries another installer lane's stamp ({serial}); no override")
     if not state.known:
         raise DataProtectionError(

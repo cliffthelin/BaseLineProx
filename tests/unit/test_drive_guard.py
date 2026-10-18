@@ -321,3 +321,23 @@ def test_an_unknown_or_partition_target_cannot_use_a_registered_installer_guid()
     state = dg.DriveState(known=False, has_data=True, ptuuid=GUID)
     with pytest.raises(dg.DataProtectionError, match="serial|read"):
         dg._authorize_format("/dev/sdb1", state, serial=None, installer_uuid_registered=True)
+
+
+def test_a_drive_another_lane_stamped_is_usable_only_after_the_operator_releases_it_in_the_data_file(monkeypatch, tmp_path):
+    """The hand-over of a drive between lanes is a deliberate operator act recorded as data (`released`); the stamp alone never decides, and the release never skips the data rules."""
+    import identifiers
+    f = tmp_path / "own-drives"
+    monkeypatch.setenv("BASELINE_OWN_DRIVES_FILE", str(f))
+    stamp = identifiers.host_id(OTHER_LANE, PC401)
+    listing = f"sdb disk  {stamp} \nsdb1 part ext4  DATA\n"                        # another lane's install, holding data
+    f.write_text(f"{PC401} disposable\n")                                              # listed and disposable, but not released
+    with pytest.raises(dg.DataProtectionError, match="another installer lane"):
+        dg.require_may_format("/dev/sdb", run=runner_with_serial(listing, PC401 + "\n"))
+    f.write_text(f"{PC401} released\n")                                                # released but not disposable: now an ordinary drive holding foreign data
+    with pytest.raises(dg.DataProtectionError, match="no override"):
+        dg.require_may_format("/dev/sdb", run=runner_with_serial(listing, PC401 + "\n"))
+    f.write_text(f"{PC401} disposable released\n")                                     # both, by the operator: this lane may reinstall it
+    assert dg.require_may_format("/dev/sdb", run=runner_with_serial(listing, PC401 + "\n")) is None
+    assert dg.own_drive_serials(released_only=True) == frozenset({PC401})
+    f.write_text(f"{PC401} disposable disposable\n")                                    # a repeated or unknown flag makes the line invalid
+    assert dg.own_drive_serials() == frozenset()

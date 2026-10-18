@@ -124,3 +124,13 @@ def test_the_hosts_own_volume_group_is_the_one_its_root_lives_in_and_two_with_th
         card.host_vg(lost)
     not_lvm = Runner(root_source="/dev/nvme0n1p2")
     assert card.host_vg(not_lvm) is None                                              # a root outside LVM has no volume group to resolve
+
+
+def test_the_name_for_addressing_a_group_comes_from_the_running_root_and_refuses_when_another_drive_shares_it():
+    own = Runner(pvs=[{"pv_name": "/dev/sda3", "vg_name": "baseline_abc", "vg_uuid": "uuid-a"}], lvs=[{"lv_name": "root", "vg_name": "baseline_abc", "vg_uuid": "uuid-a"}], root_source="/dev/mapper/baseline_abc-root")
+    assert card.host_vg_name(own) == "baseline_abc"
+    with pytest.raises(card.CardinalityError, match="2 volume groups are named 'pve'") as err:
+        card.host_vg_name(two_proxmox_drives())
+    assert err.value.ambiguous is True
+    assert card.host_vg_name(Runner(root_source="/dev/nvme0n1p2")) == "pve"                           # a root outside LVM: the old default, as before
+    assert card.host_vg_name(Runner(fail={"findmnt"}), default="fallback") == "fallback"             # an unreadable inventory is not an ambiguity

@@ -56,7 +56,7 @@ def discover_path(serial, runner=None):
         cardinality.exactly_one(disks,'drive with the selected serial',describe=lambda d:str(d.get('name')))
     except cardinality.CardinalityError:
         raise UpdateError('Selected serial does not identify exactly one attached drive') from None
-    if drive_guard.lane_verdict(disks[0].get('ptuuid'),serial)=='other':
+    if drive_guard.lane_verdict(disks[0].get('ptuuid'),serial)=='other' and serial not in drive_guard.own_drive_serials(released_only=True):
         raise UpdateError('Selected drive carries another installer lane\'s stamp; update refused')
     return pds.validate_target_device(disks[0]['name'],expected_serial=serial,
         min_size_bytes=disks[0]['size'],max_size_bytes=disks[0]['size'])['path']
@@ -121,7 +121,7 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
     if uid.returncode or uid.stdout.strip() != '0':
         raise UpdateError('Complete target-use inspection requires root')
     disk = drive_recovery._offline_disk(runner,serial)
-    if drive_guard.lane_verdict(disk.get('ptuuid'),serial)=='other':
+    if drive_guard.lane_verdict(disk.get('ptuuid'),serial)=='other' and serial not in drive_guard.own_drive_serials(released_only=True):
         raise UpdateError('Selected drive carries another installer lane\'s stamp; update refused')
     target = pds.validate_target_device(disk['name'],expected_serial=serial,
         min_size_bytes=disk['size'],max_size_bytes=disk['size'],runner=pds_runner)

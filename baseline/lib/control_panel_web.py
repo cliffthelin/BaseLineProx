@@ -74,7 +74,10 @@ def _not_from_web_app(origin, op: str):
     return None
 
 
-def handle_detect(runner: Runner, *, vg_name: str = drive_installer.DEFAULT_VG_NAME) -> RouteResult:
+def handle_detect(runner: Runner, *, vg_name: str | None = None) -> RouteResult:
+    if vg_name is None:
+        import cardinality
+        vg_name = cardinality.host_vg_name(runner)
     result = drive_installer.detect_existing_baseline_install(runner, vg_name=vg_name)
     return RouteResult("applied", 200, result)
 
@@ -279,7 +282,7 @@ class ControlPanelHandler(http.server.BaseHTTPRequestHandler):
             return self._html(200, render_index_page().encode())
 
         if parsed.path == "/api/detect":
-            result = handle_detect(deps["runner"], vg_name=deps.get("vg_name", drive_installer.DEFAULT_VG_NAME))
+            result = handle_detect(deps["runner"], vg_name=deps.get("vg_name"))
             return self._json(result.status, {"outcome": result.outcome, **result.body})
 
         if parsed.path == "/api/active-persona":
@@ -345,7 +348,7 @@ class ControlPanelHandler(http.server.BaseHTTPRequestHandler):
 
 
 def make_server(*, runner: Runner, pds_runner, config_path: str = DEFAULT_CONFIG_PATH,
-                vg_name: str = drive_installer.DEFAULT_VG_NAME, network_interface: str = "eno1",
+                vg_name: str | None = None, network_interface: str = "eno1",
                 host: str = "127.0.0.1", port: int = 8642) -> http.server.HTTPServer:
     server = http.server.HTTPServer((host, port), ControlPanelHandler)
     server.deps = {  # type: ignore[attr-defined]

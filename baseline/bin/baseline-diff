@@ -33,7 +33,7 @@ def main(argv=None) -> int:
     parser.add_argument("--config", required=True, help="path to the exported install-config.json")
     parser.add_argument("--interface", default="eno1",
                          help="fallback network interface if the config's own ethtool_interface is blank")
-    parser.add_argument("--vg-name", default=drive_installer.DEFAULT_VG_NAME)
+    parser.add_argument("--vg-name", default=None)
     parser.add_argument("--out", default=None, help="write the JSON report here instead of stdout")
     args = parser.parse_args(argv)
 
@@ -41,9 +41,11 @@ def main(argv=None) -> int:
         config = json.load(f)
 
     runner = RealRunner()
+    import cardinality
+    vg_name = args.vg_name or cardinality.host_vg_name(runner)             # the group the running system is in; refuses when another drive shares the name
     try:
         report = {
-            "install_detected": drive_installer.detect_existing_baseline_install(runner, vg_name=args.vg_name),
+            "install_detected": drive_installer.detect_existing_baseline_install(runner, vg_name=vg_name),
             "diff_sections": config_diff.compute_full_diff(runner, config, network_interface=args.interface),
         }
     except config_diff.ReadbackError as exc:

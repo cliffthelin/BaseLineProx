@@ -23,9 +23,10 @@ _BASELINE_LABEL = re.compile(r"^(BASELINE|INSTALLER_CACHE|SESSION_TEMP|SUBSTRATE
 class CardinalityError(ValueError):
     """Raised when one was needed and none or several were found; `found` holds everything that was."""
 
-    def __init__(self, message: str, found=()):
+    def __init__(self, message: str, found=(), *, ambiguous: bool = False):
         super().__init__(message)
         self.found = list(found)
+        self.ambiguous = ambiguous                                         # more than one was found (as opposed to none, or an inventory that could not be read)
 
 
 def exactly_one(found, what: str, *, describe=str):
@@ -36,7 +37,7 @@ def exactly_one(found, what: str, *, describe=str):
         raise CardinalityError(f"no {what} was found where exactly one is needed", items)
     names = ", ".join(sorted(describe(i) for i in items))
     plural = what + ("s" if not what.endswith("s") else "")
-    raise CardinalityError(f"{len(items)} {plural} were found where exactly one is needed ({names}); not choosing between them", items)
+    raise CardinalityError(f"{len(items)} {plural} were found where exactly one is needed ({names}); not choosing between them", items, ambiguous=True)
 
 
 def at_most_one(found, what: str, *, describe=str):
@@ -177,5 +178,19 @@ def host_vg(runner, *, require_unique_name: bool = False) -> dict | None:
     uuid_proc = runner.run(["lvs", "--noheadings", "-o", "vg_uuid", device], timeout=15)
     actual = (uuid_proc.stdout or "").strip() if not uuid_proc.returncode else ""
     if require_unique_name or actual not in {g.uuid for g in same}:
-        raise CardinalityError(f"{len(same)} volume groups are named '{name}' ({', '.join(g.uuid for g in same)}); the name alone does not say which one is meant", same)
+        raise CardinalityError(f"{len(same)} volume groups are named '{name}' ({', '.join(g.uuid for g in same)}); the name alone does not say which one is meant", same, ambiguous=True)
     return {"name": name, "uuid": actual, "name_shared": True}
+
+
+def host_vg_name(runner, default: str = "pve") -> str:
+    """The name of the volume group the running system lives in, for the places that address a group by name. Falls back to `default` only when the root cannot be identified or is not on LVM
+    (the old behaviour); when more than one group has that name it REFUSES, because a bare name could act on the other drive."""
+    try:
+        info = host_vg(runner, require_unique_name=True)
+    except CardinalityError as exc:
+        if exc.ambiguous:
+            raise
+        return default
+    except Exception:                                                     # noqa: BLE001 - an unreadable inventory keeps the old default; only a real ambiguity is an error
+        return default
+    return info["name"] if info else default

@@ -304,7 +304,7 @@ def _local_fallback_size_gb(runner: Runner, vg_name: str) -> int:
     return di.adaptive_single_size_gb(free_bytes, 200, min_gb=50)
 
 
-def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg_name: str = "pve") -> ApplyResult:
+def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg_name: str | None = None) -> ApplyResult:
     """Mounts USER at MOUNT_POINT if not already active,
     and ensures a durable fstab entry exists so this survives reboot
     without depending on this function running again.
@@ -340,9 +340,13 @@ def ensure_user_volume_mounted(runner: Runner, *, persona: str | None = None, vg
                         False, f"found {label} at {device} but direct mount failed: "
                                f"{direct_proc.stderr.strip()[:300]}")
             else:
+                import cardinality
                 import drive_installer as di
                 try:
+                    vg_name = vg_name or cardinality.host_vg_name(runner)      # the group the running system is in, never a bare 'pve' that another drive might also have
                     local_size_gb = _local_fallback_size_gb(runner, vg_name)
+                except cardinality.CardinalityError as exc:
+                    return ApplyResult(False, f"local self-install refused: {exc}")
                 except PersistenceObservationError as exc:
                     return ApplyResult(False, str(exc))
                 if local_size_gb <= 0:
@@ -566,7 +570,7 @@ def set_active_persona(runner: Runner, persona: str) -> None:
 
 
 def switch_active_persona(runner: Runner, *, to_persona: str, credential_ok: bool,
-                           vg_name: str = "pve") -> ApplyResult:
+                           vg_name: str | None = None) -> ApplyResult:
     """The real active-persona switch mechanism work-queue item 25
     asked for: "switch active persona = unmount current, authenticate,
     mount+rebind the newly-authenticated one."
