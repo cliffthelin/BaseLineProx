@@ -27,7 +27,7 @@ _SERIAL = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")
 _DEV_USER = re.compile(r"^[a-z][a-z0-9_-]{0,31}:\$6\$[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{86}$")
 
 
-_DEV_SSH_KEY = re.compile(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+) [A-Za-z0-9+/=]{20,800}( [A-Za-z0-9._@-]{1,64})?$")
+_DEV_SSH_KEY = re.compile(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+) [A-Za-z0-9+/=]{20,800}( [A-Za-z0-9._@ (),-]{1,80})?$")
 
 
 def _exec_line(child_identity, dev_user=None, dev_ssh_keys=()):
