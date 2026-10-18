@@ -21,6 +21,7 @@ def test_the_navigation_starts_with_home_and_the_tui_tabs_and_ends_with_the_inst
     paths = [p for p, _ in bw.NAV_TABS]
     assert paths[0] == "/home"
     assert paths[1] == "/launcher"            # DR259 (operator 2026-10-14): the phone-style launcher is where VMs/OSes start
-    assert paths[2:8] == ["/hardware", "/network", "/sensors", "/vms", "/chat", "/shell"]
+    # the navigation is nested categories now (nav_tree.py, operator 2026-10-18); the TUI's pages are still all present and the installer still comes last
+    assert {"/hardware", "/network", "/sensors", "/vms", "/chat", "/shell"} <= set(paths)
     assert paths.index("/install-plan") > paths.index("/vault") > paths.index("/shell")
     assert len(paths) == len(set(paths))

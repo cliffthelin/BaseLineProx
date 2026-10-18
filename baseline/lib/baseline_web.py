@@ -65,51 +65,28 @@ import web_security as ws
 from repair import Runner
 
 
-NAV_TABS = (
-    ("/home", "Home"),
-    ("/launcher", "Launcher"),
-    ("/hardware", "Hardware"),
-    ("/network", "Network"),
-    ("/sensors", "Sensors"),
-    ("/vms", "Virtual machines"),
-    ("/chat", "Chat"),
-    ("/shell", "Console"),
-    ("/audio", "Audio and Bluetooth"),
-    ("/power", "Power"),
-    ("/memory", "Memory and swap"),
-    ("/workspaces", "Workspaces"),
-    ("/containers", "Distro containers"),
-    ("/environments", "Environments"),
-    ("/tools", "Diagnostic tools"),
-    ("/ai-setup", "AI providers"),
-    ("/vault", "Vault"),
-    ("/security", "Two-factor"),
-    ("/ceph", "Ceph"),
-    ("/settings", "Settings"),
-    ("/admin", "Admin"),
-    ("/recovery", "Recovery"),
-    ("/drive-admin", "Drive Administration"),
-    ("/operations", "Operations"),
-    ("/operators", "Operators"),
-    ("/approvals", "Approvals"),
-    ("/audit", "Audit"),
-    ("/remote-access", "Remote access"),
-    ("/workloads", "Workload jobs"),
-    ("/master-config", "Master Config"),
-    ("/installation-readiness", "Installation readiness"),
-    ("/installer-cache", "Installer Cache"),
-    ("/managed-mode", "Managed server mode"),
-    ("/app-isolation", "App Isolation"),
-    ("/recipes", "Environment recipes"),
-    ("/install-plan", "Installer plan"),
-    ("/install-plan?display=desktop", "Installer desktop"),
-)
+import nav_tree
+
+NAV_TABS = nav_tree.flatten()          # every page, from the nested tree in nav_tree.py
+
+
+def _nav_entries(entries, active_path):
+    out = []
+    for entry in entries:
+        if nav_tree.is_page(entry):
+            path, label = entry
+            out.append(f'<a href="{path}" class="{"active" if active_path.startswith(path) else ""}">{label}</a>')
+        else:
+            label, children = entry
+            out.append(f'<span class="nav-sub"><span class="nav-sub-label">{label}</span>{_nav_entries(children, active_path)}</span>')
+    return "".join(out)
 
 
 def render_nav(active_path: str) -> str:
+    current = nav_tree.active_group(active_path)
     links = "".join(
-        f'<a href="{path}" class="{"active" if active_path.startswith(path) else ""}">{label}</a>'
-        for path, label in NAV_TABS
+        f'<details class="nav-group"{" open" if label == current else ""}><summary>{label}</summary><div class="nav-items">{_nav_entries(entries, active_path)}</div></details>'
+        for label, entries in nav_tree.TREE
     )
     return (f'<nav class="baseline-nav">{links} <a href="/logout">Log out</a>'
             '<form method="post" action="/host/restart" onsubmit="return baselineRequestRestart(event)">'
@@ -156,6 +133,10 @@ def _with_nav(body_bytes: bytes, active_path: str) -> bytes:
 .baseline-nav{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem;padding:1rem 0;border-bottom:1px solid #33364a;margin-bottom:1.2rem;font-size:.9rem}
 .baseline-nav a{color:#aebddc;text-decoration:none;padding:.3rem 0}
 .baseline-nav a.active{color:#fff;border-bottom:2px solid #7fa4ec}
+.nav-group summary{cursor:pointer;color:#aebddc;padding:.3rem .1rem;list-style:none;font-weight:600}.nav-group summary::-webkit-details-marker{display:none}
+.nav-group[open] summary{color:#fff;border-bottom:2px solid #7fa4ec}.nav-group[open]{flex-basis:100%}
+.nav-items{display:flex;flex-wrap:wrap;gap:.2rem 1rem;padding:.5rem 0 .2rem}.nav-sub{display:flex;flex-wrap:wrap;gap:.2rem 1rem;align-items:center;padding-left:.8rem;border-left:2px solid #33364a}
+.nav-sub-label{color:#7f86a3;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
 .baseline-nav form{margin:0}.baseline-nav button{margin:0;padding:.4rem .6rem}
 button,input,select,textarea{font:inherit;color:#e7e9f0;background:#171923;border:1px solid #33364a;border-radius:5px}
 button{cursor:pointer;padding:.4rem .8rem}button:disabled{cursor:default;opacity:.6}
