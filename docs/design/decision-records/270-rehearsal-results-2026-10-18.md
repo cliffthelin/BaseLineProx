@@ -40,7 +40,7 @@ Result per system on the real Proxmox (booted, guest agent up in 12-18 s): Debia
 
 ## Rehearsal-only workarounds (not in the repo)
 - The nested drive's volume group is full (the cache alone is 60 GB of the 80 GB cache volume), so the library's 10 GiB free-space headroom could not be met; a drop-in on the VM runs the web service with the headroom lowered (`/usr/local/bin/baseline-web-rehearsal`). Real hardware (512 GB) does not need it. A rehearsal with the full six-base cache needs a larger nested drive.
-- Root SSH with the development key was refused on the first attempts after the rehearse stage on three fresh installs, then accepted after a later boot of the same disk. On the third, the SSH client saw host key `ITkq...` while the guest's own host key (unchanged since install) is `L08y...`: something other than the guest's sshd answered the forwarded port 22481. What it was is not established (no other process held the port when checked afterwards; the guest was running and its sshd listening). Next rehearsal: compare `ssh-keyscan` with the guest's key before concluding anything about authentication.
+- Root SSH with the development key was refused on some boots and accepted on others. Cause found later (2026-10-18): the SSH client saw a host key that was not the guest's own because the rehearsal's emulated network hands out ONE DHCP lease (10.0.2.15) and the nested Kasm VM, bridged on the same segment, sometimes takes it before the Proxmox host does, so the port forward reached the Kasm VM's sshd. A rehearsal artifact (real hardware has a real network), not a product fault; compare `ssh-keyscan` with the guest's own host key before concluding anything about authentication.
 
 
 ## Owners for Bazzite and Omarchy from the seed (2026-10-18, later)
