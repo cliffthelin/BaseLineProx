@@ -947,20 +947,8 @@ class BaselineApp(App):
         runner = repair.RealRunner()
         rows = sensors_view.collect_rows(runner, diagnostics)       # shared with the web /sensors page
 
-        history = []
-        temp_rows = [r for r in rows if r[3] == "C" and isinstance(r[2], (int, float))]
-        if temp_rows and SENSORS_DB_PATH.exists():
-            hottest = max(temp_rows, key=lambda r: r[2])
-            try:
-                conn = sensors_history.open_db(str(SENSORS_DB_PATH))
-                try:
-                    since = time.time() - SENSORS_HISTORY_WINDOW_S
-                    history = sensors_history.query_history(conn, source=hottest[0], key=hottest[1], since_ts=since)
-                finally:
-                    conn.close()
-            except Exception:
-                history = []
-        self.call_from_thread(self._render_sensors, rows, [v for _, v in history])
+        _, history = sensors_view.hottest_history(rows, db_path=SENSORS_DB_PATH, window_s=SENSORS_HISTORY_WINDOW_S)      # shared with the web /sensors page
+        self.call_from_thread(self._render_sensors, rows, history)
 
     @_safe
     def _render_sensors(self, rows: list, history_values: list) -> None:
@@ -987,17 +975,7 @@ class BaselineApp(App):
         except proxmox_vm_metrics.MetricsError as exc:
             self.call_from_thread(self._render_vms, [], [], str(exc))
             return
-        history_values = []
-        error = ""
-        running = next((v for v in vms if v.status == "running"), None)
-        if running is not None:
-            try:
-                since = time.time() - SENSORS_HISTORY_WINDOW_S
-                for sample in proxmox_vm_metrics.vm_rrd_history(runner, "localhost", running.vmid, vm_type=running.type):
-                    if sample.get("time", 0) >= since and isinstance(sample.get("cpu"), (int, float)):
-                        history_values.append(sample["cpu"])
-            except proxmox_vm_metrics.MetricsError as exc:
-                error = str(exc)
+        _, history_values, error = proxmox_vm_metrics.running_cpu_history(runner, vms, window_s=SENSORS_HISTORY_WINDOW_S)      # shared with the web /vms page
         self.call_from_thread(self._render_vms, vms, history_values, error)
 
     @_safe

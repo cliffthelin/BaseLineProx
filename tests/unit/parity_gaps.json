@@ -15,14 +15,8 @@
  "tui.chat.copy",
  "tui.hardware.detail",
  "tui.hardware.ids_toggle",
- "tui.hardware.table",
  "tui.network.alias",
  "tui.network.power",
- "tui.proxmox.return",
  "tui.refresh",
- "tui.sensors.history",
- "tui.status_bar",
- "tui.vms.history",
- "tui.vms.shutdown",
- "tui.vms.start"
+ "tui.status_bar"
 ]

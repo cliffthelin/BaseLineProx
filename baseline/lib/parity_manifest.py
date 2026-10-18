@@ -29,7 +29,7 @@ def F(id, source, name, route, evidence=None):
 W = "baseline_web.py"
 FEATURES = (
     # --- the Baseline TUI (baseline/bin/baseline) ---
-    F("tui.hardware.table", "tui", "Hardware overview table", "/hardware", (W, 'path == "/hardware"')),
+    F("tui.hardware.table", "tui", "Hardware overview table", "/hardware", (W, 'path.startswith("/hardware")')),
     F("tui.hardware.ids_toggle", "tui", "Show or hide hardware IDs", "/hardware"),
     F("tui.hardware.detail", "tui", "Hardware row detail", "/hardware"),
     F("tui.network.table", "tui", "Network interfaces table", "/network", (W, 'path == "/network"')),
@@ -38,16 +38,16 @@ FEATURES = (
     F("tui.network.power", "tui", "Switch an interface on or off", "/network"),
     F("tui.network.role", "tui", "Primary and fallback connection", "/network", (W, "lifeline")),
     F("tui.sensors.table", "tui", "Sensors table", "/sensors", (W, 'path == "/sensors"')),
-    F("tui.sensors.history", "tui", "Sensor history graph", "/sensors"),
+    F("tui.sensors.history", "tui", "Sensor history graph", "/sensors", ("sensors_view.py", "def hottest_history")),
     F("tui.vms.table", "tui", "Virtual machines table", "/vms", (W, 'path == "/vms"')),
-    F("tui.vms.history", "tui", "Virtual machine usage graph", "/vms"),
-    F("tui.vms.start", "tui", "Start a virtual machine", "/vms"),
-    F("tui.vms.shutdown", "tui", "Shut down a virtual machine", "/vms"),
+    F("tui.vms.history", "tui", "Virtual machine usage graph", "/vms", ("vm_page.py", "def with_usage")),
+    F("tui.vms.start", "tui", "Start a virtual machine", "/vms", ("vm_page.py", 'if action == "start"')),
+    F("tui.vms.shutdown", "tui", "Shut down a virtual machine", "/vms", ("baseline_web.py", "'request_stop'")),
     F("tui.chat.ask", "tui", "Ask the assistant", "/chat", (W, '"/chat/ask"')),
     F("tui.chat.harness", "tui", "Choose the assistant", "/chat", ("chat_page.py", "harness")),
     F("tui.chat.copy", "tui", "Copy the last answer", "/chat"),
     F("tui.console.commands", "tui", "Console commands", "/shell", (W, '"/shell/run"')),
-    F("tui.proxmox.return", "tui", "Go to the Proxmox interface", "/home"),
+    F("tui.proxmox.return", "tui", "Go to the Proxmox interface", "/home", ("home_page.py", "8006")),
     F("tui.refresh", "tui", "Refresh now", "/home"),
     F("tui.status_bar", "tui", "Status bar", "/home"),
     # --- the installer in the web app (already served by baseline_web) ---

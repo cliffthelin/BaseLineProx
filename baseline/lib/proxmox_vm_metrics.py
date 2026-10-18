@@ -101,3 +101,17 @@ def vm_rrd_history(runner: Runner, node: str, vmid: int, vm_type: str = "qemu", 
         "pvesh", "get", f"/nodes/{node}/{vm_type}/{vmid}/rrddata",
         "--timeframe", timeframe, "--output-format", "json",
     ])
+
+
+def running_cpu_history(runner, vms, *, window_s: float, node: str = "localhost", now=None) -> tuple:
+    """(name, [cpu values], error) for the first running VM or container, from Proxmox's own retained data. The same call feeds the TUI's graph and the console's."""
+    import time
+    running = next((v for v in vms if v.status == "running"), None)
+    if running is None:
+        return "", [], ""
+    since = (time.time() if now is None else now) - window_s
+    try:
+        samples = vm_rrd_history(runner, node, running.vmid, vm_type=running.type)
+    except MetricsError as exc:
+        return running.name, [], str(exc)
+    return running.name, [s["cpu"] for s in samples if s.get("time", 0) >= since and isinstance(s.get("cpu"), (int, float))], ""

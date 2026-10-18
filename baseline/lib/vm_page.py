@@ -435,3 +435,14 @@ def _requested_distros():
             'install using its console, shut down, eject the ISO, and freeze the clean installation as a base. '
             'New overlays get a separate blank retained disk; it is <strong>not automatically mounted</strong> by these distros. '
             'Configure and verify its filesystem and mount before trusting an OS reset. Ubuntu is the automated retained-home recipe.</p></div>')
+
+
+def with_usage(page: bytes, name: str, values, error: str = "") -> bytes:
+    """Add the usage graph (what the TUI's VMs tab shows) to the rendered VMs page, just above its closing tag."""
+    import console_charts
+    import html
+    chart = (f'<section class="vm-usage"><h2>Usage</h2><p class="chart-empty">{html.escape(error)}</p></section>' if error else
+             f'<section class="vm-usage"><h2>Usage</h2>{console_charts.sparkline_svg([v * 100 for v in values], label=(name or "Running machine") + " processor", unit="%")}</section>')
+    text = page.decode()
+    marker = "</body>"
+    return (text.replace(marker, chart + marker, 1) if marker in text else text + chart).encode()

@@ -2372,7 +2372,9 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 rows = sensors_view.collect_rows(deps.get("runner") or repair.RealRunner(), diagnostics)
             except (OSError, ValueError, KeyError, AttributeError) as exc:
                 rows = [("error", "sensor collection failed", str(exc), "")]
-            return self._html_response(200, _with_nav(sensors_view.render(rows), path))
+            import sensors_collect
+            history = sensors_view.hottest_history(rows, db_path=deps.get("sensors_db") or sensors_collect.DB_PATH, window_s=3600)
+            return self._html_response(200, _with_nav(sensors_view.render(rows, history), path))
 
         if path == "/tools":
             import tools_page
@@ -2649,13 +2651,21 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     homepage = host.guest_homepage()
                 except (vh.VmError, OSError, ValueError) as exc:
                     homepage_error = str(exc)
-            return self._html_response(200, _with_nav(vm_page.render_vms_page(
+            usage = ("", [], "")
+            try:
+                import proxmox_vm_metrics
+                runner = deps.get("runner")
+                usage = proxmox_vm_metrics.running_cpu_history(runner, proxmox_vm_metrics.list_vms(runner), window_s=3600) if runner else usage
+            except Exception:                                      # noqa: BLE001 - the graph is a bonus: no Proxmox data means no graph, never a broken page
+                usage = ("", [], "")
+            page_bytes = vm_page.render_vms_page(
                 store=str(host.store), free_gb=round(host.free_bytes(host.store) / 2**30), kvm_ok=_kvm_ok(deps),
                 isos=vm_page.available_isos(host, iso_dir), bases=bases, vms=vms,
                 backend=getattr(host, "backend", "Local QEMU"), persistence_store=str(host.persistence_store),
                 homepage=homepage, homepage_error=homepage_error,
                 notice=qs.get("notice", [""])[0][:300], notice_ok=notice_ok,
-                default_display=vh.default_display(os.environ), inventory_error=inventory_error), path))
+                default_display=vh.default_display(os.environ), inventory_error=inventory_error)
+            return self._html_response(200, _with_nav(vm_page.with_usage(page_bytes, *usage) if usage != ("", [], "") else page_bytes, path))
 
         if path.startswith("/hardware"):
             import hardware_configuration as hc
