@@ -27,4 +27,4 @@ Date: 2026-10-18. Status: the offline cache and installer ISO were rebuilt with 
 
 ## Rehearsal-only workarounds (not in the repo)
 - The nested drive's volume group is full (the cache alone is 60 GB of the 80 GB cache volume), so the library's 10 GiB free-space headroom could not be met; a drop-in on the VM runs the web service with the headroom lowered (`/usr/local/bin/baseline-web-rehearsal`). Real hardware (512 GB) does not need it. A rehearsal with the full six-base cache needs a larger nested drive.
-- The first SSH attempts after a boot must wait for the persisted volumes to be bound; the nested guest needs about two minutes before root SSH is accepted.
+- Root SSH with the development key was refused on the first boot after the second install (about 7 minutes up), although the key file (mode 600) and the sshd drop-in were present on the disk when it was read back offline; after one more boot of the same disk the key was accepted within two minutes. The cause of the first refusal is not established; the next rehearsal should check whether it repeats on a fresh install before this is relied on.
