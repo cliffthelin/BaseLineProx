@@ -250,16 +250,50 @@ def omarchy_cidata(*, disk_bytes: int, encrypt=False, **kw) -> dict:
 BAZZITE_LABEL = "bazzite-x86_64-stable"
 
 
-def bazzite_kickstart(*, hostname="bazzite", image="/run/install/repo/bazzite-stable") -> str:
+SEED_HEREDOC = "BASELINE_SEED_EOF"
+SEED_UNIT = """[Unit]
+Description=Baseline first boot: the owner from the seed disk
+Before=sddm.service display-manager.service plasmalogin.service gdm.service systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /etc/baseline-seed/seed_runner.py
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def seed_runner_install_script(runner: str) -> str:
+    """Shell lines that put the seed runner (baseline/lib/seed_runner.py) and its unit in a system that has no cloud-init, enabled without a running systemd, so the owner is made from the
+    seed disk at the first boot, before any login screen. The runner is a file the build reads from this repository, never text from the network."""
+    if SEED_HEREDOC in runner or "%end" in runner:
+        raise BuildError("the runner text cannot contain the end marker of the file that carries it")
+    return "\n".join([
+        "mkdir -p /etc/baseline-seed /etc/systemd/system/multi-user.target.wants",
+        f"cat > /etc/baseline-seed/seed_runner.py <<'{SEED_HEREDOC}'", runner.rstrip("\n"), SEED_HEREDOC,
+        f"cat > /etc/systemd/system/baseline-seed.service <<'{SEED_HEREDOC}'", SEED_UNIT.rstrip("\n"), SEED_HEREDOC,
+        "chmod 644 /etc/baseline-seed/seed_runner.py /etc/systemd/system/baseline-seed.service",
+        "ln -sf /etc/systemd/system/baseline-seed.service /etc/systemd/system/multi-user.target.wants/baseline-seed.service",
+        "chcon -t systemd_unit_file_t /etc/systemd/system/baseline-seed.service || true",         # SELinux: the unit is labelled as a unit; the runner is only read by python
+        "chcon -h -t systemd_unit_file_t /etc/systemd/system/multi-user.target.wants/baseline-seed.service || true", ""])
+
+
+def bazzite_kickstart(*, hostname="bazzite", image="/run/install/repo/bazzite-stable", runner=None) -> str:
     """The kickstart for an unattended Bazzite install. It names the container image carried on the ISO (the same `ostreecontainer` line the ISO's own interactive defaults use) and wipes
-    the target disk. The ISO's defaults would also create a user with a known password; this creates none and locks root: the owner is made at the first boot."""
+    the target disk. The ISO's defaults would also create a user with a known password; this creates none and locks root: the owner is made at the first boot, from the seed disk, by the seed
+    runner this installs when `runner` (its source text) is given."""
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", hostname) or not re.fullmatch(r"/run/install/repo/[A-Za-z0-9][A-Za-z0-9._-]*", image):
         raise BuildError("hostname or image path is not a plain value")
-    return "\n".join([
+    lines = [
         "# Baseline: unattended install of the Bazzite image on the ISO. No account is created.", "text",
         f"ostreecontainer --url={image} --transport=oci --no-signature-verification",
         "lang en_US.UTF-8", "keyboard us", "timezone UTC --utc", f"network --bootproto=dhcp --device=link --activate --hostname={hostname}",
-        "zerombr", "clearpart --all --initlabel --disklabel=gpt", "autopart", "bootloader --timeout=1", "rootpw --lock", "poweroff", ""])
+        "zerombr", "clearpart --all --initlabel --disklabel=gpt", "autopart", "bootloader --timeout=1", "rootpw --lock", "poweroff"]
+    if runner is not None:
+        lines += ["", "%post --erroronfail", seed_runner_install_script(runner), "%end"]
+    return "\n".join(lines) + "\n"
 
 
 # ---- CachyOS (the live image's own installer, headless) ------------------------------------------------------------------------------------

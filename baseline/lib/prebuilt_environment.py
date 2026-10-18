@@ -27,7 +27,8 @@ _NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 SYSTEMS = {
     "debian": {"seed": True, "greeter": ("gdm3",)}, "ubuntu": {"seed": True, "greeter": ("gdm3",)}, "nixos": {"seed": True, "greeter": ()},
     "cachyos": {"seed": True, "greeter": ("plasmalogin", "sddm")},
-    "omarchy": {"seed": False, "greeter": ()}, "bazzite": {"seed": False, "greeter": ()}, "fydeos": {"seed": False, "greeter": ()},
+    "bazzite": {"seed": True, "greeter": ("sddm",)},
+    "omarchy": {"seed": False, "greeter": ()}, "fydeos": {"seed": False, "greeter": ()},
 }
 _HOME_PATH = "/run/wrappers/bin:/run/current-system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 

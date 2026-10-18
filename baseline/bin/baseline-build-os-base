@@ -462,6 +462,7 @@ def build_fydeos(args, work: Path, out: Path):
 BAZZITE_CHECKS = [
     ("os", "grep PRETTY_NAME /etc/os-release"), ("deployment", "rpm-ostree status 2>&1 | head -8"), ("agent", "systemctl is-active qemu-guest-agent"),
     ("accounts", "getent passwd | awk -F: '$3>=1000 && $3<65000' | wc -l"),
+    ("seed-runner", "test -f /etc/baseline-seed/seed_runner.py && echo present || echo absent-or-unreadable-by-the-agent"),
 ]
 OSTREE_TIDY = ["truncate -s 0 /etc/machine-id", "rm -f /etc/ssh/ssh_host_*", "sync"]
 
@@ -471,7 +472,7 @@ def build_bazzite(args, work: Path, out: Path):
     for source, name in (("/images/pxeboot/vmlinuz", "vmlinuz"), ("/images/pxeboot/initrd.img", "initrd.img")):
         subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", source, str(work / name)], check=True, capture_output=True)
         (work / name).chmod(0o644)
-    (work / "initrd-ks.img").write_bytes(ob.initrd_with((work / "initrd.img").read_bytes(), {"ks.cfg": ob.bazzite_kickstart().encode()}))
+    (work / "initrd-ks.img").write_bytes(ob.initrd_with((work / "initrd.img").read_bytes(), {"ks.cfg": ob.bazzite_kickstart(runner=(REPO / "baseline/lib/seed_runner.py").read_text()).encode()}))
     disk, vars_file = work / "disk.qcow2", work / "vars.fd"
     disk.unlink(missing_ok=True)
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", str(disk), f"{args.disk_gb}G"], check=True)
@@ -484,7 +485,7 @@ def build_bazzite(args, work: Path, out: Path):
     results = inspect_and_generalize(disk, work, BAZZITE_CHECKS, OSTREE_TIDY)
     manifest = {"os": "bazzite-stable", "source_image": iso.name, "source_sha256": sha256(iso), "install": "Anaconda kickstart (ostreecontainer from the ISO), no account",
                 "apps_needing_a_helper": ["vscode", "spotify", "chrome", "chatgpt", "claude"], "checks": results,
-                "first_boot": "the system's own first-boot setup creates the owner; the base has no account"}
+                "first_boot": "the owner is made at the first boot from the seed disk by baseline-seed (baseline/lib/seed_runner.py, installed by the kickstart); the base has no account"}
     finalize("bazzite", disk, out, manifest)
 
 

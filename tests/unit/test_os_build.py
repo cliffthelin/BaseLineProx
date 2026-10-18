@@ -158,3 +158,19 @@ def test_an_ssh_key_is_optional_and_odd_values_are_refused():
     for bad in ({"username": "Bad User"}, {"hostname": "Bad Host"}, {"ssh_keys": ["not a key; rm -rf /"]}):
         with pytest.raises(ob.BuildError):
             ob.first_boot_seed(**{"username": "alex", "hostname": "desk", "instance_id": "i", **bad})
+
+
+def test_the_bazzite_kickstart_installs_the_seed_runner_and_a_unit_that_runs_before_the_login_screen_and_creates_no_account():
+    ks = ob.bazzite_kickstart(runner="print('runner body')\n")
+    assert "%post --erroronfail" in ks and ks.rstrip().endswith("%end")
+    assert "print('runner body')" in ks and "/etc/baseline-seed/seed_runner.py" in ks
+    assert "Before=" in ks and "sddm.service" in ks and "display-manager.service" in ks
+    assert "multi-user.target.wants/baseline-seed.service" in ks                                # enabled without a running systemd
+    assert "rootpw --lock" in ks and "user --name" not in ks and "--password" not in ks         # still no account in the base
+    assert ks.count("BASELINE_SEED_EOF") % 2 == 0
+    with pytest.raises(ob.BuildError):
+        ob.bazzite_kickstart(runner="x\nBASELINE_SEED_EOF\nrm -rf /\n")                         # the runner text cannot end its own heredoc
+
+
+def test_the_bazzite_kickstart_without_a_runner_is_the_old_one():
+    assert "%post" not in ob.bazzite_kickstart()
