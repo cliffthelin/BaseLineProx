@@ -245,3 +245,24 @@ def test_the_kasm_seed_storage_is_not_offered_as_an_operating_system_image(tmp_p
     h.run = answer
     assert [i["name"] for i in h.available_isos()] == ["installer-cache:iso/debian.iso"]
     assert "baseline-kasm-root" in pv.HIDDEN_ISO_STORAGES
+
+
+def test_a_ready_made_vm_is_registered_with_proxmox_with_its_seed_efi_disk_and_no_password(tmp_path):
+    """The same path the launcher's ready-made tile takes: the carried base is linked in, an overlay and a retained disk are made, and Proxmox gets a VM with the seed CD and OVMF."""
+    import hashlib
+    import prebuilt_environment as pe
+    h, run = host(tmp_path)
+    carried_dir = tmp_path / "carried"
+    carried_dir.mkdir()
+    (carried_dir / "debian-base.qcow2").write_bytes(b"debian base")
+    (carried_dir / "debian-base.json").write_text(json.dumps({"base": "debian-base.qcow2", "sha256": hashlib.sha256(b"debian base").hexdigest(), "holds_install_state_or_secrets": False}))
+    pe.install_base(h, "debian", carried_dir)
+    got = pe.create(h, "work", "debian", owner=pe.owner_account(h, "cliff"), memory_mb=4096, cpus=2)
+    assert got["owner"] == "cliff"
+    create = next(c for c in run.calls if c[:2] == ["qm", "create"])
+    assert "--agent" in create and "--machine" in create and any(a.startswith("baseline") for a in create)
+    sets = [c for c in run.calls if c[:2] == ["qm", "set"]]
+    assert any("--ide2" in c and any("seed.iso" in a for a in c) for c in sets)                      # the first-boot seed is attached as a CD
+    assert any("--bios" in c and "ovmf" in c for c in sets) and any("--efidisk0" in c for c in sets)  # UEFI with an EFI disk, as the bases boot
+    assert not any("password" in " ".join(c).lower() for c in run.calls)                              # nothing about a password is sent to Proxmox
+    assert (h.vm_dir("work") / "seed.iso").exists() and h.base_path("debian-base").is_symlink()
