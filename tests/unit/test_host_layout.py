@@ -1,5 +1,6 @@
 """Swap moves into SESSION_TEMP: the fstab edits (PC601's real lines) and the order of the steps. The real commands are proven in the rehearsal VM."""
 import os
+from pathlib import Path
 
 import pytest
 
@@ -206,3 +207,44 @@ def test_a_second_run_changes_nothing_and_a_name_owned_by_another_group_is_refus
     with pytest.raises(hl.LayoutError):
         hl.name_the_volume_group_for_drive(GroupRunner(other="U-OTHER\n"), serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1",
                                            name_files=(str(fstab),), grub_config=str(tmp_path / "none"), mapper_dir=str(tmp_path / "mapper"))
+
+
+def test_failed_boot_regeneration_is_pending_and_retry_finishes_after_vg_already_renamed(tmp_path, monkeypatch):
+    """Injected command responses are unit evidence, not a VM or physical boot."""
+    monkeypatch.setattr(hl, "BOOT_TOOL_UUIDS", str(tmp_path / "absent"))
+    fstab = tmp_path / "fstab"
+    fstab.write_text(PC601_FSTAB)
+    grub = tmp_path / "grub.cfg"
+    grub.write_text("linux /boot/vmlinuz root=/dev/mapper/pve-root ro\n")
+    runner = GroupRunner()
+    original_run = runner.run
+
+    def failed_grub(argv, timeout=10):
+        if argv == ["update-grub"]:
+            return FakeProc(1, "", "regeneration failed")
+        return original_run(argv, timeout=timeout)
+
+    monkeypatch.setattr(runner, "run", failed_grub)
+    options = dict(serial="FD01N6557110C271B", vg_uuid="U-1", name_files=(str(fstab),),
+                   grub_config=str(grub), mapper_dir=str(tmp_path / "mapper"))
+    with pytest.raises(hl.LayoutError, match="pending"):
+        hl.name_the_volume_group_for_drive(runner, vg="pve", **options)
+    pending = Path(str(grub) + ".baseline-vg-rename.json")
+    assert pending.is_file()
+    monkeypatch.setattr(runner, "run", original_run)
+    runner.calls.clear()
+    result = hl.name_the_volume_group_for_drive(runner, vg=hl.volume_group_name_for(options["serial"]), **options)
+    assert result["regenerated"] is True
+    assert not any(call[0] == "vgrename" for call in runner.calls)
+    assert ["update-initramfs", "-u", "-k", "all"] in runner.calls
+    assert ["update-grub"] in runner.calls
+    assert not pending.exists()
+
+
+def test_unknown_destination_vg_ownership_refuses_before_rename(tmp_path, monkeypatch):
+    runner = GroupRunner()
+    monkeypatch.setattr(runner, "run", lambda argv, timeout=10: FakeProc(1, "", "cannot read VGs"))
+    with pytest.raises(hl.LayoutError, match="ownership"):
+        hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1",
+            name_files=(), grub_config=str(tmp_path / "grub.cfg"), mapper_dir=str(tmp_path / "mapper"))
+    assert not Path(str(tmp_path / "grub.cfg") + ".baseline-vg-rename.json").exists()

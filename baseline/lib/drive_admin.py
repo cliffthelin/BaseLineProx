@@ -681,7 +681,7 @@ def rebuild_persistence_lvm(runner: Runner, *, device_path: str, pds_runner=None
         return ActionResult(False, f"refused: {exc}")
 
     try:
-        drive_guard.require_may_format(validated["path"], run=_lsblk_run(pds_runner))
+        drive_guard.require_may_format(validated["path"], run=_lsblk_run(pds_runner), serial=validated["serial"])
     except drive_guard.DataProtectionError as exc:
         return ActionResult(False, str(exc))
     pds.wipe_signatures(validated, runner=pds_runner)
@@ -1623,7 +1623,7 @@ def _prepare(action_id: str, params: dict, pds_runner=None) -> tuple:
             try:
                 if action_id == "lay_out_baseline_drive":
                     drive_guard.require_baseline_drive(validated["path"], run=_lsblk_run(pds_runner))
-                drive_guard.require_may_format(validated["path"], run=_lsblk_run(pds_runner))
+                drive_guard.require_may_format(validated["path"], run=_lsblk_run(pds_runner), serial=validated["serial"])
             except drive_guard.DataProtectionError as exc:
                 raise ValueError(str(exc)) from None
             state = drive_guard.read_drive_state(validated["path"], run=_lsblk_run(pds_runner))

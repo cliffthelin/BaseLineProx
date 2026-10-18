@@ -18,8 +18,12 @@ SOMEONES = f"sdb disk  {GUID} \nsdb1 part ntfs  Media\n"
 SIZE = 512_110_190_592
 
 
-def pds(table, **kw):
-    return FakePdsRunner(drive_table=table, size_bytes=SIZE, **kw)
+TEST_SERIAL = "FD01N6557110C271B"     # PC601, this lane's own drive: the guard needs the validated serial and refuses the other lane's
+PC401_SERIAL = "MD89N41071210AP4E"
+
+
+def pds(table, *, serial=TEST_SERIAL, **kw):
+    return FakePdsRunner(drive_table=table, size_bytes=SIZE, serial=serial, **kw)
 
 
 class Runner(FakeRunner):
@@ -39,6 +43,7 @@ class Runner(FakeRunner):
 @pytest.fixture(autouse=True)
 def _blank_unless_stated(monkeypatch):
     monkeypatch.setattr(dg, "_default_run", lambda argv: (0, BLANK))
+    monkeypatch.setattr(dg, "DEVELOPMENT_LOCKED_SERIALS", frozenset())
 
 
 def test_the_action_is_destructive_and_never_pre_approved_and_needs_a_confirmation():
@@ -89,7 +94,7 @@ def test_a_confirmed_layout_wipes_creates_the_volumes_and_stamps_the_drive(monke
         @drive_table.setter
         def drive_table(self, value):
             pass
-    live = Live(size_bytes=SIZE)
+    live = Live(size_bytes=SIZE, serial=TEST_SERIAL)
     result = perform_confirmed(runner, "lay_out_baseline_drive", {"device_path": "/dev/sdb"}, pds_runner=live)
     assert result.ok is True, result.detail
     names = [c[0] for c in runner.calls]

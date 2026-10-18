@@ -18,6 +18,7 @@ import tempfile
 import time
 
 import drive_admin
+import drive_guard
 import drive_installer as di
 import drive_recovery
 import installer_inputs
@@ -40,10 +41,16 @@ def baseline_growth_plan(current_bytes, vg_free_bytes, *, target_bytes=50*1024**
     return {'grow_bytes':growth,'target_bytes':max(current_bytes,target_bytes),'remaining_vg_bytes':vg_free_bytes-growth}
 
 
-def discover_path(serial):
-    from repair import RealRunner
+def _require_update_serial(serial):
+    if serial in drive_guard.OTHER_LANE_PROTECTED_SERIALS:
+        raise UpdateError('Selected serial belongs to the other installer lane; update refused')
     if serial not in drive_admin.allowed_target_serials():
         raise UpdateError('Selected drive is not enrolled')
+
+
+def discover_path(serial):
+    from repair import RealRunner
+    _require_update_serial(serial)
     listing=storage._json_command(RealRunner(),['lsblk','-J','-b','-p','-o','NAME,TYPE,SERIAL,SIZE'])
     disks=[d for d in listing.get('blockdevices',[]) if d.get('type')=='disk' and d.get('serial')==serial]
     if len(disks)!=1:
@@ -103,11 +110,10 @@ def _require_plain_tree(path):
 
 
 def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=None):
+    _require_update_serial(serial)
     bundle = Path(input_bundle)
     installer_inputs.verify(bundle)  # Validate captured code before any device probe.
     payload = bundle / 'payload'
-    if serial not in drive_admin.allowed_target_serials():
-        raise UpdateError('Selected serial is not enrolled')
     uid = runner.run(['id','-u'],timeout=10)
     if uid.returncode or uid.stdout.strip() != '0':
         raise UpdateError('Complete target-use inspection requires root')
@@ -301,8 +307,7 @@ def main():
         os.execvpe('unshare',['unshare','--mount','--propagation','private',sys.executable,
             sys.argv[0],*sys.argv[1:]],env)
     try:
-        if args.serial not in drive_admin.allowed_target_serials():
-            raise UpdateError('Selected serial is not enrolled')
+        _require_update_serial(args.serial)
         with open('/run/lock/baseline-drive-update-'+args.serial+'.lock','a') as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             from repair import RealRunner

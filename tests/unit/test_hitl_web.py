@@ -15,7 +15,7 @@ from ram_drive import RamDrive
 from test_baseline_web import FakePdsRunner, FakeSudoExecutor, _RealServerCase, _base_deps, _poll_job
 
 SECRET = "test-secret"
-ALLOWED_SERIAL = "MD89N41071210AP4E"
+ALLOWED_SERIAL = "FD01N6557110C271B"
 
 
 class Clock:

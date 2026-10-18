@@ -13,7 +13,7 @@ def test_web_confirmed_update_runs_helper_bound_to_selected_serial(tmp_path):
          'recovery_folder':str(tmp_path/'recovery')},
         pds_runner=FakePdsRunner())
     assert result.ok
-    assert any('MD89N41071210AP4E' in call and 'baseline-drive-update' in ' '.join(call)
+    assert any('FD01N6557110C271B' in call and 'baseline-drive-update' in ' '.join(call)
                for call in runner.calls)
     assert 'boot' in result.detail.lower()
 
@@ -29,7 +29,7 @@ def test_changed_captured_source_refuses_before_any_target_command(tmp_path):
     (bundle/'payload/baseline/lib/needed.py').write_text('changed')
     runner = FakeRunner()
     with pytest.raises(inputs.InputError,match='integrity'):
-        update.update(runner,serial='MD89N41071210AP4E',input_bundle=bundle,
+        update.update(runner,serial='FD01N6557110C271B',input_bundle=bundle,
                       recovery_folder=tmp_path/'recovery',root=tmp_path/'target')
     assert runner.calls == []
 
@@ -58,7 +58,7 @@ def test_installer_update_reviews_owned_snapshot_without_executing(tmp_path):
         installed_update_discovery=lambda serial:'/dev/sdb',
         installed_update_recovery=lambda serial:tmp_path/'recovery',pds_runner=FakePdsRunner()))
     try:
-        status,result=case.post_json('/install-plan/update',{'serial':'MD89N41071210AP4E','job_id':job['id']})
+        status,result=case.post_json('/install-plan/update',{'serial':'FD01N6557110C271B','job_id':job['id']})
         assert status==200
         assert result['outcome']=='confirmation_required'
         assert 'REDEPLOY' in str(result)
@@ -85,7 +85,7 @@ def test_confirmed_installer_update_is_durable_and_not_replayed(tmp_path):
         installed_update_discovery=lambda serial:'/dev/sdb',installed_update_recovery=lambda serial:tmp_path/'recovery',
         pds_runner=FakePdsRunner(),pkexec_executor=executor))
     try:
-        _,review=case.post_json('/install-plan/update',{'serial':'MD89N41071210AP4E','job_id':prep['id']})
+        _,review=case.post_json('/install-plan/update',{'serial':'FD01N6557110C271B','job_id':prep['id']})
         challenge=review['challenge']
         status,refused=case.post_json('/drive-admin/confirm',{'challenge_id':challenge['id'],
             'typed':challenge['phrase'],'secret':'wrong-test-secret'})
@@ -116,7 +116,7 @@ def test_open_physical_volume_refuses_before_mount_or_provision(tmp_path):
     bundle=tmp_path/'bundle'
     inputs.prepare(repository(tmp_path/'source'),bundle,plan={},settings={},recipe=None,
                    artifact_locks={},which=lambda name:'/bin/'+name)
-    disk={'name':'/dev/sdb','type':'disk','serial':'MD89N41071210AP4E',
+    disk={'name':'/dev/sdb','type':'disk','serial':'FD01N6557110C271B',
           'size':500000000000,'mountpoints':[None],
           'children':[{'name':'/dev/sdb3','type':'part','fstype':'LVM2_member','mountpoints':[None]}]}
     rows=[{'lv_name':'root','lv_attr':'-wi-ao----','lv_device_open':'open'}]
@@ -129,7 +129,7 @@ def test_open_physical_volume_refuses_before_mount_or_provision(tmp_path):
         (lambda a:a[0]=='lvs',FakeProc(0,json.dumps({'report':[{'lv':rows}]}))),
     ])
     with pytest.raises(update.UpdateError,match='open'):
-        update.update(runner,serial='MD89N41071210AP4E',input_bundle=bundle,
+        update.update(runner,serial='FD01N6557110C271B',input_bundle=bundle,
             recovery_folder=tmp_path/'recovery',root=tmp_path/'target',pds_runner=FakePdsRunner())
     assert not any(a[0] in ('mount','chroot','lvextend','mkfs.ext4','wipefs') for a in runner.calls)
 
@@ -155,12 +155,12 @@ def test_recovery_inspection_checks_current_device_and_journal(tmp_path, monkeyp
     bundle=tmp_path/'bundle';bundle.mkdir()
     journal=tmp_path/'bundle-update.json'
     journal.write_text(json.dumps({'format':'baseline.installed-drive-update/v1',
-        'serial':'MD89N41071210AP4E','input_bundle':str(bundle),'state':'failed',
+        'serial':'FD01N6557110C271B','input_bundle':str(bundle),'state':'failed',
         'stages':['captured_source_staged'],'boot_verified':False}))
     observed=[]
     monkeypatch.setattr(update,'discover_path',lambda serial:observed.append(serial) or '/dev/sdc')
     result=update.inspect_update(bundle)
-    assert observed==['MD89N41071210AP4E']
+    assert observed==['FD01N6557110C271B']
     assert result['available'] and 'failed' in result['message']
     assert 'boot' in result['message'].lower()
 
@@ -178,13 +178,13 @@ def test_automatic_continuation_prepares_owned_inputs_without_manual_draft(tmp_p
         installed_update_discovery=lambda serial:calls.append(serial) or '/dev/sdb',
         installed_update_recovery=lambda serial:tmp_path/'recovery',pds_runner=FakePdsRunner()))
     try:
-        status,result=case.post_json('/install-plan/continue',{'serial':'MD89N41071210AP4E','request_id':'automatic-update'})
+        status,result=case.post_json('/install-plan/continue',{'serial':'FD01N6557110C271B','request_id':'automatic-update'})
         assert status==202
         job=jobs.wait(result['job_id'],10)
-        assert job['state']=='completed' and calls==['MD89N41071210AP4E']
+        assert job['state']=='completed' and calls==['FD01N6557110C271B']
         folder=tmp_path/'bundles'/hashlib.sha256(b'root').hexdigest()/job['name']
         installer_inputs.verify(folder)
-        status,review=case.post_json('/install-plan/update',{'serial':'MD89N41071210AP4E','job_id':job['id']})
+        status,review=case.post_json('/install-plan/update',{'serial':'FD01N6557110C271B','job_id':job['id']})
         assert status==200 and review['outcome']=='confirmation_required'
         assert all(item['action']=='prepare_inputs' for item in jobs.listing())
     finally:
@@ -264,9 +264,9 @@ def test_automatic_execution_uses_native_authorization_once(tmp_path):
         installer_repo_root=repository(tmp_path/'source'),installed_update_discovery=lambda serial:'/dev/sdb',
         installed_update_recovery=lambda serial:tmp_path/'recovery',pds_runner=FakePdsRunner(),pkexec_executor=executor))
     try:
-        _,prep=case.post_json('/install-plan/continue',{'serial':'MD89N41071210AP4E','request_id':'native-update'})
+        _,prep=case.post_json('/install-plan/continue',{'serial':'FD01N6557110C271B','request_id':'native-update'})
         assert jobs.wait(prep['job_id'],5)['state']=='completed'
-        _,review=case.post_json('/install-plan/update',{'serial':'MD89N41071210AP4E','job_id':prep['job_id']})
+        _,review=case.post_json('/install-plan/update',{'serial':'FD01N6557110C271B','job_id':prep['job_id']})
         status,result=case.post_json('/install-plan/execute-native',{'challenge_id':review['challenge']['id']})
         assert status==200 and result['durable']
         assert jobs.wait(result['job_id'],5)['state']=='completed'

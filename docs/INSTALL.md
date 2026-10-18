@@ -1,5 +1,19 @@
 # Installing BaselineOS on real hardware
 
+## PC401 → PC601 selective port review — 2026-10-17 (DR309)
+
+This is an isolated review checkout based on PC601 `b4e41ec`, branch
+`codex/pc601-backport-review`, not a deployed PC601 installation. It adds the
+PC401 reliability fixes while retaining PC601's newer Kasm/registry/OS-base
+architecture, swap schema, service-quiescence guard and PC601 installer UUID.
+Core checks: 258 passed; full self-installer/data-protection subset: 50 passed.
+These 308 focused tests include real-file/production-command and injected-unit
+evidence; no new QEMU or physical acceptance is claimed. Neither the shared
+checkout nor either physical drive was changed. See
+[DR309](design/decision-records/309-pc401-solutions-for-pc601-review.md)
+and [the comparison and port assessment](verification/309/README.md).
+Queue72/74/75/76/78 remain open pending installed-guest and physical acceptance.
+
 ## Installer-lane drive locks — 2026-10-11 (DR300)
 
 The data-protection guard maps each pinned installer UUID to its assigned

@@ -351,7 +351,7 @@ def build_and_write_self_installer(
     import drive_guard
     try:
         drive_guard.require_may_format(
-            device_path, run=lambda argv: (0, pds_runner.run(argv)) if pds_runner is not None else drive_guard._default_run(argv))
+            device_path, run=lambda argv: (0, pds_runner.run(argv)) if pds_runner is not None else drive_guard._default_run(argv), serial=target["serial"])
     except drive_guard.DataProtectionError as exc:
         return SelfInstallerResult("refused", str(exc))
     except Exception as exc:  # noqa: BLE001 - failing to look means "unknown", which protects the drive

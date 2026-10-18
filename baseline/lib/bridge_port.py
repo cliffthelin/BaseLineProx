@@ -94,9 +94,37 @@ def rewrite(text: str, broken: list, nic: str) -> str:
     return "".join(lines)
 
 
+def _write_backup(interfaces: Path, text: str, timestamp: int) -> Path:
+    """Create a complete backup without replacing one from an earlier repair."""
+    base = interfaces.with_name(interfaces.name + f".baseline-bridge-port.{timestamp}")
+    suffix = 0
+    while True:
+        backup = base if suffix == 0 else base.with_name(base.name + f".{suffix}")
+        try:
+            with backup.open("x") as handle:
+                handle.write(text)
+            return backup
+        except FileExistsError:
+            suffix += 1
+
+
 def _bring_up(names):
+    failures = []
     for name in names:
-        subprocess.run(["ip", "link", "set", name, "up"], capture_output=True)
+        try:
+            result = subprocess.run(
+                ["ip", "link", "set", name, "up"], capture_output=True, text=True
+            )
+        except OSError as exc:
+            failures.append({"nic": name, "error": str(exc)})
+            continue
+        if result.returncode:
+            failures.append({
+                "nic": name,
+                "returncode": result.returncode,
+                "stderr": (result.stderr or "").strip(),
+            })
+    return failures
 
 
 def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring_up=True, wait_seconds=15.0, log=None, now=time.time, reload=False) -> dict:
@@ -104,13 +132,13 @@ def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring
     interfaces, text = Path(interfaces), Path(interfaces).read_text()
     nics = wired_nics(sys_net)
     present = _present(sys_net)
+    bring_up_failures = []
     if "broken" not in plan(text, present, ["probe"]):
         result = {"action": "none", "reason": "every bridge has a port that exists"}
     else:
         if bring_up:
-            _bring_up(nics)
-        # Wait the whole window unless every NIC already has its link: the first NIC to report a carrier is not necessarily the only one
-        # that will, and an ethernet port takes a few seconds to negotiate after it is brought up.
+            bring_up_failures = _bring_up(nics)
+        # Wait for all links to negotiate; the first carrier may be a dock adapter.
         deadline = time.monotonic() + wait_seconds
         while True:
             linked = [n for n in nics if carrier(sys_net, n)]
@@ -122,18 +150,23 @@ def run(interfaces="/etc/network/interfaces", sys_net="/sys/class/net", *, bring
             if len(internal) == 1:
                 linked = internal
         result = plan(text, present, linked)
+        if result.get("reason") == "no wired NIC reports a link" and bring_up_failures:
+            failed = "; ".join(
+                f"{item['nic']}: {item.get('stderr') or item.get('error') or 'ip link failed'}"
+                for item in bring_up_failures
+            )
+            result["reason"] += f"; could not bring up {failed}"
         if result["action"] == "rewrite":
-            backup = interfaces.with_name(interfaces.name + f".baseline-bridge-port.{int(now())}")
-            backup.write_text(text)
+            backup = _write_backup(interfaces, text, int(now()))
             temporary = interfaces.with_name(interfaces.name + ".baseline-new")
             temporary.write_text(rewrite(text, result["broken"], result["nic"]))
             temporary.chmod(interfaces.stat().st_mode & 0o777)
             temporary.replace(interfaces)
             result["backup"] = str(backup)
-            if reload:                         # networking is already up (the boot-time run is before it): apply the change now
+            if reload:
                 done = subprocess.run(["ifreload", "-a"], capture_output=True, text=True)
                 result["reloaded"] = done.returncode == 0
-    result.update(wired=nics, time=int(now()))
+    result.update(wired=nics, time=int(now()), bring_up_failures=bring_up_failures)
     path = Path(log) if log else LOG
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

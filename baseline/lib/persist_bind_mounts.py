@@ -379,6 +379,40 @@ def unmount_user_volume(runner: Runner, *, persona: str | None = None) -> ApplyR
     return ApplyResult(True, f"{mountpoint} unmounted")
 
 
+def migrate_redirect_contents(runner: Runner, target_path: str, persistence_side: str) -> ApplyResult:
+    """Keep failed migrations pending, without binding an incomplete directory.
+
+    A pre-existing destination without a pending record is already persistent
+    state. A retry with a record moves only remaining, non-conflicting entries;
+    a collision is a visible repair requirement, never an overwrite.
+    """
+    pending = posixpath.join(posixpath.dirname(persistence_side),
+                             "." + posixpath.basename(persistence_side) + ".migration-pending")
+    identity = {"source": target_path, "destination": persistence_side}
+    try:
+        if runner.path_exists(pending):
+            if json.loads(runner.read_text(pending)) != identity:
+                return ApplyResult(False, f"migration record identity differs: {target_path}")
+        elif runner.path_exists(persistence_side):
+            return ApplyResult(True, f"persistent state already exists: {persistence_side}")
+        else:
+            runner.write_text_atomic(pending, json.dumps(identity) + "\n")
+        runner.makedirs(persistence_side)
+        if runner.path_exists(target_path):
+            for entry in runner.listdir(target_path):
+                destination = posixpath.join(persistence_side, posixpath.basename(str(entry)))
+                if runner.path_exists(destination):
+                    return ApplyResult(False, f"migration collision requires review: {destination}")
+                moved = runner.run(["mv", str(entry), persistence_side + "/"], timeout=30)
+                if moved.returncode:
+                    return ApplyResult(False, f"migration failed for {entry}: {(moved.stderr or moved.stdout).strip()[:300]}")
+        runner.remove(pending)
+    except (OSError, ValueError) as exc:
+        return ApplyResult(False, f"migration could not complete for {target_path}: {exc}")
+    return ApplyResult(True, f"migration complete: {target_path}")
+
+
+
 def ensure_redirect(runner: Runner, target_path: str, subdir: str, *, persona: str | None = None) -> ApplyResult:
     """Idempotent bind-mount setup for one redirected path.
 
@@ -406,15 +440,15 @@ def ensure_redirect(runner: Runner, target_path: str, subdir: str, *, persona: s
 
     persistence_side = f"{mountpoint}/{subdir}"
 
-    if not runner.path_exists(persistence_side):
+    pending = posixpath.join(mountpoint, "." + subdir + ".migration-pending")
+    if not runner.path_exists(persistence_side) or runner.path_exists(pending):
         running = _running_units(runner, target_path)
         if running:
             return ApplyResult(False, f"refusing to move {target_path} while {', '.join(running)} is running (or its state cannot be read); "
                                       "it is moved at the next boot, before it starts")
-        runner.makedirs(persistence_side)
-        if runner.path_exists(target_path):
-            for entry in runner.listdir(target_path):
-                runner.run(["mv", str(entry), persistence_side + "/"], timeout=30)
+    migrated = migrate_redirect_contents(runner, target_path, persistence_side)
+    if not migrated.applied:
+        return migrated
 
     if not runner.path_exists(target_path):
         runner.makedirs(target_path)

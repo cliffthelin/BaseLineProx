@@ -221,3 +221,16 @@ def test_host_only_settings_never_leak_into_what_a_guest_receives(roots):
     ls.write_layer(roots, "admin", {"theme": "dark", "host_swap_gib": 8, "host_swap_kind": "reserved"}, actor="admin")
     assert ls.effective_os(roots, OS_A) == {"theme": "dark"}
     assert set(ls.explain_os(roots, OS_A)) == {"theme"} and set(ls.effective_app(roots, OS_A, APP)) == {"theme"}
+
+
+def test_read_refuses_unmounted_storage_even_if_a_stale_settings_file_exists(roots):
+    ls.write_layer(roots, "user", {"theme": "dark"})
+    mounted_roots = roots._replace(require_mount=True)
+    with pytest.raises(ls.SettingsError, match="not mounted"):
+        ls.read_layer(mounted_roots, "user")
+
+
+def test_read_reports_missing_storage_instead_of_empty_settings(roots, tmp_path):
+    missing_roots = roots._replace(user=str(tmp_path / "absent-volume"), require_mount=True)
+    with pytest.raises(ls.SettingsError, match="not mounted"):
+        ls.read_layer(missing_roots, "user")

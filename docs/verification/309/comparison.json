@@ -1,0 +1,13 @@
+{
+  "pc601_source_base": "b4e41ecc36a59a100d05bf7c971c0865553f4413",
+  "pc401_source": "610cd62fed2d2ccf1b424c0c4685e274bc90ba94",
+  "pc601_installer_uuid": "4af8c95a-1c9b-437a-a306-c53855d4077f",
+  "physical_drive_changed": false,
+  "other_checkout_changed": false,
+  "focused_tests": 308,
+  "new_qemu_or_hardware_verification": false,
+  "focused_test_groups": {
+    "core": 258,
+    "self_installer_and_data_protection": 50
+  }
+}

@@ -618,6 +618,22 @@ def test_a_proxmox_state_directory_is_not_moved_while_its_service_is_running():
     assert not runner.path_exists("/mnt/USER/var-lib-pve-cluster")            # nothing half-made on the volume either
 
 
+def test_pending_migration_retry_does_not_bypass_the_running_service_guard():
+    """Unit/injected responses: retry wiring, not actual database or boot proof."""
+    import json
+    source = "/var/lib/pve-cluster"
+    destination = "/mnt/USER/var-lib-pve-cluster"
+    pending = "/mnt/USER/.var-lib-pve-cluster.migration-pending"
+    runner = _mounted_runner(**{source + "/config.db": "sqlite",
+        pending: json.dumps({"source": source, "destination": destination})})
+    runner.makedirs(destination)
+    runner.command_responses = _active("pve-cluster")
+    result = pbm.ensure_redirect(runner, source, "var-lib-pve-cluster")
+    assert not result.applied and "running" in result.detail
+    assert not any(c[0] in ("mv", "mount") for c in runner.calls)
+    assert runner.path_exists(pending)
+
+
 def test_it_is_moved_once_the_service_is_stopped():
     runner = _mounted_runner(**{"/var/lib/pve-cluster/config.db": "sqlite"})
     runner.command_responses = _active()                                       # nothing running

@@ -1,0 +1,16 @@
+[
+  {
+    "display_copy": "final-guest-serial.log",
+    "raw_path": "/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/final-guest-serial.log.raw",
+    "raw_sha256": "33b781e2bac93c0d81e7d84ce0817ab7dc8f12907931b50f9f71adf55a2ad2b8",
+    "display_sha256": "c015c1fdd214cc48b4358e2684879278f078dea9625e061738817ce96efff667",
+    "normalization": "Remove terminal ANSI controls and trailing whitespace; original bytes retained separately"
+  },
+  {
+    "display_copy": "full-unit-restricted.log",
+    "raw_path": "/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/full-unit-restricted.log.raw",
+    "raw_sha256": "a436e6b0e2955ea0f27ec1711469604787f9466821c4d0f50d94cdd8db1d60e1",
+    "display_sha256": "762d1e7b57e42dc8401353ad859d6080d8e3edf04908330894413559270b3981",
+    "normalization": "Remove terminal ANSI controls and trailing whitespace; original bytes retained separately"
+  }
+]

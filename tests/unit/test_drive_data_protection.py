@@ -14,8 +14,17 @@ DATA = f"sdb disk  {GUID} \nsdb1 part ntfs  Media\n"
 OWN = f"sdb disk  {GUID} \nsdb1 part ext4  BASELINE\nsdb2 part ext4  USER_ADMIN\n"
 
 
-def pds(table):
-    return FakePdsRunner(drive_table=table)
+TEST_SERIAL = "FD01N6557110C271B"
+LANE_SERIAL = TEST_SERIAL
+
+
+def pds(table, *, serial=TEST_SERIAL):
+    return FakePdsRunner(drive_table=table, serial=serial)
+
+
+@pytest.fixture(autouse=True)
+def _exercise_general_data_rule_without_lane_exception(monkeypatch):
+    monkeypatch.setattr(dg, "DEVELOPMENT_LOCKED_SERIALS", frozenset())
 
 
 def test_prepare_refuses_a_data_drive_so_no_challenge_can_be_raised():
@@ -45,7 +54,7 @@ def test_a_human_confirmation_does_not_override_the_data_rule():
 
 def test_a_data_drive_with_an_unregistered_uuid_is_refused_even_when_all_volumes_are_baselines_own():
     with pytest.raises(ValueError):
-        da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
+        da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN, serial=LANE_SERIAL))
 
 
 def test_an_unreadable_drive_is_treated_as_having_data():
@@ -63,8 +72,8 @@ def test_a_blank_drive_may_be_prepared():
 
 
 def test_a_data_drive_carrying_a_registered_installer_uuid_may_be_prepared():
-    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
-    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(DATA))
+    dg.register_installer_uuid(GUID, serial="FD01N6557110C271B")
+    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(DATA, serial=LANE_SERIAL))
 
 
 def test_rebuild_persistence_lvm_wipes_nothing_on_a_data_drive():
@@ -106,12 +115,12 @@ def test_stamp_adopts_a_baseline_only_drive_end_to_end(monkeypatch):
             table["v"] = f"sdb disk  {argv[2]} \nsdb1 part ext4  BASELINE\nsdb2 part ext4  USER_ADMIN\n"
         return orig(argv, **kw)
     runner.run = run
-    result = perform_confirmed(runner, "stamp_installer_identity", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
+    result = perform_confirmed(runner, "stamp_installer_identity", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN, serial=LANE_SERIAL))
     assert result.ok is True, result.message if hasattr(result, "message") else result
     new_guid = table["v"].split()[2]
     assert dg.is_installer_uuid(new_guid)
     # ...and the drive may now be formatted by the installer.
-    dg.require_may_format("/dev/sdb")
+    dg.require_may_format("/dev/sdb", serial=TEST_SERIAL)
 
 
 def test_stamp_refuses_a_drive_with_someone_elses_data(monkeypatch):
@@ -123,12 +132,12 @@ def test_stamp_refuses_a_drive_with_someone_elses_data(monkeypatch):
 
 
 def test_a_baseline_drive_with_data_is_not_formatted_without_a_recent_backup(monkeypatch):
-    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
+    dg.register_installer_uuid(GUID, serial="FD01N6557110C271B")
     monkeypatch.setattr(da, "backup_is_fresh", lambda: False)
     with pytest.raises(ValueError, match="backup"):
-        da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
+        da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN, serial=LANE_SERIAL))
     monkeypatch.setattr(da, "backup_is_fresh", lambda: True)
-    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
+    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN, serial=LANE_SERIAL))
 
 
 def test_a_blank_drive_needs_no_backup(monkeypatch):

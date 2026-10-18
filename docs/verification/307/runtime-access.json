@@ -1,0 +1,12 @@
+{
+  "observed_at": "2026-10-13T03:05:36.223576+00:00",
+  "lsblk_returncode": 0,
+  "lsblk_stdout": "sda      16.4T WDC WD180EDFZ-11AFWA0                 3WH7BUVJ             0\nsdb      16.4T WDC WD180EDFZ-11AFWA0                 3WJJ46BJ             0\nsdc       4.5T ST5000DM003-2FH18L                    WCV00XXY             0\nsdd       4.5T ST5000DM003-2FH18L                    WCV00YLT             0\nsdf       9.1T WDC WD100EMAZ-00WJTA0                 JEHBBVWM             0\nsdh     476.9G PC601 NVMe SK hynix 512GB             FD01N6557110C271B    0\nsdm     476.9G PC401 NVMe SK hynix 512GB             MD89N41071210AP4E    0\nsdn       1.8T Samsung SSD 980 PRO with Heatsink 2TB S6WRNS0TA12638A      0\nnvme0n1   1.8T Corsair MP400                         212079230001307818BC 0\nnvme1n1 953.9G GIGABYTE GP-GSM2NE3100TNTD            SN211808916391       0\n",
+  "device_nodes": {
+    "/dev/sdm": false,
+    "/dev/sdh": false,
+    "/dev/kvm": false
+  },
+  "hardware_deployment_performed": false,
+  "native_boot_verified": false
+}

@@ -1,0 +1,7 @@
+{
+  "required_volume": "USER_ADMIN",
+  "observed_fstab_line_for_personal": "/mnt/USER_PERSONAL/var-lib-pve-cluster /var/lib/pve-cluster none bind 0 0\n",
+  "always_admin_requirement_met": false,
+  "physical_deployment_ready": false,
+  "task": "PC401-308-01: pin Proxmox state to USER_ADMIN independently of the active persona; test switching and reboot in a disposable installed guest"
+}

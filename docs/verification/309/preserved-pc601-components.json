@@ -1,0 +1,26 @@
+{
+  "baseline/INSTALLER_UUID": {
+    "preserved_from_pc601": true,
+    "sha256": "e76a6453158cdbeb0fcd91b03c04af277fe5e2acef10f0e4df16c2080687110e"
+  },
+  "baseline/lib/kasm_setup.py": {
+    "preserved_from_pc601": true,
+    "sha256": "44fdf14445348eaa3982e1cf5561dcce9185e3d1f48dff349ff89b23ffe7b143"
+  },
+  "baseline/lib/kasm_registry.py": {
+    "preserved_from_pc601": true,
+    "sha256": "73fe964c6f8044c360655d82f28135396ccdd3494735e72f060ad470f45d0996"
+  },
+  "baseline/lib/os_build.py": {
+    "preserved_from_pc601": true,
+    "sha256": "19d8595ecbc3961d3d5725344dc2bd47c33d6427a39a1e49c5009dfbfded6faa"
+  },
+  "baseline/lib/swap_config.py": {
+    "preserved_from_pc601": true,
+    "sha256": "a4b075a92b5127dc86bee35862e8104deca2e012344e4dd576d6e7513680b98d"
+  },
+  "boot/proxmox-overlay.conf": {
+    "preserved_from_pc601": true,
+    "sha256": "d020d532c7462f77504d94ac275bac64c77271c8d40a3961a8ea5598e2555ec3"
+  }
+}

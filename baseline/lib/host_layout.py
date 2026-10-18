@@ -8,6 +8,7 @@ last step leaves the old swap in place. Every step checks the current state firs
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -165,6 +166,50 @@ def _rewrite(path: Path, old: str, new: str) -> bool:
     return True
 
 
+def prepare_group_rename(pending: Path, *, serial: str, vg: str, vg_uuid: str) -> dict | None:
+    """Persist the original name until boot repair finishes, including across reboot.
+
+    A renamed VG alone is not evidence that its initramfs and boot loader were
+    rebuilt. The journal remains on any command failure and binds a retry to
+    exactly the same physical VG UUID and serial.
+    """
+    pending = Path(pending)
+    new = volume_group_name_for(serial)
+    if pending.is_symlink():
+        raise LayoutError("volume-group repair journal is a symlink")
+    if not isinstance(vg_uuid, str) or not vg_uuid.strip():
+        raise LayoutError("volume-group repair requires a UUID")
+    if pending.exists():
+        try:
+            state = json.loads(pending.read_text())
+        except (OSError, ValueError) as exc:
+            raise LayoutError("volume-group repair journal is unreadable") from exc
+        if (not isinstance(state, dict) or state.get("serial") != serial
+                or state.get("vg_uuid") != vg_uuid or state.get("new") != new
+                or not isinstance(state.get("old"), str)
+                or not re.fullmatch(r"[A-Za-z0-9_+.-]+", state["old"])
+                or state["old"].startswith("-") or vg not in (state["old"], new)):
+            raise LayoutError("volume-group repair journal identity differs from the target")
+        return state
+    if vg == new:
+        return None
+    if not isinstance(vg, str) or not re.fullmatch(r"[A-Za-z0-9_+.-]+", vg) or vg.startswith("-"):
+        raise LayoutError("invalid original volume-group name")
+    state = {"serial": serial, "vg_uuid": vg_uuid, "old": vg, "new": new}
+    with pending.open("x") as stream:
+        os.chmod(pending, 0o600)
+        json.dump(state, stream)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    parent_fd = os.open(pending.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
+    return state
+
+
 def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: str, name_files=NAME_FILES, grub_config=GRUB_CONFIG,
                                     mapper_dir="/dev/mapper") -> dict:
     """Idempotent. Renames the root's volume group (by UUID, so a second group of the same name cannot be the one renamed), rewrites the files
@@ -173,28 +218,37 @@ def name_the_volume_group_for_drive(runner, *, serial: str, vg: str, vg_uuid: st
     done = {"renamed": False, "files": [], "name": new}
     if vg != new:
         others = runner.run(["vgs", "--noheadings", "-o", "vg_uuid", "--select", f"vg_name={new}"], timeout=30)
-        if others.returncode == 0 and others.stdout.strip() not in ("", vg_uuid):
+        if others.returncode != 0:
+            raise LayoutError("volume-group name ownership could not be read")
+        if others.stdout.strip() not in ("", vg_uuid):
             raise LayoutError(f"the name {new} already belongs to another volume group")
+    pending = Path(str(grub_config) + ".baseline-vg-rename.json")
+    transaction = prepare_group_rename(pending, serial=serial, vg=vg, vg_uuid=vg_uuid)
+    old = transaction["old"] if transaction else vg
+    if vg != new:
         _run(runner, ["vgrename", vg_uuid, new])
         done["renamed"] = True
-    if vg != new:
+    if old != new:
         for name in (*name_files, grub_config):
-            if Path(name).is_file() and _rewrite(Path(name), vg, new):
+            if Path(name).is_file() and _rewrite(Path(name), old, new):
                 done["files"].append(name)
-    if done["renamed"] or done["files"]:
+    if transaction:
         _run(runner, ["update-initramfs", "-u", "-k", "all"], timeout=900)
         # The kernel keeps reporting the running root under the name it was mounted with, which the live rename has just removed, so
         # grub-probe, findmnt and lsblk cannot resolve it until the next boot. The old name is given back as a link in /dev (a tmpfs: it is
         # gone at the next boot, when the root is mounted under its new name). grub-probe still writes the old name into the configuration,
         # so the file is rewritten again afterwards - which is what the next boot reads. Regeneration is best effort; the rewritten file
-        # is what is required.
-        link = Path(mapper_dir) / f"{vg}-root"
-        if vg != new and not link.exists() and (Path(mapper_dir) / f"{new}-root").exists():
+        # is what is required. Failure still leaves a pending repair for the next run.
+        link = Path(mapper_dir) / f"{old}-root"
+        if old != new and not link.exists() and (Path(mapper_dir) / f"{new}-root").exists():
             link.symlink_to(f"{new}-root")
         argv = ["proxmox-boot-tool", "refresh"] if Path(BOOT_TOOL_UUIDS).is_file() else ["update-grub"]
         done["regenerated"] = runner.run(argv, timeout=600).returncode == 0
-        if vg != new and Path(grub_config).is_file():
-            _rewrite(Path(grub_config), vg, new)
-            if f"/dev/mapper/{vg}-" in Path(grub_config).read_text():
+        if old != new and Path(grub_config).is_file():
+            _rewrite(Path(grub_config), old, new)
+            if text_with_group_renamed(Path(grub_config).read_text(), old, new) != Path(grub_config).read_text():
                 raise LayoutError("the boot configuration still names the old volume group")
+        if not done["regenerated"]:
+            raise LayoutError("boot regeneration failed; volume-group repair remains pending")
+        pending.unlink()
     return done

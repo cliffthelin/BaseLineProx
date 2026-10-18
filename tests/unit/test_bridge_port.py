@@ -66,6 +66,61 @@ def test_no_nic_with_a_link_leaves_the_file_alone_and_says_why(tmp_path):
     assert result["action"] == "none" and "no wired NIC" in result["reason"] and text == INTERFACES
 
 
+def test_failed_nic_bring_up_is_reported_instead_of_being_hidden_as_no_link(tmp_path, monkeypatch):
+    root = sysnet(tmp_path, {"enp5s0": False})
+    interfaces = tmp_path / "interfaces"
+    interfaces.write_text(INTERFACES)
+    monkeypatch.setattr(
+        bp.subprocess,
+        "run",
+        lambda *args, **kwargs: type("Result", (), {
+            "returncode": 1,
+            "stderr": "RTNETLINK answers: Operation not permitted",
+        })(),
+    )
+
+    result = bp.run(interfaces, root, wait_seconds=0, log=tmp_path / "log")
+
+    assert result["action"] == "none"
+    assert result["reason"] == (
+        "no wired NIC reports a link; could not bring up "
+        "enp5s0: RTNETLINK answers: Operation not permitted"
+    )
+    assert result["bring_up_failures"] == [{
+        "nic": "enp5s0",
+        "returncode": 1,
+        "stderr": "RTNETLINK answers: Operation not permitted",
+    }]
+
+
+def test_cannot_launch_ip_command_is_reported_and_does_not_claim_network_readiness(tmp_path, monkeypatch):
+    root = sysnet(tmp_path, {"enp5s0": False})
+    interfaces = tmp_path / "interfaces"
+    interfaces.write_text(INTERFACES)
+
+    def missing_ip(*args, **kwargs):
+        raise FileNotFoundError("ip command not found")
+
+    monkeypatch.setattr(bp.subprocess, "run", missing_ip)
+    result = bp.run(interfaces, root, wait_seconds=0, log=tmp_path / "log")
+
+    assert result["action"] == "none"
+    assert "could not bring up enp5s0: ip command not found" in result["reason"]
+    assert result["bring_up_failures"] == [{"nic": "enp5s0", "error": "ip command not found"}]
+
+
+def test_bridge_repair_preserves_existing_same_timestamp_backup(tmp_path):
+    existing = tmp_path / "interfaces.baseline-bridge-port.1000"
+    existing.write_text("previous preserved backup\n")
+
+    result, repaired = run(tmp_path, {"enp5s0": True})
+
+    assert existing.read_text() == "previous preserved backup\n"
+    assert result["backup"] == str(tmp_path / "interfaces.baseline-bridge-port.1000.1")
+    assert (tmp_path / "interfaces.baseline-bridge-port.1000.1").read_text() == INTERFACES
+    assert repaired == INTERFACES.replace("bridge-ports ens4", "bridge-ports enp5s0")
+
+
 def test_a_bridge_and_a_wireless_device_are_never_chosen(tmp_path):
     root = sysnet(tmp_path, {"enp5s0": None}, extra=("vmbr0",))
     (root / "wlp2s0" / "device").mkdir(parents=True)

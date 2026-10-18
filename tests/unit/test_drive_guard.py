@@ -25,6 +25,8 @@ def runner(output, rc=0):
 
     def run(argv):
         calls.append(list(argv))
+        if "SERIAL" in argv:
+            return 0, "UNLOCKED-TEST-DISK\n"
         return rc, output
     run.calls = calls
     return run
@@ -105,7 +107,7 @@ def test_an_unreadable_drive_is_refused_even_though_it_might_be_empty():
 
 def test_there_is_no_parameter_that_overrides_the_rule():
     params = set(inspect.signature(dg.require_may_format).parameters)
-    assert params == {"device_path", "run"}
+    assert params == {"device_path", "run", "serial"}
     for forbidden in ("force", "override", "confirmed", "bypass", "allow", "yes", "skip"):
         assert forbidden not in params
 
@@ -137,6 +139,8 @@ class Cmd:
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def reader(self, argv):
+        if "SERIAL" in argv:
+            return 0, "UNLOCKED-TEST-DISK\n"
         return 0, self.output
 
 
@@ -217,30 +221,45 @@ def test_the_lock_names_exactly_one_drive_and_changing_that_is_a_conscious_edit(
     assert dg._locked_serials_for("5029a80d-c748-4616-aa08-99ac560f5311") == frozenset({PC401})
 
 
+LANE_TARGET = PC601
+PROTECTED_TARGET = PC401
+
+
 def test_the_locked_development_drive_may_be_formatted_even_though_it_holds_foreign_data():
-    assert dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, PC601 + "\n")) is None
+    assert dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, LANE_TARGET + "\n")) is None
 
 
 def test_the_other_lane_drive_stays_protected_even_if_lsblk_reports_it_as_empty():
-    with pytest.raises(dg.DataProtectionError, match=PC401):
-        dg.require_may_format("/dev/sdb", run=runner_with_serial(BLANK, PC401 + "\n"))
+    with pytest.raises(dg.DataProtectionError, match=PROTECTED_TARGET):
+        dg.require_may_format("/dev/sdb", run=runner_with_serial(BLANK, PROTECTED_TARGET + "\n"))
 
 
-@pytest.mark.parametrize("serial", [PC401, "SOMEONE-ELSES-TERABYTES", "FD01N6557110C271", PC601.lower(), ""])
+@pytest.mark.parametrize("serial", [PROTECTED_TARGET, "SOMEONE-ELSES-TERABYTES", "FD01N6557110C271", LANE_TARGET.lower(), ""])
 def test_every_other_drive_holding_data_is_still_refused(serial):
     with pytest.raises(dg.DataProtectionError, match="no override"):
         dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, serial + "\n"))
 
 
-@pytest.mark.parametrize("serial,rc", [("", 1), (PC601 + "\n" + PC401 + "\n", 0), (PC601 + " " + PC401, 0)])
+@pytest.mark.parametrize("serial,rc", [("", 1), (LANE_TARGET + "\n" + PROTECTED_TARGET + "\n", 0), (LANE_TARGET + " " + PROTECTED_TARGET, 0)])
 def test_a_serial_that_cannot_be_read_or_is_ambiguous_does_not_unlock_anything(serial, rc):
     with pytest.raises(dg.DataProtectionError):
         dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, serial, rc))
 
 
+def test_a_prevalidated_exact_serial_can_be_passed_without_a_second_serial_probe():
+    calls = []
+    def run(argv):
+        calls.append(list(argv))
+        if "SERIAL" in argv:
+            raise AssertionError("guard must use the exact serial returned by device validation")
+        return 0, DATA
+    assert dg.require_may_format("/dev/sdb", run=run, serial=LANE_TARGET) is None
+    assert not any("SERIAL" in call for call in calls)
+
+
 def test_the_lock_never_applies_to_a_drive_whose_contents_cannot_be_read():
     def run(argv):
-        return (0, PC601 + "\n") if "SERIAL" in argv else (1, "")
+        return (0, LANE_TARGET + "\n") if "SERIAL" in argv else (1, "")
     with pytest.raises(dg.DataProtectionError):
         dg.require_may_format("/dev/sdb", run=run)
 
@@ -248,8 +267,20 @@ def test_the_lock_never_applies_to_a_drive_whose_contents_cannot_be_read():
 def test_removing_the_lock_restores_the_hard_requirement_for_that_drive_too(monkeypatch):
     monkeypatch.setattr(dg, "DEVELOPMENT_LOCKED_SERIALS", frozenset())
     with pytest.raises(dg.DataProtectionError, match="no override"):
-        dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, PC601 + "\n"))
+        dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, LANE_TARGET + "\n"))
 
 
 def test_the_lock_is_a_module_constant_never_a_parameter():
-    assert set(inspect.signature(dg.require_may_format).parameters) == {"device_path", "run"}
+    assert set(inspect.signature(dg.require_may_format).parameters) == {"device_path", "run", "serial"}
+
+
+def test_a_failed_serial_probe_cannot_fall_through_to_a_registered_installer_guid():
+    state = dg.DriveState(known=True, has_data=True, ptuuid=GUID)
+    with pytest.raises(dg.DataProtectionError, match="serial"):
+        dg._authorize_format("/dev/sdb", state, serial=None, installer_uuid_registered=True)
+
+
+def test_an_unknown_or_partition_target_cannot_use_a_registered_installer_guid():
+    state = dg.DriveState(known=False, has_data=True, ptuuid=GUID)
+    with pytest.raises(dg.DataProtectionError, match="serial|read"):
+        dg._authorize_format("/dev/sdb1", state, serial=None, installer_uuid_registered=True)

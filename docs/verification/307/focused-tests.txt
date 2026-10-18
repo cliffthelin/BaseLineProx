@@ -1,0 +1,5 @@
+Command: python3 -m pytest -q tests/unit/test_update_lane_protection.py tests/unit/test_vg_rename_recovery.py tests/unit/test_host_layout.py tests/unit/test_bridge_port.py tests/unit/test_network_retry.py tests/unit/test_installer_identity.py tests/unit/test_drive_guard.py tests/unit/test_check_provision_deploys_all_imports.py --tb=short
+Result: 121 passed in 4.56s
+Evidence: unit tests, including injected command responses; not VM or hardware proof.
+Provision import checker: passed.
+Shell syntax: boot/provision.sh and boot/baseline-proxmox-defaults.sh passed bash -n.

@@ -517,7 +517,10 @@ def test_refuses_when_the_selected_device_reports_no_hardware_serial(tmp_path):
     kwargs = _ready_kwargs(tmp_path, pds_runner=no_serial_pds, expected_serial=None)
     result = si.build_and_write_self_installer(**kwargs)
     assert result.outcome == "refused"
-    assert "no hardware serial" in result.detail
+    # The serial guard now refuses before the later answer-building stage.
+    assert "serial could not be read unambiguously; no override" in result.detail
+    assert result.qemu_process is None
+    assert not kwargs["workspace"].exists()
 
 
 def test_generates_its_own_cert_and_key_when_none_supplied(tmp_path):

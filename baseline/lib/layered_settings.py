@@ -137,9 +137,13 @@ def _validated(layer: str, data) -> dict:
 def read_layer(roots: Roots, layer: str, *, os_id=None, app_id=None) -> dict:
     volume, parts = _volume_and_path(roots, layer, os_id, app_id)
     path = os.path.join(volume, *parts)
-    if not os.path.isdir(volume):
+    if roots.require_mount:
+        real_volume = _check_volume(roots, volume)
+    elif not os.path.isdir(volume):
         return {}
-    if not _inside(os.path.realpath(volume), path):
+    else:
+        real_volume = os.path.realpath(volume)
+    if not _inside(real_volume, path):
         raise SettingsError(f"{path} resolves outside {volume}")
     try:
         with open(path, encoding="utf8") as stream:
