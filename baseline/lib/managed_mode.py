@@ -1,0 +1,70 @@
+"""Managed server mode is opt-in. Without it, a Baseline user only changes their own build and is never asked to connect to a parent.
+
+Everything that involves a parent (the parent vault backup, filing under a combination, the remote rebuild service) reads its settings here and does nothing when the mode is `standalone`, which is the
+default and the state of every install until its operator turns managed mode on in the installer / build manager. The platform works fully without it; with it, the parent keeps every child's
+persistence data in git and can rebuild children remotely, which makes the whole more stable and more capable.
+
+The settings are the operator's own data in a file outside the repository (next to the drives file on a build host, `/etc/baseline/managed.json` on an installed system).
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+from write_once import write_if_changed
+
+MODES = ("standalone", "managed")
+DEFAULTS = {"mode": "standalone", "parent_vault": None, "remote_rebuild": False}
+
+
+class ManagedError(ValueError):
+    pass
+
+
+def config_path(environ=None) -> Path:
+    env = os.environ if environ is None else environ
+    if env.get("BASELINE_MANAGED_FILE"):
+        return Path(env["BASELINE_MANAGED_FILE"])
+    if env.get("BASELINE_DRIVES_FILE"):
+        return Path(env["BASELINE_DRIVES_FILE"]).parent / "managed.json"
+    return Path("/etc/baseline/managed.json")
+
+
+def load(path=None) -> dict:
+    """The settings, or the defaults (standalone) when there is no file or it cannot be read: a broken file never turns managed mode on."""
+    try:
+        data = json.loads(Path(path or config_path()).read_text())
+    except (OSError, ValueError):
+        return dict(DEFAULTS)
+    if not isinstance(data, dict) or data.get("mode") not in MODES:
+        return dict(DEFAULTS)
+    return {**DEFAULTS, **{k: data.get(k, DEFAULTS[k]) for k in DEFAULTS}}
+
+
+def is_managed(path=None) -> bool:
+    return load(path)["mode"] == "managed"
+
+
+def parent_vault(path=None) -> str | None:
+    """Where the parent keeps its backups, only in managed mode."""
+    cfg = load(path)
+    return cfg["parent_vault"] if cfg["mode"] == "managed" and cfg["parent_vault"] else None
+
+
+def remote_rebuild_enabled(path=None) -> bool:
+    cfg = load(path)
+    return cfg["mode"] == "managed" and bool(cfg["remote_rebuild"])
+
+
+def save(settings: dict, path=None) -> dict:
+    mode = settings.get("mode", "standalone")
+    if mode not in MODES:
+        raise ManagedError(f"mode is one of {', '.join(MODES)}")
+    cfg = {**DEFAULTS, **{k: settings.get(k, DEFAULTS[k]) for k in DEFAULTS}}
+    if mode == "managed" and not cfg["parent_vault"]:
+        raise ManagedError("managed mode needs the folder the parent keeps its backups in")
+    if cfg["remote_rebuild"] and mode != "managed":
+        raise ManagedError("remote rebuild is part of managed mode")
+    write_if_changed(Path(path or config_path()), json.dumps(cfg, indent=1) + "\n")
+    return cfg

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--serial", required=True)
-    parser.add_argument("--parent", default=os.environ.get("BASELINE_PARENT_VAULT"), help="the parent/server backup folder (default: $BASELINE_PARENT_VAULT)")
+    parser.add_argument("--parent", default=None, help="the parent/server backup folder; by default the one managed mode names, and none when managed mode is off")
     parser.add_argument("--with", dest="peers", action="append", default=[], metavar="SERIAL", help="another drive of this drive's combination (repeatable); without it the drive is a combination of one")
     parser.add_argument("--input-bundle")
     parser.add_argument("--recovery-folder")
@@ -23,8 +23,10 @@ def main():
     if os.geteuid() != 0:
         print("a rebuild needs root", file=sys.stderr)
         return 1
+    import managed_mode
     import rebuild_drive
     from repair import RealRunner
+    args.parent = args.parent or managed_mode.parent_vault()           # standalone: no parent is ever contacted
     runner, update = RealRunner(), None
     if args.input_bundle:
         if not args.recovery_folder:
