@@ -113,3 +113,40 @@ def test_a_disk_smaller_than_the_systems_own_is_refused_before_anything_is_creat
         pe.create(f.host, "work", "debian", owner="cliff", disk_gb=8)
     assert not f.host.vm_dir("work").exists()                                                     # nothing was made
     assert pe.create(f.host, "work", "debian", owner="cliff", disk_gb=40)["owner"] == "cliff"
+
+
+def _seed(os_id, initialize_home=True):
+    return json.loads(pe.cloud_config(os_id, owner="cliff", initialize_home=initialize_home, hostname="work").split("\n", 1)[1])
+
+
+@pytest.mark.parametrize("os_id", ["debian", "ubuntu", "nixos", "cachyos"])
+def test_the_home_script_is_plain_sh_that_finds_its_tools_on_every_system(os_id):
+    """Found on the rehearsal: NixOS has no `bash` on cloud-init's PATH (exit 127, no home, no sign-in)."""
+    command = _seed(os_id)["bootcmd"][0]
+    assert command[0] == "/bin/sh" and command[1] == "-c"
+    script = command[2]
+    assert "/run/current-system/sw/bin" in script and "/run/wrappers/bin" in script and "/usr/sbin" in script       # NixOS and the usual places
+    for bashism in ("[[", "<<<", "function ", "$'", "==", "local ", "declare "):                                 # plain POSIX sh only (also checked by running it on each system)
+        assert bashism not in script
+
+
+def test_a_home_that_is_already_a_mountpoint_on_the_systems_own_disk_is_mounted_over_not_skipped():
+    """Found on the rehearsal: CachyOS keeps /home as a btrfs subvolume, so 'mount unless /home is a mountpoint' left the retained disk unmounted."""
+    script = _seed("cachyos")["bootcmd"][0][2]
+    assert "mountpoint -q /home" not in script
+    assert "--target /home" in script and "tail -n 1" in script                                                  # compares the topmost mount's source with the retained disk
+    assert "mount -t ext4" in script
+
+
+def test_each_system_signs_the_owner_in_through_the_login_manager_it_actually_has():
+    cachyos = _seed("cachyos")
+    paths = {w["path"]: w["content"] for w in cachyos["write_files"]}
+    assert "User=cliff" in paths["/etc/plasmalogin.conf.d/baseline-autologin.conf"] and "Session=plasma" in paths["/etc/plasmalogin.conf.d/baseline-autologin.conf"]
+    assert "User=cliff" in paths["/etc/sddm.conf.d/baseline-autologin.conf"]
+    assert "/etc/systemd/system/plasmalogin.service.d/baseline-home.conf" in paths
+    nixos = _seed("nixos")
+    rewrite = [c for c in nixos["bootcmd"][1:] if "/etc/gdm/custom.conf" in c[2]]
+    assert rewrite and "rm -f /etc/gdm/custom.conf" in rewrite[0][2] and "AutomaticLogin=cliff" in rewrite[0][2]      # NixOS links the file into the store; a real file replaces the link
+    assert any("display-manager" in " ".join(c) for c in nixos["runcmd"])                                         # a greeter already up is restarted so the sign-in applies
+    for os_id in ("debian", "ubuntu"):
+        assert not any("display-manager" in " ".join(c) for c in _seed(os_id)["runcmd"])

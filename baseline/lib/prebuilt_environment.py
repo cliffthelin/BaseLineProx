@@ -23,11 +23,13 @@ OWNER_FILE = "owner.json"
 OWNER_UID = 1100                      # the same on every system, and clear of the default users (1000 is taken by the installer's own account on Debian, `ubuntu` on Ubuntu), so a retained home belongs to the owner everywhere
 _RESERVED = frozenset({"root", "admin", "administrator", "baseline", "guest", "system", "operator", "daemon", "nobody"})
 _NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
-# id -> does it take a cloud-init seed, and which display manager must wait for the retained home
+# id -> does it take a cloud-init seed, and which login-manager units must wait for the retained home (a system may carry more than one name: CachyOS moved from SDDM to Plasma Login Manager)
 SYSTEMS = {
-    "debian": {"seed": True, "greeter": "gdm3"}, "ubuntu": {"seed": True, "greeter": "gdm3"}, "nixos": {"seed": True, "greeter": None}, "cachyos": {"seed": True, "greeter": "sddm"},
-    "omarchy": {"seed": False, "greeter": None}, "bazzite": {"seed": False, "greeter": None}, "fydeos": {"seed": False, "greeter": None},
+    "debian": {"seed": True, "greeter": ("gdm3",)}, "ubuntu": {"seed": True, "greeter": ("gdm3",)}, "nixos": {"seed": True, "greeter": ()},
+    "cachyos": {"seed": True, "greeter": ("plasmalogin", "sddm")},
+    "omarchy": {"seed": False, "greeter": ()}, "bazzite": {"seed": False, "greeter": ()}, "fydeos": {"seed": False, "greeter": ()},
 }
+_HOME_PATH = "/run/wrappers/bin:/run/current-system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 class PrebuiltError(vh.VmError):
@@ -86,35 +88,47 @@ def cloud_config(os_id: str, *, owner: str, initialize_home: bool, hostname: str
 """ if initialize_home else """
     echo 'Retained home filesystem missing or damaged; recovery required' >&2; exit 1
 """
-    prepare_home = """set -eu
+    prepare_home = f"""set -eu
+export PATH={_HOME_PATH}
 disk=/dev/disk/by-id/virtio-baseline-home
-[ -b "$disk" ] || { echo 'Retained home disk is absent' >&2; exit 1; }
+[ -b "$disk" ] || {{ echo 'Retained home disk is absent' >&2; exit 1; }}
 if [ "$(blkid -s TYPE -o value "$disk" || true)" != ext4 ] ||
    [ "$(blkid -s LABEL -o value "$disk" || true)" != baseline-home ]; then
 """ + initialize + """
 fi
 mkdir -p /home
-if ! mountpoint -q /home; then mount -t ext4 "$disk" /home; fi
-actual=$(findmnt -n -o SOURCE --mountpoint /home)
-[ "$(readlink -f "$actual")" = "$(readlink -f "$disk")" ] ||
+topmost() {
+    here=$(findmnt -n -o SOURCE --target /home 2>/dev/null | tail -n 1 || true)
+    here=${here%%'['*}
+    [ -n "$here" ] && readlink -f "$here" || true
+}
+if [ "$(topmost)" != "$(readlink -f "$disk")" ]; then mount -t ext4 "$disk" /home; fi
+[ "$(topmost)" = "$(readlink -f "$disk")" ] ||
     { echo 'Wrong filesystem mounted at /home' >&2; exit 1; }
 touch /run/baseline-home-ready
 """
     config = {
         "disable_root": True, "ssh_pwauth": False, "hostname": hostname, "preserve_hostname": False,
         "users": [{"name": owner, "uid": OWNER_UID, "groups": ["sudo", "wheel"], "shell": "/bin/bash", "lock_passwd": True, "sudo": ["ALL=(ALL) NOPASSWD:ALL"]}],
-        "bootcmd": [["bash", "-c", prepare_home]],
+        "bootcmd": [["/bin/sh", "-c", prepare_home]],
         "write_files": [{"path": "/etc/baseline-environment.json", "permissions": "0644", "content": json.dumps({"format": "baseline.prebuilt-environment/v1", "os": os_id}, sort_keys=True) + "\n"}],
         "runcmd": [["systemctl", "enable", "--now", "qemu-guest-agent"]],
     }
-    if spec["greeter"]:                                  # the login screen must not appear before the retained home is mounted
-        config["write_files"].append({"path": f"/etc/systemd/system/{spec['greeter']}.service.d/baseline-home.conf", "permissions": "0644",
+    for unit in spec["greeter"]:                         # the login screen must not appear before the retained home is mounted
+        config["write_files"].append({"path": f"/etc/systemd/system/{unit}.service.d/baseline-home.conf", "permissions": "0644",
                                       "content": "[Unit]\nRequiresMountsFor=/home\nConditionPathExists=/run/baseline-home-ready\n"})
-        if spec["greeter"] == "gdm3":                       # sign the owner straight in at the console; Debian reads daemon.conf, Ubuntu's GDM reads custom.conf
-            for path in ("/etc/gdm3/daemon.conf", "/etc/gdm3/custom.conf"):
-                config["write_files"].append({"path": path, "permissions": "0644", "content": f"[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={owner}\n"})
-        elif spec["greeter"] == "sddm":
-            config["write_files"].append({"path": "/etc/sddm.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\n"})
+    sign_in = f"[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={owner}\n"
+    if "gdm3" in spec["greeter"]:                        # sign the owner straight in at the console; Debian reads daemon.conf, Ubuntu's GDM reads custom.conf
+        for path in ("/etc/gdm3/daemon.conf", "/etc/gdm3/custom.conf"):
+            config["write_files"].append({"path": path, "permissions": "0644", "content": sign_in})
+    if "plasmalogin" in spec["greeter"]:                 # CachyOS's Plasma Login Manager (SDDM's successor); the older name is covered too
+        config["write_files"].append({"path": "/etc/plasmalogin.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\nSession=plasma\n"})
+    if "sddm" in spec["greeter"]:
+        config["write_files"].append({"path": "/etc/sddm.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\n"})
+    if os_id == "nixos":                                 # NixOS links GDM's file into the store; a real file in its place signs the owner in
+        config["bootcmd"].append(["/bin/sh", "-c", f"export PATH={_HOME_PATH}; rm -f /etc/gdm/custom.conf; printf '[daemon]\\nAutomaticLoginEnable=true\\nAutomaticLogin={owner}\\n' > /etc/gdm/custom.conf"])
+    if os_id in ("nixos", "cachyos"):                    # a login screen that came up before the seed ran is restarted so the sign-in applies
+        config["runcmd"].append(["/bin/sh", "-c", f"export PATH={_HOME_PATH}; systemctl try-restart display-manager.service || true"])
     for key, items in (extra or {}).items():             # an application environment adds files, mounts and first-boot commands after the base ones
         if key not in ("write_files", "runcmd", "mounts", "packages") or not isinstance(items, list):
             raise PrebuiltError("extra seed content is write_files, runcmd, mounts or packages")
