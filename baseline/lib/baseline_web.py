@@ -95,12 +95,16 @@ def render_nav(active_path: str) -> str:
         f'<div class="nav-items">{_nav_entries(g.items, active_path)}</div></details>'
         for g in nav_tree.TREE
     )
+    links += ('<span class="nav-status" id="baseline-status" role="status" aria-live="polite"></span>'
+              '<button type="button" id="baseline-refresh" title="Refresh this page now">Refresh now</button>')
     links += ('<span class="mode-switch" role="group" aria-label="Detail level">'
               '<button type="button" data-mode="simple">Simple</button><button type="button" data-mode="advanced">Advanced</button></span>')
     return (f'<nav class="baseline-nav">{links} <a href="/logout">Log out</a>'
             '<form method="post" action="/host/restart" onsubmit="return baselineRequestRestart(event)">'
             '<button type="submit">Restart host</button><span role="status"></span></form></nav>'
             '''<script>(function(){var d=document.documentElement,m='simple';try{m=localStorage.getItem('baseline-mode')||'simple'}catch(e){}d.setAttribute('data-mode',m);
+var st=document.getElementById('baseline-status');if(st){fetch('/status',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){st.innerHTML='';st.append(j.network);var a=document.createElement('span');a.className='adv';a.textContent=' | '+j.network_detail+' | '+j.assistant;st.append(a)}).catch(function(){})}
+var rf=document.getElementById('baseline-refresh');if(rf)rf.addEventListener('click',function(){location.reload()});
 document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.mode-switch button');if(!b)return;m=b.getAttribute('data-mode');d.setAttribute('data-mode',m);try{localStorage.setItem('baseline-mode',m)}catch(x){}});})();</script>
 <script>
 async function baselineRequestRestart(event) {
@@ -134,33 +138,55 @@ async function baselineRequestRestart(event) {
 </script>''')
 
 
+_STATUS_CACHE = {"at": 0.0, "value": None}
+
+
+def _status_line(deps, *, now=None) -> dict:
+    """The TUI's header and status bar as data: whether the lifeline is up, and the assistant session line. Cached for 30 seconds: it probes the network."""
+    import time
+    clock = time.monotonic() if now is None else now
+    if _STATUS_CACHE["value"] is not None and clock - _STATUS_CACHE["at"] < 30:
+        return _STATUS_CACHE["value"]
+    import network
+    import status_bar
+    detail = ""
+    try:
+        facts = network.check_lifeline()
+        if facts and facts[-1]["ok"]:
+            online, detail = "You are online", "online - lifeline up"
+        elif facts:
+            online, detail = "You are offline", f"offline - stopped at {facts[-1]['fact']}"
+        else:
+            online, detail = "Connection not checked yet", "network state unknown"
+    except (OSError, network.NetworkProbeError) as exc:
+        online, detail = "Connection could not be checked", f"network state unknown ({exc})"
+    try:
+        import harness_registry
+        adapter = harness_registry.get_adapter("claude")
+        desc = adapter.describe_session(adapter.new_session()) if adapter is not None else "no harness adapter selected"
+    except Exception as exc:                                            # noqa: BLE001 - a status line never breaks a page
+        desc = f"assistant status unavailable: {exc}"
+    value = {"network": online, "network_detail": detail, "assistant": status_bar.format_status_bar(desc)}
+    _STATUS_CACHE.update(at=clock, value=value)
+    return value
+
+
 def _with_nav(body_bytes: bytes, active_path: str) -> bytes:
     """Inserts the shared nav bar right after the opening `<body...>`
     tag of an existing rendered page, without touching the already-
     tested render functions that produced it."""
     html = body_bytes.decode()
-    shell = '''<style id="baseline-shell-style">
-:root{color-scheme:dark}body{background:#0d0e13;color:#e7e9f0;font-family:system-ui,sans-serif}
-.baseline-nav{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem;padding:1rem 0;border-bottom:1px solid #33364a;margin-bottom:1.2rem;font-size:.9rem}
-.baseline-nav a{color:#aebddc;text-decoration:none;padding:.3rem 0}
-.baseline-nav a.active{color:#fff;border-bottom:2px solid #7fa4ec}
-html[data-mode="simple"] .adv,html[data-mode="simple"] .m-adv{display:none!important}html[data-mode="advanced"] .m-simple{display:none!important}
-.mode-switch{margin-left:auto;display:inline-flex;border:1px solid #4a4f6a;border-radius:6px;overflow:hidden}.mode-switch button{margin:0;border:0;border-radius:0;background:transparent;color:#aebddc;padding:.3rem .7rem;cursor:pointer}
-html[data-mode="simple"] .mode-switch [data-mode="simple"],html[data-mode="advanced"] .mode-switch [data-mode="advanced"]{background:#33407a;color:#fff}
-.nav-group summary{cursor:pointer;color:#aebddc;padding:.3rem .1rem;list-style:none;font-weight:600}.nav-group summary::-webkit-details-marker{display:none}
-.nav-group[open] summary{color:#fff;border-bottom:2px solid #7fa4ec}.nav-group[open]{flex-basis:100%}
-.nav-items{display:flex;flex-wrap:wrap;gap:.2rem 1rem;padding:.5rem 0 .2rem}.nav-sub{display:flex;flex-wrap:wrap;gap:.2rem 1rem;align-items:center;padding-left:.8rem;border-left:2px solid #33364a}
-.nav-sub-label{color:#7f86a3;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
-.baseline-nav form{margin:0}.baseline-nav button{margin:0;padding:.4rem .6rem}
-button,input,select,textarea{font:inherit;color:#e7e9f0;background:#171923;border:1px solid #33364a;border-radius:5px}
-button{cursor:pointer;padding:.4rem .8rem}button:disabled{cursor:default;opacity:.6}
-a{color:#9db4ec}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #33364a}
-</style>'''
+    import console_theme
+    shell = console_theme.style_tag()
     html = html.replace('</head>', shell + '</head>', 1)
     marker = "<body>"
     idx = html.find(marker)
     if idx == -1:
-        return body_bytes
+        if "<body" in html or "<html" in html.lower() or "<" not in html:          # a page with its own attributes on <body>, or not markup at all: left as it is
+            return body_bytes
+        # a bare fragment (no document around it) gets one, so the menu is on every page
+        html = f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Baseline</title>{shell}</head><body>{html}</body></html>'
+        idx = html.find(marker)
     insert_at = idx + len(marker)
     return (html[:insert_at] + render_nav(active_path) + html[insert_at:]).encode()
 
@@ -2192,13 +2218,16 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(launcher_page.render(state), path))
 
         if path == "/memory":
+            import cardinality
             import layered_settings
             import memory_page
             import swap_config
-            runner, vg = _swap_runner(deps)
+            import volume_growth
             try:
+                runner, vg = _swap_runner(deps)
                 current = swap_config.current(runner, vg)
-            except (swap_config.SwapError, RuntimeError, OSError) as exc:
+            except (swap_config.SwapError, RuntimeError, OSError, volume_growth.GrowthError, cardinality.CardinalityError) as exc:
+                runner = vg = None
                 current, notice = {"kind": None, "gib": 0, "names": []}, "Swap could not be read: " + str(exc)
             else:
                 notice = qs.get("notice", [""])[0][:300].replace("+", " ")
@@ -2358,12 +2387,16 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             except (OSError, network.NetworkProbeError) as exc:
                 interfaces = []
                 facts.append({"fact": "interface_inventory", "ok": False, "detail": str(exc)})
-            page = network_view.render(network_view.build_rows(facts, interfaces, providers.check_providers(), network))
+            show_ids = qs.get("ids", [""])[0] == "1"
+            page = network_view.render(network_view.build_rows(facts, interfaces, providers.check_providers(), network, show_ids))
             notice = html.escape(qs.get("notice", [""])[0][:200].replace("+", " "))
             links = "".join(f'<li><a href="/network/connection?dev={html.escape(i["name"])}">{html.escape(i["friendly"])}: name, power and role</a></li>' for i in interfaces)
             extra = (f"<p>{notice}</p>" if notice else "") + ('<form method="post" action="/network/tether">'
-                                                              '<button type="submit">Connect a USB tether</button></form>') + (f"<h2>Connections</h2><ul>{links}</ul>" if links else "")
+                                                              '<button type="submit">Connect a USB tether</button></form>') + (f"<h2>Connections</h2><ul>{links}</ul>" if links else "") + ('<p><a href="/network">Hide hardware IDs</a></p>' if show_ids else '<p><a href="/network?ids=1">Show hardware IDs</a></p>')
             return self._html_response(200, _with_nav(page.replace(b"</body>", extra.encode() + b"</body>"), path))
+
+        if path == "/status":
+            return self._json(200, _status_line(deps))
 
         if path == "/network/connection":
             import network, netpref, network_connection, network_connection_page
@@ -2487,7 +2520,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
 
         if path == "/managed-mode":
             import managed_mode, managed_mode_page
-            return self._html_response(200, _with_nav(managed_mode_page.render(managed_mode.load(deps.get("managed_file"))), path))
+            try:
+                mounts = Path("/proc/mounts").read_text()
+            except OSError:
+                mounts = ""
+            return self._html_response(200, _with_nav(managed_mode_page.render(managed_mode.load(deps.get("managed_file")), managed_mode.candidate_folders(mounts)), path))
 
         if path == "/remote-access":
             status = deps["remote_status"]() if deps.get("remote_status") else remote_access.collect(deps["runner"])
@@ -2733,7 +2770,16 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             category_html = hardware_tabs.render(state.get('inventory') or {},configuration_html=configuration_html,
                 driver_sections=driver_sections,packages=packages,target=target,
                 render_inventory=lambda inventory:_render_inventory(inventory,host_drive_links=not bool(target)))
-            return self._html_response(200, _with_nav(render_hardware_page(**state,target_html=target_html,category_html=category_html), path))
+            page_bytes = render_hardware_page(**state,target_html=target_html,category_html=category_html)
+            if not target:                                     # the host's own overview, as the TUI's Hardware tab shows it
+                import hardware, hardware_overview
+                try:
+                    rows, overview_error = hardware_overview.overview_rows(hardware.collect, hardware.full_inventory)
+                except Exception as exc:                       # noqa: BLE001 - the overview is reported as unavailable, never a broken page
+                    rows, overview_error = [], str(exc)
+                section = hardware_overview.render_section(rows, overview_error).encode()
+                page_bytes = page_bytes.replace(b"</body>", section + b"</body>", 1) if b"</body>" in page_bytes else page_bytes + section
+            return self._html_response(200, _with_nav(page_bytes, path))
 
         if path.startswith("/master-config"):
             import master_configuration

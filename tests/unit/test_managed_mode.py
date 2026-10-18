@@ -37,3 +37,11 @@ def test_enabled_then_disabled_returns_to_standalone(tmp_path):
 def test_config_follows_the_drives_file_on_a_build_host():
     assert str(mm.config_path({"BASELINE_DRIVES_FILE": "/b/drives.json"})) == "/b/managed.json"
     assert str(mm.config_path({"BASELINE_MANAGED_FILE": "/m.json"})) == "/m.json"
+
+
+def test_candidate_folders_offer_each_mounted_data_volume_without_typing():
+    mounts = ("/dev/sda1 / ext4 rw 0 0\ntmpfs /run tmpfs rw 0 0\n/dev/sdb1 /run/media/u/CACHE ext4 rw 0 0\n"
+              "/dev/sdc1 /mnt/10TB ext4 rw 0 0\n/dev/sdc1 /mnt/10TB ext4 rw 0 0\n/dev/loop0 /snap/x squashfs ro 0 0\n")
+    out = mm.candidate_folders(mounts)
+    assert [o["folder"] for o in out] == ["/run/media/u/CACHE/baseline-vault", "/mnt/10TB/baseline-vault"]
+    assert mm.candidate_folders("") == []

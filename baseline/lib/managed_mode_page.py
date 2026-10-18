@@ -1,38 +1,42 @@
-"""The installer / build manager's Managed server mode page: see the mode, turn it on with its parent folder, turn it off."""
+"""The installer / build manager's Managed server mode page: choose the mode, pick where a parent keeps its backups, and say whether it may rebuild children."""
 from __future__ import annotations
 
 import html
 
-CHOICES = ("standalone", "managed")
 
-
-def render(cfg: dict, *, notice: str = "") -> bytes:
+def render(cfg: dict, folders: list | None = None, *, notice: str = "") -> bytes:
+    e = html.escape
     managed = cfg.get("mode") == "managed"
-    vault = html.escape(str(cfg.get("parent_vault") or ""))
-    checked = "checked" if cfg.get("remote_rebuild") else ""
-    note = f'<p role="status">{html.escape(notice)}</p>' if notice else ""
-    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Managed server mode</title>
-<style>body{{font:15px/1.55 system-ui,sans-serif;margin:0 auto;max-width:46rem;padding:1rem}}
-fieldset{{border:1px solid #888;border-radius:6px;margin:1rem 0;padding:.8rem 1rem}}label{{display:block;margin:.4rem 0}}
-input[type=text]{{width:100%;box-sizing:border-box;padding:.4rem}}.sub{{opacity:.8;margin:.1rem 0 .5rem 1.6rem}}</style></head><body>
-<h1>Managed server mode</h1>
-<p>You do not have to run or maintain a parent system. Without managed server mode you only change your own build and Baseline never connects to a parent.
-Turning it on makes the platform more stable and more capable: a parent keeps every child install's persistence data in git, filed by drive combination, and can rebuild children remotely.</p>
-<p>Current mode: <strong>{'managed' if managed else 'standalone'}</strong></p>{note}
+    current = cfg.get("parent_vault") or ""
+    folders = folders or []
+    options = [(f["folder"], f"{f['volume']}") for f in folders]
+    if current and current not in [o[0] for o in options]:
+        options.insert(0, (current, current))
+    folder_tiles = "".join(
+        f'<input type="radio" name="vault" id="v{i}" value="{e(path)}" {"checked" if path == current else ""}>'
+        f'<label class="tile" for="v{i}"><b>{e(label)}</b><span>Backups go in <code>{e(path)}</code></span></label>' for i, (path, label) in enumerate(options))
+    other_checked = "" if (not current or current in [o[0] for o in options]) else "checked"
+    note = f'<p class="note" role="status">{e(notice)}</p>' if notice else ""
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Managed server mode</title></head><body>
+<header class="page-head"><div class="eyebrow">Baseline / Set up and build / Parent server</div><h1>Managed server mode</h1>
+<p class="lead">Optional. A parent keeps your computers' data and can rebuild them for you. Without it you only change your own build and nothing ever connects to a parent.</p></header>{note}
 <form id="mm">
-<fieldset><legend>Mode</legend>
-<label><input type="radio" name="mode" value="standalone" {'' if managed else 'checked'}> Standalone (default)</label>
-<p class="sub">Your own build only. Nothing is sent to or required from a parent.</p>
-<label><input type="radio" name="mode" value="managed" {'checked' if managed else ''}> Managed</label>
-<p class="sub">This machine is, or connects to, a parent that keeps backups and can rebuild children.</p></fieldset>
-<fieldset><legend>Parent</legend>
-<label>Folder the parent keeps its backups in <input type="text" name="parent_vault" value="{vault}" autocomplete="off"></label>
-<label><input type="checkbox" name="remote_rebuild" {checked}> Allow approved remote rebuilds (needs the one-time root setup; a rebuild never wipes)</label></fieldset>
-<button type="submit">Save</button> <span id="result" role="status" aria-live="polite"></span></form>
+<section class="card"><h2>How should this machine run?</h2><div class="tiles">
+<input type="radio" name="mode" id="m-s" value="standalone" {"" if managed else "checked"}><label class="tile" for="m-s"><b>On its own</b><span>Your build only. Nothing is sent to a parent, and none is needed.</span></label>
+<input type="radio" name="mode" id="m-m" value="managed" {"checked" if managed else ""}><label class="tile" for="m-m"><b>With a parent server</b><span>Backups of your data are kept on the parent, and it can rebuild your computers.</span></label></div></section>
+<section class="card" id="parent"><h2>Where the parent keeps its backups</h2>
+<div class="tiles">{folder_tiles or '<p class="dim">No other drive is connected. Connect one, or choose Another place below.</p>'}
+<input type="radio" name="vault" id="v-other" value="__other" {other_checked}><label class="tile" for="v-other"><b>Another place</b><span>Type a folder. Use this only if the drive you want is not listed.</span></label></div>
+<details class="reveal" {"open" if other_checked else ""}><summary>Folder to use</summary><input type="text" id="other" value="{e(current if other_checked else "")}" placeholder="/path/to/folder" autocomplete="off"></details>
+<label class="switch"><input type="checkbox" id="remote" {"checked" if cfg.get("remote_rebuild") else ""}><i></i><span>Allow remote rebuilds<small>You approve each one with a one-time code. A rebuild never wipes anything.</small></span></label></section>
+<p><button type="submit" class="primary">Save</button> <span id="result" role="status" aria-live="polite"></span></p></form>
 <script>
-document.getElementById('mm').addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.target);
-const body={{mode:f.get('mode'),parent_vault:f.get('parent_vault')||null,remote_rebuild:f.get('remote_rebuild')==='on'}};
+const f=document.getElementById('mm'),parent=document.getElementById('parent');
+function sync(){{parent.style.opacity=f.mode.value==='managed'?1:.45}}f.addEventListener('change',sync);sync();
+f.addEventListener('submit',async ev=>{{ev.preventDefault();
+let v=f.vault?f.vault.value:'';if(v==='__other')v=document.getElementById('other').value.trim();
+const body={{mode:f.mode.value,parent_vault:f.mode.value==='managed'?(v||null):(v||null),remote_rebuild:document.getElementById('remote').checked&&f.mode.value==='managed'}};
 const r=await fetch('/managed-mode',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
-const j=await r.json();document.getElementById('result').textContent=r.ok?'Saved.':(j.message||'Refused.');if(r.ok)location.reload();}});
+const j=await r.json();document.getElementById('result').textContent=r.ok?'Saved.':(j.message||'Refused.');if(r.ok)setTimeout(()=>location.reload(),600);}});
 </script></body></html>"""
     return page.encode()

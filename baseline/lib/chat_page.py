@@ -21,13 +21,17 @@ def clean_question(value) -> str:
 
 
 def render(history, harnesses, notice="") -> bytes:
-    log = "".join(f"<p><b>You:</b> {html.escape(q)}</p><p><b>Baseline:</b> {html.escape(a)}</p>" for q, a in history)
+    log = "".join(f"<p><b>You:</b> {html.escape(q)}</p><p class='answer'><b>Baseline:</b> <span>{html.escape(a)}</span></p>" for q, a in history)
     options = "".join(f"<option value='{html.escape(i)}'>{html.escape(n)}</option>" for i, n in harnesses)
     note = f"<p>{html.escape(notice)}</p>" if notice else ""
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Chat</title></head><body><h1>Chat</h1>"
             f"{note}<form method=\"post\" action=\"/chat/ask\"><select name='harness'>{options}</select> "
             "<input name='question' size='60' autocomplete='off' placeholder='Ask Baseline...' required> "
             f"<button type='submit'>Ask</button></form>{log}"
+            "<p><button type='button' id='copy-last'>Copy last answer</button> <span id='copy-result' role='status'></span></p>"
+            "<script>document.getElementById('copy-last').addEventListener('click',async()=>{const a=[...document.querySelectorAll('p.answer span')].pop();"
+            "const r=document.getElementById('copy-result');if(!a){r.textContent='Nothing to copy yet - ask a question first.';return}"
+            "try{await navigator.clipboard.writeText(a.textContent);r.textContent='Copied.'}catch(e){r.textContent='Copy failed: '+e.message}});</script>"
             "<p><a href='/ai-setup'>AI provider setup</a></p></body></html>").encode()
 
 

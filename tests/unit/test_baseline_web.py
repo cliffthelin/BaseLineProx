@@ -24,7 +24,7 @@ import drive_admin as da
 
 def test_render_nav_marks_the_active_tab():
     nav = bw.render_nav("/drive-admin")
-    assert 'class="active">Drive Administration' in nav
+    assert 'href="/drive-admin" class="active"' in nav and "Drive Administration" in nav
 
 
 def test_with_nav_inserts_right_after_body_tag():
@@ -1352,7 +1352,7 @@ def test_managed_mode_page_defaults_to_standalone_and_saves_a_change(tmp_path):
     case = _RealServerCase(_base_deps(managed_file=f))
     try:
         status, body = case.get('/managed-mode')
-        assert status == 200 and b"standalone" in body and b"do not have to run" in body
+        assert status == 200 and b"On its own" in body and b"nothing ever connects to a parent" in body
         assert any(p == "/managed-mode" for p, _ in bw.NAV_TABS)
         assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': None, 'remote_rebuild': False})[0] == 400
         assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': str(tmp_path / 'v'), 'remote_rebuild': False})[0] == 200
@@ -1406,5 +1406,21 @@ def test_network_connection_page_and_save_use_the_shared_logic(monkeypatch):
         assert case.post_json('/network/connection', {'dev': 'nope', 'alias': '', 'power': True})[0] == 404
         status, out = case.post_json('/network/connection', {'dev': 'eth9', 'alias': 'Office', 'power': False, 'role': 'primary'})
         assert status == 200 and ("alias", "eth9", "Office") in calls and ("power", "eth9", False) in calls and ("primary", "eth9") in calls
+    finally:
+        case.close()
+
+
+def test_a_bare_fragment_page_still_gets_the_menu():
+    out = bw._with_nav(b"<h1>Installation readiness</h1><table></table>", "/installation-readiness").decode()
+    assert out.startswith("<!doctype html>") and 'class="baseline-nav"' in out and "<h1>Installation readiness</h1>" in out
+
+
+def test_memory_page_says_so_when_the_volume_group_cannot_be_read(monkeypatch):
+    import volume_growth
+    monkeypatch.setattr(bw, "_swap_runner", lambda deps: (_ for _ in ()).throw(volume_growth.GrowthError("lvs could not be read")))
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get('/memory')
+        assert status == 200 and b"Swap could not be read" in body
     finally:
         case.close()

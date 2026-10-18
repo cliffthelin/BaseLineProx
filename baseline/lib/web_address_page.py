@@ -3,24 +3,27 @@ from __future__ import annotations
 
 import html
 
+PORT_PRESETS = (8100, 8443, 8080)
+
 
 def render(current: dict, addresses: list, *, notice: str = "") -> bytes:
-    options = "".join(
-        f'<option value="{html.escape(a)}"{" selected" if a == current["bind_host"] else ""}>{html.escape(label)}</option>'
-        for a, label in [("0.0.0.0", "Every address on this host (0.0.0.0)"), *[(a, a) for a in addresses]])
-    if current["bind_host"] not in ["0.0.0.0", *addresses]:
-        options += f'<option value="{html.escape(current["bind_host"])}" selected>{html.escape(current["bind_host"])} (not currently on this host)</option>'
-    note = f'<p role="status">{html.escape(notice)}</p>' if notice else ""
-    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Web address</title>
-<style>body{{font:15px/1.55 system-ui,sans-serif;margin:0 auto;max-width:42rem;padding:1rem}}label{{display:block;margin:.6rem 0}}select,input{{padding:.4rem;min-width:14rem}}</style></head><body>
-<h1>Web address</h1>
-<p>Baseline runs on the Proxmox host itself, as a system service started after Proxmox's own. This is the address it answers on.
-Choose one IP of this host, or every address. The change applies the next time the Baseline web service starts.</p>
-<p>Now: <strong>http://{html.escape(current['bind_host'])}:{current['port']}/</strong></p>{note}
-<form id="wa"><label>Address <select name="bind_host">{options}</select></label>
-<label>Port <input type="number" name="port" min="1024" max="65535" value="{current['port']}"></label>
-<button type="submit">Save</button> <span id="result" role="status" aria-live="polite"></span></form>
-<script>document.getElementById('wa').addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.target);
-const r=await fetch('/web-address',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{bind_host:f.get('bind_host'),port:Number(f.get('port'))}})}});
+    e = html.escape
+    choices = [("0.0.0.0", "Every address", "Reachable on any network this computer is on.")] + [(a, a, "Only on this address.") for a in addresses]
+    if current["bind_host"] not in [c[0] for c in choices]:
+        choices.append((current["bind_host"], current["bind_host"], "Saved, but not currently on this computer."))
+    tiles = "".join(f'<input type="radio" name="host" id="h{i}" value="{e(v)}" {"checked" if v == current["bind_host"] else ""}><label class="tile" for="h{i}"><b>{e(t)}</b><span>{e(d)}</span></label>'
+                    for i, (v, t, d) in enumerate(choices))
+    ports = list(PORT_PRESETS) if current["port"] in PORT_PRESETS else [*PORT_PRESETS, current["port"]]
+    chips = "".join(f'<input type="radio" name="port" id="p{p}" value="{p}" {"checked" if p == current["port"] else ""}><label for="p{p}">{p}</label>' for p in ports)
+    note = f'<p class="note" role="status">{e(notice)}</p>' if notice else ""
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web address</title></head><body>
+<header class="page-head"><div class="eyebrow">Baseline / Settings</div><h1>Where Baseline is on your network</h1>
+<p class="lead">Baseline runs on the Proxmox host itself. Pick the address you will type to reach it. It is now <strong>http://{e(current['bind_host'])}:{current['port']}/</strong>.</p></header>{note}
+<form id="wa"><section class="card"><h2>Address</h2><div class="tiles">{tiles}</div></section>
+<section class="card"><h2>Port <small class="dim">(8100 unless something else uses it)</small></h2><div class="chips">{chips}</div></section>
+<p><button type="submit" class="primary">Save</button> <span id="result" role="status" aria-live="polite"></span></p>
+<p class="dim">A change applies the next time the Baseline web service starts.</p></form>
+<script>document.getElementById('wa').addEventListener('submit',async ev=>{{ev.preventDefault();const f=ev.target;
+const r=await fetch('/web-address',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{bind_host:f.host.value,port:Number(f.port.value)}})}});
 const j=await r.json();document.getElementById('result').textContent=r.ok?'Saved. It applies when the web service restarts.':(j.message||'Refused.');}});</script></body></html>"""
     return page.encode()

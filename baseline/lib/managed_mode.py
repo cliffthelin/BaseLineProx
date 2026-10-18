@@ -68,3 +68,21 @@ def save(settings: dict, path=None) -> dict:
         raise ManagedError("remote rebuild is part of managed mode")
     write_if_changed(Path(path or config_path()), json.dumps(cfg, indent=1) + "\n")
     return cfg
+
+
+def candidate_folders(mounts_text: str) -> list:
+    """Places a parent could keep its backups, offered as choices so nobody has to type a path: a `baseline-vault` folder on each mounted data volume (under /mnt, /media or /run/media)."""
+    found = []
+    for line in (mounts_text or "").splitlines():
+        parts = line.split()
+        if len(parts) < 3 or parts[2] in ("tmpfs", "proc", "sysfs", "devtmpfs", "cgroup2", "overlay", "squashfs", "autofs", "efivarfs"):
+            continue
+        mount = parts[1].replace("\\040", " ")
+        if mount.startswith(("/mnt/", "/media/", "/run/media/")):
+            found.append({"folder": mount.rstrip("/") + "/baseline-vault", "volume": mount})
+    seen, out = set(), []
+    for item in found:
+        if item["folder"] not in seen:
+            seen.add(item["folder"])
+            out.append(item)
+    return out

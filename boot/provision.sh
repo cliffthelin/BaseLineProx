@@ -384,7 +384,9 @@ cp "$SRC/baseline/lib/write_once.py" /opt/baseline/lib/write_once.py
 cp "$SRC/baseline/lib/managed_mode.py" /opt/baseline/lib/managed_mode.py             # managed server mode (opt-in; standalone by default)
 cp "$SRC/baseline/lib/managed_mode_page.py" /opt/baseline/lib/managed_mode_page.py
 cp "$SRC/baseline/lib/nav_tree.py" /opt/baseline/lib/nav_tree.py
+cp "$SRC/baseline/lib/console_theme.py" /opt/baseline/lib/console_theme.py          # the one look every console page shares
 cp "$SRC/baseline/lib/console_charts.py" /opt/baseline/lib/console_charts.py            # inline charts shared by the console pages
+cp "$SRC/baseline/lib/hardware_overview.py" /opt/baseline/lib/hardware_overview.py
 cp "$SRC/baseline/lib/network_connection.py" /opt/baseline/lib/network_connection.py       # one connection's name, power and role (TUI and console)
 cp "$SRC/baseline/lib/network_connection_page.py" /opt/baseline/lib/network_connection_page.py
 cp "$SRC/baseline/lib/web_address.py" /opt/baseline/lib/web_address.py            # the console's own address (an IP of this host and a port)

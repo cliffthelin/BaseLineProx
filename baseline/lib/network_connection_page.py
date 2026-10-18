@@ -8,19 +8,22 @@ def render(ifname: str, friendly: str, identity: list, status_line: str, alias: 
     e = html.escape
     power_known = admin_up is not None
     role = "primary" if pref.get("primary") == ifname else ("fallback" if pref.get("fallback") == ifname else "")
-    warn = ('<p class="adv-note" role="note">This connection carries your current internet access. Switching it off will disconnect this page.</p>' if is_active else "")
-    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{e(friendly)}</title>
-<style>body{{font:15px/1.55 system-ui,sans-serif;margin:0 auto;max-width:46rem;padding:1rem}}label{{display:block;margin:.6rem 0}}pre{{white-space:pre-wrap}}input[type=text]{{padding:.4rem;width:20rem;max-width:100%}}</style></head><body>
-<h1>{e(friendly)}</h1><p><a href="/network">Back to network</a></p>{('<p role="status">' + e(notice) + '</p>') if notice else ''}
-<pre class="adv">{e(chr(10).join(identity))}</pre><p>{e(status_line)}</p>
+    warn = ('<p class="note" role="note">This connection carries your current internet access. Switching it off will disconnect this page.</p>' if is_active else "")
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{e(friendly)}</title></head><body>
+<header class="page-head"><div class="eyebrow">Baseline / This computer / Internet and network</div><h1>{e(friendly)}</h1><p class="lead">{e(status_line) or 'A network connection on this computer.'} <a href="/network">Back to network</a></p></header>
+{('<p class="note" role="status">' + e(notice) + '</p>') if notice else ''}
 <form id="conn" data-dev="{e(ifname)}" data-active="{'1' if is_active else '0'}">
-<label>Name (blank for the default) <input type="text" name="alias" value="{e(alias)}" placeholder="{e(friendly)}"></label>
-<label><input type="checkbox" name="power" {'checked' if admin_up else ''} {'' if power_known else 'disabled'}> Switched on{'' if power_known else ' (state could not be read)'}</label>{warn}
-<fieldset><legend>Role</legend><label><input type="radio" name="role" value="" {'checked' if not role else ''}> Leave as is</label>
-<label><input type="radio" name="role" value="primary" {'checked' if role == 'primary' else ''}> Primary</label>
-<label><input type="radio" name="role" value="fallback" {'checked' if role == 'fallback' else ''}> Fallback</label></fieldset>
-<button type="submit">Save</button> <span id="result" role="status" aria-live="polite"></span></form>
-<h2>Connection check</h2><pre class="adv">{e(lifeline)}</pre>
+<div class="grid"><section class="card"><h2>Power</h2>
+<label class="switch"><input type="checkbox" name="power" {'checked' if admin_up else ''} {'' if power_known else 'disabled'}><i></i><span>Switched on{'' if power_known else ' (state could not be read)'}<small>Turning it off disconnects anything using it.</small></span></label>{warn}</section>
+<section class="card"><h2>Role</h2><div class="seg" role="radiogroup" aria-label="Role">
+<input type="radio" name="role" id="r0" value="" {'checked' if not role else ''}><label for="r0">Leave as is</label>
+<input type="radio" name="role" id="r1" value="primary" {'checked' if role == 'primary' else ''}><label for="r1">Main</label>
+<input type="radio" name="role" id="r2" value="fallback" {'checked' if role == 'fallback' else ''}><label for="r2">Backup</label></div>
+<p class="dim">Main is used first. Backup takes over if the main connection fails.</p></section>
+<section class="card"><h2>Name</h2><details class="reveal" {'open' if alias else ''}><summary>Rename this connection</summary>
+<input type="text" name="alias" value="{e(alias)}" placeholder="{e(friendly)}" autocomplete="off"></details></section></div>
+<section class="card adv"><h2>Details</h2><pre>{e(chr(10).join(identity))}</pre><h3>Connection check</h3><pre>{e(lifeline)}</pre></section>
+<p><button type="submit" class="primary">Save</button> <span id="result" role="status" aria-live="polite"></span></p></form>
 <script>document.getElementById('conn').addEventListener('submit',async ev=>{{ev.preventDefault();const f=ev.target,d=new FormData(f);
 const body={{dev:f.dataset.dev,alias:d.get('alias')||'',power:d.get('power')==='on',role:d.get('role')||null,power_known:{'true' if power_known else 'false'}}};
 if(f.dataset.active==='1'&&!body.power&&body.power_known&&!confirm('This connection carries your internet access. Switch it off?'))return;

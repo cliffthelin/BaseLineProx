@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Look at the console without installing it: runs the real web app on this machine's loopback address with a throwaway state folder and one preview session.
+
+For checking what the pages look like and that every link works. It is not a way to sign in to anything real: it refuses any address but 127.0.0.1, never touches /var/lib/baseline, uses a fresh
+temporary state and data store each time, and prints the one preview session's cookie. Pages that read the host (drives, network, VMs) show what this machine reports, or say they are unavailable.
+
+    baseline-web-preview [PORT]          (default 8190)
+"""
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import baseline_web as bw  # noqa: E402
+
+
+def main() -> int:
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8190
+    state = Path(tempfile.mkdtemp(prefix="baseline-preview-"))
+    if state.resolve() == bw.DEFAULT_STATE_DIR.resolve():
+        raise SystemExit("refusing to run on the real state folder")
+    server = bw.build_real_server(host="127.0.0.1", port=port, data_path=state / "store.json", state_dir=state)
+    if server.server_address[0] != "127.0.0.1":
+        raise SystemExit("the preview only listens on 127.0.0.1")
+    import time
+    token = server.deps["sessions"].create("preview", now=time.time(), role="admin").token
+    print(f"PREVIEW http://127.0.0.1:{port}/ cookie session={token} state={state}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.shutdown()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

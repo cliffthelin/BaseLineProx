@@ -30,8 +30,8 @@ W = "baseline_web.py"
 FEATURES = (
     # --- the Baseline TUI (baseline/bin/baseline) ---
     F("tui.hardware.table", "tui", "Hardware overview table", "/hardware", (W, 'path.startswith("/hardware")')),
-    F("tui.hardware.ids_toggle", "tui", "Show or hide hardware IDs", "/hardware"),
-    F("tui.hardware.detail", "tui", "Hardware row detail", "/hardware"),
+    F("tui.hardware.ids_toggle", "tui", "Show or hide hardware IDs", "/network", (W, "Show hardware IDs")),
+    F("tui.hardware.detail", "tui", "Hardware row detail", "/hardware", ("hardware_overview.py", "def render_section")),
     F("tui.network.table", "tui", "Network interfaces table", "/network", (W, 'path == "/network"')),
     F("tui.network.tether", "tui", "Tether (phone) connection", "/network", (W, '"/network/tether"')),
     F("tui.network.alias", "tui", "Rename a connection", "/network", ("network_connection_page.py", "name=\"alias\"")),
@@ -45,11 +45,11 @@ FEATURES = (
     F("tui.vms.shutdown", "tui", "Shut down a virtual machine", "/vms", ("baseline_web.py", "'request_stop'")),
     F("tui.chat.ask", "tui", "Ask the assistant", "/chat", (W, '"/chat/ask"')),
     F("tui.chat.harness", "tui", "Choose the assistant", "/chat", ("chat_page.py", "harness")),
-    F("tui.chat.copy", "tui", "Copy the last answer", "/chat"),
+    F("tui.chat.copy", "tui", "Copy the last answer", "/chat", ("chat_page.py", "copy-last")),
     F("tui.console.commands", "tui", "Console commands", "/shell", (W, '"/shell/run"')),
     F("tui.proxmox.return", "tui", "Go to the Proxmox interface", "/home", ("home_page.py", "8006")),
-    F("tui.refresh", "tui", "Refresh now", "/home"),
-    F("tui.status_bar", "tui", "Status bar", "/home"),
+    F("tui.refresh", "tui", "Refresh now", "/home", (W, "baseline-refresh")),
+    F("tui.status_bar", "tui", "Status bar", "/home", (W, "def _status_line")),
     # --- the installer in the web app (already served by baseline_web) ---
     F("installer.plan", "installer", "Installer plan", "/install-plan", (W, '"/install-plan"')),
     F("installer.plan.update", "installer", "Update the plan", "/install-plan", (W, "'/install-plan/update'")),

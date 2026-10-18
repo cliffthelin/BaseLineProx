@@ -11,10 +11,5 @@
  "build.install.wipe_install",
  "build.iso",
  "managed.parent_vault",
- "managed.remote_rebuild",
- "tui.chat.copy",
- "tui.hardware.detail",
- "tui.hardware.ids_toggle",
- "tui.refresh",
- "tui.status_bar"
+ "managed.remote_rebuild"
 ]
