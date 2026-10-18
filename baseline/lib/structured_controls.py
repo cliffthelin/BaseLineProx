@@ -26,7 +26,7 @@ details{margin:.7rem 0}details textarea{width:100%;box-sizing:border-box;min-hei
 window.BaselineStructuredEditor = class {
  constructor(source, options={}) {
   this.source=source; this.options=options; this.value=null;
-  this.view=document.createElement('div');this.view.className='structured-controls';
+  this.view=document.createElement('div');this.view.className='structured-controls cfg-view';
   this.details=source.parentElement.tagName==='DETAILS'?source.parentElement:
     source.nextElementSibling?.tagName==='DETAILS'?source.nextElementSibling:null;
   if(!this.details){
@@ -34,7 +34,6 @@ window.BaselineStructuredEditor = class {
    const summary=document.createElement('summary');summary.textContent='Advanced JSON override';
    this.details.append(summary);source.before(this.details);this.details.append(source);
   }
-  this.details.before(this.view);
   this.raw=source.tagName==='TEXTAREA'?source:this.details.querySelector('[data-json-override]');
   this.enable=this.details.querySelector('[data-json-enable]');
   if(!this.enable){
@@ -43,10 +42,23 @@ window.BaselineStructuredEditor = class {
    this.raw.before(label);
   }
   this.raw.disabled=true;
+  // one container, two tabs: Efficient (choices) and Advanced (the raw configuration)
+  this.box=document.createElement('div');this.box.className='config-box';
+  const bar=document.createElement('div');bar.className='cfg-tabs';bar.setAttribute('role','tablist');
+  this.tabs=[['Efficient',false],['Advanced',true]].map(([name,adv])=>{
+   const tab=document.createElement('button');tab.type='button';tab.textContent=name;tab.className='cfg-tab';tab.setAttribute('role','tab');
+   tab.addEventListener('click',()=>{this.enable.checked=adv;this.enable.dispatchEvent(new Event('change',{bubbles:true}));});
+   bar.append(tab);return tab;});
+  this.rawPanel=document.createElement('div');this.rawPanel.className='cfg-raw';
+  this.details.before(this.box);this.box.append(bar,this.view,this.rawPanel);
+  this.rawPanel.append(this.raw);this.details.hidden=true;
+  const showMode=()=>{const adv=this.enable.checked;this.view.hidden=adv;this.rawPanel.hidden=!adv;
+   this.tabs.forEach((t,i)=>{t.setAttribute('aria-selected',String((i===1)===adv));t.classList.toggle('on',(i===1)===adv);});};
   this.enable.addEventListener('change',()=>{
-   this.raw.disabled=!this.enable.checked;this.view.hidden=this.enable.checked;
-   this.raw.setCustomValidity('');if(!this.enable.checked)this.set(this.value);
+   this.raw.disabled=!this.enable.checked;
+   this.raw.setCustomValidity('');if(!this.enable.checked)this.set(this.value);showMode();
   });
+  showMode();
   this.raw.addEventListener('input',()=>{
    if(!this.enable.checked)return;
    try{this.value=JSON.parse(this.raw.value);this.raw.setCustomValidity('');
@@ -76,17 +88,20 @@ window.BaselineStructuredEditor = class {
  }
  draw(parent,value,path,assign,title){
   if(value!==null && typeof value==='object'){
-   const box=document.createElement('fieldset'),legend=document.createElement('legend');
-   legend.textContent=title;box.append(legend);parent.append(box);
-   if(Array.isArray(value)){
-    if(!value.length){const empty=document.createElement('p');empty.textContent='No items selected';box.append(empty);}
+   const isArray=Array.isArray(value),box=document.createElement('div');
+   box.className=isArray?'cfg-items':'cfg-fields';
+   if(path.length){const heading=document.createElement('div');heading.className='cfg-title';heading.textContent=title;parent.append(heading);}
+   parent.append(box);
+   if(isArray){
+    if(!value.length){const empty=document.createElement('p');empty.className='cfg-empty';empty.textContent='Nothing added yet.';box.append(empty);}
     value.forEach((item,index)=>{
-     const row=document.createElement('div');box.append(row);
-     this.draw(row,item,[...path,index],v=>{value[index]=v;},'Item '+(index+1));
-     const remove=document.createElement('button');remove.type='button';remove.textContent='Remove item';
-     remove.onclick=()=>{value.splice(index,1);this.sync();this.set(this.value);};row.append(remove);
+     const card=document.createElement('div');card.className='cfg-item';box.append(card);
+     this.draw(card,item,[...path,index],v=>{value[index]=v;},'Item '+(index+1));
+     const remove=document.createElement('button');remove.type='button';remove.className='cfg-remove';remove.textContent='Remove';
+     remove.setAttribute('aria-label','Remove item '+(index+1));
+     remove.onclick=()=>{value.splice(index,1);this.sync();this.set(this.value);};card.append(remove);
     });
-    const add=document.createElement('button');add.type='button';add.textContent='Add item';
+    const add=document.createElement('button');add.type='button';add.className='cfg-add';add.textContent='+ Add item';
     add.onclick=()=>{const choices=this.choices(path);const sample=value[0];
       value.push(choices?choices.find(v=>!value.includes(v))??choices[0]:
        sample===undefined?'':typeof sample==='object'?structuredClone(sample):typeof sample==='number'?0:typeof sample==='boolean'?false:'');
@@ -96,7 +111,7 @@ window.BaselineStructuredEditor = class {
    }
    return;
   }
-  const label=document.createElement('label');label.append(document.createTextNode(title));
+  const label=document.createElement('label');label.className='cfg-field';const caption=document.createElement('span');caption.textContent=title;label.append(caption);
   let input;const choices=this.choices(path);
   if(choices){input=document.createElement('select');
    const values=[...choices];if(!values.includes(value))values.unshift(value);

@@ -65,7 +65,8 @@ def humanize(key: str) -> str:
 def row(key: str, control: str, *, label=None, help_text=None) -> str:
     plain, sentence = LABELS.get(key, (humanize(key), ""))
     e = html.escape
-    return (f'<div class="setting"><div class="setting-text"><b>{e(label or plain)}</b>'
+    wide = " wide" if "data-structured-editor" in control else ""
+    return (f'<div class="setting{wide}"><div class="setting-text"><b>{e(label or plain)}</b>'
             f'{f"<span>{e(help_text or sentence)}</span>" if (help_text or sentence) else ""}<code class="adv">{e(key)}</code></div>'
             f'<div class="setting-control">{control}</div></div>')
 

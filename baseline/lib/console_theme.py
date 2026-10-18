@@ -82,6 +82,20 @@ figure.chart{margin:.6rem 0;display:inline-block}figure.chart svg{color:var(--ac
 .setting .field-info{display:none}.setting-control details{flex-basis:100%;text-align:right}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 @media (max-width:720px){.setting{grid-template-columns:1fr}.setting-control{justify-content:flex-start}}
+/* ---- configuration box: Efficient / Advanced ---- */
+.setting.wide{grid-template-columns:1fr}.setting.wide .setting-control{display:block}
+.config-box{background:rgba(0,0,0,.2);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;width:100%}
+.cfg-tabs{display:flex;gap:.25rem;padding:.4rem .5rem 0;border-bottom:1px solid var(--line);background:rgba(255,255,255,.03)}
+.cfg-tab{border:0;border-radius:var(--r-sm) var(--r-sm) 0 0;background:transparent;color:var(--dim);padding:.5rem 1.1rem;font-weight:600}
+.cfg-tab.on{background:var(--glass);color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+.cfg-view,.cfg-raw{padding:1rem}.cfg-raw textarea{width:100%;min-height:10rem;font-family:var(--mono);font-size:.86rem}
+.cfg-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.8rem;align-items:stretch}.cfg-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:.8rem}
+.cfg-item{display:flex;flex-direction:column;gap:.5rem;background:var(--glass-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:.8rem}
+.cfg-field{display:flex;flex-direction:column;gap:.25rem;margin:0}.cfg-field span,.cfg-title{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.cfg-field input[type=checkbox]{align-self:flex-start;width:1.2rem;height:1.2rem}.cfg-title{margin:.6rem 0 .3rem;grid-column:1/-1}
+.cfg-remove{align-self:flex-start;padding:.2rem .8rem;font-size:.82rem;color:#ffb3b9;border-color:rgba(255,125,134,.35)}
+.cfg-add{min-height:4rem;border:2px dashed var(--line);background:transparent;color:var(--dim);border-radius:var(--r-sm)}.cfg-add:hover{border-color:var(--accent);color:var(--ink);background:rgba(95,214,196,.06)}
+.cfg-empty{grid-column:1/-1;margin:0;color:var(--dim)}
 [role=status]{color:var(--dim)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 @media (max-width:640px){.baseline-nav{position:static}}
