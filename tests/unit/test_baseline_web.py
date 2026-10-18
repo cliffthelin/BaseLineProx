@@ -1383,3 +1383,28 @@ def test_web_address_page_and_save(tmp_path):
         assert "BASELINE_WEB_PORT=9100" in f.read_text()
     finally:
         case.close()
+
+
+def test_network_connection_page_and_save_use_the_shared_logic(monkeypatch):
+    import network
+    import netpref
+    calls = []
+    monkeypatch.setattr(network, "list_interfaces", lambda: [{"name": "eth9", "friendly": "Ethernet"}])
+    monkeypatch.setattr(network, "device_details", lambda n: {"driver": "e1000"})
+    monkeypatch.setattr(network, "is_admin_up", lambda n: True)
+    monkeypatch.setattr(network, "load_aliases", lambda: {})
+    monkeypatch.setattr(network, "check_lifeline", lambda: [{"fact": "nic_detected", "ok": True, "detail": "other0"}])
+    monkeypatch.setattr(network, "save_alias", lambda n, a: calls.append(("alias", n, a)))
+    monkeypatch.setattr(network, "set_admin_state", lambda n, up: calls.append(("power", n, up)) or (True, "ok"))
+    monkeypatch.setattr(netpref, "load_preference", lambda: {})
+    monkeypatch.setattr(netpref, "apply_primary", lambda d: calls.append(("primary", d)) or (True, "primary set"))
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get('/network/connection?dev=eth9')
+        assert status == 200 and b'name="alias"' in body
+        assert case.get('/network/connection?dev=nope')[0] == 404
+        assert case.post_json('/network/connection', {'dev': 'nope', 'alias': '', 'power': True})[0] == 404
+        status, out = case.post_json('/network/connection', {'dev': 'eth9', 'alias': 'Office', 'power': False, 'role': 'primary'})
+        assert status == 200 and ("alias", "eth9", "Office") in calls and ("power", "eth9", False) in calls and ("primary", "eth9") in calls
+    finally:
+        case.close()

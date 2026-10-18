@@ -385,6 +385,8 @@ cp "$SRC/baseline/lib/managed_mode.py" /opt/baseline/lib/managed_mode.py        
 cp "$SRC/baseline/lib/managed_mode_page.py" /opt/baseline/lib/managed_mode_page.py
 cp "$SRC/baseline/lib/nav_tree.py" /opt/baseline/lib/nav_tree.py
 cp "$SRC/baseline/lib/console_charts.py" /opt/baseline/lib/console_charts.py            # inline charts shared by the console pages
+cp "$SRC/baseline/lib/network_connection.py" /opt/baseline/lib/network_connection.py       # one connection's name, power and role (TUI and console)
+cp "$SRC/baseline/lib/network_connection_page.py" /opt/baseline/lib/network_connection_page.py
 cp "$SRC/baseline/lib/web_address.py" /opt/baseline/lib/web_address.py            # the console's own address (an IP of this host and a port)
 cp "$SRC/baseline/lib/web_address_page.py" /opt/baseline/lib/web_address_page.py
 cp "$SRC/baseline/bin/baseline-managed" /opt/baseline/bin/baseline-managed

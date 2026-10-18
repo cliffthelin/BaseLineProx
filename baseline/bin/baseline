@@ -45,6 +45,7 @@ import harness_events  # noqa: E402
 import tether  # noqa: E402
 import providers  # noqa: E402
 import netpref  # noqa: E402
+import network_connection  # noqa: E402
 import diagnostics  # noqa: E402
 import proxmox_vm_metrics  # noqa: E402
 import vm_power  # noqa: E402
@@ -247,18 +248,7 @@ class ConnectionModal(ModalScreen):
         self._admin_state_error: str | None = None
 
     def _lifeline_text(self) -> str:
-        if not self.is_active_device or not self.facts:
-            return "Not currently carrying the lifeline. Available as an alternate path (see Role above)."
-        fact_map = {f["fact"]: f for f in self.facts}
-        lines = []
-        for key, label in LIFELINE_STAGE_LABELS:
-            f = fact_map.get(key)
-            if f is None:
-                lines.append(f"-  {label}: not reached")
-            else:
-                mark = "OK" if f["ok"] else "FAIL"
-                lines.append(f"{mark}  {label}: {f['detail']}")
-        return "\n".join(lines)
+        return network_connection.lifeline_text(self.facts, self.is_active_device)      # shared with the web console
 
     def compose(self) -> ComposeResult:
         # markup=False on every raw-data widget, same reasoning as
@@ -336,30 +326,9 @@ class ConnectionModal(ModalScreen):
 
     @work(thread=True, exit_on_error=False)
     def run_save_and_close(self, alias_value: str, power_on: bool, role: str | None) -> None:
-        messages = []
-        failed = False
-
-        try:
-            network.save_alias(self.ifname, alias_value)
-        except OSError as exc:
-            failed = True
-            messages.append(f"alias: {exc}")
-
-        if self._admin_up_at_open is not None and power_on != self._admin_up_at_open:
-            ok, detail = network.set_admin_state(self.ifname, power_on)
-            messages.append(detail)
-            failed = failed or not ok
-
-        if role == "role_primary":
-            ok, detail = netpref.apply_primary(self.ifname)
-            messages.append(detail)
-            failed = failed or not ok
-        elif role == "role_fallback":
-            try:
-                netpref.save_preference(fallback=self.ifname)
-            except OSError as exc:
-                failed = True
-                messages.append(str(exc))
+        role_name = {"role_primary": "primary", "role_fallback": "fallback"}.get(role)
+        messages, failed = network_connection.apply_changes(network, netpref, self.ifname, alias=alias_value, power_on=power_on,
+                                                            admin_up_at_open=self._admin_up_at_open, role=role_name)      # shared with the web console's connection page
 
         style = "red" if failed else "green"
         summary = "; ".join(messages) if messages else "Nothing changed."

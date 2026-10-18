@@ -15,8 +15,6 @@
  "tui.chat.copy",
  "tui.hardware.detail",
  "tui.hardware.ids_toggle",
- "tui.network.alias",
- "tui.network.power",
  "tui.refresh",
  "tui.status_bar"
 ]

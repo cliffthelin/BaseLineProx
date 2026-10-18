@@ -2360,9 +2360,34 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 facts.append({"fact": "interface_inventory", "ok": False, "detail": str(exc)})
             page = network_view.render(network_view.build_rows(facts, interfaces, providers.check_providers(), network))
             notice = html.escape(qs.get("notice", [""])[0][:200].replace("+", " "))
+            links = "".join(f'<li><a href="/network/connection?dev={html.escape(i["name"])}">{html.escape(i["friendly"])}: name, power and role</a></li>' for i in interfaces)
             extra = (f"<p>{notice}</p>" if notice else "") + ('<form method="post" action="/network/tether">'
-                                                              '<button type="submit">Connect a USB tether</button></form>')
+                                                              '<button type="submit">Connect a USB tether</button></form>') + (f"<h2>Connections</h2><ul>{links}</ul>" if links else "")
             return self._html_response(200, _with_nav(page.replace(b"</body>", extra.encode() + b"</body>"), path))
+
+        if path == "/network/connection":
+            import network, netpref, network_connection, network_connection_page
+            ifname = qs.get("dev", [""])[0]
+            try:
+                known = {i["name"]: i for i in network.list_interfaces()}
+            except (OSError, network.NetworkProbeError):
+                known = {}
+            if ifname not in known:
+                return self._json(404, {"message": "no such network connection"})
+            details = network.device_details(ifname)
+            try:
+                admin_up = network.is_admin_up(ifname)
+            except network.NetworkProbeError:
+                admin_up = None
+            identity = [f"Device: {ifname}"] + [f"{k}: {details[k]}" for k in ("manufacturer", "model", "connection", "driver") if details.get(k)]
+            try:
+                facts = network.check_lifeline()
+            except (OSError, network.NetworkProbeError):
+                facts = []
+            active = any(f["fact"] == "nic_detected" and ifname in str(f.get("detail", "")) for f in facts)
+            return self._html_response(200, _with_nav(network_connection_page.render(
+                ifname, known[ifname]["friendly"], identity, "", network.load_aliases().get(ifname, ""), admin_up, netpref.load_preference(),
+                network_connection.lifeline_text(facts, active), is_active=active), path))
 
         if path == "/sensors":
             import diagnostics
@@ -3439,6 +3464,33 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(400, {'ok':False,'message':str(exc)})
             except (OSError, sqlite3.Error) as exc:
                 return self._json(503, {'ok':False,'message':'Draft could not be saved: ' + str(exc)})
+
+        if path == "/network/connection":
+            import network, netpref, network_connection
+            if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
+                return self._json(403,{'message':'Changing a network connection requires an operator account'})
+            if not isinstance(body,dict) or not isinstance(body.get('dev'),str) or not isinstance(body.get('alias'),str) or not isinstance(body.get('power'),bool):
+                return self._json(400,{'message':'Provide a connection, a name and whether it is switched on'})
+            try:
+                known = {i["name"] for i in network.list_interfaces()}
+            except (OSError, network.NetworkProbeError):
+                known = set()
+            if body['dev'] not in known:
+                return self._json(404,{'message':'no such network connection'})
+            try:
+                admin_up = network.is_admin_up(body['dev'])
+            except network.NetworkProbeError:
+                admin_up = None
+            if admin_up and not body['power'] and not body.get('confirm_power_off'):
+                try:
+                    carrying = any(f["fact"] == "nic_detected" and body['dev'] in str(f.get("detail", "")) for f in network.check_lifeline())
+                except (OSError, network.NetworkProbeError):
+                    carrying = True                                # unknown: ask for the confirmation rather than risk cutting this page off
+                if carrying:
+                    return self._json(409,{'ok':False,'message':'This connection may carry your internet access and this page. Confirm to switch it off.','needs_confirmation':True})
+            messages, failed = network_connection.apply_changes(network, netpref, body['dev'], alias=body['alias'], power_on=body['power'], admin_up_at_open=admin_up, role=body.get('role') or None)
+            if deps.get('audit'):deps['audit']({'event':'network_connection_changed','dev':body['dev'],'failed':failed})
+            return self._json(409 if failed else 200,{'ok':not failed,'message':"; ".join(messages) or 'Nothing changed.'})
 
         if path == "/web-address":
             import web_address
