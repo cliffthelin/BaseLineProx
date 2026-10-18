@@ -13,7 +13,7 @@ CSS = r"""
 --font:ui-rounded,"SF Pro Rounded","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace}
 *{box-sizing:border-box}
 html{background:#0a0c16}
-body{margin:0;min-height:100vh;padding:0 clamp(1rem,3vw,2.4rem) 4rem;color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;
+body{margin:0!important;max-width:none!important;width:auto!important;min-height:100vh;padding:0 clamp(1rem,3vw,2.4rem) 4rem!important;color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;
 background:radial-gradient(1100px 640px at 12% -8%,rgba(94,92,230,.38),transparent 60%),radial-gradient(900px 560px at 96% 4%,rgba(20,184,166,.28),transparent 60%),
 radial-gradient(800px 500px at 50% 110%,rgba(236,72,153,.16),transparent 60%),#0a0c16;background-attachment:fixed}
 a{color:#a9b8ff;text-decoration:none}a:hover{text-decoration:underline}
@@ -73,6 +73,15 @@ th{text-align:left;font-size:.72rem;letter-spacing:.09em;text-transform:uppercas
 td{padding:.65rem 1rem;border-top:1px solid var(--line);vertical-align:top}tr:hover td{background:rgba(255,255,255,.03)}
 details>summary{cursor:pointer}pre,code{font-family:var(--mono);font-size:.86em}pre{white-space:pre-wrap;background:rgba(0,0,0,.28);border-radius:var(--r-sm);padding:.7rem .9rem}
 figure.chart{margin:.6rem 0;display:inline-block}figure.chart svg{color:var(--accent);display:block}figure.chart figcaption{color:var(--dim);font-size:.82rem;margin-top:.3rem}
+/* ---- settings rows ---- */
+.settings-stack{columns:34rem;column-gap:1.1rem;max-width:none}.settings-stack>.card{break-inside:avoid;margin:0 0 1.1rem;display:inline-block;width:100%}.settings-card{padding:1.2rem 1.4rem}html[data-mode="simple"] .setting-control details{display:none}.settings-card h2{margin:0 0 .15rem}.settings-card>p{margin:0 0 .6rem}
+.setting{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,auto);gap:1rem 2rem;align-items:center;padding:.85rem 0;border-top:1px solid var(--line)}
+.setting:first-of-type{border-top:0}.setting-text b{display:block;font-weight:600}.setting-text span{display:block;color:var(--dim);font-size:.88rem}
+.setting-text code{display:inline-block;margin-top:.25rem;color:var(--faint)}.setting-control{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:.5rem;align-items:center}
+.setting-control select,.setting-control input[type=text],.setting-control input[type=email],.setting-control input[type=number]{min-width:14rem}
+.setting .field-info{display:none}.setting-control details{flex-basis:100%;text-align:right}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (max-width:720px){.setting{grid-template-columns:1fr}.setting-control{justify-content:flex-start}}
 [role=status]{color:var(--dim)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 @media (max-width:640px){.baseline-nav{position:static}}

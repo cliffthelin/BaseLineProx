@@ -1708,14 +1708,8 @@ def render_configuration_sections(settings: dict) -> str:
         interface_choices = None
     else:
         interface_choices = None
-    return interface_error + "".join(
-        f"""<h2>{section}</h2>
-<form method="post" action="/settings/{section}" data-autosave>
-{"".join(f'<label>{key} {render_field_input(key, value, options=interface_choices if key == "ethtool_interface" else None)}</label>' for key, value in values.items())}
-<span role="status" data-save-status aria-live="polite"></span>
-</form>"""
-        for section, values in settings.items() if not section.startswith("_")
-    )
+    import settings_ui
+    return interface_error + settings_ui.render_sections(settings, render_field_input=render_field_input, field_choices=_FIELD_CHOICES, interface_choices=interface_choices)
 
 
 def render_iperf3_run_form(settings: dict) -> str:

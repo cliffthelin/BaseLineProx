@@ -22,3 +22,22 @@ def test_the_pages_i_rebuilt_use_choices_before_typing():
     w = web_address_page.render({"bind_host": "0.0.0.0", "port": 8100}, ["10.0.0.5"]).decode()
     assert 'class="tiles"' in m and 'class="switch"' in m and "Another place" in m and '<details class="reveal"' in m
     assert 'class="tiles"' in w and 'class="chips"' in w and 'type="number"' not in w
+
+
+def test_settings_render_as_cards_with_the_right_control_for_each_kind_of_value():
+    import settings_ui
+    import settings_web as sw
+    page = settings_ui.render_sections({"drivers": {"cpu_microcode": True, "cpu_microcode_package": "amd64-microcode"}, "network": {"hostname": "baseline"},
+                                        "handoff": {"restored_categories": [], "archive_path": ""}},
+                                       render_field_input=sw.render_field_input, field_choices=sw._FIELD_CHOICES)
+    assert page.count('class="card settings-card') == 3 and 'class="switch"' in page and 'class="seg"' in page and 'type="text"' in page
+    assert "Keep processor fixes up to date" in page and '<code class="adv">cpu_microcode</code>' in page       # plain name first, the real key kept for Advanced
+    assert 'name="cpu_microcode__type" value="bool"' in page and 'action="/settings/drivers"' in page and "data-autosave" in page
+    assert 'settings-card adv' in page                                                                      # list-valued data is advanced-only
+
+
+def test_a_setting_without_words_is_still_shown_with_a_name_made_from_its_key():
+    import settings_ui
+    import settings_web as sw
+    page = settings_ui.render_sections({"network": {"brand_new_option": True}}, render_field_input=sw.render_field_input, field_choices=sw._FIELD_CHOICES)
+    assert "Brand new option" in page and "brand_new_option" in page
