@@ -253,7 +253,7 @@ BAZZITE_LABEL = "bazzite-x86_64-stable"
 SEED_HEREDOC = "BASELINE_SEED_EOF"
 SEED_UNIT = """[Unit]
 Description=Baseline first boot: the owner from the seed disk
-Before=sddm.service display-manager.service plasmalogin.service gdm.service systemd-user-sessions.service
+Before=omarchy-provision-owner.service sddm.service display-manager.service plasmalogin.service gdm.service getty@tty1.service systemd-user-sessions.service
 
 [Service]
 Type=oneshot
@@ -265,14 +265,21 @@ WantedBy=multi-user.target
 """
 
 
-def seed_runner_install_script(runner: str) -> str:
+def seed_runner_install_script(runner: str, extra_files=None) -> str:
     """Shell lines that put the seed runner (baseline/lib/seed_runner.py) and its unit in a system that has no cloud-init, enabled without a running systemd, so the owner is made from the
     seed disk at the first boot, before any login screen. The runner is a file the build reads from this repository, never text from the network."""
-    if SEED_HEREDOC in runner or "%end" in runner:
-        raise BuildError("the runner text cannot contain the end marker of the file that carries it")
+    extra_files = dict(extra_files or {})
+    for text in (runner, *extra_files.values()):
+        if SEED_HEREDOC in text or "%end" in text:
+            raise BuildError("the runner text cannot contain the end marker of the file that carries it")
+    if not all(re.fullmatch(r"/etc/baseline-seed/[a-z_]+\.py", path) for path in extra_files):
+        raise BuildError("extra files go under /etc/baseline-seed/ as .py files")
+    extra = []
+    for path, text in sorted(extra_files.items()):
+        extra += [f"cat > {path} <<'{SEED_HEREDOC}'", text.rstrip("\n"), SEED_HEREDOC, f"chmod 644 {path}"]
     return "\n".join([
         "mkdir -p /etc/baseline-seed /etc/systemd/system/multi-user.target.wants",
-        f"cat > /etc/baseline-seed/seed_runner.py <<'{SEED_HEREDOC}'", runner.rstrip("\n"), SEED_HEREDOC,
+        f"cat > /etc/baseline-seed/seed_runner.py <<'{SEED_HEREDOC}'", runner.rstrip("\n"), SEED_HEREDOC, *extra,
         f"cat > /etc/systemd/system/baseline-seed.service <<'{SEED_HEREDOC}'", SEED_UNIT.rstrip("\n"), SEED_HEREDOC,
         "chmod 644 /etc/baseline-seed/seed_runner.py /etc/systemd/system/baseline-seed.service",
         "ln -sf /etc/systemd/system/baseline-seed.service /etc/systemd/system/multi-user.target.wants/baseline-seed.service",

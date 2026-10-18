@@ -86,10 +86,22 @@ def test_creating_a_vm_makes_an_overlay_a_seed_and_a_retained_disk_and_no_passwo
 
 def test_a_system_whose_own_setup_makes_the_owner_gets_an_overlay_and_no_seed(tmp_path):
     f = FakeHost(tmp_path / "os")
-    pe.install_base(f.host, "omarchy", carried(tmp_path, "omarchy"))
-    got = pe.create(f.host, "om", "omarchy", owner="cliff")
+    pe.install_base(f.host, "fydeos", carried(tmp_path, "fydeos"))
+    got = pe.create(f.host, "om", "fydeos", owner="cliff")
     assert "password" not in got and "first-boot setup" in got["message"]
     assert not (f.host.vm_dir("om") / "seed.iso").exists() and f.host._spec("om")["uefi"] is True
+
+
+def test_omarchy_and_bazzite_are_seeded_through_the_seed_runner_with_no_password_anywhere():
+    omarchy = _seed("omarchy")
+    assert omarchy["users"] == []                                                                  # Omarchy's own first-boot script makes the account, fed from the seed
+    assert ["/usr/bin/python3", "/etc/baseline-seed/omarchy_owner.py", "cliff", "work"] in omarchy["runcmd"]
+    assert omarchy["bootcmd"][0][0] == "/bin/sh"
+    bazzite = _seed("bazzite")
+    assert bazzite["users"][0]["name"] == "cliff" and bazzite["users"][0]["lock_passwd"] is True
+    assert any(w["path"] == "/etc/sddm.conf.d/baseline-autologin.conf" for w in bazzite["write_files"])
+    for config in (omarchy, bazzite):
+        assert "passwd:" not in json.dumps(config) and "chpasswd" not in json.dumps(config)
 
 
 def test_a_base_that_is_not_installed_is_refused_not_guessed(tmp_path):

@@ -28,7 +28,7 @@ SYSTEMS = {
     "debian": {"seed": True, "greeter": ("gdm3",)}, "ubuntu": {"seed": True, "greeter": ("gdm3",)}, "nixos": {"seed": True, "greeter": ()},
     "cachyos": {"seed": True, "greeter": ("plasmalogin", "sddm")},
     "bazzite": {"seed": True, "greeter": ("sddm",)},
-    "omarchy": {"seed": False, "greeter": ()}, "fydeos": {"seed": False, "greeter": ()},
+    "omarchy": {"seed": True, "greeter": (), "owner_step": "omarchy"}, "fydeos": {"seed": False, "greeter": ()},
 }
 _HOME_PATH = "/run/wrappers/bin:/run/current-system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -126,6 +126,9 @@ touch /run/baseline-home-ready
         config["write_files"].append({"path": "/etc/plasmalogin.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\nSession=plasma\n"})
     if "sddm" in spec["greeter"]:
         config["write_files"].append({"path": "/etc/sddm.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\n"})
+    if spec.get("owner_step") == "omarchy":              # Omarchy makes its owner with its own first-boot script, fed from the seed (baseline/lib/omarchy_owner.py)
+        config["users"] = []
+        config["runcmd"].append(["/usr/bin/python3", "/etc/baseline-seed/omarchy_owner.py", owner, hostname])
     if os_id == "nixos":                                 # NixOS links GDM's file into the store; a real file in its place signs the owner in
         config["bootcmd"].append(["/bin/sh", "-c", f"export PATH={_HOME_PATH}; rm -f /etc/gdm/custom.conf; printf '[daemon]\\nAutomaticLoginEnable=true\\nAutomaticLogin={owner}\\n' > /etc/gdm/custom.conf"])
     if os_id in ("nixos", "cachyos"):                    # a login screen that came up before the seed ran is restarted so the sign-in applies

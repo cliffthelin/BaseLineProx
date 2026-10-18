@@ -22,7 +22,7 @@ class Cmds:
 
 def seed(os_id="bazzite", owner="cliff", initialize_home=True):
     text = pe.cloud_config(os_id, owner=owner, initialize_home=initialize_home, hostname="work")
-    return text, "instance-id: abc123\nlocal-hostname: work\n"
+    return text, json.dumps({"instance-id": "abc123", "local-hostname": "work"})      # exactly what write_seed puts on the seed disk
 
 
 def run(tmp_path, cmds=None, os_id="bazzite", state=None, **kw):
@@ -37,7 +37,7 @@ def run(tmp_path, cmds=None, os_id="bazzite", state=None, **kw):
 def test_user_data_is_parsed_and_the_instance_id_is_read():
     user_data, meta = seed()
     assert sr.parse_user_data(user_data)["users"][0]["name"] == "cliff"
-    assert sr.instance_id(meta) == "abc123"
+    assert sr.instance_id(meta) == "abc123" and sr.instance_id("instance-id: abc123\nlocal-hostname: work\n") == "abc123"
     with pytest.raises(sr.SeedError):
         sr.parse_user_data("not a cloud config")
 
@@ -96,3 +96,33 @@ def test_a_name_or_path_that_is_not_plain_is_refused():
     bad = json.dumps({"write_files": [{"path": "/etc/../../x", "content": "x"}]})
     with pytest.raises(sr.SeedError):
         sr.apply("#cloud-config\n" + bad, "instance-id: x\n", run=Cmds(), root="/nonexistent", state_dir="/nonexistent")
+
+
+def test_every_step_and_any_failure_is_written_to_a_log_that_survives_the_boot(tmp_path):
+    """Found on the rehearsal: Omarchy keeps no journal across boots, and a runner that fails silently cannot be diagnosed."""
+    log = tmp_path / "state" / "baseline-seed.log"
+    entries = []
+    sr.record(entries.append, log, "made the account cliff")
+    assert log.read_text().endswith("made the account cliff\n") and entries and "made the account cliff" in entries[0]
+    sr.record(print, log, "second line")
+    assert log.read_text().count("\n") == 2
+    ok = sr.main_with(lambda: {"instance": "x"}, log_path=log)
+    assert ok == 0 and '"instance": "x"' in log.read_text()
+    def boom():
+        raise sr.SeedError("a boot command failed (no space)")
+    assert sr.main_with(boom, log_path=log) == 1 and "STOPPED: a boot command failed (no space)" in log.read_text()
+    def odd():
+        raise RuntimeError("unexpected")
+    assert sr.main_with(odd, log_path=log) == 1 and "RuntimeError" in log.read_text()
+
+
+def test_a_first_boot_command_that_fails_is_reported_in_the_result_not_swallowed(tmp_path):
+    class Failing(Cmds):
+        def __call__(self, argv):
+            if argv[:1] == ["systemctl"] and "enable" in argv:
+                self.calls.append(list(argv))
+                return 1, "", "Unit qemu-guest-agent.service not found"
+            return super().__call__(argv)
+    result, cmds, _ = run(tmp_path, cmds=Failing())
+    assert result["runcmd_failures"][0]["exit"] == 1 and "not found" in result["runcmd_failures"][0]["output"]
+    assert result["users"] == ["cliff"]                                                                  # and the account was still made

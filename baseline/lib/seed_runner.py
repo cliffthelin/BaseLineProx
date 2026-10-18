@@ -47,6 +47,12 @@ def parse_user_data(text: str) -> dict:
 
 
 def instance_id(meta: str) -> str:
+    try:                                                                  # the seed's meta-data is written as JSON (valid YAML, which is what cloud-init reads)
+        value = json.loads(meta or "")
+        if isinstance(value, dict) and isinstance(value.get("instance-id"), str) and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", value["instance-id"]):
+            return value["instance-id"]
+    except ValueError:
+        pass
     match = re.search(r"^instance-id:\s*(\S+)\s*$", meta or "", re.M)
     if not match:
         raise SeedError("the seed's meta-data has no instance-id")
@@ -156,9 +162,14 @@ def apply(user_data: str, meta: str, *, run, root="/", state_dir=STATE_DIR) -> d
         fstab.parent.mkdir(parents=True, exist_ok=True)
         with open(fstab, "a") as handle:
             handle.write("\t".join(entry) + "\n")
+    failures = []
     for command in config.get("runcmd") or []:
         argv = command if isinstance(command, list) else ["/bin/sh", "-c", str(command)]
-        _run(run, argv, f"first-boot command {argv[0]}", check=False)    # a failing convenience (restarting the greeter) never undoes the account
+        code, out, err = run(argv)                                       # a failing convenience (restarting the greeter) never undoes the account, but it is written down
+        if code:
+            failures.append({"command": " ".join(argv)[:120], "exit": code, "output": (err or out).strip()[-300:]})
+    if failures:
+        done["runcmd_failures"] = failures
     state.mkdir(parents=True, exist_ok=True)
     marker.write_text(instance + "\n")
     return done
@@ -167,7 +178,7 @@ def apply(user_data: str, meta: str, *, run, root="/", state_dir=STATE_DIR) -> d
 class RealRun:
     def __call__(self, argv):
         try:
-            done = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+            done = subprocess.run(argv, capture_output=True, text=True, timeout=3600)      # Omarchy's own account setup takes several minutes
         except (OSError, subprocess.TimeoutExpired) as exc:
             return 127, "", str(exc)
         return done.returncode, done.stdout, done.stderr
@@ -183,28 +194,52 @@ def find_seed(run, wait_s=25):
     return None
 
 
+LOG_FILE = "baseline-seed.log"
+
+
+def record(emit, log_path, message: str) -> None:
+    """One line to the console/journal and to a file that survives the boot (some systems keep no journal across boots)."""
+    line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} baseline-seed: {message}"
+    emit(line)
+    try:
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+
+
+def main_with(work, *, log_path) -> int:
+    """Run `work()` and log its result, or why it stopped; the exit status is 0 only when it finished."""
+    try:
+        record(print, log_path, json.dumps(work()))
+        return 0
+    except SeedError as exc:
+        record(lambda line: print(line, file=sys.stderr), log_path, f"STOPPED: {exc}")
+    except Exception as exc:                                                # noqa: BLE001 - whatever went wrong is recorded, never lost
+        record(lambda line: print(line, file=sys.stderr), log_path, f"STOPPED: {type(exc).__name__}: {exc}")
+    return 1
+
+
 def main() -> int:
     run = RealRun()
-    device = find_seed(run)
-    if device is None:
-        print("baseline-seed: no seed disk (label cidata); nothing to do")
-        return 0
-    mount = Path("/run/baseline-seed")
-    mount.mkdir(parents=True, exist_ok=True)
-    try:
-        _run(run, ["mount", "-o", "ro", device, str(mount)], "mounting the seed disk")
-        user_data = (mount / "user-data").read_text()
-        meta = (mount / "meta-data").read_text()
-    finally:
-        run(["umount", str(mount)])
-    result = apply(user_data, meta, run=run)
-    print("baseline-seed:", json.dumps(result))
-    return 0
+    log_path = Path(STATE_DIR) / LOG_FILE
+
+    def work():
+        device = find_seed(run)
+        if device is None:
+            return {"skipped": "no seed disk (label cidata); nothing to do"}
+        mount = Path("/run/baseline-seed")
+        mount.mkdir(parents=True, exist_ok=True)
+        try:
+            _run(run, ["mount", "-o", "ro", device, str(mount)], "mounting the seed disk")
+            user_data = (mount / "user-data").read_text()
+            meta = (mount / "meta-data").read_text()
+        finally:
+            run(["umount", str(mount)])
+        return apply(user_data, meta, run=run)
+    return main_with(work, log_path=log_path)
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except SeedError as exc:
-        print(f"baseline-seed: STOPPED: {exc}", file=sys.stderr)
-        sys.exit(1)
+    sys.exit(main())
