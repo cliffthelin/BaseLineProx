@@ -12,10 +12,21 @@ from pathlib import Path
 CONFIG = Path(os.environ.get("BASELINE_REBUILD_CONFIG", "/etc/baseline-rebuild.json"))
 sys.path.insert(0, str(Path(os.environ.get("BASELINE_REBUILD_SRC", "/opt/baseline-rebuilder/src")) / "baseline/lib"))
 import rebuild_authority as ra  # noqa: E402
+import rebuild_policy as rp  # noqa: E402
 
 INBOX = Path("/run/baseline-rebuild")
 STATE = Path("/var/lib/baseline-rebuild")
 LOGS = Path("/var/log/baseline-rebuild")
+
+
+def live_drive(serial):
+    """(size in bytes) of the attached drive with this serial, or None."""
+    out = subprocess.run(["lsblk", "-dbn", "-o", "SERIAL,SIZE"], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == serial:
+            return int(parts[1])
+    return None
 
 
 def load_drives(path):
@@ -28,7 +39,7 @@ def load_drives(path):
 def handle(auth, msg):
     op = msg.get("op")
     if op == "request":
-        return auth.request(str(msg.get("target", "")))
+        return auth.request(str(msg.get("target", "")), msg.get("hours"))
     if op == "approve":
         return auth.approve(str(msg.get("id", "")), str(msg.get("code", "")))
     if op == "status":
@@ -60,8 +71,15 @@ def main():
     os.chown(INBOX, 0, int(cfg["gid"]))
     os.chmod(LOGS, 0o755)
     running = {}
+    src = Path(os.environ.get("BASELINE_REBUILD_SRC", "/opt/baseline-rebuilder/src"))
     while True:
-        auth = ra.Authority(STATE, load_drives(cfg["drives_file"]))
+        try:
+            policy = rp.load_verified(cfg["policy_file"], cfg["policy_digest_file"])    # re-checked every pass: a changed policy stops everything
+        except rp.PolicyError as exc:
+            print("baseline-rebuild:", exc, file=sys.stderr, flush=True)
+            time.sleep(30)
+            continue
+        auth = ra.Authority(STATE, {n: None for n in policy["drives"]}, max_seconds=policy["max_approval_hours"] * 3600)
         drain_inbox(auth)
         for rid, (proc, _) in list(running.items()):
             if proc.poll() is not None:
@@ -69,14 +87,21 @@ def main():
                 del running[rid]
         req = auth.take_approved()
         if req:
-            env = dict(os.environ, BASELINE_DRIVES_FILE=cfg["drives_file"], HOME="/root")
-            if cfg.get("own_drives_file"):
-                env["BASELINE_OWN_DRIVES_FILE"] = cfg["own_drives_file"]
-            src = Path(os.environ.get("BASELINE_REBUILD_SRC", "/opt/baseline-rebuilder/src"))
-            log = open(LOGS / f"{req['id']}.log", "w")
-            proc = subprocess.Popen([sys.executable, str(src / "baseline/bin/baseline-allscript-install"), "--target", req["target"], "--from", "recovery",
-                                     "--confirm-wipe", auth.serial_for(req["target"])], stdout=log, stderr=subprocess.STDOUT, env=env)
-            running[req["id"]] = (proc, log)
+            serial = load_drives(cfg["drives_file"]).get(req["target"], "")
+            try:
+                size = live_drive(serial)
+                if size is None:
+                    raise rp.PolicyError(f"{req['target']} is not attached")
+                argv = rp.command_for(policy, target=req["target"], serial=serial, size_bytes=size, src=str(src), python=sys.executable, current_source=rp.source_digest(src))
+            except rp.PolicyError as exc:
+                auth.finish(req["id"], 126)
+                (LOGS / f"{req['id']}.log").write_text(f"refused: {exc}\n")
+            else:
+                env = dict(os.environ, BASELINE_DRIVES_FILE=cfg["drives_file"], HOME="/root")
+                if cfg.get("own_drives_file"):
+                    env["BASELINE_OWN_DRIVES_FILE"] = cfg["own_drives_file"]
+                log = open(LOGS / f"{req['id']}.log", "w")
+                running[req["id"]] = (subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT, env=env), log)
         time.sleep(2)
 
 

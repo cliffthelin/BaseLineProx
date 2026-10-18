@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Ask the rebuild service (see baseline-rebuild-service) for a rebuild, and approve it with its one-time code.
 
-  baseline-rebuild request PC601        -> prints a request id and a one-time code
+  baseline-rebuild request PC601 [HOURS] -> prints a request id and a one-time code (valid up to the policy's maximum, a day by default)
   baseline-rebuild approve <id> <code>  -> the rebuild (wipe + install of that drive) starts
   baseline-rebuild status
 """
@@ -33,8 +33,8 @@ def call(message, wait=20):
 
 
 def main(argv):
-    if len(argv) == 3 and argv[1] == "request":
-        message = {"op": "request", "target": argv[2]}
+    if len(argv) in (3, 4) and argv[1] == "request":
+        message = {"op": "request", "target": argv[2], "hours": argv[3] if len(argv) == 4 else None}
     elif len(argv) == 4 and argv[1] == "approve":
         message = {"op": "approve", "id": argv[2], "code": argv[3]}
     elif len(argv) == 2 and argv[1] == "status":

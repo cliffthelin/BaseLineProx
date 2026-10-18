@@ -1,7 +1,7 @@
 """Remote authorization of a full rebuild (a wipe of a named drive), decided by a root service and approved with a one-time code.
 
 The flow, which works from any device that can reach the person's chat or shell:
-  1. `request <target>`   the service records a pending request and returns its id and a one-time code (valid 15 minutes);
+  1. `request <target>`   the service records a pending request and returns its id and a one-time code (valid for the hours asked, within the policy's maximum; a day by default);
   2. the person sends the code back from wherever they are;
   3. `approve <id> <code>`  the service checks the code (3 tries, single use, not expired) and only then queues the rebuild of exactly that target.
 Every message arrives as a small file in an inbox the person's account can write; the service (root) keeps all state in its own directory, so a request, an approval or a code cannot be forged by
@@ -17,7 +17,7 @@ import secrets
 import time
 from pathlib import Path
 
-TTL_SECONDS = 15 * 60
+TTL_SECONDS = 24 * 3600                                                    # default approval window; the policy sets the most a request may ask for
 MAX_TRIES = 3
 _TARGET = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _ID = re.compile(r"^[a-f0-9]{16}$")
@@ -28,10 +28,10 @@ def _hash(code: str, request_id: str) -> str:
 
 
 class Authority:
-    def __init__(self, state_dir, drives: dict, *, now=time.time):
+    def __init__(self, state_dir, drives: dict, *, now=time.time, max_seconds=TTL_SECONDS):
         self.dir = Path(state_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.drives, self.now = dict(drives), now
+        self.drives, self.now, self.max_seconds = dict(drives), now, max_seconds
 
     def _path(self, request_id):
         return self.dir / f"{request_id}.json"
@@ -47,14 +47,17 @@ class Authority:
     def _save(self, req):
         self._path(req["id"]).write_text(json.dumps(req))
 
-    def request(self, target: str) -> dict:
+    def request(self, target: str, hours=None) -> dict:
+        seconds = self.max_seconds if hours is None else int(float(hours) * 3600)
+        if not 0 < seconds <= self.max_seconds:
+            return {"ok": False, "error": f"approval time must be up to {self.max_seconds // 3600} hours"}
         if not _TARGET.match(str(target)) or target not in self.drives:
             return {"ok": False, "error": f"{target!r} is not a drive this machine knows; known: {', '.join(sorted(self.drives)) or 'none'}"}
         if any(r["target"] == target and r["state"] in ("approved", "running") for r in self._all()):
             return {"ok": False, "error": f"a rebuild of {target} is already approved or running"}
         request_id, code = secrets.token_hex(8), f"{secrets.randbelow(10**8):08d}"
-        self._save({"id": request_id, "target": target, "state": "pending", "tries": 0, "code_hash": _hash(code, request_id), "expires": self.now() + TTL_SECONDS})
-        return {"ok": True, "id": request_id, "code": code, "target": target, "expires_in_s": TTL_SECONDS}
+        self._save({"id": request_id, "target": target, "state": "pending", "tries": 0, "code_hash": _hash(code, request_id), "expires": self.now() + seconds})
+        return {"ok": True, "id": request_id, "code": code, "target": target, "expires_in_s": seconds}
 
     def approve(self, request_id: str, code: str) -> dict:
         req = self._load(request_id)

@@ -58,3 +58,8 @@ def test_code_is_not_stored_in_clear(auth, tmp_path):
 
 def test_bad_id_is_rejected(auth):
     assert not auth.approve("../../etc/passwd", "1")["ok"]
+
+
+def test_request_time_is_capped_by_the_maximum(auth):
+    assert not auth.request("ONE", hours=ra.TTL_SECONDS / 3600 + 1)["ok"]
+    assert auth.request("ONE", hours=2)["expires_in_s"] == 7200
