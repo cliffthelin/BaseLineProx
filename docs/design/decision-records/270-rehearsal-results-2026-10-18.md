@@ -20,6 +20,19 @@ Date: 2026-10-18. Status: the offline cache and installer ISO were rebuilt with 
 5. Ubuntu's GDM reads `/etc/gdm3/custom.conf`, not `daemon.conf`; the seed writes both and Ubuntu now signs the owner in.
 6. (Not shown to be needed.) The development SSH key given at install time looked unusable on the first boot, so a development key now also travels with the development user into `/etc/baseline-dev/authorized_keys`, which sshd reads (rehearsal and development only). A later run showed the refusals were probably not the guest's doing at all: see the last section. The change is harmless and stays, but it was not proven to fix anything.
 
+## Second run: the whole carried set on a larger nested drive (2026-10-18)
+The cache drive was raised to 2 TB, so the rehearsal drive became 384 GiB and the cache carries all seven built bases plus Kasm (53.6 GB, 406 packages). The full install ran offline again; with the room, no headroom workaround was needed and all six ready-made systems were created through `POST /vms/action` in 6-21 s each.
+
+Booting each one on the real Proxmox found three more defects, fixed with tests and re-verified on a fresh VM of each:
+7. NixOS: `bash` is not on cloud-init's PATH, so the home script exited 127 and nothing was mounted or signed in. The script is now plain `/bin/sh` with a PATH that covers NixOS, and NixOS gets its GDM autologin by replacing the store-linked `/etc/gdm/custom.conf` with a real file after the home is mounted.
+8. CachyOS: `/home` is already a mountpoint (a btrfs subvolume), so "mount unless /home is a mountpoint" skipped the retained disk and then failed its own check. The disk is now mounted over it when the topmost mount's source is not the retained disk.
+9. CachyOS: its login manager is Plasma Login Manager (`plasmalogin`), not SDDM; it now gets `/etc/plasmalogin.conf.d` autologin (and the SDDM file too, for a base that still has it).
+Also found while building the set: the cache stage called a two-base cache "complete" when seven were wanted; a cache missing a wanted base, or holding an older build, is now stale.
+
+Result per system on the real Proxmox (booted, guest agent up in 12-18 s): Debian, Ubuntu, NixOS and CachyOS each have the owner (uid 1100, password locked, passwordless sudo), a signed-in graphical session, and the retained disk mounted at `/home`. Omarchy reaches its own first-boot setup screen ("Press Return to Start Setup"), as designed.
+
+**Bazzite does not work yet.** It boots (slowly: about four minutes to its login screen) to a KDE login with username and password fields and no account to use, because the base has no account and Bazzite has no cloud-init seed. The retained home disk is not mounted either. It needs its own first-boot owner flow (candidates: systemd credentials/sysusers, or a first-boot unit carried in the base); not built. FydeOS stays blocked (its desktop needs Intel GPU passthrough); Qubes needs the hardware to itself.
+
 ## Not verified, and why
 - Ollama's LXC and the app VMs' first-boot install: the rehearsal has no network and does not carry the container template.
 - NFS and SMB mounts (no file server), the remaining four ready-made systems on Proxmox (not in the rehearsal's set), and the retained home surviving a destroy-and-rebuild of a ready-made VM (the generic rebuild is unit-tested; not repeated here).
