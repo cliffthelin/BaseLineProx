@@ -110,8 +110,9 @@ touch /run/baseline-home-ready
     if spec["greeter"]:                                  # the login screen must not appear before the retained home is mounted
         config["write_files"].append({"path": f"/etc/systemd/system/{spec['greeter']}.service.d/baseline-home.conf", "permissions": "0644",
                                       "content": "[Unit]\nRequiresMountsFor=/home\nConditionPathExists=/run/baseline-home-ready\n"})
-        if spec["greeter"] == "gdm3":                       # sign the owner straight in at the console
-            config["write_files"].append({"path": "/etc/gdm3/daemon.conf", "permissions": "0644", "content": f"[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={owner}\n"})
+        if spec["greeter"] == "gdm3":                       # sign the owner straight in at the console; Debian reads daemon.conf, Ubuntu's GDM reads custom.conf
+            for path in ("/etc/gdm3/daemon.conf", "/etc/gdm3/custom.conf"):
+                config["write_files"].append({"path": path, "permissions": "0644", "content": f"[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={owner}\n"})
         elif spec["greeter"] == "sddm":
             config["write_files"].append({"path": "/etc/sddm.conf.d/baseline-autologin.conf", "permissions": "0644", "content": f"[Autologin]\nUser={owner}\n"})
     for key, items in (extra or {}).items():             # an application environment adds files, mounts and first-boot commands after the base ones

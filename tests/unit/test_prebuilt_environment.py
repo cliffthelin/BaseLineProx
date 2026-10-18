@@ -46,6 +46,8 @@ def test_the_seed_makes_the_owners_account_with_no_password_signs_it_in_and_hold
     assert "gdm3" in drop_in["path"] and "RequiresMountsFor=/home" in drop_in["content"]
     login = next(w for w in config["write_files"] if w["path"] == "/etc/gdm3/daemon.conf")
     assert "AutomaticLogin=cliff" in login["content"]                                                  # the console signs the owner straight in
+    ubuntu = json.loads(pe.cloud_config("ubuntu", owner="cliff", initialize_home=False, hostname="work").split("\n", 1)[1])
+    assert any(w["path"] == "/etc/gdm3/custom.conf" and "AutomaticLogin=cliff" in w["content"] for w in ubuntu["write_files"])   # Ubuntu's GDM reads custom.conf (found on the rehearsal)
     fresh = json.loads(pe.cloud_config("debian", owner="cliff", initialize_home=True, hostname="work").split("\n", 1)[1])
     assert "mkfs.ext4" in fresh["bootcmd"][0][2] and "cmp -n" in fresh["bootcmd"][0][2] and "blkid" in fresh["bootcmd"][0][2]
 
