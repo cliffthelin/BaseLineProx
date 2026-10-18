@@ -13,12 +13,21 @@ from pathlib import Path
 
 FORMAT = "baseline.app-catalogue/v1"
 CATEGORIES = ("browsers", "developer-tools", "ai-tools", "media", "ai-image-tools", "office-tools")
-ROUTES = ("apt", "pacman", "nix", "flatpak", "proot", "container")
+ROUTES = ("apt", "deb", "pacman", "nix", "flatpak", "appimage", "service", "proot", "container")
 # What each system prefers first. Immutable and declarative systems have narrower choices; Ubuntu's repository packages for browsers are snaps, so it prefers Flatpak.
 PREFERENCE = {
-    "debian": ("apt", "flatpak"), "ubuntu": ("flatpak", "apt"), "cachyos": ("pacman", "flatpak"), "omarchy": ("pacman", "flatpak"),
-    "bazzite": ("flatpak",), "nixos": ("nix", "flatpak"), "kasm": ("proot", "container"),
+    "debian": ("apt", "deb", "flatpak", "appimage", "service"), "ubuntu": ("flatpak", "deb", "apt", "appimage", "service"), "cachyos": ("pacman", "flatpak", "appimage", "service"),
+    "omarchy": ("pacman", "flatpak", "appimage", "service"), "bazzite": ("flatpak", "appimage", "service"), "nixos": ("nix", "flatpak"), "kasm": ("proot", "container"),
 }
+# Publishers whose Debian package index (or fixed download) is read to find the current file; the index also gives the SHA-256 that is checked before the package is installed.
+PUBLISHERS = {
+    "spotify": {"base": "https://repository.spotify.com/", "index": "dists/stable/non-free/binary-amd64/Packages", "package": "spotify-client"},
+    "claude": {"base": "https://downloads.claude.ai/claude-desktop/apt/stable/", "index": "dists/stable/main/binary-amd64/Packages", "package": "claude-desktop"},
+    "chatgpt": {"url": "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb"},          # no index: its hash is recorded when first fetched
+}
+_APPIMAGE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,40}$")
+_RELEASE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_ASSET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$")
 _ID = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 _PACKAGE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,80}$")
 _FLATPAK = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+){2,}$")
@@ -42,6 +51,10 @@ def validate_entry(entry) -> dict:
         ok = {"apt": lambda p: _PACKAGE.match(str(p.get("package", ""))), "pacman": lambda p: _PACKAGE.match(str(p.get("package", ""))),
               "nix": lambda p: _NIX_ATTR.match(str(p.get("attr", ""))), "flatpak": lambda p: _FLATPAK.match(str(p.get("id", ""))),
               "proot": lambda p: _PACKAGE.match(str(p.get("name", ""))),
+              "deb": lambda p: p.get("publisher") in PUBLISHERS,
+              "appimage": lambda p: str(p.get("url", "")).startswith("https://") and not re.search(r"[\s'\"`$;&|<>\\]", str(p.get("url", ""))) and _APPIMAGE_NAME.match(str(p.get("name", ""))),
+              "service": lambda p: _RELEASE.match(str(p.get("release", ""))) and _ASSET.match(str(p.get("asset", ""))) and isinstance(p.get("port"), int) and 1 <= p["port"] <= 65535
+              and str(p.get("models", "")).startswith("/") and ".." not in str(p.get("models", "")) and not re.search(r"[\s'\"`$;&|<>\\]", str(p.get("models", ""))),
               "container": lambda p: _IMAGE.match(str(p.get("image", ""))) and isinstance(p.get("ports"), list) and all(isinstance(x, int) and 1 <= x <= 65535 for x in p["ports"])
               and str(p.get("config", "")).startswith("/")}[route](params)
         if not ok:
@@ -49,6 +62,8 @@ def validate_entry(entry) -> dict:
         only = params.get("only")
         if only is not None and (not isinstance(only, list) or not all(o in PREFERENCE for o in only)):
             raise CatalogueError(f"{entry['id']}.{route}: only lists known systems")
+    if "launch" in entry and not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,60}", str(entry["launch"])):
+        raise CatalogueError(f"{entry['id']}: launch is the name of one command")
     data = entry.get("data", [])
     if not isinstance(data, list) or not all(isinstance(d, str) and d.startswith(("~/", "/")) and ".." not in d for d in data):
         raise CatalogueError(f"{entry['id']}: data paths are absolute or start with ~/")
@@ -93,9 +108,10 @@ _FLATPAK_FIRST = {"debian": _APT_UPDATE + "\napt-get install -y flatpak", "ubunt
                   "bazzite": "command -v flatpak >/dev/null"}
 
 
-def install_script(entry: dict, os_id: str):
+def install_script(entry: dict, os_id: str, resolved: dict = None):
     """The shell that installs the application on this system, or None where the route is not an install-time command (nix is declared in the configuration; proot and container belong to the Kasm
-    and service-host sides). Non-interactive and fail-fast."""
+    and service-host sides). Non-interactive and fail-fast. The `deb`, `appimage` and `service` routes download a file: `resolved` (from `resolve`) names the exact file and the SHA-256 to check; without
+    one the script still downloads the current file, records its SHA-256 in /var/lib/baseline/app-hashes (the first fetch becomes the reference) and says so."""
     route, params = route_for(entry, os_id)
     if route is None:
         raise CatalogueError(params)
@@ -107,7 +123,111 @@ def install_script(entry: dict, os_id: str):
     if route == "flatpak":
         prerequisite = _FLATPAK_FIRST.get(os_id)
         return "\n".join(head + ([prerequisite] if prerequisite else []) + [f"flatpak remote-add --if-not-exists --system flathub {FLATHUB}", f"flatpak install -y --system --noninteractive flathub {params['id']}"]) + "\n"
+    if route in ("deb", "appimage", "service"):
+        return "\n".join(head + _download_lines(entry, route, params, resolved or {})) + "\n"
     return None
+
+
+# A freshly built base has no package lists and may have no curl: fetch both before anything is downloaded, whichever package manager the system has.
+_NEED_CURL = ('command -v curl >/dev/null || { if command -v apt-get >/dev/null; then ' + _APT_UPDATE.replace("\n", " ") + '; apt-get install -y curl ca-certificates; '
+              'elif command -v pacman >/dev/null; then pacman -Syu --noconfirm --needed curl; fi; }')
+
+
+def _fetch_and_check(url: str, target: str, sha256: str, key: str) -> list:
+    lines = [_NEED_CURL, "mkdir -p /var/lib/baseline/app-hashes", f"curl -fL --proto '=https' --tlsv1.2 -o {target} '{url}'"]
+    if sha256:
+        if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+            raise CatalogueError("a SHA-256 is 64 lowercase hex characters")
+        lines.append(f"echo '{sha256}  {target}' | sha256sum -c -")
+    else:
+        lines += [f"sha256sum {target} | cut -d' ' -f1 > /var/lib/baseline/app-hashes/{key}", f"echo 'no hash was pinned for {key}; recorded' \"$(cat /var/lib/baseline/app-hashes/{key})\" 'as the reference' >&2"]
+    return lines
+
+
+def _download_lines(entry: dict, route: str, params: dict, resolved: dict) -> list:
+    key = entry["id"]
+    url = resolved.get("url") or (PUBLISHERS[params["publisher"]].get("url") if route == "deb" else params.get("url"))
+    if route == "deb":
+        if not url:
+            raise CatalogueError(f"{entry['name']}: its package must be resolved first (resolve) so the file and its hash are named")
+        return _fetch_and_check(url, "/tmp/app.deb", resolved.get("sha256", ""), key) + ["apt-get install -y /tmp/app.deb", "rm -f /tmp/app.deb"]
+    if route == "appimage":
+        name = params["name"]
+        return (_fetch_and_check(url, f"/tmp/{name}.AppImage", resolved.get("sha256", ""), key)
+                + ["if command -v apt-get >/dev/null; then apt-get install -y libfuse2t64 2>/dev/null || apt-get install -y libfuse2 2>/dev/null || true; fi", "mkdir -p /opt/appimages",
+                   f"install -m 0755 /tmp/{name}.AppImage /opt/appimages/{name}.AppImage", f"rm -f /tmp/{name}.AppImage",
+                   f"printf '#!/bin/sh\\nexec /opt/appimages/{name}.AppImage --appimage-extract-and-run \"$@\"\\n' > /usr/local/bin/{key}", f"chmod 0755 /usr/local/bin/{key}"])
+    # a systemd service from a release tarball (Ollama): extracted under /opt, run by its own unprivileged user, data on the mount named in the entry
+    models, port = params["models"], params["port"]
+    if not url:
+        raise CatalogueError(f"{entry['name']}: its release must be resolved first (resolve) so the file and its hash are named")
+    return (["if command -v apt-get >/dev/null; then " + _APT_UPDATE + "; apt-get install -y zstd; elif command -v pacman >/dev/null; then pacman -Syu --noconfirm --needed zstd; fi"]
+            + _fetch_and_check(url, "/tmp/service.tar.zst", resolved.get("sha256", ""), key)
+            + [f"mkdir -p /opt/{key}", f"zstd -dc /tmp/service.tar.zst | tar -x -C /opt/{key}", "rm -f /tmp/service.tar.zst",
+               f"ln -sf /opt/{key}/bin/{key} /usr/local/bin/{key}",
+               f"id {key} >/dev/null 2>&1 || useradd --system --home-dir {models} --shell /usr/sbin/nologin {key}",
+               f"mkdir -p {models}", f"chown {key}: {models}",
+               f"cat > /etc/systemd/system/{key}.service <<'UNIT'", "[Unit]", f"Description={entry['name']} server", "After=network-online.target", "Wants=network-online.target", "RequiresMountsFor=" + models,
+               "[Service]", f"ExecStart=/opt/{key}/bin/{key} serve", f"User={key}", f"Group={key}", f"Environment=OLLAMA_HOST=0.0.0.0:{port}" if key == "ollama" else f"Environment=PORT={port}",
+               f"Environment=OLLAMA_MODELS={models}" if key == "ollama" else f"Environment=DATA_DIR={models}", "Restart=always", "RestartSec=3", "[Install]", "WantedBy=multi-user.target", "UNIT",
+               "systemctl daemon-reload", f"systemctl enable --now {key}"])
+
+
+# ---- finding the exact file (done on the machine with the network, before the script is written) -------------------------------------------------------
+def _http_get(opener, url, limit=32 * 1024 * 1024, headers=None):
+    import urllib.request
+    request = urllib.request.Request(url, headers={"User-Agent": "baseline-app-catalogue", **(headers or {})})
+    try:
+        with opener(request, timeout=30) as response:
+            data = response.read(limit + 1)
+            return data, getattr(response, "url", url) if not hasattr(response, "geturl") else response.geturl()
+    except OSError as exc:
+        raise CatalogueError(f"could not read {url}: {exc}") from None
+
+
+def resolve(entry: dict, os_id: str, opener=None) -> dict:
+    """{url, sha256?, version?} for a route that downloads a file, found from the publisher's own index or release data: a Debian package index (its SHA-256 and filename), a GitHub release asset
+    (its published SHA-256), or the versioned address a download link redirects to (no hash is published: the script records one). {} for routes that download nothing."""
+    import urllib.request
+    opener = opener or urllib.request.urlopen
+    route, params = route_for(entry, os_id)
+    if route == "deb":
+        publisher = PUBLISHERS[params["publisher"]]
+        if "url" in publisher:
+            return {"url": publisher["url"]}
+        data, _ = _http_get(opener, publisher["base"] + publisher["index"])
+        best = None
+        for stanza in data.decode("utf-8", "replace").split("\n\n"):
+            fields = dict(line.split(": ", 1) for line in stanza.splitlines() if ": " in line and not line.startswith(" "))
+            if fields.get("Package") == publisher["package"] and fields.get("Architecture") == "amd64" and re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,128}", fields.get("Version", "")):
+                if best is None or _newer(fields["Version"], best["Version"]):
+                    best = fields
+        if best is None or not best.get("Filename") or not re.fullmatch(r"[0-9a-f]{64}", best.get("SHA256", "")):
+            raise CatalogueError(f"{entry['name']}: the publisher's index has no usable package")
+        return {"url": publisher["base"] + best["Filename"], "sha256": best["SHA256"], "version": best["Version"]}
+    if route == "service":
+        import json as _json
+        data, _ = _http_get(opener, f"https://api.github.com/repos/{params['release']}/releases/latest", headers={"Accept": "application/vnd.github+json"})
+        release = _json.loads(data.decode())
+        asset = next((a for a in release.get("assets", []) if a.get("name") == params["asset"]), None)
+        digest = str((asset or {}).get("digest", ""))
+        if asset is None or not digest.startswith("sha256:") or not re.fullmatch(r"[0-9a-f]{64}", digest[7:]):
+            raise CatalogueError(f"{entry['name']}: the release has no {params['asset']} with a published SHA-256")
+        return {"url": asset["browser_download_url"], "sha256": digest[7:], "version": release.get("tag_name", "")}
+    if route == "appimage":
+        request = urllib.request.Request(params["url"], method="HEAD", headers={"User-Agent": "baseline-app-catalogue"})
+        try:
+            with opener(request, timeout=30) as response:
+                final = response.geturl() if hasattr(response, "geturl") else params["url"]
+        except OSError as exc:
+            raise CatalogueError(f"could not read {params['url']}: {exc}") from None
+        return {"url": final}
+    return {}
+
+
+def _newer(a: str, b: str) -> bool:
+    import subprocess
+    return subprocess.run(["dpkg", "--compare-versions", a, "gt", b], capture_output=True).returncode == 0
 
 
 def nix_attrs(entries) -> list:

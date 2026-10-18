@@ -1,60 +1,299 @@
 {
  "format": "baseline.app-catalogue/v1",
- "_note": "One entry per application: which way it is installed on each kind of system, where its data lives, and what a person should know. Adding an application is adding one entry. Categories follow the operator's order (DR266): browsers, developer tools, AI tools, media, AI image tools, office tools; only browsers are filled so far. Every Flatpak id was checked against Flathub's own API on 2026-10-17; apt and pacman names are only used where the system's own repository has the package.",
+ "_note": "One entry per application: which way it is installed on each kind of system, where its data lives, and what a person should know. Adding an application is adding one entry. Categories follow the operator's order (DR266): browsers, developer tools, AI tools, media, AI image tools, office tools; browsers are filled, and the six the operator named for Proxmox (VS Code, Spotify, Claude, ChatGPT, LM Studio, Ollama). Every Flatpak id was checked against Flathub's own API on 2026-10-17; apt and pacman names are only used where the system's own repository has the package.",
  "apps": [
   {
-   "id": "firefox", "name": "Firefox", "category": "browsers",
+   "id": "firefox",
+   "name": "Firefox",
+   "category": "browsers",
    "routes": {
-    "apt": {"package": "firefox-esr", "only": ["debian"]},
-    "pacman": {"package": "firefox"},
-    "nix": {"attr": "firefox"},
-    "flatpak": {"id": "org.mozilla.firefox"},
-    "proot": {"name": "firefox"},
-    "container": {"image": "lscr.io/linuxserver/firefox:latest", "ports": [3000, 3001], "config": "/config"}
+    "apt": {
+     "package": "firefox-esr",
+     "only": [
+      "debian"
+     ]
+    },
+    "pacman": {
+     "package": "firefox"
+    },
+    "nix": {
+     "attr": "firefox"
+    },
+    "flatpak": {
+     "id": "org.mozilla.firefox"
+    },
+    "proot": {
+     "name": "firefox"
+    },
+    "container": {
+     "image": "lscr.io/linuxserver/firefox:latest",
+     "ports": [
+      3000,
+      3001
+     ],
+     "config": "/config"
+    }
    },
-   "data": ["~/.mozilla", "~/.var/app/org.mozilla.firefox"]
+   "data": [
+    "~/.mozilla",
+    "~/.var/app/org.mozilla.firefox"
+   ],
+   "launch": "firefox-esr"
   },
   {
-   "id": "chromium", "name": "Chromium", "category": "browsers",
+   "id": "chromium",
+   "name": "Chromium",
+   "category": "browsers",
    "routes": {
-    "apt": {"package": "chromium", "only": ["debian"]},
-    "pacman": {"package": "chromium"},
-    "nix": {"attr": "chromium"},
-    "flatpak": {"id": "org.chromium.Chromium"},
-    "proot": {"name": "chromium"},
-    "container": {"image": "lscr.io/linuxserver/chromium:latest", "ports": [3000, 3001], "config": "/config"}
+    "apt": {
+     "package": "chromium",
+     "only": [
+      "debian"
+     ]
+    },
+    "pacman": {
+     "package": "chromium"
+    },
+    "nix": {
+     "attr": "chromium"
+    },
+    "flatpak": {
+     "id": "org.chromium.Chromium"
+    },
+    "proot": {
+     "name": "chromium"
+    },
+    "container": {
+     "image": "lscr.io/linuxserver/chromium:latest",
+     "ports": [
+      3000,
+      3001
+     ],
+     "config": "/config"
+    }
    },
-   "data": ["~/.config/chromium", "~/.var/app/org.chromium.Chromium"]
+   "data": [
+    "~/.config/chromium",
+    "~/.var/app/org.chromium.Chromium"
+   ],
+   "launch": "chromium"
   },
   {
-   "id": "brave", "name": "Brave", "category": "browsers",
+   "id": "brave",
+   "name": "Brave",
+   "category": "browsers",
    "routes": {
-    "nix": {"attr": "brave"},
-    "flatpak": {"id": "com.brave.Browser"},
-    "proot": {"name": "brave"},
-    "container": {"image": "lscr.io/linuxserver/brave:latest", "ports": [3000, 3001], "config": "/config"}
+    "nix": {
+     "attr": "brave"
+    },
+    "flatpak": {
+     "id": "com.brave.Browser"
+    },
+    "proot": {
+     "name": "brave"
+    },
+    "container": {
+     "image": "lscr.io/linuxserver/brave:latest",
+     "ports": [
+      3000,
+      3001
+     ],
+     "config": "/config"
+    }
    },
-   "data": ["~/.config/BraveSoftware", "~/.var/app/com.brave.Browser"]
+   "data": [
+    "~/.config/BraveSoftware",
+    "~/.var/app/com.brave.Browser"
+   ]
   },
   {
-   "id": "librewolf", "name": "LibreWolf", "category": "browsers",
+   "id": "librewolf",
+   "name": "LibreWolf",
+   "category": "browsers",
    "routes": {
-    "nix": {"attr": "librewolf"},
-    "flatpak": {"id": "io.gitlab.librewolf-community"},
-    "proot": {"name": "librewolf"},
-    "container": {"image": "lscr.io/linuxserver/librewolf:latest", "ports": [3000, 3001], "config": "/config"}
+    "nix": {
+     "attr": "librewolf"
+    },
+    "flatpak": {
+     "id": "io.gitlab.librewolf-community"
+    },
+    "proot": {
+     "name": "librewolf"
+    },
+    "container": {
+     "image": "lscr.io/linuxserver/librewolf:latest",
+     "ports": [
+      3000,
+      3001
+     ],
+     "config": "/config"
+    }
    },
-   "data": ["~/.librewolf", "~/.var/app/io.gitlab.librewolf-community"]
+   "data": [
+    "~/.librewolf",
+    "~/.var/app/io.gitlab.librewolf-community"
+   ]
   },
   {
-   "id": "vivaldi", "name": "Vivaldi", "category": "browsers",
+   "id": "vivaldi",
+   "name": "Vivaldi",
+   "category": "browsers",
    "routes": {
-    "nix": {"attr": "vivaldi"},
-    "flatpak": {"id": "com.vivaldi.Vivaldi"},
-    "proot": {"name": "vivaldi"},
-    "container": {"image": "lscr.io/linuxserver/vivaldi:latest", "ports": [3000, 3001], "config": "/config"}
+    "nix": {
+     "attr": "vivaldi"
+    },
+    "flatpak": {
+     "id": "com.vivaldi.Vivaldi"
+    },
+    "proot": {
+     "name": "vivaldi"
+    },
+    "container": {
+     "image": "lscr.io/linuxserver/vivaldi:latest",
+     "ports": [
+      3000,
+      3001
+     ],
+     "config": "/config"
+    }
    },
-   "data": ["~/.config/vivaldi", "~/.var/app/com.vivaldi.Vivaldi"]
+   "data": [
+    "~/.config/vivaldi",
+    "~/.var/app/com.vivaldi.Vivaldi"
+   ]
+  },
+  {
+   "id": "vscode",
+   "name": "Visual Studio Code",
+   "category": "developer-tools",
+   "routes": {
+    "nix": {
+     "attr": "vscode"
+    },
+    "flatpak": {
+     "id": "com.visualstudio.code"
+    },
+    "proot": {
+     "name": "vscode"
+    }
+   },
+   "data": [
+    "~/.config/Code",
+    "~/.vscode",
+    "~/.var/app/com.visualstudio.code"
+   ]
+  },
+  {
+   "id": "spotify",
+   "name": "Spotify",
+   "category": "media",
+   "routes": {
+    "deb": {
+     "publisher": "spotify",
+     "only": [
+      "debian",
+      "ubuntu"
+     ]
+    },
+    "nix": {
+     "attr": "spotify"
+    },
+    "flatpak": {
+     "id": "com.spotify.Client"
+    },
+    "proot": {
+     "name": "spotify"
+    }
+   },
+   "data": [
+    "~/.config/spotify",
+    "~/.var/app/com.spotify.Client"
+   ],
+   "launch": "spotify"
+  },
+  {
+   "id": "claude",
+   "name": "Claude (desktop, with Claude Code)",
+   "category": "ai-tools",
+   "routes": {
+    "deb": {
+     "publisher": "claude",
+     "only": [
+      "debian",
+      "ubuntu"
+     ]
+    },
+    "proot": {
+     "name": "claude"
+    }
+   },
+   "data": [
+    "~/.config/Claude",
+    "~/.claude"
+   ],
+   "launch": "claude-desktop"
+  },
+  {
+   "id": "chatgpt",
+   "name": "ChatGPT (desktop)",
+   "category": "ai-tools",
+   "routes": {
+    "deb": {
+     "publisher": "chatgpt",
+     "only": [
+      "debian",
+      "ubuntu"
+     ]
+    },
+    "proot": {
+     "name": "chatgpt"
+    }
+   },
+   "data": [
+    "~/.config/chatgpt"
+   ],
+   "launch": "chatgpt"
+  },
+  {
+   "id": "lm-studio",
+   "name": "LM Studio",
+   "category": "ai-tools",
+   "routes": {
+    "appimage": {
+     "url": "https://lmstudio.ai/download/latest/linux/x64",
+     "name": "LM-Studio"
+    },
+    "proot": {
+     "name": "lmstudio"
+    }
+   },
+   "data": [
+    "~/.lmstudio",
+    "~/.cache/lm-studio"
+   ],
+   "launch": "lm-studio"
+  },
+  {
+   "id": "ollama",
+   "name": "Ollama",
+   "category": "ai-tools",
+   "routes": {
+    "pacman": {
+     "package": "ollama"
+    },
+    "nix": {
+     "attr": "ollama"
+    },
+    "service": {
+     "release": "ollama/ollama",
+     "asset": "ollama-linux-amd64.tar.zst",
+     "port": 11434,
+     "models": "/models"
+    }
+   },
+   "data": [
+    "/models"
+   ]
   }
  ]
 }

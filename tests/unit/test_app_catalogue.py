@@ -13,11 +13,12 @@ def cat():
     return ac.load()
 
 
-def test_the_shipped_catalogue_is_valid_and_has_the_first_category_of_browsers(cat):
-    assert {"firefox", "chromium", "brave", "librewolf", "vivaldi"} <= set(cat)
-    assert all(e["category"] == "browsers" for e in cat.values())
-    assert all("flatpak" in e["routes"] for e in cat.values())                                    # every application has a route that fits an immutable system
-    assert all(e["routes"]["container"]["image"].endswith(":latest") and not e["routes"]["container"]["image"].endswith(":kasm") for e in cat.values())   # never LinuxServer's deprecated kasm tags
+def test_the_shipped_catalogue_is_valid_and_has_the_browsers_and_the_six_proxmox_apps(cat):
+    assert {"firefox", "chromium", "brave", "librewolf", "vivaldi", "vscode", "spotify", "claude", "chatgpt", "lm-studio", "ollama"} <= set(cat)
+    browsers = [e for e in cat.values() if e["category"] == "browsers"]
+    assert len(browsers) == 5 and all("flatpak" in e["routes"] for e in browsers)                  # every browser has a route that fits an immutable system
+    images = [e["routes"]["container"]["image"] for e in cat.values() if "container" in e["routes"]]
+    assert images and all(i.endswith(":latest") for i in images)                                     # never LinuxServer's deprecated kasm tags
 
 
 def test_each_system_picks_from_its_own_preference_order(cat):

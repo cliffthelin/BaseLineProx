@@ -164,7 +164,7 @@ async function createFromList(a){
   if (a.blocked){ toast(a.name + ' cannot be created here: ' + a.blocked); return; }
   const p = a.plan;
   if (p.prebuilt){
-    if (!confirm('Create ' + a.name + ' from its ready-made base?\n\nIt already has its desktop and applications; no installer runs. ' + p.memory_mb + ' MB memory, ' + p.cpus + ' CPUs, UEFI.\nIt is created stopped; you get a one-time login to save where the system makes the account that way.')) return;
+    if (!confirm('Create ' + a.name + ' from its ready-made base?\n\nIt already has its desktop and applications; no installer runs. ' + p.memory_mb + ' MB memory, ' + p.cpus + ' CPUs, UEFI.\nIt is created stopped. When you start it you are signed in as yourself; there is no separate login.')) return;
     return power({kind:'vm'}, 'create_prebuilt', {name:p.name, os:p.os, memory_mb:p.memory_mb, cpus:p.cpus});
   }
   if (!confirm('Create ' + a.name + ' from ' + p.iso + '?\n\n' + p.disk_gb + ' GB disk, ' + p.memory_mb + ' MB memory, ' + p.cpus + ' CPUs, UEFI.\nIt is created stopped. You can change these afterwards in VM settings.')) return;
@@ -262,7 +262,6 @@ async function power(t, action, params){
       }
     }
     toast(j.message || (j.ok ? 'Done' : 'Failed'));
-    if (j.message && j.message.indexOf('one-time login') >= 0) alert(j.message);      // a login is shown once and kept nowhere: it must not vanish with the toast
   }catch(e){ toast('Connection lost. Check the tile before retrying.'); }
   await refresh();
 }

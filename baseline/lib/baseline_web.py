@@ -3648,6 +3648,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             if action not in actions[kind]:
                 return self._json(400,{'ok':False,'message':'unknown workload action'})
             params={k:v for k,v in body.items() if k not in ('action','request_id')}
+            submitter=(deps['sessions'].get(self._cookie_token(),now) or type('S',(),{'username':''})()).username     # the Proxmox user who is signed in: the owner of what is created
             origin=None
             if kind=='container' and action in ('backup','restore'):
                 gate=deps.get('web_gate')
@@ -3664,7 +3665,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 host.run=traced_run
                 try:
                     result=container_page.perform(host,action,params,origin=origin,backup_run=deps.get('container_backup_run')) if kind=='container' else \
-                        vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR,os_bases_dir=deps.get('os_bases_dir') or DEFAULT_OS_BASES_DIR)
+                        vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR,os_bases_dir=deps.get('os_bases_dir') or DEFAULT_OS_BASES_DIR,owner=submitter)
                 finally:
                     host.run=original_run
                 audit=deps.get('audit')

@@ -25,7 +25,7 @@ def _int(params: dict, key: str, label: str) -> int:
         raise vh.VmError(f"{label} must be a whole number") from None
 
 
-def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir, os_bases_dir=None) -> dict:
+def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir, os_bases_dir=None, owner=None) -> dict:
     name = str(params.get("name", ""))
     try:
         if action in _NEEDS_CONFIRM and params.get("confirm") != "yes":
@@ -58,10 +58,9 @@ def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir, os_bases_dir
             if os_bases_dir is None:
                 raise vh.VmError("no folder of ready-made bases is configured")
             pe.install_base(host, os_id, os_bases_dir)
-            created = pe.create(host, name, os_id, memory_mb=_int(params, "memory_mb", "memory"), cpus=_int(params, "cpus", "cpus"),
+            created = pe.create(host, name, os_id, owner=pe.owner_account(host, owner), memory_mb=_int(params, "memory_mb", "memory"), cpus=_int(params, "cpus", "cpus"),
                                 disk_gb=_int(params, "disk_gb", "disk size") if params.get("disk_gb") else None)
-            note = (f" Save this one-time login: user {created['username']}, password {created['password']}." if created.get("password") else "")
-            return dict(created, ok=True, message=created["message"] + note)
+            return dict(created, ok=True)
         if action == "create_iso":
             iso = {i["name"]: i["path"] for i in available_isos(host, iso_dir)}.get(str(params.get("iso", "")))
             if iso is None:

@@ -195,7 +195,7 @@ def test_ubuntu_configuration_verification_is_a_real_native_action(env,monkeypat
     assert not result['ok']
 
 
-def test_creating_from_a_carried_base_installs_it_makes_the_vm_and_shows_the_one_time_login_once(tmp_path):
+def test_creating_from_a_carried_base_installs_it_and_makes_the_vm_for_the_signed_in_user_with_no_separate_login(tmp_path):
     import hashlib
     import json
     import vm_page
@@ -205,10 +205,10 @@ def test_creating_from_a_carried_base_installs_it_makes_the_vm_and_shows_the_one
     folder.mkdir()
     (folder / "debian-base.qcow2").write_bytes(b"base")
     (folder / "debian-base.json").write_text(json.dumps({"base": "debian-base.qcow2", "sha256": hashlib.sha256(b"base").hexdigest(), "holds_install_state_or_secrets": False}))
-    got = vm_page.perform(f.host, "create_prebuilt", {"name": "work", "os": "debian", "memory_mb": "4096", "cpus": "2"}, iso_dir=tmp_path / "isos", os_bases_dir=folder)
-    assert got["ok"] is True and "one-time login" in got["message"] and got["username"] == "baseline-admin" and got["password"] in got["message"]
+    got = vm_page.perform(f.host, "create_prebuilt", {"name": "work", "os": "debian", "memory_mb": "4096", "cpus": "2"}, iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
+    assert got["ok"] is True and got["owner"] == "cliff" and "password" not in got and "password" not in got["message"].lower()
     assert f.host._spec("work")["base"] == "debian-base"
-    for bad in ({"name": "x", "os": "windows"}, {"name": "x", "os": "ubuntu", "memory_mb": "4096", "cpus": "2"}):
-        refused = vm_page.perform(f.host, "create_prebuilt", dict(bad, memory_mb="4096", cpus="2"), iso_dir=tmp_path / "isos", os_bases_dir=folder)
+    for bad in ({"name": "x", "os": "windows"}, {"name": "x", "os": "ubuntu"}):
+        refused = vm_page.perform(f.host, "create_prebuilt", dict(bad, memory_mb="4096", cpus="2"), iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
         assert refused["ok"] is False                                              # an unknown system, or a base this machine does not carry
-    assert vm_page.perform(f.host, "create_prebuilt", {"name": "y", "os": "debian", "memory_mb": "4096", "cpus": "2"}, iso_dir=tmp_path / "isos")["ok"] is False   # no folder configured
+    assert vm_page.perform(f.host, "create_prebuilt", {"name": "y", "os": "debian", "memory_mb": "4096", "cpus": "2"}, iso_dir=tmp_path / "isos", owner="cliff")["ok"] is False   # no folder configured

@@ -302,24 +302,17 @@ exit "$status"
 """
 
 
-# ---- first boot: the person's account comes from a seed, never from the base -------------------------------------------------------------------
-def first_boot_seed(*, username: str, password_hash: str = "", ssh_keys=(), hostname: str, instance_id: str) -> dict:
-    """The two files of a cloud-init NoCloud drive (label `cidata`) that make the person's account on the first boot of a VM made from a base. The password is accepted only as a salted hash
-    (`$6$...`), never as text; with no hash and no key the account has no way in, and that is refused rather than made."""
+# ---- first boot: the owner's account comes from a seed, never from the base ---------------------------------------------------------------------
+def first_boot_seed(*, username: str, ssh_keys=(), hostname: str, instance_id: str) -> dict:
+    """The two files of a cloud-init NoCloud drive (label `cidata`) that make the owner's account on the first boot of a VM made from a base. The owner is the Proxmox user who is already signed in,
+    so the account has NO password (nothing to guess, store or show), may use sudo without a prompt, and the console signs it in; SSH keys are optional for remote use."""
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", hostname) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", instance_id):
         raise BuildError("username, hostname or instance id is not a plain value")
-    if password_hash and not re.fullmatch(r"\$6\$[A-Za-z0-9./]{1,16}\$[A-Za-z0-9./]{86}", password_hash):
-        raise BuildError("a salted SHA-512 password hash is required, never a plain password")
     keys = [k.strip() for k in ssh_keys]
     if not all(re.fullmatch(r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+|sk-ssh-ed25519@openssh.com) [A-Za-z0-9+/=]+( [^\n]{0,80})?", k) for k in keys):
         raise BuildError("an SSH key is not in the usual one-line form")
-    if not password_hash and not keys:
-        raise BuildError("an account with no password hash and no key could never be used")
-    lines = ["#cloud-config", "users:", f"  - name: {username}", "    groups: [sudo, wheel]", "    sudo: ALL=(ALL) ALL", "    shell: /bin/bash"]
-    lines.append(f"    passwd: '{password_hash}'" if password_hash else "    lock_passwd: true")
-    if password_hash:
-        lines.append("    lock_passwd: false")
+    lines = ["#cloud-config", "users:", f"  - name: {username}", "    uid: 1100", "    groups: [sudo, wheel]", "    sudo: ALL=(ALL) NOPASSWD:ALL", "    shell: /bin/bash", "    lock_passwd: true"]
     if keys:
         lines += ["    ssh_authorized_keys:"] + [f"      - {k}" for k in keys]
-    lines += ["ssh_pwauth: " + ("true" if password_hash else "false"), "disable_root: true"]
+    lines += ["ssh_pwauth: false", "disable_root: true"]
     return {"user-data": "\n".join(lines) + "\n", "meta-data": f"instance-id: {instance_id}\nlocal-hostname: {hostname}\n"}

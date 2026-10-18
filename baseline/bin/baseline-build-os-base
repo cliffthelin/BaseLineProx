@@ -553,7 +553,7 @@ def build_cachyos(args, work: Path, out: Path):
 
 
 def first_boot_check(args) -> int:
-    """Use a finished base the way a VM made from it would be: a throwaway layer over it, a seed that creates an account from a hash, and a look through the guest agent at whether that
+    """Use a finished base the way a VM made from it would be: a throwaway layer over it, a seed that creates the owner's account (no password), and a look through the guest agent at whether that
     account came to exist. Nothing is kept."""
     import secrets
     work = args.output / f"first-boot-{args.os}"
@@ -562,11 +562,9 @@ def first_boot_check(args) -> int:
     base = args.base.resolve()
     overlay = work / "overlay.qcow2"
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(base), "-F", "qcow2", str(overlay)], check=True)
-    password = secrets.token_urlsafe(18)
-    hashed = subprocess.run(["openssl", "passwd", "-6", "-stdin"], input=password, capture_output=True, text=True, check=True).stdout.strip()
     seed = work / "seed"
     seed.mkdir()
-    for name, text in ob.first_boot_seed(username="alex", password_hash=hashed, hostname="firstboot", instance_id=f"first-boot-{args.os}").items():
+    for name, text in ob.first_boot_seed(username="alex", hostname="firstboot", instance_id=f"first-boot-{args.os}").items():
         (seed / name).write_text(text)
     make_iso("cidata", seed, work / "seed.iso")
     vars_file = work / "vars.fd"
@@ -594,7 +592,7 @@ def first_boot_check(args) -> int:
             return 1
         time.sleep(20)                                           # cloud-init runs its modules after the agent is up
         report = {}
-        for name, command in (("account", "id alex"), ("password", "passwd -S alex"), ("cloud-init", "cloud-init status --long 2>&1 | head -5"), ("hostname", "hostname")):
+        for name, command in (("account", "id alex"), ("password-locked", "passwd -S alex"), ("sudo", "sudo -n -u alex sudo -n true && echo sudo-without-a-prompt"), ("cloud-init", "cloud-init status --long 2>&1 | head -5"), ("hostname", "hostname")):
             code, out, err = client.exec("/bin/sh", ["-c", "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; " + command], wait=120)
             report[name] = {"exit": code, "output": (out + err).strip()}
         ok = report["account"]["exit"] == 0

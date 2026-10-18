@@ -145,24 +145,16 @@ def test_the_cachyos_post_install_adds_the_agent_and_cloud_init_and_a_removable_
     assert subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True).returncode == 0
 
 
-HASH = "$6$abcdefgh$" + "A" * 86
+def test_the_first_boot_seed_makes_the_owners_account_with_no_password_at_all():
+    seed = ob.first_boot_seed(username="alex", hostname="desk", instance_id="vm-101")
+    assert seed["user-data"].startswith("#cloud-config") and "lock_passwd: true" in seed["user-data"] and "passwd:" not in seed["user-data"].replace("lock_passwd:", "")
+    assert "uid: 1100" in seed["user-data"] and "sudo: ALL=(ALL) NOPASSWD:ALL" in seed["user-data"] and "ssh_pwauth: false" in seed["user-data"] and "disable_root: true" in seed["user-data"]
+    assert seed["meta-data"] == "instance-id: vm-101\nlocal-hostname: desk\n"
 
 
-def test_the_first_boot_seed_makes_one_account_from_a_hash_and_never_from_a_plain_password():
-    seed = ob.first_boot_seed(username="alex", password_hash=HASH, hostname="desk", instance_id="vm-101")
-    assert seed["user-data"].startswith("#cloud-config") and f"passwd: '{HASH}'" in seed["user-data"] and "lock_passwd: false" in seed["user-data"]
-    assert seed["meta-data"] == "instance-id: vm-101\nlocal-hostname: desk\n" and "disable_root: true" in seed["user-data"]
-    for plain in ("hunter2", "$6$short", "x" * 100, "$1$abc$" + "A" * 22):
-        with pytest.raises(ob.BuildError):
-            ob.first_boot_seed(username="alex", password_hash=plain, hostname="desk", instance_id="i")
-
-
-def test_a_key_only_account_has_no_password_and_an_account_with_no_way_in_is_refused():
+def test_an_ssh_key_is_optional_and_odd_values_are_refused():
     key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl alex@host"
-    seed = ob.first_boot_seed(username="alex", ssh_keys=[key], hostname="desk", instance_id="i")
-    assert "lock_passwd: true" in seed["user-data"] and "ssh_pwauth: false" in seed["user-data"] and key in seed["user-data"]
-    with pytest.raises(ob.BuildError, match="no way|never be used"):
-        ob.first_boot_seed(username="alex", hostname="desk", instance_id="i")
+    assert key in ob.first_boot_seed(username="alex", ssh_keys=[key], hostname="desk", instance_id="i")["user-data"]
     for bad in ({"username": "Bad User"}, {"hostname": "Bad Host"}, {"ssh_keys": ["not a key; rm -rf /"]}):
         with pytest.raises(ob.BuildError):
-            ob.first_boot_seed(**{"username": "alex", "password_hash": HASH, "hostname": "desk", "instance_id": "i", **bad})
+            ob.first_boot_seed(**{"username": "alex", "hostname": "desk", "instance_id": "i", **bad})
