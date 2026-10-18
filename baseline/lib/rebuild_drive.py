@@ -1,5 +1,7 @@
 """Rebuild an installed Baseline drive in place: its data is versioned and backed up first, and nothing is formatted, partitioned or removed.
 
+The same histories are pushed to the parent vault (parent_vault: the CACHE drive's server copy, filed by combination id) when one is given.
+
 Steps: find the drive by its serial (and refuse a copy of another drive's identifier), activate its volume group by UUID and mount its volumes, snapshot every data volume into its git history
 (data_vault) and write a self-contained bundle of each onto the drive's INSTALLER_CACHE (which a paired twin carries too), unmount, and then, when a reviewed update bundle is given, hand the code
 layer to `installed_drive_update` (its own guards: recovery snapshot, reserve, no data restore). Without an update bundle the report says the code layer was not changed. A rebuild never wipes: a layout this build cannot reach in place is reported and left for a separate, typed-confirmation reinstall. A failure before the
@@ -11,6 +13,7 @@ import time
 from pathlib import Path
 
 import data_vault
+import parent_vault
 import twin_sync
 
 MOUNT_BASE = "/mnt/REBUILD"
@@ -27,10 +30,11 @@ def volumes_to_add(mounted: dict) -> list:
     return sorted(wanted - set(mounted))
 
 
-def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, stamp: str | None = None) -> dict:
+def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, stamp: str | None = None, parent_root=None, peer_serials=()) -> dict:
     stamp = stamp or time.strftime("%Y%m%dT%H%M%S")
     try:
         child = twin_sync.peer_by_serial(runner, serial)
+        peers = [twin_sync.peer_by_serial(runner, p) for p in peer_serials]
         attached = twin_sync.attach_twin(runner, child, mount_base=mount_base)
     except twin_sync.TwinError as exc:
         raise RebuildError(str(exc)) from None
@@ -40,10 +44,14 @@ def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, s
             raise RebuildError("the drive's INSTALLER_CACHE is not available, so the backup has nowhere to go; nothing was changed")
         volumes = {role: mounts[role] for role in data_vault.DATA_ROLES if role in mounts}
         backups = data_vault.backup_all(runner, volumes, Path(mounts["INSTALLER_CACHE"]) / "backups" / f"rebuild-{stamp}", message=f"rebuild {stamp}: backup before update", tag=f"rebuild-{stamp}")
+        filed = []
+        if parent_root:                                          # the parent/server copy: each volume's history, filed under the combination of drives it belongs to
+            for role, path in volumes.items():
+                filed.append(parent_vault.push(runner, path, parent_root, child_ids=[child, *peers], this_child=child, role=role))
     finally:
         twin_sync.detach_twin(runner, attached, mount_base=mount_base)
     report = {"drive_child_id": child, "backups": backups, "formatted": False, "volumes_to_add_in_place": volumes_to_add(mounts),
-              "wipe_needed": False}
+              "wipe_needed": False, "parent_backup": filed}
     if update is None:
         report["code_layer"] = "not changed: no reviewed update bundle was given"
     else:

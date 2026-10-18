@@ -123,6 +123,8 @@ def main():
                 (LOGS / f"{req['id']}.log").write_text(f"refused: {exc}\n")
             else:
                 env = dict(os.environ, BASELINE_DRIVES_FILE=cfg["drives_file"], HOME="/root")
+                if cfg.get("parent_vault"):
+                    env["BASELINE_PARENT_VAULT"] = cfg["parent_vault"]
                 if cfg.get("own_drives_file"):
                     env["BASELINE_OWN_DRIVES_FILE"] = cfg["own_drives_file"]
                 log = open(LOGS / f"{req['id']}.log", "w")

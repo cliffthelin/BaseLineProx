@@ -48,3 +48,10 @@ def test_unknown_drive_is_a_rebuild_error(monkeypatch):
 def test_missing_role_volumes_are_reported_for_in_place_adding_not_wiping(fakes):
     out = rd.rebuild(R(), serial="S")
     assert "USER_ADMIN" in out["volumes_to_add_in_place"] and out["wipe_needed"] is False
+
+
+def test_histories_are_filed_on_the_parent_while_the_drive_is_attached(fakes, monkeypatch):
+    seen = []
+    monkeypatch.setattr(rd.parent_vault, "push", lambda r, path, root, child_ids, this_child, role: seen.append((fakes[-1], role, root, child_ids)) or {"role": role})
+    out = rd.rebuild(R(), serial="S", parent_root="/parent")
+    assert seen and seen[0][0][0] == "backup" and "detach" not in fakes[:-1] and out["parent_backup"] == [{"role": "USER_PERSONAL"}]

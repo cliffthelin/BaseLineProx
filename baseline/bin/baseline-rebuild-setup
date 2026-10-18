@@ -39,7 +39,7 @@ print("policy covers:", ", ".join(sorted(chosen)), "- command pinned by", rp.pol
 P
 chmod 644 /etc/baseline-rebuild/policy.json /etc/baseline-rebuild/policy.sha256
 cat > /etc/baseline-rebuild.json <<J
-{"drives_file": "$DRIVES", "own_drives_file": "$OWN", "gid": $GID, "repo": "$REPO", "policy_file": "/etc/baseline-rebuild/policy.json", "policy_digest_file": "/etc/baseline-rebuild/policy.sha256"}
+{"drives_file": "$DRIVES", "own_drives_file": "$OWN", "gid": $GID, "repo": "$REPO", "policy_file": "/etc/baseline-rebuild/policy.json", "policy_digest_file": "/etc/baseline-rebuild/policy.sha256", "parent_vault": "$(dirname "$DRIVES")/vault"}
 J
 chmod 644 /etc/baseline-rebuild.json
 cat > /etc/systemd/system/baseline-rebuild.service <<U

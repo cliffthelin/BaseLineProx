@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--serial", required=True)
+    parser.add_argument("--parent", default=os.environ.get("BASELINE_PARENT_VAULT"), help="the parent/server backup folder (default: $BASELINE_PARENT_VAULT)")
+    parser.add_argument("--with", dest="peers", action="append", default=[], metavar="SERIAL", help="another drive of this drive's combination (repeatable); without it the drive is a combination of one")
     parser.add_argument("--input-bundle")
     parser.add_argument("--recovery-folder")
     args = parser.parse_args()
@@ -34,7 +36,7 @@ def main():
             with __import__("tempfile").TemporaryDirectory(prefix="baseline-drive-update-") as root:
                 return iu.update(runner, serial=args.serial, input_bundle=args.input_bundle, recovery_folder=args.recovery_folder, root=root)
     try:
-        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update), indent=1))
+        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update, parent_root=args.parent, peer_serials=args.peers), indent=1))
     except Exception as exc:                                                # noqa: BLE001 - reported, nonzero exit
         print(f"rebuild refused: {exc}", file=sys.stderr)
         return 1
