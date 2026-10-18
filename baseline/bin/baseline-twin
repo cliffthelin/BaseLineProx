@@ -37,7 +37,7 @@ def cmd_status(args):
     mine = ts.read_installed()
     out = {"paired": config is not None, "installed": mine, "healthy": bool(mine and ts.is_healthy(mine["digest"]))}
     if config:
-        out["twin_attached"] = ts.peer_attached(runner(), config["peer_serial"])
+        out["twin_attached"] = ts.peer_attached(runner(), config["peer"])
     try:
         out["last_sync"] = json.loads(REPORT.read_text())
     except (OSError, ValueError):
@@ -67,7 +67,7 @@ def cmd_sync(args):
     if config is None:
         say("not paired; nothing to do")
         return 0
-    if not ts.peer_attached(runner(), config["peer_serial"]):
+    if not ts.peer_attached(runner(), config["peer"]):
         say("the twin is not attached; nothing to do")
         return 0
     try:

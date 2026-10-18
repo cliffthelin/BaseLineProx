@@ -198,52 +198,80 @@ PAIR_SCHEME = "baseline-twin-pair-v1"
 _SERIAL_OK = __import__("re").compile(r"^[A-Za-z0-9_.-]{8,64}$")
 
 
-def pair_id_for(serial_a: str, serial_b: str) -> str:
-    """The identity of a pair of drives: their two serials, sorted and joined, then hashed. It is built only from what distinguishes the two DRIVES (never from the machine they are attached to, because a
-    drive moves between machines), it is the same whichever drive computes it and in whichever order, and nothing random has to be stored or exchanged."""
+def _valid_child(child_id) -> str:
+    """A drive's child identifier (DR255): the GPT disk GUID its install stamped, a HOST identifier carrying the parent installer's lane. Anything else is not an identity."""
+    import identifiers
+    try:
+        text = str(__import__("uuid").UUID(str(child_id)))
+        if identifiers.parse(text).kind == "host":
+            return text
+    except (ValueError, identifiers.IdentifierError):
+        pass
+    raise TwinError(f"{child_id!r} is not an installer-made drive identifier")
+
+
+def child_id_of(disk) -> str:
+    """The child UUID of an attached drive, checked against the drive itself: the identifier carries the drive's own serial hint, so a GUID copied onto another drive (a clone) does not validate here."""
+    import identifiers
+    if not disk.ptuuid or identifiers.stamped_lane(disk.ptuuid, disk.serial) is None:
+        raise TwinError(f"{disk.path} carries no valid installer-made identifier for this drive (not installed by Baseline, or a clone)")
+    return _valid_child(disk.ptuuid)
+
+
+def pair_id_for(child_a: str, child_b: str) -> str:
+    """The identity of a pair of drives: their two CHILD UUIDs (each one made by that drive's install and carrying its parent installer's identity), sorted, joined and hashed. Unique by concatenation, and built only from the
+    drives, never from the machine they are attached to (a drive moves between machines): the same whichever drive computes it and in either order, with nothing random stored or exchanged."""
     import hashlib
-    if not (_SERIAL_OK.match(serial_a or "") and _SERIAL_OK.match(serial_b or "")):
-        raise TwinError("a drive's serial is plain letters, digits and ._- , 8 to 64 characters")
-    if serial_a == serial_b:
-        raise TwinError("a drive cannot be its own twin")
-    low, high = sorted((serial_a, serial_b))
+    a, b = _valid_child(child_a), _valid_child(child_b)
+    if a == b:
+        raise TwinError("a drive cannot be its own twin (the same identifier twice: a clone, or the same drive)")
+    low, high = sorted((a, b))
     return hashlib.sha256(f"{PAIR_SCHEME}:{low}+{high}".encode()).hexdigest()[:32]
 
 
 def load_twin_config(path=None):
-    """{peer_serial} from this drive's own pairing data (runtime data on the persistent admin volume, never in the repository), or None when not paired or the data is not well formed."""
+    """{peer} (the twin's child UUID) from this drive's own pairing data (runtime data on the persistent admin volume, never in the repository), or None when not paired or the data is not well formed."""
     try:
         data = json.loads(Path(path or TWIN_CONFIG).read_text())
-        if isinstance(data.get("peer_serial"), str) and _SERIAL_OK.match(data["peer_serial"]):
-            return {"peer_serial": data["peer_serial"]}
-    except (OSError, ValueError, AttributeError):
-        pass
-    return None
+        return {"peer": _valid_child(data.get("peer"))}
+    except (OSError, ValueError, AttributeError, TwinError):
+        return None
 
 
-def save_twin_config(path, *, peer_serial: str) -> None:
-    if not _SERIAL_OK.match(peer_serial or ""):
-        raise TwinError("the peer's plain serial is needed")
+def save_twin_config(path, *, peer: str) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({"peer_serial": peer_serial}) + "\n")
+    target.write_text(json.dumps({"peer": _valid_child(peer)}) + "\n")
 
 
-def own_serial(runner) -> str:
-    """The serial of the drive the running system lives on: the one disk that carries a physical volume of the running root's volume group."""
+def _own_disk(survey, runner):
+    import cardinality
+    host = cardinality.host_vg(runner)
+    if host is None:
+        raise TwinError("the running system is not on LVM, so its drive cannot be identified for pairing")
+    group = cardinality.exactly_one([g for g in survey.vgs if g.uuid == host["uuid"]], "volume group of the running system", describe=lambda g: g.uuid)
+    return cardinality.exactly_one([d for d in survey.disks if any(pv.startswith(d.path) for pv in group.pvs)], "drive carrying the running system", describe=lambda d: d.path)
+
+
+def own_child_id(runner) -> str:
+    """The child UUID of the drive the running system lives on."""
     import cardinality
     try:
-        host = cardinality.host_vg(runner)
-        if host is None:
-            raise TwinError("the running system is not on LVM, so its drive cannot be identified for pairing")
-        survey = cardinality.survey(runner)
-        group = cardinality.exactly_one([g for g in survey.vgs if g.uuid == host["uuid"]], "volume group of the running system", describe=lambda g: g.uuid)
-        disk = cardinality.exactly_one([d for d in survey.disks if any(pv.startswith(d.path) for pv in group.pvs)], "drive carrying the running system", describe=lambda d: d.path)
+        return child_id_of(_own_disk(cardinality.survey(runner), runner))
     except cardinality.CardinalityError as exc:
         raise TwinError(str(exc)) from None
-    if not disk.serial:
-        raise TwinError("the running drive reports no serial")
-    return disk.serial
+
+
+def peer_disk(survey, peer: str):
+    """The one attached drive whose child UUID is `peer` and whose identifier validates for that drive. Two drives with the same identifier are a clone and are refused, never resolved by picking one."""
+    import cardinality
+    import identifiers
+    peer = _valid_child(peer)
+    same = [d for d in survey.disks if d.ptuuid and d.ptuuid.lower() == peer]
+    disk = cardinality.exactly_one(same, "attached drive with the twin's identifier", describe=lambda d: d.path)
+    if identifiers.stamped_lane(disk.ptuuid, disk.serial) is None:
+        raise TwinError(f"{disk.path} carries the twin's identifier but it does not belong to that drive (a clone)")
+    return disk
 
 
 def _cmd(runner, argv, what, timeout=120):
@@ -253,14 +281,14 @@ def _cmd(runner, argv, what, timeout=120):
     return proc.stdout or ""
 
 
-def attach_twin(runner, peer_serial: str, *, mount_base: str = "/mnt/TWIN") -> dict:
-    """Activate the twin drive's volume group (selected by UUID, because both drives may carry a group of the same name) and mount its syncable volumes under `mount_base/<ROLE>`. The twin must be exactly
-    one attached drive, and its group must not be the running system's own."""
+def attach_twin(runner, peer: str, *, mount_base: str = "/mnt/TWIN") -> dict:
+    """Activate the twin drive's volume group (selected by UUID, because both drives may carry a group of the same name) and mount its syncable volumes under `mount_base/<ROLE>`. The twin is found by its child
+    UUID and must be exactly one attached drive, and its group must not be the running system's own."""
     import cardinality
     import drive_installer as di
     try:
         survey = cardinality.survey(runner)
-        disk = survey.disk_for_serial(peer_serial)
+        disk = peer_disk(survey, peer)
         group = cardinality.exactly_one([g for g in survey.vgs if any(pv.startswith(disk.path) for pv in g.pvs)], "volume group on the twin drive", describe=lambda g: g.uuid)
         host = cardinality.host_vg(runner)
     except cardinality.CardinalityError as exc:
@@ -299,12 +327,22 @@ def local_mounts(base: str = "/mnt") -> dict:
     return {label: str(Path(base) / label) for label in _RULES}
 
 
+def peer_by_serial(runner, peer_serial: str) -> str:
+    """The operator names the other drive by its hardware serial (what is printed on it); pairing turns that into its child UUID, which is what is recorded and used from then on."""
+    import cardinality
+    try:
+        return child_id_of(cardinality.survey(runner).disk_for_serial(peer_serial))
+    except cardinality.CardinalityError as exc:
+        raise TwinError(str(exc)) from None
+
+
 def pair_drives(runner, peer_serial: str, *, config_path=None, mount_base: str = "/mnt/TWIN", local_base: str = "/mnt") -> dict:
-    """First-time pairing: mark every syncable volume on BOTH drives with the pair id (derived from the two serials) and record the pairing on both, so either drive finds the other when it is the one that
-    boots. Refuses a volume already marked for a different pair."""
-    pair_id = pair_id_for(own_serial(runner), peer_serial)
-    mine = own_serial(runner)
-    attached = attach_twin(runner, peer_serial, mount_base=mount_base)
+    """First-time pairing with the drive whose hardware serial is `peer_serial`: mark every syncable volume on BOTH drives with the pair id (derived from the two child UUIDs) and record the pairing on both, so either
+    drive finds the other when it is the one that boots. Refuses a volume already marked for a different pair."""
+    peer = peer_by_serial(runner, peer_serial)
+    mine = own_child_id(runner)
+    pair_id = pair_id_for(mine, peer)
+    attached = attach_twin(runner, peer, mount_base=mount_base)
     try:
         here = local_mounts(local_base)
         for label, twin_root in attached["mounts"].items():
@@ -317,9 +355,9 @@ def pair_drives(runner, peer_serial: str, *, config_path=None, mount_base: str =
                     raise TwinError(f"{root} is already part of a different pair")
             for root in (Path(here[label]), Path(twin_root)):
                 write_pair_marker(root, pair_id, role=label)
-        save_twin_config(config_path or TWIN_CONFIG, peer_serial=peer_serial)
+        save_twin_config(config_path or TWIN_CONFIG, peer=peer)
         if "USER_ADMIN" in attached["mounts"]:                              # the twin's own copy of the pairing, where ITS /etc/baseline lives, naming this drive as its peer
-            save_twin_config(Path(attached["mounts"]["USER_ADMIN"]) / "etc-baseline" / "twin.json", peer_serial=mine)
+            save_twin_config(Path(attached["mounts"]["USER_ADMIN"]) / "etc-baseline" / "twin.json", peer=mine)
         return {"pair": pair_id, "volumes": sorted(attached["mounts"])}
     finally:
         detach_twin(runner, attached, mount_base=mount_base)
@@ -330,9 +368,9 @@ def sync_pair(runner, *, config_path=None, mount_base: str = "/mnt/TWIN", local_
     config = load_twin_config(config_path)
     if config is None:
         raise TwinError("this drive is not paired with a twin")
-    pair_id = pair_id_for(own_serial(runner), config["peer_serial"])
+    pair_id = pair_id_for(own_child_id(runner), config["peer"])
     stamp = stamp or time.strftime("%Y%m%dT%H%M%S")
-    attached = attach_twin(runner, config["peer_serial"], mount_base=mount_base)
+    attached = attach_twin(runner, config["peer"], mount_base=mount_base)
     results = {}
     try:
         here = local_mounts(local_base)
@@ -397,9 +435,11 @@ def is_healthy(digest: str, *, root="/") -> bool:
     return (Path(root) / HEALTH_DIR / f"{digest}.ok").is_file()
 
 
-def peer_attached(runner, peer_serial: str) -> bool:
+def peer_attached(runner, peer: str) -> bool:
+    """Whether the twin (by its child UUID) is attached. A clone or an unreadable inventory is not 'attached'; the sync then does nothing."""
     import cardinality
     try:
-        return any(d.serial == peer_serial for d in cardinality.survey(runner).disks)
-    except cardinality.CardinalityError:
+        peer_disk(cardinality.survey(runner), peer)
+        return True
+    except (cardinality.CardinalityError, TwinError):
         return False

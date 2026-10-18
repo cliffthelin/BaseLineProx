@@ -9,6 +9,11 @@ import pytest
 import twin_sync as ts
 
 PAIR = "pair-0000-test"
+import cardinality
+import identifiers
+LANE = "11111111-2222-4333-8444-555555555555"                    # a parent installer's lane identifier (not a drive)
+HOST_ID = identifiers.host_id(LANE, "SYNTHHOST0000001")          # the child UUIDs the two installs stamped on their drives
+TWIN_ID = identifiers.host_id(LANE, "SYNTHTWIN0000001")
 
 
 class Runner:
@@ -174,16 +179,17 @@ def test_a_role_without_an_include_list_syncs_everything_except_the_never_list(t
 
 class Recorder:
     """Answers the read-only inventory from fixed JSON and records every other command."""
-    def __init__(self, twin_vg_uuid="uuid-twin", host_vg_uuid="uuid-host", twin_serial="SYNTHTWIN0000001"):
+    def __init__(self, twin_vg_uuid="uuid-twin", host_vg_uuid="uuid-host", twin_serial="SYNTHTWIN0000001", twin_ptuuid=None):
         self.calls, self.twin_vg_uuid, self.host_vg_uuid, self.twin_serial = [], twin_vg_uuid, host_vg_uuid, twin_serial
+        self.twin_ptuuid = twin_ptuuid or TWIN_ID
 
     def run(self, argv, timeout=60):
         self.calls.append(list(argv))
         out = ""
         if argv[0] == "lsblk":
             out = json.dumps({"blockdevices": [
-                {"name": "/dev/sdh", "type": "disk", "serial": "SYNTHHOST0000001", "size": 512, "children": [{"name": "/dev/sdh3", "type": "part", "fstype": "LVM2_member"}]},
-                {"name": "/dev/sdl", "type": "disk", "serial": self.twin_serial, "size": 512, "children": [{"name": "/dev/sdl3", "type": "part", "fstype": "LVM2_member"}]}]})
+                {"name": "/dev/sdh", "type": "disk", "serial": "SYNTHHOST0000001", "ptuuid": HOST_ID, "size": 512, "children": [{"name": "/dev/sdh3", "type": "part", "fstype": "LVM2_member"}]},
+                {"name": "/dev/sdl", "type": "disk", "serial": self.twin_serial, "ptuuid": self.twin_ptuuid, "size": 512, "children": [{"name": "/dev/sdl3", "type": "part", "fstype": "LVM2_member"}]}]})
         elif argv[0] == "pvs":
             out = json.dumps({"report": [{"pv": [{"pv_name": "/dev/sdh3", "vg_name": "baseline_host", "vg_uuid": self.host_vg_uuid}, {"pv_name": "/dev/sdl3", "vg_name": "baseline_twin", "vg_uuid": self.twin_vg_uuid}]}]})
         elif argv[0] == "lvs" and "--noheadings" in argv and "lv_name,lv_path" in argv:
@@ -202,7 +208,7 @@ class Recorder:
 
 def test_the_twin_is_found_by_its_serial_its_group_by_uuid_and_only_syncable_volumes_are_mounted(tmp_path):
     r = Recorder()
-    got = ts.attach_twin(r, "SYNTHTWIN0000001", mount_base=str(tmp_path / "TWIN"))
+    got = ts.attach_twin(r, TWIN_ID, mount_base=str(tmp_path / "TWIN"))
     assert got["vg_uuid"] == "uuid-twin" and sorted(got["mounts"]) == ["INSTALLER_CACHE", "USER_ADMIN"]       # session temp and root are not mounted for syncing
     assert ["vgchange", "-ay", "--select", "vg_uuid=uuid-twin"] in r.calls                                   # by UUID: a shared name could mean either drive
     mounts = [c for c in r.calls if c[0] == "mount"]
@@ -212,31 +218,50 @@ def test_the_twin_is_found_by_its_serial_its_group_by_uuid_and_only_syncable_vol
 
 
 def test_the_twin_is_refused_when_it_is_missing_or_is_the_running_drive_itself(tmp_path):
-    with pytest.raises(ts.TwinError, match="no drive"):
-        ts.attach_twin(Recorder(twin_serial="SYNTHELSE0000001"), "SYNTHTWIN0000001", mount_base=str(tmp_path / "T"))
+    with pytest.raises(ts.TwinError, match="no attached drive"):
+        ts.attach_twin(Recorder(twin_ptuuid=identifiers.host_id(LANE, "SYNTHELSE0000001")), TWIN_ID, mount_base=str(tmp_path / "T"))
     with pytest.raises(ts.TwinError, match="running system"):
-        ts.attach_twin(Recorder(twin_vg_uuid="uuid-host"), "SYNTHTWIN0000001", mount_base=str(tmp_path / "T"))
+        ts.attach_twin(Recorder(twin_vg_uuid="uuid-host"), TWIN_ID, mount_base=str(tmp_path / "T"))
 
 
-def test_a_pair_config_names_the_peer_and_nothing_else(tmp_path):
+def test_a_clone_is_never_taken_for_the_twin():
+    """The child UUID is the always-unique identity unless a drive is cloned: two drives with the same identifier, or an identifier copied onto a drive it was not made for, are refused."""
+    survey = cardinality.survey(Recorder())
+    assert ts.peer_disk(survey, TWIN_ID).serial == "SYNTHTWIN0000001"
+    copied = cardinality.survey(Recorder(twin_serial="SYNTHCLONE0000001"))                   # the identifier names a different drive's serial hint
+    with pytest.raises(ts.TwinError, match="clone"):
+        ts.peer_disk(copied, TWIN_ID)
+    two = Recorder()
+    both = cardinality.survey(two)
+    from dataclasses import replace
+    both.disks.append(replace(both.disks[1], path="/dev/sdz"))                                    # a second attached drive with the very same identifier
+    with pytest.raises(cardinality.CardinalityError, match="2 attached drive"):
+        ts.peer_disk(both, TWIN_ID)
+    assert ts.peer_attached(Recorder(), TWIN_ID) is True and ts.peer_attached(Recorder(twin_serial="SYNTHCLONE0000001"), TWIN_ID) is False
+
+
+def test_a_pair_config_names_the_twin_by_its_child_uuid_and_nothing_else(tmp_path):
     f = tmp_path / "twin.json"
     assert ts.load_twin_config(f) is None
-    ts.save_twin_config(f, peer_serial="SYNTHTWIN0000001")
-    assert ts.load_twin_config(f) == {"peer_serial": "SYNTHTWIN0000001"}
-    f.write_text(json.dumps({"peer_serial": "bad serial; x"}))
+    ts.save_twin_config(f, peer=TWIN_ID)
+    assert ts.load_twin_config(f) == {"peer": TWIN_ID}
+    f.write_text(json.dumps({"peer": "not-a-uuid"}))
     assert ts.load_twin_config(f) is None                                                                     # malformed data is treated as no pairing, never trusted
+    with pytest.raises(ts.TwinError):
+        ts.save_twin_config(f, peer="SYNTHTWIN0000001")                                                      # a hardware serial is not the identifier
 
 
-def test_the_pair_identity_is_the_two_drives_serials_joined_and_hashed_and_never_the_machine():
-    """Unique by concatenation: built only from what tells the two DRIVES apart, so it is the same whichever drive computes it, in either order, on any machine."""
-    a, b = "SYNTHDRIVEA00001", "SYNTHDRIVEB00002"
+def test_the_pair_identity_is_the_two_child_uuids_joined_and_hashed_and_never_the_machine():
+    """Unique by concatenation of the always-unique child identifiers (each carries its parent installer's lane): the same whichever drive computes it, in either order, on any machine."""
+    a, b, c = HOST_ID, TWIN_ID, identifiers.host_id(LANE, "SYNTHOTHER0000001")
     assert ts.pair_id_for(a, b) == ts.pair_id_for(b, a) and len(ts.pair_id_for(a, b)) == 32
-    assert ts.pair_id_for(a, b) != ts.pair_id_for(a, "SYNTHDRIVEC00003") and ts.pair_id_for(a, b) != ts.pair_id_for(b, "SYNTHDRIVEC00003")
-    assert a not in ts.pair_id_for(a, b)                                                                      # the serials themselves are not stored in what is written to the volumes
+    assert ts.pair_id_for(a, b) != ts.pair_id_for(a, c) and ts.pair_id_for(a, b) != ts.pair_id_for(b, c)
     with pytest.raises(ts.TwinError, match="its own twin"):
         ts.pair_id_for(a, a)
-    with pytest.raises(ts.TwinError):
-        ts.pair_id_for(a, "bad serial")
+    with pytest.raises(ts.TwinError, match="not an installer-made"):
+        ts.pair_id_for(a, "SYNTHTWIN0000001")
+    with pytest.raises(ts.TwinError, match="not an installer-made"):
+        ts.pair_id_for(a, "4af8c95a-1c9b-437a-a306-c53855d4077f")                                            # a valid UUID, but not a host identifier of the scheme
     import ast
     import inspect
     import textwrap
@@ -245,16 +270,26 @@ def test_the_pair_identity_is_the_two_drives_serials_joined_and_hashed_and_never
     assert not (used & {"socket", "gethostname", "uuid4", "random", "getnode", "environ", "platform"})                       # nothing about the machine or chance goes in
 
 
-def test_the_running_drives_serial_is_the_one_disk_under_the_running_roots_volume_group():
-    assert ts.own_serial(Recorder()) == "SYNTHHOST0000001"
+def test_the_running_drives_identity_is_the_child_uuid_of_the_one_disk_under_the_running_roots_volume_group():
+    assert ts.own_child_id(Recorder()) == HOST_ID
+
+    class NoLvm(Recorder):
+        def run(self, argv, timeout=60):
+            p = super().run(argv, timeout)
+            if argv[0] == "findmnt":
+                p.stdout = "/dev/nvme0n1p2\n"
+            return p
     with pytest.raises(ts.TwinError, match="not on LVM"):
-        class NoLvm(Recorder):
-            def run(self, argv, timeout=60):
-                p = super().run(argv, timeout)
-                if argv[0] == "findmnt":
-                    p.stdout = "/dev/nvme0n1p2\n"
-                return p
-        ts.own_serial(NoLvm())
+        ts.own_child_id(NoLvm())
+
+
+def test_the_operator_names_the_other_drive_by_its_serial_and_pairing_turns_that_into_its_child_uuid():
+    assert ts.peer_by_serial(Recorder(), "SYNTHTWIN0000001") == TWIN_ID
+    with pytest.raises(ts.TwinError, match="no drive"):
+        ts.peer_by_serial(Recorder(), "SYNTHMISSING00001")
+
+
+
 
 
 def test_a_drives_installed_version_is_a_digest_of_its_source_and_only_a_healthy_one_is_offered(tmp_path):
