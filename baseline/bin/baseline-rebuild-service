@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Root service behind remote rebuild authorization (see rebuild_authority). It reads requests from an inbox the operator's account can write, keeps all state in its own root-only
+directory, and runs the installer (from its own root-owned snapshot of the source, so editing the working copy cannot change what runs as root) for a request that has been approved
+with its one-time code. Set up once with `sudo baseline/bin/baseline-rebuild-setup`."""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+CONFIG = Path(os.environ.get("BASELINE_REBUILD_CONFIG", "/etc/baseline-rebuild.json"))
+sys.path.insert(0, str(Path(os.environ.get("BASELINE_REBUILD_SRC", "/opt/baseline-rebuilder/src")) / "baseline/lib"))
+import rebuild_authority as ra  # noqa: E402
+
+INBOX = Path("/run/baseline-rebuild")
+STATE = Path("/var/lib/baseline-rebuild")
+LOGS = Path("/var/log/baseline-rebuild")
+
+
+def load_drives(path):
+    try:
+        return dict(json.loads(Path(path).read_text()).get("drives", {}))
+    except (OSError, ValueError):
+        return {}
+
+
+def handle(auth, msg):
+    op = msg.get("op")
+    if op == "request":
+        return auth.request(str(msg.get("target", "")))
+    if op == "approve":
+        return auth.approve(str(msg.get("id", "")), str(msg.get("code", "")))
+    if op == "status":
+        return {"ok": True, "requests": auth.status()}
+    return {"ok": False, "error": "unknown operation"}
+
+
+def drain_inbox(auth):
+    for f in sorted(INBOX.glob("*.json")):
+        out = f.with_suffix(".out")
+        try:
+            reply = handle(auth, json.loads(f.read_text()))
+        except (OSError, ValueError):
+            reply = {"ok": False, "error": "unreadable message"}
+        out.write_text(json.dumps(reply))
+        out.chmod(0o644)
+        f.unlink(missing_ok=True)
+    for old in INBOX.glob("*.out"):
+        if time.time() - old.stat().st_mtime > 300:
+            old.unlink(missing_ok=True)
+
+
+def main():
+    cfg = json.loads(CONFIG.read_text())
+    for d in (INBOX, STATE, LOGS):
+        d.mkdir(parents=True, exist_ok=True)
+    os.chmod(STATE, 0o700)
+    os.chmod(INBOX, 0o770)
+    os.chown(INBOX, 0, int(cfg["gid"]))
+    os.chmod(LOGS, 0o755)
+    running = {}
+    while True:
+        auth = ra.Authority(STATE, load_drives(cfg["drives_file"]))
+        drain_inbox(auth)
+        for rid, (proc, _) in list(running.items()):
+            if proc.poll() is not None:
+                auth.finish(rid, proc.returncode)
+                del running[rid]
+        req = auth.take_approved()
+        if req:
+            env = dict(os.environ, BASELINE_DRIVES_FILE=cfg["drives_file"], HOME="/root")
+            if cfg.get("own_drives_file"):
+                env["BASELINE_OWN_DRIVES_FILE"] = cfg["own_drives_file"]
+            src = Path(os.environ.get("BASELINE_REBUILD_SRC", "/opt/baseline-rebuilder/src"))
+            log = open(LOGS / f"{req['id']}.log", "w")
+            proc = subprocess.Popen([sys.executable, str(src / "baseline/bin/baseline-allscript-install"), "--target", req["target"], "--from", "recovery",
+                                     "--confirm-wipe", auth.serial_for(req["target"])], stdout=log, stderr=subprocess.STDOUT, env=env)
+            running[req["id"]] = (proc, log)
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    main()

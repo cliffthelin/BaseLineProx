@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Ask the rebuild service (see baseline-rebuild-service) for a rebuild, and approve it with its one-time code.
+
+  baseline-rebuild request PC601        -> prints a request id and a one-time code
+  baseline-rebuild approve <id> <code>  -> the rebuild (wipe + install of that drive) starts
+  baseline-rebuild status
+"""
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+INBOX = Path("/run/baseline-rebuild")
+
+
+def call(message, wait=20):
+    if not INBOX.is_dir():
+        sys.exit("the rebuild service is not running; set it up once with: sudo baseline/bin/baseline-rebuild-setup")
+    stem = INBOX / f"{os.getpid()}-{int(time.time()*1000)}"
+    tmp = stem.with_suffix(".tmp")
+    tmp.write_text(json.dumps(message))
+    tmp.rename(stem.with_suffix(".json"))
+    out = stem.with_suffix(".out")
+    end = time.time() + wait
+    while time.time() < end:
+        if out.exists():
+            reply = json.loads(out.read_text())
+            out.unlink(missing_ok=True)
+            return reply
+        time.sleep(0.5)
+    sys.exit("the rebuild service did not answer")
+
+
+def main(argv):
+    if len(argv) == 3 and argv[1] == "request":
+        message = {"op": "request", "target": argv[2]}
+    elif len(argv) == 4 and argv[1] == "approve":
+        message = {"op": "approve", "id": argv[2], "code": argv[3]}
+    elif len(argv) == 2 and argv[1] == "status":
+        message = {"op": "status"}
+    else:
+        print(__doc__)
+        return 2
+    reply = call(message)
+    print(json.dumps(reply, indent=1))
+    return 0 if reply.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1,0 +1,33 @@
+#!/bin/sh
+# One-time (re-run to refresh): installs the remote-rebuild service. Needs root: sudo baseline/bin/baseline-rebuild-setup
+# Makes a root-owned copy of the committed source for the service to run, writes its settings, and enables the systemd unit.
+set -eu
+[ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
+REPO=$(cd "$(dirname "$0")/../.." && pwd)
+OPERATOR=${SUDO_USER:-${PKEXEC_UID:+$(id -nu "$PKEXEC_UID")}}
+[ -n "$OPERATOR" ] || { echo "cannot tell which account may send requests" >&2; exit 1; }
+DRIVES=${BASELINE_DRIVES_FILE:-/run/media/cane/CACHE/baseline-build/drives.json}
+OWN=$(dirname "$DRIVES")/own-drives
+SRC=/opt/baseline-rebuilder/src
+rm -rf "$SRC"; mkdir -p /opt/baseline-rebuilder
+git clone -q --no-hardlinks "$REPO" "$SRC"
+git -C "$SRC" checkout -q "$(git -C "$REPO" rev-parse HEAD)"
+chown -R root:root /opt/baseline-rebuilder; chmod -R go-w /opt/baseline-rebuilder
+cat > /etc/baseline-rebuild.json <<J
+{"drives_file": "$DRIVES", "own_drives_file": "$OWN", "gid": $(id -g "$OPERATOR")}
+J
+chmod 644 /etc/baseline-rebuild.json
+cat > /etc/systemd/system/baseline-rebuild.service <<U
+[Unit]
+Description=Baseline remote rebuild authorization
+After=local-fs.target
+[Service]
+ExecStart=/usr/bin/python3 $SRC/baseline/bin/baseline-rebuild-service
+Environment=BASELINE_REBUILD_SRC=$SRC
+Restart=always
+[Install]
+WantedBy=multi-user.target
+U
+systemctl daemon-reload
+systemctl enable --now baseline-rebuild.service
+echo "ready: baseline/bin/baseline-rebuild request <drive>"
