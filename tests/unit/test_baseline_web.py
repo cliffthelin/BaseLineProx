@@ -1370,3 +1370,16 @@ def test_managed_mode_needs_an_operator_account(tmp_path):
         assert case.post_json('/managed-mode', {'mode': 'standalone', 'parent_vault': None})[0] == 403
     finally:
         case.close()
+
+
+def test_web_address_page_and_save(tmp_path):
+    f = tmp_path / "web.env"
+    case = _RealServerCase(_base_deps(web_env_file=f))
+    try:
+        status, body = case.get('/web-address')
+        assert status == 200 and b"Proxmox host itself" in body and b"0.0.0.0" in body
+        assert case.post_json('/web-address', {'bind_host': 'not-an-ip', 'port': 8100})[0] == 400
+        assert case.post_json('/web-address', {'bind_host': '0.0.0.0', 'port': 9100})[0] == 200
+        assert "BASELINE_WEB_PORT=9100" in f.read_text()
+    finally:
+        case.close()

@@ -384,6 +384,8 @@ cp "$SRC/baseline/lib/write_once.py" /opt/baseline/lib/write_once.py
 cp "$SRC/baseline/lib/managed_mode.py" /opt/baseline/lib/managed_mode.py             # managed server mode (opt-in; standalone by default)
 cp "$SRC/baseline/lib/managed_mode_page.py" /opt/baseline/lib/managed_mode_page.py
 cp "$SRC/baseline/lib/nav_tree.py" /opt/baseline/lib/nav_tree.py
+cp "$SRC/baseline/lib/web_address.py" /opt/baseline/lib/web_address.py            # the console's own address (an IP of this host and a port)
+cp "$SRC/baseline/lib/web_address_page.py" /opt/baseline/lib/web_address_page.py
 cp "$SRC/baseline/bin/baseline-managed" /opt/baseline/bin/baseline-managed
 chmod 755 /opt/baseline/bin/baseline-managed
 cp "$SRC/baseline/lib/twin_sync.py" /opt/baseline/lib/twin_sync.py               # keeps two paired Baseline drives the same (DR272)

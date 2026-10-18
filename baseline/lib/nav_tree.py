@@ -19,7 +19,7 @@ TREE = (
         ("/vault", "Vault"), ("/security", "Two-factor"), ("/operators", "Operators"), ("/approvals", "Approvals"),
         ("/audit", "Audit"), ("/remote-access", "Remote access"))),
     ("Recovery and backup", (("/recovery", "Recovery"),)),
-    ("Settings", (("/settings", "Settings"), ("/admin", "Admin"), ("/operations", "Operations"), ("/master-config", "Master Config"))),
+    ("Settings", (("/settings", "Settings"), ("/web-address", "Web address"), ("/admin", "Admin"), ("/operations", "Operations"), ("/master-config", "Master Config"))),
     ("Installer", (
         ("Plan and build", (("/install-plan", "Installer plan"), ("/install-plan?display=desktop", "Installer desktop"),
                             ("/recipes", "Environment recipes"), ("/installation-readiness", "Installation readiness"))),

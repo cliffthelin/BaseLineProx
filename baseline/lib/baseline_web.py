@@ -2440,6 +2440,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 status = 503
             return self._html_response(status, _with_nav(audit, path))
 
+        if path == "/web-address":
+            import web_address, web_address_page
+            return self._html_response(200, _with_nav(web_address_page.render(web_address.read(deps.get("web_env_file") or web_address.ENV_FILE), web_address.local_addresses(deps["runner"]) if deps.get("runner") else []), path))
+
         if path == "/managed-mode":
             import managed_mode, managed_mode_page
             return self._html_response(200, _with_nav(managed_mode_page.render(managed_mode.load(deps.get("managed_file"))), path))
@@ -3411,6 +3415,20 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(400, {'ok':False,'message':str(exc)})
             except (OSError, sqlite3.Error) as exc:
                 return self._json(503, {'ok':False,'message':'Draft could not be saved: ' + str(exc)})
+
+        if path == "/web-address":
+            import web_address
+            if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
+                return self._json(403,{'message':'Changing the web address requires an operator account'})
+            if not isinstance(body,dict) or set(body)!={'bind_host','port'}:
+                return self._json(400,{'message':'Provide an address and a port'})
+            try:
+                saved=web_address.save(body['bind_host'],body['port'],path=deps.get("web_env_file") or web_address.ENV_FILE,
+                                       local_addresses=web_address.local_addresses(deps["runner"]) if deps.get("runner") else None)
+            except (web_address.AddressError,OSError) as exc:
+                return self._json(400,{'message':str(exc)})
+            if deps.get('audit'):deps['audit']({'event':'web_address_changed','bind_host':saved['bind_host'],'port':saved['port']})
+            return self._json(200,{'ok':True,**saved})
 
         if path == "/managed-mode":
             import managed_mode
