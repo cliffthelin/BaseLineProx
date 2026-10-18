@@ -266,3 +266,20 @@ def test_a_ready_made_vm_is_registered_with_proxmox_with_its_seed_efi_disk_and_n
     assert any("--bios" in c and "ovmf" in c for c in sets) and any("--efidisk0" in c for c in sets)  # UEFI with an EFI disk, as the bases boot
     assert not any("password" in " ".join(c).lower() for c in run.calls)                              # nothing about a password is sent to Proxmox
     assert (h.vm_dir("work") / "seed.iso").exists() and h.base_path("debian-base").is_symlink()
+
+
+def test_a_creation_that_fails_after_the_vmid_is_reserved_leaves_nothing_behind_so_the_same_name_can_be_tried_again(tmp_path):
+    """Found on the rehearsal's real web service: the retained-disk space check failed after the VMID record was written, and every retry
+    then answered 'already exists or has retained state'."""
+    room = {"user": 0}
+    run = ProxmoxRunner()
+    h = pv.ProxmoxVmHost(tmp_path / "os", persistence_store=tmp_path / "user", run=run,
+                         free_bytes=lambda p: room["user"] * vh.GIB if str(p).startswith(str(tmp_path / "user")) else 500 * vh.GIB)
+    h.bases_dir.mkdir(parents=True)
+    (h.bases_dir / "ubuntu.qcow2").write_bytes(b"base")
+    with pytest.raises(vh.VmError, match="free space"):
+        h.create_overlay("desktop", base="ubuntu")
+    assert not h._record_path("desktop").exists() and not any(c[:2] == ["qm", "create"] for c in run.calls)
+    room["user"] = 500
+    spec = h.create_overlay("desktop", base="ubuntu")
+    assert spec["base"] == "ubuntu" and h._record("desktop")["registered"] is True

@@ -297,9 +297,29 @@ class ProxmoxVmHost(vh.VmHost):
                 self._command(argv)
 
     def create_overlay(self, name, **kwargs):
-        spec = super().create_overlay(name, **kwargs)
-        self._register(name, spec)
+        pre_existing = self._record_path(name).exists()
+        try:
+            spec = super().create_overlay(name, **kwargs)
+            self._register(name, spec)
+        except Exception:
+            if not pre_existing:
+                self._discard_unregistered(name)
+            raise
         return spec
+
+    def _discard_unregistered(self, name):
+        """A creation that failed before Proxmox knew the VM leaves nothing behind (the VMID record and the folders this attempt made), so the
+        same name can be tried again. A VM Proxmox does know is never removed here."""
+        record_path = self._record_path(name)
+        if not record_path.exists():
+            return
+        record = self._record(name)
+        if record.get("registered"):
+            return
+        vmid = record["vmid"]
+        shutil.rmtree(self.persistence_store / "images" / str(vmid), ignore_errors=True)
+        shutil.rmtree(self.store / "images" / str(vmid), ignore_errors=True)
+        record_path.unlink(missing_ok=True)
 
     def _new_dir(self, name, size_gb):
         if self._record_path(name).exists():

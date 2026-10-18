@@ -148,6 +148,16 @@ def _run(host, argv):
     return out
 
 
+def _need_disk_at_least_the_systems_own(host, base: str, disk_gb: int) -> None:
+    """The overlay cannot be smaller than the base it sits on; said before anything is created, not as a qemu-img failure afterwards."""
+    try:
+        virtual = int(json.loads(_run(host, ["qemu-img", "info", "--output=json", str(host.base_path(base))]))["virtual-size"])
+    except (ValueError, KeyError, TypeError, PrebuiltError):
+        return                                                      # unreadable: qemu-img's own refusal at resize time still applies
+    if disk_gb * 2**30 < virtual:
+        raise PrebuiltError(f"the disk must be at least {-(-virtual // 2**30)} GB, the size of the system itself")
+
+
 def write_seed(host, name: str, os_id: str, profile: dict, *, initialize_home: bool, extra: dict = None) -> None:
     folder = host.vm_dir(name)
     seed = folder / "seed"
@@ -175,6 +185,8 @@ def create(host, name: str, os_id: str, *, owner: str, memory_mb=4096, cpus=2, d
     base = base_name(os_id)
     if not host.base_path(base).is_file():
         raise PrebuiltError(f"the {os_id} base is not installed on this host")
+    if disk_gb:
+        _need_disk_at_least_the_systems_own(host, base, int(disk_gb))
     spec = host.create_overlay(name, base=base, memory_mb=memory_mb, cpus=cpus, persistence_gb=persistence_gb)
     if disk_gb:
         _run(host, ["qemu-img", "resize", str(host.disk_path(name)), f"{int(disk_gb)}G"])

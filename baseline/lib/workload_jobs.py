@@ -55,7 +55,7 @@ class WorkloadJobs:
         if set(context)-{'backend','store','persistence_store','data_store'} or any(not isinstance(v,str) for v in context.values()):
             raise JobError('unsupported backend context')
         allowed = {'name','template','cache_storage','os_storage','disk_gb','memory_mb','cpus','recipe','homepage',
-                   'locale','persistence_gb','iso','base','base_name','display','firmware','confirm','destination','backup_id','package'}
+                   'locale','persistence_gb','iso','os','base','base_name','display','firmware','confirm','destination','backup_id','package'}
         if not isinstance(params, dict) or set(params) - allowed or any(not isinstance(v, (str,int,float,bool)) for v in params.values()):
             raise JobError('unsupported workload job parameter')
         request_id = request_id or uuid.uuid4().hex

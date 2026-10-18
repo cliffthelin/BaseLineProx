@@ -114,3 +114,12 @@ def test_ubuntu_locale_and_configuration_verification_report_survive_job_restart
     restarted=jobs.WorkloadJobs(path)
     try:assert restarted.get(job['id'])['result']['configuration_report']==report
     finally:restarted.close()
+
+
+def test_the_parameters_the_launcher_sends_for_a_ready_made_vm_are_accepted_by_the_job_store(tmp_path):
+    """Found on the rehearsal's real web service: the launcher posts name, os, memory_mb and cpus; the store refused `os`."""
+    store = jobs.WorkloadJobs(tmp_path/'jobs.sqlite')
+    job = store.submit('vm', 'create_prebuilt', {'name': 'ready-debian', 'os': 'debian', 'memory_mb': 4096, 'cpus': 2}, lambda: {'ok': True, 'message': 'made'})
+    store.wait(job['id'], 3)
+    assert store.result(job['id'])['ok'] is True
+    store.close()

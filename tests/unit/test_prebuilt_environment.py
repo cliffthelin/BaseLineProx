@@ -94,3 +94,20 @@ def test_a_base_that_is_not_installed_is_refused_not_guessed(tmp_path):
     f = FakeHost(tmp_path / "os")
     with pytest.raises(pe.PrebuiltError, match="not installed"):
         pe.create(f.host, "work", "debian", owner="cliff")
+
+
+def test_a_disk_smaller_than_the_systems_own_is_refused_before_anything_is_created(tmp_path):
+    """Found on the rehearsal: asking for 8 GB over a 32 GB base failed inside qemu-img after the VM was already registered."""
+    f = FakeHost(tmp_path / "os")
+    pe.install_base(f.host, "debian", carried(tmp_path))
+    original = f.run.__call__
+    def run(argv):
+        if argv[:2] == ["qemu-img", "info"]:
+            f.run.calls.append(list(argv))
+            return 0, json.dumps({"virtual-size": 32 * 2**30}), ""
+        return original(argv)
+    f.host.run = run
+    with pytest.raises(pe.PrebuiltError, match="at least 32 GB"):
+        pe.create(f.host, "work", "debian", owner="cliff", disk_gb=8)
+    assert not f.host.vm_dir("work").exists()                                                     # nothing was made
+    assert pe.create(f.host, "work", "debian", owner="cliff", disk_gb=40)["owner"] == "cliff"

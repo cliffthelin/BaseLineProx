@@ -207,7 +207,9 @@ def test_creating_from_a_carried_base_installs_it_and_makes_the_vm_for_the_signe
     (folder / "debian-base.json").write_text(json.dumps({"base": "debian-base.qcow2", "sha256": hashlib.sha256(b"base").hexdigest(), "holds_install_state_or_secrets": False}))
     got = vm_page.perform(f.host, "create_prebuilt", {"name": "work", "os": "debian", "memory_mb": "4096", "cpus": "2"}, iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
     assert got["ok"] is True and got["owner"] == "cliff" and "password" not in got and "password" not in got["message"].lower()
-    assert f.host._spec("work")["base"] == "debian-base"
+    assert f.host._spec("work")["base"] == "debian-base" and f.host._spec("work")["persistence_gb"] == 32       # the standard home disk
+    sized = vm_page.perform(f.host, "create_prebuilt", {"name": "small", "os": "debian", "memory_mb": "4096", "cpus": "2", "persistence_gb": "4"}, iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
+    assert sized["ok"] is True and f.host._spec("small")["persistence_gb"] == 4                                  # a chosen home-disk size is honoured
     for bad in ({"name": "x", "os": "windows"}, {"name": "x", "os": "ubuntu"}):
         refused = vm_page.perform(f.host, "create_prebuilt", dict(bad, memory_mb="4096", cpus="2"), iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
         assert refused["ok"] is False                                              # an unknown system, or a base this machine does not carry

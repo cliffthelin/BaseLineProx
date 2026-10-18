@@ -59,7 +59,8 @@ def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir, os_bases_dir
                 raise vh.VmError("no folder of ready-made bases is configured")
             pe.install_base(host, os_id, os_bases_dir)
             created = pe.create(host, name, os_id, owner=pe.owner_account(host, owner), memory_mb=_int(params, "memory_mb", "memory"), cpus=_int(params, "cpus", "cpus"),
-                                disk_gb=_int(params, "disk_gb", "disk size") if params.get("disk_gb") else None)
+                                disk_gb=_int(params, "disk_gb", "disk size") if params.get("disk_gb") else None,
+                                **({"persistence_gb": _int(params, "persistence_gb", "user disk size")} if params.get("persistence_gb") else {}))
             return dict(created, ok=True)
         if action == "create_iso":
             iso = {i["name"]: i["path"] for i in available_isos(host, iso_dir)}.get(str(params.get("iso", "")))
