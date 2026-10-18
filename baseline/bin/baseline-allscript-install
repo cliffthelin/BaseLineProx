@@ -51,7 +51,7 @@ sys.path.insert(0, str(REPO / "baseline/lib"))
 
 DRIVES = {"PC401": "MD89N41071210AP4E", "PC601": "FD01N6557110C271B"}   # both 512110190592-byte SK hynix NVMe
 SIZE = 512110190592
-REHEARSAL_DISK_BYTES = 128 * 2**30    # the rehearsal VM's virtual disk: a sparse file, far smaller than the real drives it stands in for; room for the carried Kasm base (the ISO and its expanded copy)
+REHEARSAL_DISK_BYTES = 384 * 2**30    # the rehearsal VM's virtual disk: a sparse file, a little smaller than the real 512 GB drives it stands in for; room for the full cache (Kasm base and every ready-made base, carried as the ISO and its expanded copy)
 REHEARSAL_MEMORY_MB = 16384           # Kasm's own VM runs inside it (nested), and Kasm setup refuses a host under 12 GiB
 REHEARSAL_LVM = dict(lvm_maxroot=16, lvm_maxvz=8, lvm_swapsize=2)   # leaves most of the 64 GiB free for first boot's Baseline volumes
 TARGET_NAME = None                    # chosen per run by select_target(); there is deliberately no default
