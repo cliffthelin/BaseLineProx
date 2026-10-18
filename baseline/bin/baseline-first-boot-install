@@ -156,7 +156,7 @@ def step_machine(host_id_path=None, read=None):
     mark("machine", recorded=True, state=result["state"], roles=len(roles))
 
 
-def step_dev_user(write_to=None, systemd=True):
+def step_dev_user(write_to=None, systemd=True, ssh_dir=None, sshd_dropin=None):
     """Development-phase login (baseline-dev-user): store the carried 'name:hash' root-only, install the script and its boot unit, run it.
     Nothing happens when no development user was carried."""
     value = os.environ.get("BASELINE_DEV_USER")
@@ -170,6 +170,7 @@ def step_dev_user(write_to=None, systemd=True):
     with os.fdopen(fd, "w") as handle:
         handle.write(value + "\n")
     os.chmod(target, 0o600)
+    step_dev_ssh_keys(ssh_dir or target.parent, sshd_dropin or Path("/etc/ssh/sshd_config.d/baseline-dev.conf"), reload=systemd)
     if systemd:
         shutil.copy(SRC / "baseline/bin/baseline-dev-user", "/usr/local/sbin/baseline-dev-user")
         os.chmod("/usr/local/sbin/baseline-dev-user", 0o755)
@@ -179,6 +180,27 @@ def step_dev_user(write_to=None, systemd=True):
         run(["systemctl", "start", "--no-block", "baseline-dev-user.service"])
     log(f"dev-user: {value.split(':', 1)[0]} will be a Linux user and a Proxmox Administrator")
     mark("dev-user", carried=True, user=value.split(":", 1)[0])
+
+
+def step_dev_ssh_keys(directory, sshd_dropin, reload=True):
+    """Development keys carried with the development user go into a file of their own that sshd also reads. The install-time root key sits in
+    /root/.ssh, which moves onto USER_ADMIN (and Proxmox links it into its cluster store); the rehearsal found it unusable on the first boot."""
+    value = os.environ.get("BASELINE_DEV_SSH_KEYS")
+    if not value:
+        return
+    keys = Path(directory) / "authorized_keys"
+    keys.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(keys, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write("\n".join(value.split("|")) + "\n")
+    os.chmod(keys, 0o600)
+    sshd_dropin = Path(sshd_dropin)
+    sshd_dropin.parent.mkdir(parents=True, exist_ok=True)
+    sshd_dropin.write_text(f"AuthorizedKeysFile .ssh/authorized_keys {keys}\n")
+    if reload:
+        run(["systemctl", "reload", "ssh"])
+    log(f"dev-user: {len(value.split('|'))} development SSH key(s) authorized through {keys}")
+    mark("dev-ssh-keys", count=len(value.split("|")))
 
 
 def step_volume_group():

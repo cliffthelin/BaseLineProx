@@ -481,6 +481,37 @@ def test_the_hook_carries_a_development_user_only_if_it_is_a_name_and_a_sha512cr
             fbh._exec_line(None, bad)
 
 
+def test_the_hook_carries_development_ssh_keys_only_in_the_usual_one_line_form_and_only_with_a_development_user(tmp_path):
+    import first_boot_hook as fbh
+    import pytest
+    user = "baseline:$6$abcdefgh$" + "A" * 86
+    key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabc baseline-monitor"
+    line = fbh._exec_line(None, user, (key,))
+    assert f"BASELINE_DEV_SSH_KEYS='{key}'" in line
+    assert "BASELINE_DEV_SSH_KEYS" not in fbh._exec_line(None, user, ())
+    for bad in ("ssh-ed25519 AAAA'; rm -rf / #", "not a key", "ssh-ed25519 AAAA\nssh-rsa BBBB"):
+        with pytest.raises(fbh.HookError):
+            fbh._exec_line(None, user, (bad,))
+    with pytest.raises(fbh.HookError):
+        fbh._exec_line(None, None, (key,))
+
+
+def test_first_boot_writes_carried_development_keys_where_sshd_reads_them_whatever_happens_to_the_root_home(tmp_path, monkeypatch):
+    """The install-time root key lives in /root/.ssh, which is moved onto USER_ADMIN (and Proxmox links it into its own cluster store): the
+    rehearsal found it unusable on the first real boot. A development key is therefore also written to a file of its own that sshd reads."""
+    installer = _installer()
+    monkeypatch.setattr(installer, "STATE", tmp_path / "state")
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    (tmp_path / "state").mkdir()
+    monkeypatch.setenv("BASELINE_DEV_USER", "baseline:$6$abcdefgh$" + "A" * 86)
+    key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabc baseline-monitor"
+    monkeypatch.setenv("BASELINE_DEV_SSH_KEYS", key)
+    installer.step_dev_user(write_to=tmp_path / "etc" / "dev-user.hash", systemd=False, ssh_dir=tmp_path / "etc", sshd_dropin=tmp_path / "sshd" / "baseline-dev.conf")
+    keys = tmp_path / "etc" / "authorized_keys"
+    assert keys.read_text() == key + "\n" and keys.stat().st_mode & 0o777 == 0o600
+    assert f"AuthorizedKeysFile .ssh/authorized_keys {keys}" in (tmp_path / "sshd" / "baseline-dev.conf").read_text()
+
+
 def test_the_installer_cache_storage_is_named_for_the_volume_and_the_old_name_is_replaced(tmp_path, monkeypatch):
     """Operator, 2026-10-12: `baseline-isos` is not a volume. The same folder is registered as `installer-cache`, the old entry removed."""
     import json

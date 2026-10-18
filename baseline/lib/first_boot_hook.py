@@ -27,7 +27,10 @@ _SERIAL = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")
 _DEV_USER = re.compile(r"^[a-z][a-z0-9_-]{0,31}:\$6\$[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{86}$")
 
 
-def _exec_line(child_identity, dev_user=None):
+_DEV_SSH_KEY = re.compile(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+) [A-Za-z0-9+/=]{20,800}( [A-Za-z0-9._@-]{1,64})?$")
+
+
+def _exec_line(child_identity, dev_user=None, dev_ssh_keys=()):
     """The last line of the hook. With a child identity (installer_identity: the UUID the drive must carry, and its hardware serial)
     both are handed to the installer as environment variables; they are checked here so nothing but plain characters can reach a
     shell script."""
@@ -37,6 +40,12 @@ def _exec_line(child_identity, dev_user=None):
         if not isinstance(dev_user, str) or not _DEV_USER.match(dev_user):
             raise HookError("a development user must be 'name:sha512crypt-hash' (name lower-case letters, digits, _ and -)")
         extra = f" BASELINE_DEV_USER='{dev_user}'"      # only [a-z0-9_-:$./A-Za-z0-9] by the check above: safe inside single quotes
+    if dev_ssh_keys:
+        if dev_user is None:
+            raise HookError("development SSH keys travel with a development user only")
+        if not all(isinstance(k, str) and _DEV_SSH_KEY.match(k) for k in dev_ssh_keys):
+            raise HookError("a development SSH key must be in the usual one-line form")
+        extra += " BASELINE_DEV_SSH_KEYS='" + "|".join(dev_ssh_keys) + "'"     # plain characters only, checked above
     if child_identity is None:
         return plain if not extra else f'exec env{extra} /usr/bin/python3 "$dest/{INSTALLER}"'
     if (not isinstance(child_identity, dict) or set(child_identity) != {"uuid", "serial"}
@@ -82,11 +91,11 @@ class HookError(RuntimeError):
     pass
 
 
-def build_hook(repo_root, output_path, *, child_identity=None, dev_user=None) -> Path:
+def build_hook(repo_root, output_path, *, child_identity=None, dev_user=None, dev_ssh_keys=()) -> Path:
     repo_root, output_path = Path(repo_root), Path(output_path)
     if not (repo_root / INSTALLER).is_file() or not (repo_root / "boot/provision.sh").is_file():
         raise HookError(f"{repo_root} does not contain the on-target installer and provision.sh")
-    hook = HOOK.replace("@EXEC@", _exec_line(child_identity, dev_user))
+    hook = HOOK.replace("@EXEC@", _exec_line(child_identity, dev_user, dev_ssh_keys))
     if len(hook.encode()) >= PROXMOX_HOOK_LIMIT:
         raise HookError("the first-boot hook exceeds Proxmox's 1 MiB limit")
     output_path.parent.mkdir(parents=True, exist_ok=True)

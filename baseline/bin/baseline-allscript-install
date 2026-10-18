@@ -718,7 +718,7 @@ def stage_rehearse(r):
                                        disk_serial="BLREHEARSAL01", first_boot=True, root_ssh_keys=monitor_keys(),
                                        **REHEARSAL_LVM))
     answer.chmod(0o600)                                    # holds the password hash; the build drive's ACLs widen it
-    hook = fbh.build_hook(REPO, work / "baseline-first-boot", child_identity=child_identity_for("BLREHEARSAL01"), dev_user=dev_user())
+    hook = fbh.build_hook(REPO, work / "baseline-first-boot", child_identity=child_identity_for("BLREHEARSAL01"), dev_user=dev_user(), dev_ssh_keys=monitor_keys())
     prepared = dsan.prepare_iso_defensively(
         dsan.RealAnswerRunner(), binary=ASSISTANT, source_iso=SOURCE_ISO, answer_file=answer, fetch_from="iso",
         output_path=work / "answer.iso", tmp_dir=work / "prep-tmp", workspace_root=work, expected_fetch_mode="iso",
