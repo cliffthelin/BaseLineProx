@@ -211,7 +211,7 @@ DEBIAN_CHECKS = [
     ("failed-units", "systemctl --failed --no-legend | wc -l"),
 ]
 DEBIAN_APPS_STEP = ("install-apps", "mkdir -p /mnt/payload && mount -t iso9660 -o ro /dev/vdb /mnt/payload && sh /mnt/payload/install-apps.sh > /var/log/baseline-apps.log 2>&1; rc=$?; umount /mnt/payload; echo exit=$rc; tail -n 3 /var/log/baseline-apps.log")
-DEBIAN_TIDY = ["cloud-init clean --logs --seed --machine-id || cloud-init clean --logs", "rm -f /etc/ssh/ssh_host_* /var/log/baseline-apps-failed", "apt-get clean", "rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*",
+DEBIAN_TIDY = ["sed -i '/^deb cdrom:/d; /^deb-src cdrom:/d' /etc/apt/sources.list || true", "cloud-init clean --logs --seed --machine-id || cloud-init clean --logs", "rm -f /etc/ssh/ssh_host_* /var/log/baseline-apps-failed", "apt-get clean", "rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*",
                "truncate -s 0 /etc/machine-id", "rm -f /var/lib/dbus/machine-id", "fstrim -av || true", "sync"]
 
 

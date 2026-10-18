@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Install an application from the catalogue on THIS system, by the route that system prefers (DR266, app_catalogue.py).
+
+    baseline-app-install list [--category browsers]
+    baseline-app-install show firefox --os debian         the route chosen and the script it would run
+    baseline-app-install run firefox --os debian          run that script (needs root, and the system's own network)
+
+The script is printed before it is run, and every value in it came from the catalogue, never from the command line.
+"""
+import argparse
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
+import app_catalogue as ac  # noqa: E402
+
+
+def this_system() -> str:
+    try:
+        fields = dict(line.split("=", 1) for line in open("/etc/os-release").read().splitlines() if "=" in line)
+    except OSError:
+        return ""
+    ident = fields.get("ID", "").strip('"')
+    return {"arch": "cachyos"}.get(ident, ident) if ident not in ac.PREFERENCE else ident
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("action", choices=("list", "show", "run"))
+    parser.add_argument("app", nargs="?")
+    parser.add_argument("--os", help="the system to plan for (default: this one)")
+    parser.add_argument("--category")
+    args = parser.parse_args(argv)
+    try:
+        catalogue = ac.load()
+        if args.action == "list":
+            for entry in catalogue.values():
+                if not args.category or entry["category"] == args.category:
+                    print(f"{entry['id']:<12} {entry['category']:<16} {entry['name']}")
+            return 0
+        if args.app not in catalogue:
+            print(f"baseline-app-install: {args.app!r} is not in the catalogue", file=sys.stderr)
+            return 2
+        os_id = args.os or this_system()
+        route, params = ac.route_for(catalogue[args.app], os_id)
+        if route is None:
+            print(f"baseline-app-install: {params}", file=sys.stderr)
+            return 1
+        script = ac.install_script(catalogue[args.app], os_id)
+        print(f"# {catalogue[args.app]['name']} on {os_id}: route {route}")
+        if script is None:
+            print(f"# the {route} route is not an install-time command here (nix is declared in the configuration; proot and container belong to the Kasm and service-host sides)")
+            return 0
+        print(script, end="")
+        if args.action == "run":
+            if os.geteuid() != 0:
+                print("baseline-app-install: running it needs root", file=sys.stderr)
+                return 1
+            return subprocess.run(["sh", "-c", script]).returncode
+        return 0
+    except ac.CatalogueError as exc:
+        print(f"baseline-app-install: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

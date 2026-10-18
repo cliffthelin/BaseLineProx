@@ -17,3 +17,7 @@ Date: 2026-10-17. Status: QUEUED by the operator. Nothing below is built. The op
 
 ## To confirm when this is picked up
 "I tools" meaning; the list of apps within each category (the catalogue has 227; name the first handful per category); AI image tools are not in the LinuxServer list as such (the catalogue has none named that way), so where they come from is open.
+
+
+## Progress (2026-10-17, later): see DR268
+Item 1's first step (the reviewed, pinned kit catalogue) and item 4's framework with the browsers category are built and tested. The rest of items 1 to 4 is still queued.

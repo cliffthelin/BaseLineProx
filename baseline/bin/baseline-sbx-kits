@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Read a Docker Sandbox kit and say what it does, so a person can review it (DR265, sbx_kits.py). Nothing is installed and no Docker account or `sbx` is needed.
+
+    baseline-sbx-kits review docker.io/sbx/task-kit:latest
+
+Prints the kit's manifest digest (the value a recipe's `reviewed` is set to, short form), the facts it declares, and the findings a recipe must accept by name.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
+import sbx_kits  # noqa: E402
+
+
+def main(argv):
+    if len(argv) != 2 or argv[0] != "review":
+        print(__doc__, file=sys.stderr)
+        return 2
+    try:
+        kit = sbx_kits.fetch(argv[1])
+        found = sbx_kits.review(kit["spec"])
+    except sbx_kits.KitError as exc:
+        print(f"baseline-sbx-kits: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps({"ref": kit["ref"], "digest": kit["digest"], "reviewed": sbx_kits.short(kit["digest"]), "facts": found["facts"], "findings": found["findings"]}, indent=2))
+    print("\n--- spec.yaml ---\n" + kit["spec"])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

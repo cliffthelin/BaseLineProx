@@ -1,0 +1,60 @@
+{
+ "format": "baseline.app-catalogue/v1",
+ "_note": "One entry per application: which way it is installed on each kind of system, where its data lives, and what a person should know. Adding an application is adding one entry. Categories follow the operator's order (DR266): browsers, developer tools, AI tools, media, AI image tools, office tools; only browsers are filled so far. Every Flatpak id was checked against Flathub's own API on 2026-10-17; apt and pacman names are only used where the system's own repository has the package.",
+ "apps": [
+  {
+   "id": "firefox", "name": "Firefox", "category": "browsers",
+   "routes": {
+    "apt": {"package": "firefox-esr", "only": ["debian"]},
+    "pacman": {"package": "firefox"},
+    "nix": {"attr": "firefox"},
+    "flatpak": {"id": "org.mozilla.firefox"},
+    "proot": {"name": "firefox"},
+    "container": {"image": "lscr.io/linuxserver/firefox:latest", "ports": [3000, 3001], "config": "/config"}
+   },
+   "data": ["~/.mozilla", "~/.var/app/org.mozilla.firefox"]
+  },
+  {
+   "id": "chromium", "name": "Chromium", "category": "browsers",
+   "routes": {
+    "apt": {"package": "chromium", "only": ["debian"]},
+    "pacman": {"package": "chromium"},
+    "nix": {"attr": "chromium"},
+    "flatpak": {"id": "org.chromium.Chromium"},
+    "proot": {"name": "chromium"},
+    "container": {"image": "lscr.io/linuxserver/chromium:latest", "ports": [3000, 3001], "config": "/config"}
+   },
+   "data": ["~/.config/chromium", "~/.var/app/org.chromium.Chromium"]
+  },
+  {
+   "id": "brave", "name": "Brave", "category": "browsers",
+   "routes": {
+    "nix": {"attr": "brave"},
+    "flatpak": {"id": "com.brave.Browser"},
+    "proot": {"name": "brave"},
+    "container": {"image": "lscr.io/linuxserver/brave:latest", "ports": [3000, 3001], "config": "/config"}
+   },
+   "data": ["~/.config/BraveSoftware", "~/.var/app/com.brave.Browser"]
+  },
+  {
+   "id": "librewolf", "name": "LibreWolf", "category": "browsers",
+   "routes": {
+    "nix": {"attr": "librewolf"},
+    "flatpak": {"id": "io.gitlab.librewolf-community"},
+    "proot": {"name": "librewolf"},
+    "container": {"image": "lscr.io/linuxserver/librewolf:latest", "ports": [3000, 3001], "config": "/config"}
+   },
+   "data": ["~/.librewolf", "~/.var/app/io.gitlab.librewolf-community"]
+  },
+  {
+   "id": "vivaldi", "name": "Vivaldi", "category": "browsers",
+   "routes": {
+    "nix": {"attr": "vivaldi"},
+    "flatpak": {"id": "com.vivaldi.Vivaldi"},
+    "proot": {"name": "vivaldi"},
+    "container": {"image": "lscr.io/linuxserver/vivaldi:latest", "ports": [3000, 3001], "config": "/config"}
+   },
+   "data": ["~/.config/vivaldi", "~/.var/app/com.vivaldi.Vivaldi"]
+  }
+ ]
+}
