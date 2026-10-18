@@ -851,6 +851,9 @@ def main():
         raise RuntimeError(f"the install stage erases {TARGET_NAME}: add  --confirm-wipe {SERIAL}")
     needs_root = root_required(stages)
     if needs_root and os.geteuid() != 0:
+        import elevate
+        say("these stages need root; asking the system for it (a password prompt will appear)")
+        elevate.elevate_or_return([str(Path(__file__).resolve()), *sys.argv[1:]])
         raise RuntimeError(f"stages {', '.join(needs_root)} need root: run with sudo")
     WORK.mkdir(mode=0o750, parents=True, exist_ok=True)
     _give_to_operator(WORK)
