@@ -67,7 +67,7 @@ def load_drives(path=None) -> dict:
 os.environ.setdefault("BASELINE_OWN_DRIVES_FILE", str(DRIVES_FILE.with_name("own-drives")))   # this host's lane data (the drives it may act on, `disposable` ones reinstallable), beside drives.json
 DRIVES = load_drives()                  # every target is a drive the operator named in that file; with fewer than two the OTHER drive cannot be protected, so a drive run needs both
 SIZE = 512110190592
-REHEARSAL_DISK_BYTES = 384 * 2**30    # the rehearsal VM's virtual disk: a sparse file, a little smaller than the real 512 GB drives it stands in for; room for the full cache (Kasm base and every ready-made base, carried as the ISO and its expanded copy)
+REHEARSAL_DISK_BYTES = SIZE            # the mirror of the child drive: a sparse file of exactly the real drive's size, so a size-accurate build is tried on CACHE and only what is written takes space; the real drive is not rewritten to try a change
 REHEARSAL_MEMORY_MB = 16384           # Kasm's own VM runs inside it (nested), and Kasm setup refuses a host under 12 GiB
 REHEARSAL_LVM = dict(lvm_maxroot=16, lvm_maxvz=8, lvm_swapsize=2)   # leaves most of the 64 GiB free for first boot's Baseline volumes
 TARGET_NAME = None                    # chosen per run by select_target(); there is deliberately no default
@@ -575,6 +575,8 @@ def stage_install(r):
     say("deactivated on this host:", deactivate_target_vgs(r, target))
     # The authorization is the exact `--confirm-wipe <serial>` on the command line (checked in main), after a verified
     # recovery image and under the serial lock: an interactive prompt on top of that only blocks unattended runs.
+    import device_wear
+    wear_before = device_wear.written_bytes(Path(target["path"]).name)
     say(f"ERASING {TARGET_NAME} ({SERIAL}, {target['path']}); verified recovery image: {folder}")
     if cache_status(CACHE_DIR, REPO, KASM_BASE, OS_BASES) != "complete":
         raise RuntimeError(cache_not_ready("run the cache stage first; the installer must carry its own packages and applications"))
@@ -598,7 +600,9 @@ def stage_install(r):
     # authorization. Nothing here reads console text (no OCR, by design): a person or vision-capable agent watches
     # the screendump and records each checkpoint.
     watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)", opened_path=target["path"])
-    record("install", workspace=str(workspace), build=CURRENT_BUILD)
+    wear = device_wear.spent(wear_before, device_wear.written_bytes(Path(target["path"]).name))
+    say(f"this install wrote {device_wear.describe(wear)} to {TARGET_NAME}")
+    record("install", workspace=str(workspace), build=CURRENT_BUILD, bytes_written=wear)
 
 
 def clear_stale_checkpoint(path):
@@ -833,8 +837,8 @@ def main():
                         help="a prepared Kasm base (the folder baseline-build-kasm-base wrote); the cache then carries it (about 15 GiB) so Kasm is built on the new setup")
     parser.add_argument("--os-bases", type=Path, metavar="DIR",
                         help="the folder baseline-build-os-base wrote; the cache then carries each ready-made VM base that passes its checks, so the listed systems can be created already set up")
-    parser.add_argument("--force", action="store_true",
-                        help="install even when the drive's recorded build is exactly the one about to be carried")
+    parser.add_argument("--reinstall", "--force", dest="force", action="store_true",
+                        help="erase and install again even though this drive is already installed (a full install writes about 170 GiB to it; code changes go in place with baseline-rebuild-drive instead)")
     parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
                         help="authorize erasing the target (after its verified recovery image); its exact serial")
     args = parser.parse_args()
@@ -871,9 +875,13 @@ def main():
         CURRENT_BUILD = build_currency.source_state(r, REPO)
         verdict = build_currency.assess(journal()["stages"].get("install", {}).get("build"), CURRENT_BUILD)
         say(f"build check for {TARGET_NAME}: {verdict['action']} - {verdict['reason']}")
+        installed_before = "install" in journal()["stages"]
+        if installed_before and verdict["action"] == "install":
+            verdict = {"action": "skip", "reason": verdict["reason"] + "; this drive is already installed, so the code is updated in place (baseline-rebuild-drive), not by rewriting the drive"}
+            say(f"build check for {TARGET_NAME}: {verdict['reason']}")
         if verdict["action"] == "skip" and not args.force:
             stages = [s for s in stages if s not in ("recovery", "install", "firstboot", "kiosk")]
-            say(f"{TARGET_NAME} is left as it is (nothing erased); add --force to install anyway")
+            say(f"{TARGET_NAME} is left as it is (nothing erased or written); add --reinstall to erase and install anyway")
             if not stages:
                 return
     functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,

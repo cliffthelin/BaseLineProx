@@ -271,8 +271,8 @@ def test_the_development_user_travels_as_a_hash_only_and_the_file_must_be_privat
         allscript.dev_user()
 
 
-def test_the_rehearsal_vm_disk_is_smaller_than_the_real_drive_and_leaves_room_for_the_baseline_volumes():
-    assert 32 * 2**30 <= allscript.REHEARSAL_DISK_BYTES <= 384 * 2**30 < allscript.SIZE
+def test_the_rehearsal_mirror_is_exactly_the_real_drives_size_and_leaves_room_for_the_baseline_volumes():
+    assert allscript.REHEARSAL_DISK_BYTES == allscript.SIZE
     used = (allscript.REHEARSAL_LVM["lvm_maxroot"] + allscript.REHEARSAL_LVM["lvm_maxvz"] + allscript.REHEARSAL_LVM["lvm_swapsize"]) * 2**30
     assert allscript.REHEARSAL_DISK_BYTES - used >= 24 * 2**30
 
