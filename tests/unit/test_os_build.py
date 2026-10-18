@@ -174,3 +174,14 @@ def test_the_bazzite_kickstart_installs_the_seed_runner_and_a_unit_that_runs_bef
 
 def test_the_bazzite_kickstart_without_a_runner_is_the_old_one():
     assert "%post" not in ob.bazzite_kickstart()
+
+
+def test_injection_steps_mount_the_base_run_the_script_in_it_verify_and_unmount_and_refuse_odd_values():
+    steps = ob.injection_steps("2")
+    assert list(steps) == ["mount", "run", "verify", "unmount"]
+    assert "/dev/vdb2" in steps["mount"] and "subvol=@" in steps["mount"] and "chroot /mnt/target /bin/bash /tmp/inject.sh" in steps["run"]
+    assert "rm -f /mnt/target/tmp/inject.sh" in steps["run"] and "exit $status" in steps["run"]               # the script never stays in the base, and its failure is the step's failure
+    assert "baseline-seed.service" in steps["verify"] and steps["unmount"].startswith("sync")
+    for bad in ({"partition": "2; rm -rf /"}, {"partition": "0"}, {"partition": "2", "mount_options": "subvol=@; reboot"}):
+        with pytest.raises(ob.BuildError):
+            ob.injection_steps(**bad)

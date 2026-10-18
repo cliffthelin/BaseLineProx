@@ -391,6 +391,66 @@ def installer_boot_drives(disk: Path, iso: Path, extra_cdroms=()):
     return argv
 
 
+def inject_seed_runner(disk: Path, helper: Path, work: Path, *, partition="2") -> dict:
+    """Put the first-boot seed runner (and Omarchy's owner step) into a FINISHED Omarchy base. Omarchy has no guest agent and its installer has no hook, so a helper VM (any base that has one, here
+    Debian) opens the base's disk as a second drive, runs the install script in a chroot of the base's root filesystem, checks the result and unmounts. The base is never booted."""
+    import qga_client
+    script = ob.seed_runner_install_script((REPO / "baseline/lib/seed_runner.py").read_text(),
+                                           {"/etc/baseline-seed/omarchy_owner.py": (REPO / "baseline/lib/omarchy_owner.py").read_text()})
+    steps = ob.injection_steps(partition)
+    overlay, vars_file, sock, pidfile = work / "helper.qcow2", work / "helper-vars.fd", work / "helper-qga.sock", work / "helper.pid"
+    for f in (overlay, sock):
+        f.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", str(helper.resolve()), str(overlay)], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    argv = ["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", "4", "-m", "4096", "-machine", "q35", "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
+            "-drive", f"if=pflash,format=raw,file={vars_file}", "-drive", f"file={overlay},if=none,id=root,format=qcow2", "-device", "virtio-blk-pci,drive=root,bootindex=0",
+            "-drive", f"file={disk},if=none,id=tgt,format=qcow2", "-device", "virtio-blk-pci,drive=tgt", "-nic", "user,model=virtio-net-pci,restrict=on", "-display", "none",
+            "-chardev", f"socket,path={sock},server=on,wait=off,id=qga0", "-device", "virtio-serial", "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
+            "-serial", f"file:{work / 'helper-serial.log'}", "-daemonize", "-pidfile", str(pidfile)]
+    say("opening the finished base from a helper VM to install the seed runner")
+    subprocess.run(argv, check=True)
+    pid = int(pidfile.read_text())
+    client, end = None, time.monotonic() + AGENT_WAIT_S
+    try:
+        while client is None and time.monotonic() < end:
+            try:
+                client = qga_client.QGA(str(sock), timeout=10)
+                client.sync(timeout=max(1, end - time.monotonic()))
+            except Exception:
+                client = None
+                time.sleep(5)
+        if client is None:
+            raise ob.BuildError("the helper VM did not answer through its guest agent")
+        def step(command, stdin=b"", what=""):
+            code, out, err = client.exec("/bin/sh", ["-c", command], stdin=stdin, wait=900)
+            if code:
+                raise ob.BuildError(f"{what or command[:40]} failed in the helper: {(err or out).strip()[-300:]}")
+            return (out + err).strip()
+        step("cat > /tmp/inject.sh", script.encode(), "sending the install script")
+        step(steps["mount"], what="mounting the base's root filesystem")
+        step(steps["run"], what="running the install script in the base")
+        verified = step(steps["verify"], what="checking the installed files")
+        step(steps["unmount"], what="unmounting the base")
+        try:
+            client.exec("/bin/sh", ["-c", "systemctl poweroff"], wait=30)
+        except (OSError, ValueError):                                     # the agent goes away with the system it was asked to stop
+            pass
+        for _ in range(60):
+            try:
+                Path(f"/proc/{pid}").stat()
+                time.sleep(2)
+            except OSError:
+                break
+        return {"verified": verified}
+    finally:
+        try:
+            Path(f"/proc/{pid}").stat()
+            subprocess.run(["kill", str(pid)])
+        except OSError:
+            pass
+
+
 def build_omarchy(args, work: Path, out: Path):
     iso = next(args.images.glob("omarchy-*.iso"))
     disk, vars_file = work / "disk.qcow2", work / "vars.fd"
@@ -415,6 +475,13 @@ def build_omarchy(args, work: Path, out: Path):
     manifest = {"os": "omarchy-4.0.4", "source_image": iso.name, "source_sha256": sha256(iso), "install": "the ISO's cidata path with defer-provisioning (full disk, unencrypted)",
                 "apps_needing_a_helper": ["vscode", "spotify", "chrome", "chatgpt", "claude"], "checks": results,
                 "first_boot": "the owner is created at the first boot by Omarchy's own setup (omarchy-provision-owner); the base has no account"}
+    helper = Path(args.helper) if getattr(args, "helper", None) else out / "debian-base.qcow2"
+    if helper.is_file():
+        results["seed-runner"] = inject_seed_runner(disk, helper, work)
+        manifest["first_boot"] = ("the owner is made at the first boot from the seed disk by baseline-seed, through Omarchy's own provisioning (omarchy_owner); with no seed disk Omarchy's own "
+                                  "interactive setup runs; the base has no account")
+    else:
+        say(f"no helper base at {helper}: the seed runner is NOT installed, so VMs from this base ask for the owner on Omarchy's own first-boot screen")
     finalize("omarchy", disk, out, manifest)
 
 
@@ -605,6 +672,28 @@ def first_boot_check(args) -> int:
     return 0 if ok else 1
 
 
+def inject_existing(args) -> int:
+    """`inject`: the same helper-VM step as the build, on a base that is already built. The base file is changed in place and its manifest (checksum, size, first-boot note) rewritten."""
+    base, manifest_path = args.base.resolve(), args.base.resolve().with_suffix(".json")
+    if not base.is_file() or not manifest_path.is_file():
+        say("stopped: the base and its manifest (same name, .json) must both exist")
+        return 1
+    args.work.mkdir(parents=True, exist_ok=True)
+    try:
+        result = inject_seed_runner(base, args.helper, args.work)
+    except (ob.BuildError, subprocess.CalledProcessError) as exc:
+        say("stopped:", exc)
+        return 1
+    manifest = json.loads(manifest_path.read_text())
+    manifest.setdefault("checks", {})["seed-runner"] = result
+    manifest.update(bytes=base.stat().st_size, sha256=sha256(base), holds_install_state_or_secrets=False,
+                    first_boot=("the owner is made at the first boot from the seed disk by baseline-seed, through Omarchy's own provisioning (omarchy_owner); with no seed disk Omarchy's own "
+                                "interactive setup runs; the base has no account"))
+    manifest_path.write_text(json.dumps(manifest, indent=1))
+    say(f"done: seed runner installed in {base.name}; manifest updated")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -616,11 +705,18 @@ def main():
     two.add_argument("--apps", type=Path)
     two.add_argument("--output", required=True, type=Path)
     two.add_argument("--disk-gb", type=int, default=32)
+    two.add_argument("--helper", type=Path, help="a base with a guest agent (default: debian-base.qcow2 in the output folder) used to install the seed runner into Omarchy")
     three = sub.add_parser("first-boot")
     three.add_argument("--os", required=True)
     three.add_argument("--base", required=True, type=Path)
     three.add_argument("--output", required=True, type=Path)
+    four = sub.add_parser("inject", help="install the seed runner into an already finished Omarchy base (in place; the manifest is updated)")
+    four.add_argument("--base", required=True, type=Path)
+    four.add_argument("--helper", required=True, type=Path)
+    four.add_argument("--work", required=True, type=Path)
     args = parser.parse_args()
+    if args.command == "inject":
+        return inject_existing(args)
     if args.command == "first-boot":
         return first_boot_check(args)
     if args.command == "apps":

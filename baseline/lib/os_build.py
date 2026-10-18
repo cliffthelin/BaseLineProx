@@ -303,6 +303,19 @@ def bazzite_kickstart(*, hostname="bazzite", image="/run/install/repo/bazzite-st
     return "\n".join(lines) + "\n"
 
 
+def injection_steps(partition: str, *, mount_options: str = "subvol=@") -> dict:
+    """Shell steps a helper VM runs to put files into a FINISHED base whose system cannot be reached through a guest agent (Omarchy has none, and the installer offers no hook): find the
+    base's root filesystem on the extra disk, mount it, run the install script inside it, check the result, and unmount. Pure text; `partition` is the base's root partition number."""
+    if not re.fullmatch(r"[1-9][0-9]?", str(partition)) or not re.fullmatch(r"[A-Za-z0-9=@,_/.-]{1,80}", mount_options):
+        raise BuildError("partition or mount options are not plain values")
+    return {
+        "mount": f"mkdir -p /mnt/target && mount -o {mount_options} /dev/vdb{partition} /mnt/target",
+        "run": "cp /tmp/inject.sh /mnt/target/tmp/inject.sh && chroot /mnt/target /bin/bash /tmp/inject.sh; status=$?; rm -f /mnt/target/tmp/inject.sh; exit $status",
+        "verify": "test -s /mnt/target/etc/baseline-seed/seed_runner.py && test -L /mnt/target/etc/systemd/system/multi-user.target.wants/baseline-seed.service && echo seed-runner-installed",
+        "unmount": "sync && umount /mnt/target && echo unmounted",
+    }
+
+
 # ---- CachyOS (the live image's own installer, headless) ------------------------------------------------------------------------------------
 CACHY_BUILD_USER = "baseline-build"
 
