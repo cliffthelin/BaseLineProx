@@ -1,54 +1,128 @@
-"""The navigation as nested categories, one tree for the installer / build manager and the Baseline web console.
+"""The navigation as nested categories, in two modes, one tree for the installer / build manager and the Baseline console.
 
-A group holds pages and, where a topic has parts of its own, a sub-group (the Installer holds a Server managed group). The flat list of pages is derived from the tree, so a page can never be
-reachable in one and missing from the other.
+Simple mode is for someone who just wants things to work: plain names, only the pages that matter. Advanced mode is the full set with the technical names. Every entry carries both names; an entry
+marked advanced is not shown in simple mode at all, and a group with nothing left is not shown either. The flat list of pages is derived from the tree, so a page can never be reachable in one place and
+missing from another. (Inside a page, anything technical is marked `class="adv"` and hidden in simple mode by the same switch.)
 """
 from __future__ import annotations
 
-# (label, [ (path, label) | (label, [ ... ]) ])
+from dataclasses import dataclass
+
+SIMPLE, ADVANCED = "simple", "advanced"
+
+
+@dataclass(frozen=True)
+class Page:
+    path: str
+    advanced: str                 # the technical name (what it has always been called)
+    simple: str | None = None     # the plain name; None = the page is advanced-only
+    blurb: str = ""               # one plain sentence, shown in simple mode
+
+
+@dataclass(frozen=True)
+class Group:
+    advanced: str
+    simple: str | None
+    items: tuple
+
+
+P = Page
 TREE = (
-    ("Home", (("/home", "Home"), ("/launcher", "Launcher"))),
-    ("Machine", (
-        ("/hardware", "Hardware"), ("/sensors", "Sensors"), ("/network", "Network"), ("/audio", "Audio and Bluetooth"),
-        ("/power", "Power"), ("/memory", "Memory and swap"), ("/drive-admin", "Drive Administration"))),
-    ("Workloads", (
-        ("/vms", "Virtual machines"), ("/workspaces", "Workspaces"), ("/containers", "Distro containers"), ("/environments", "Environments"),
-        ("/workloads", "Workload jobs"), ("/app-isolation", "App Isolation"), ("/ceph", "Ceph"))),
-    ("Tools", (("/chat", "Chat"), ("/shell", "Console"), ("/tools", "Diagnostic tools"), ("/ai-setup", "AI providers"))),
-    ("Security and access", (
-        ("/vault", "Vault"), ("/security", "Two-factor"), ("/operators", "Operators"), ("/approvals", "Approvals"),
-        ("/audit", "Audit"), ("/remote-access", "Remote access"))),
-    ("Recovery and backup", (("/recovery", "Recovery"),)),
-    ("Settings", (("/settings", "Settings"), ("/web-address", "Web address"), ("/admin", "Admin"), ("/operations", "Operations"), ("/master-config", "Master Config"))),
-    ("Installer", (
-        ("Plan and build", (("/install-plan", "Installer plan"), ("/install-plan?display=desktop", "Installer desktop"),
-                            ("/recipes", "Environment recipes"), ("/installation-readiness", "Installation readiness"))),
-        ("Cache", (("/installer-cache", "Installer Cache"),)),
-        ("Server managed", (("/managed-mode", "Managed server mode"),)))),
+    Group("Home", "Home", (P("/home", "Home", "Home"), P("/launcher", "Launcher", "Apps and computers", "Open an app or start a computer."))),
+    Group("Machine", "This computer", (
+        P("/hardware", "Hardware", "About this computer", "What this computer is made of and whether it is healthy."),
+        P("/sensors", "Sensors", "Temperatures and health", "How hot things are and how the drives are doing."),
+        P("/network", "Network", "Internet and network", "Whether you are online, and how."),
+        P("/audio", "Audio and Bluetooth", "Sound and Bluetooth"),
+        P("/power", "Power", "Power", "Sleep, shut down and restart."),
+        P("/memory", "Memory and swap"),
+        P("/drive-admin", "Drive Administration", "Storage drives", "See, set up and protect your drives."))),
+    Group("Workloads", "Virtual computers", (
+        P("/vms", "Virtual machines", "Virtual computers", "Computers that run inside this one."),
+        P("/workspaces", "Workspaces", "Workspaces"),
+        P("/environments", "Environments", "Ready-made setups", "A computer already set up for a purpose."),
+        P("/containers", "Distro containers"),
+        P("/workloads", "Workload jobs"),
+        P("/app-isolation", "App Isolation"),
+        P("/ceph", "Ceph"))),
+    Group("Tools", "Help and tools", (
+        P("/chat", "Chat", "Ask for help", "Ask the assistant."),
+        P("/tools", "Diagnostic tools", "Checkups", "Run a check on a part of this computer."),
+        P("/ai-setup", "AI providers", "AI assistants"),
+        P("/shell", "Console"))),
+    Group("Security and access", "Safety and access", (
+        P("/vault", "Vault", "Passwords and keys"),
+        P("/security", "Two-factor", "Two-step sign-in"),
+        P("/operators", "Operators", "People who can sign in"),
+        P("/approvals", "Approvals", "Waiting for your approval", "Things that need a yes from you."),
+        P("/remote-access", "Remote access", "Connect from elsewhere"),
+        P("/audit", "Audit"))),
+    Group("Recovery and backup", "Backup and restore", (P("/recovery", "Recovery", "Backup and restore", "Get things back if something goes wrong."),)),
+    Group("Settings", "Settings", (
+        P("/settings", "Settings", "Settings"),
+        P("/web-address", "Web address", "Where Baseline is on your network", "The address you type to reach this page."),
+        P("/admin", "Admin"),
+        P("/operations", "Operations"),
+        P("/master-config", "Master Config"))),
+    Group("Installer", "Set up and build", (
+        Group("Plan and build", "Plan a build", (
+            P("/install-plan", "Installer plan", "Plan a build", "Choose what to put on a new drive."),
+            P("/installation-readiness", "Installation readiness", "Is it ready to install?"),
+            P("/install-plan?display=desktop", "Installer desktop"),
+            P("/recipes", "Environment recipes"))),
+        Group("Cache", None, (P("/installer-cache", "Installer Cache"),)),
+        Group("Server managed", "Parent server", (P("/managed-mode", "Managed server mode", "Connect to a parent server",
+                                                      "Optional. A parent keeps backups of your data and can rebuild your computers. You never need one."),)))),
 )
 
 
-def is_page(entry) -> bool:
-    return isinstance(entry[0], str) and entry[0].startswith("/")
+def _visible(entry, mode) -> bool:
+    if mode == ADVANCED:
+        return True
+    return entry.simple is not None and (isinstance(entry, Page) or any(_visible(i, mode) for i in entry.items))
+
+
+def label(entry, mode) -> str:
+    return entry.simple if mode == SIMPLE and entry.simple else entry.advanced
 
 
 def flatten(tree=TREE) -> tuple:
+    """(path, advanced name) of every page."""
     out = []
 
     def walk(entries):
-        for entry in entries:
-            if is_page(entry):
-                out.append(entry)
+        for e in entries:
+            if isinstance(e, Page):
+                out.append((e.path, e.advanced))
             else:
-                walk(entry[1])
-    for _, entries in tree:
-        walk(entries)
+                walk(e.items)
+    walk(tree)
     return tuple(out)
 
 
+def is_page(entry) -> bool:
+    return isinstance(entry, Page)
+
+
 def active_group(active_path: str, tree=TREE):
-    """The label of the top-level group holding the page being viewed, or None."""
-    for label, entries in tree:
-        if any(active_path.startswith(path) for path, _ in flatten(((label, entries),))):
-            return label
+    """The advanced label of the top-level group holding the page being viewed, or None."""
+    for group in tree:
+        if any(active_path.startswith(path) for path, _ in flatten((group,))):
+            return group.advanced
     return None
+
+
+def visible_in(mode: str, tree=TREE) -> list:
+    """The paths shown in a mode."""
+    out = []
+
+    def walk(entries):
+        for e in entries:
+            if not _visible(e, mode):
+                continue
+            if isinstance(e, Page):
+                out.append(e.path)
+            else:
+                walk(e.items)
+    walk(tree)
+    return out

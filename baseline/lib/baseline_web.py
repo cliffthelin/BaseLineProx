@@ -70,28 +70,39 @@ import nav_tree
 NAV_TABS = nav_tree.flatten()          # every page, from the nested tree in nav_tree.py
 
 
+def _both(entry):
+    """The entry's name in both modes; the page shows the one for the chosen mode."""
+    adv, simple = html.escape(entry.advanced), html.escape(entry.simple or entry.advanced)
+    return f'<span class="m-adv">{adv}</span><span class="m-simple">{simple}</span>' if adv != simple else adv
+
+
 def _nav_entries(entries, active_path):
     out = []
-    for entry in entries:
-        if nav_tree.is_page(entry):
-            path, label = entry
-            out.append(f'<a href="{path}" class="{"active" if active_path.startswith(path) else ""}">{label}</a>')
+    for e in entries:
+        hide = "" if e.simple is not None and (nav_tree.is_page(e) or any(nav_tree._visible(i, nav_tree.SIMPLE) for i in e.items)) else " adv"
+        if nav_tree.is_page(e):
+            title = f' title="{html.escape(e.blurb)}"' if e.blurb else ""
+            out.append(f'<a href="{e.path}" class="{"active" if active_path.startswith(e.path) else ""}{hide}"{title}>{_both(e)}</a>')
         else:
-            label, children = entry
-            out.append(f'<span class="nav-sub"><span class="nav-sub-label">{label}</span>{_nav_entries(children, active_path)}</span>')
+            out.append(f'<span class="nav-sub{hide}"><span class="nav-sub-label">{_both(e)}</span>{_nav_entries(e.items, active_path)}</span>')
     return "".join(out)
 
 
 def render_nav(active_path: str) -> str:
     current = nav_tree.active_group(active_path)
     links = "".join(
-        f'<details class="nav-group"{" open" if label == current else ""}><summary>{label}</summary><div class="nav-items">{_nav_entries(entries, active_path)}</div></details>'
-        for label, entries in nav_tree.TREE
+        f'<details class="nav-group{"" if nav_tree._visible(g, nav_tree.SIMPLE) else " adv"}"{" open" if g.advanced == current else ""}><summary>{_both(g)}</summary>'
+        f'<div class="nav-items">{_nav_entries(g.items, active_path)}</div></details>'
+        for g in nav_tree.TREE
     )
+    links += ('<span class="mode-switch" role="group" aria-label="Detail level">'
+              '<button type="button" data-mode="simple">Simple</button><button type="button" data-mode="advanced">Advanced</button></span>')
     return (f'<nav class="baseline-nav">{links} <a href="/logout">Log out</a>'
             '<form method="post" action="/host/restart" onsubmit="return baselineRequestRestart(event)">'
             '<button type="submit">Restart host</button><span role="status"></span></form></nav>'
-            '''<script>
+            '''<script>(function(){var d=document.documentElement,m='simple';try{m=localStorage.getItem('baseline-mode')||'simple'}catch(e){}d.setAttribute('data-mode',m);
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.mode-switch button');if(!b)return;m=b.getAttribute('data-mode');d.setAttribute('data-mode',m);try{localStorage.setItem('baseline-mode',m)}catch(x){}});})();</script>
+<script>
 async function baselineRequestRestart(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -133,6 +144,9 @@ def _with_nav(body_bytes: bytes, active_path: str) -> bytes:
 .baseline-nav{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem;padding:1rem 0;border-bottom:1px solid #33364a;margin-bottom:1.2rem;font-size:.9rem}
 .baseline-nav a{color:#aebddc;text-decoration:none;padding:.3rem 0}
 .baseline-nav a.active{color:#fff;border-bottom:2px solid #7fa4ec}
+html[data-mode="simple"] .adv,html[data-mode="simple"] .m-adv{display:none!important}html[data-mode="advanced"] .m-simple{display:none!important}
+.mode-switch{margin-left:auto;display:inline-flex;border:1px solid #4a4f6a;border-radius:6px;overflow:hidden}.mode-switch button{margin:0;border:0;border-radius:0;background:transparent;color:#aebddc;padding:.3rem .7rem;cursor:pointer}
+html[data-mode="simple"] .mode-switch [data-mode="simple"],html[data-mode="advanced"] .mode-switch [data-mode="advanced"]{background:#33407a;color:#fff}
 .nav-group summary{cursor:pointer;color:#aebddc;padding:.3rem .1rem;list-style:none;font-weight:600}.nav-group summary::-webkit-details-marker{display:none}
 .nav-group[open] summary{color:#fff;border-bottom:2px solid #7fa4ec}.nav-group[open]{flex-basis:100%}
 .nav-items{display:flex;flex-wrap:wrap;gap:.2rem 1rem;padding:.5rem 0 .2rem}.nav-sub{display:flex;flex-wrap:wrap;gap:.2rem 1rem;align-items:center;padding-left:.8rem;border-left:2px solid #33364a}
