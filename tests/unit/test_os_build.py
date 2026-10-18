@@ -174,13 +174,3 @@ def test_the_bazzite_kickstart_installs_the_seed_runner_and_a_unit_that_runs_bef
 
 def test_the_bazzite_kickstart_without_a_runner_is_the_old_one():
     assert "%post" not in ob.bazzite_kickstart()
-
-
-def test_the_omarchy_configuration_can_carry_commands_that_archinstall_runs_in_the_new_system():
-    import json
-    install = ob.seed_runner_install_script("print('runner')\n", {"/etc/baseline-seed/omarchy_owner.py": "print('owner')\n"})
-    doc = json.loads(ob.omarchy_user_configuration(disk_bytes=64 * 2**30, custom_commands=[install]))
-    assert doc["custom_commands"] == [install] and "/etc/baseline-seed/omarchy_owner.py" in install and "print('owner')" in install
-    assert json.loads(ob.omarchy_user_configuration(disk_bytes=64 * 2**30))["custom_commands"] == []        # unchanged without them
-    with pytest.raises(ob.BuildError):
-        ob.seed_runner_install_script("x", {"/etc/passwd": "root::0:0"})                                     # only the seed runner's own folder

@@ -204,7 +204,7 @@ def _size(value: int) -> dict:
 
 
 def omarchy_user_configuration(*, disk_bytes: int, disk="/dev/vda", hostname="omarchy", timezone="UTC", keyboard="us", kernel="linux-omarchy", packages=OMARCHY_PACKAGES,
-                               services=("qemu-guest-agent",), encrypt=False, custom_commands=()) -> str:
+                               services=("qemu-guest-agent",), encrypt=False) -> str:
     """`user_configuration.json` as Omarchy's own configurator writes it for a full-disk, deferred-provisioning install (read from the configurator inside the carried ISO, schema 3.0.9):
     the owner is created at the first boot, so nothing personal is in it. Encryption is off by default for a VM base: a passphrase prompt at every boot suits a laptop, not a VM whose
     disk is protected by the storage under it, and an encrypted base would need a throwaway passphrase kept somewhere."""
@@ -229,7 +229,7 @@ def omarchy_user_configuration(*, disk_bytes: int, disk="/dev/vda", hostname="om
         disk_config["disk_encryption"] = {"encryption_type": "luks", "lvm_volumes": [], "iter_time": 2000, "partitions": [main_id]}
     document = {
         "app_config": None, "archinstall-language": "English", "auth_config": {}, "audio_config": {"audio": "pipewire"},
-        "bootloader_config": {"bootloader": "Limine", "uki": False, "removable": False}, "custom_commands": list(custom_commands),
+        "bootloader_config": {"bootloader": "Limine", "uki": False, "removable": False}, "custom_commands": [],
         "omarchy_install": {"input_method": "none", "input_xkb_layout": "", "mode": "full_disk", "defer_provisioning": True, "target_mount": "/mnt",
                             "boot": {"esp_mount": "/boot", "esp_path": "/EFI/limine", "efi_binary": "limine_x64.efi", "enable_fallback": True}, "storage": {"kernel": kernel}},
         "disk_config": disk_config, "hostname": hostname, "kernels": [kernel], "network_config": {"type": "iso"}, "ntp": True, "parallel_downloads": 8, "script": None,
