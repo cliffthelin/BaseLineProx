@@ -16,7 +16,7 @@ def test_policy_holds_no_serial():
 def test_tampered_policy_is_refused(tmp_path):
     p, d = tmp_path / "p.json", tmp_path / "d"
     rp.write(p, d, policy())
-    p.write_text(p.read_text().replace("recovery", "anything"))
+    p.write_text(p.read_text().replace("baseline-rebuild-drive", "anything"))
     with pytest.raises(rp.PolicyError):
         rp.load_verified(p, d)
 
@@ -34,7 +34,7 @@ def cmd(**kw):
 
 
 def test_command_is_the_pinned_template_only():
-    assert cmd()[-2:] == ["--confirm-wipe", "SYNTH-1"] and cmd()[2:4] == ["--target", "ONE"]
+    assert cmd()[-2:] == ["--serial", "SYNTH-1"] and "wipe" not in " ".join(cmd())
 
 
 def test_another_drive_under_the_same_name_is_refused():

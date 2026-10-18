@@ -468,6 +468,21 @@ def step_user_admin(root=None, host_id_path=None, is_mount=os.path.ismount):
     mark("user-admin", **report)
 
 
+def step_data_vault(mount_base="/mnt", is_mount=os.path.ismount):
+    """Put every data volume under git from the first build (data_vault.py), so a later rebuild can back it up and nothing in it is ever only in one state. A volume that is not mounted is reported, not skipped silently."""
+    import data_vault
+    from repair import RealRunner
+    runner, report = RealRunner(), []
+    for role in data_vault.DATA_ROLES:
+        path = Path(mount_base) / role
+        if not is_mount(path):
+            report.append({"role": role, "skipped": "not mounted"})
+            continue
+        report.append(data_vault.snapshot(runner, path, role, message="build: first snapshot", tag="build"))
+    log(f"data-vault: {json.dumps(report)}")
+    mark("data-vault", volumes=[e.get("role") for e in report if "commit" in e])
+
+
 OS_LIST_ON_MEDIA = SRC / "config" / "supported-os.json"
 OS_LIST_ON_HOST = Path("/mnt/USER_ADMIN/config/supported-os.json")
 
@@ -519,7 +534,7 @@ def step_provision():
     mark("provision")
 
 
-STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("own-drive", step_own_drive), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("user-admin", step_user_admin), ("installer", step_installer),
+STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("own-drive", step_own_drive), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("user-admin", step_user_admin), ("data-vault", step_data_vault), ("installer", step_installer),
          ("os-isos", step_os_isos), ("os-list", step_os_list), ("provision", step_provision), ("dev-user", step_dev_user)]
 
 

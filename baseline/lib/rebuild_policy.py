@@ -1,6 +1,6 @@
 """The standing policy a rebuild service obeys: which exact command may run as root, for which drives, and what it is allowed to be.
 
-Nothing outside the policy can run. The policy names ONE command shape (argv template, with {src} {target} {serial} the only fill-ins) and the drives it may be pointed at, each by an
+A rebuild never formats: the command is the in-place rebuild (data backed up and versioned, code updated). Wiping a drive is a different act with its own typed confirmation and is not in the policy. Nothing outside the policy can run. The policy names ONE command shape (argv template, with {src} {target} {serial} the only fill-ins) and the drives it may be pointed at, each by an
 identity hash of the drive's own facts (serial and size) rather than by a name or a person. The source it runs is NOT pinned here: each request pins the exact commit it was made at (shown to the person who approves it), so work can continue right up to the moment of approval. The whole policy is itself
 held by a SHA-256 in a second root-owned file, so a partial edit of either is detected and the service stops. It is written only by the setup run as root; it is not tied to any account:
 who may send requests is a group the person setting it up names.
@@ -11,7 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 
-DEFAULT_ARGV = ["{python}", "{src}/baseline/bin/baseline-allscript-install", "--target", "{target}", "--from", "recovery", "--confirm-wipe", "{serial}"]
+DEFAULT_ARGV = ["{python}", "{src}/baseline/bin/baseline-rebuild-drive", "--serial", "{serial}"]
 MAX_TTL_HOURS = 24 * 7
 DEFAULT_TTL_HOURS = 24
 

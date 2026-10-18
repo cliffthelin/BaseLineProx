@@ -2,7 +2,7 @@
 
 Role volumes start small (storage plan v3) and the rest of the drive stays free in the volume group. This module decides, from measured usage,
 which volumes to extend and by how much, and does it with `lvextend -r` (volume and ext4 together, online). It never shrinks anything, never
-touches a volume that is not a Baseline role, never takes the last GiB of the group, and never grows a role past its ceiling.
+touches a volume that is not a Baseline role, never takes the last GiB of the group, and never takes the last GiB of the group. A role's own table ceiling is not applied by `collect`: sizes are fluid, and any role may take whatever is still unallocated.
 
 `plan` is pure. `collect` reads usage; `execute` runs the extensions; `ensure_room` is what a writer calls before a large copy.
 """
@@ -116,8 +116,9 @@ def collect(runner, vg: str, personas=di.DEFAULT_PERSONAS) -> tuple:
     lvs = _json(runner, ["lvs", "--reportformat", "json", "--units", "b", "--nosuffix", "-o", "lv_name,lv_size", vg])["report"][0]["lv"]
     sizes = {r["lv_name"]: int(r["lv_size"]) for r in lvs}
     free = int(_json(runner, ["vgs", "--reportformat", "json", "--units", "b", "--nosuffix", "-o", "vg_free", vg])["report"][0]["vg"][0]["vg_free"])
+    group_gib = sum(sizes.values()) // GIB + free // GIB        # no role has a ceiling of its own: any of them may take whatever is still unallocated, until the group is full
     rows = []
-    for name, _, max_gib, label, mountpoint in di.baseline_volumes_for(tuple(personas)):
+    for name, _, _table_ceiling, label, mountpoint in di.baseline_volumes_for(tuple(personas)):
         if name not in sizes:
             continue
         proc = runner.run(di.df_argv(mountpoint), timeout=30)
@@ -125,7 +126,7 @@ def collect(runner, vg: str, personas=di.DEFAULT_PERSONAS) -> tuple:
         if usage is None:
             continue
         rows.append({"label": label, "name": name, "size_bytes": sizes[name], "used_bytes": usage["used_bytes"],
-                     "available_bytes": usage["available_bytes"], "max_gib": max_gib})
+                     "available_bytes": usage["available_bytes"], "max_gib": group_gib})
     return rows, free
 
 

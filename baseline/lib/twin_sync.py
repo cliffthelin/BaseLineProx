@@ -48,7 +48,7 @@ def mode_for(role: str):
 
 def filter_args(role: str | None) -> list:
     """The rsync filters for a role: never the live-state files, and for a role with an include list only those folders."""
-    args = [f"--exclude={pattern}" for pattern in _NEVER]
+    args = [f"--exclude={pattern}" for pattern in _NEVER] + ["--exclude=/.baseline-vault/"]          # each drive keeps its own data history (data_vault.py)
     include = (_RULES.get(role) or {}).get("include") if role else None
     if include:
         for folder in include:

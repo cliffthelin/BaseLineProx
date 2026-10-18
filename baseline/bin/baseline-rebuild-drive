@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Rebuild an installed drive in place (no format): back up and version its data, then update its code layer when a reviewed bundle is given. Needs root.
+
+    baseline-rebuild-drive --serial <serial> [--input-bundle DIR --recovery-folder DIR]
+"""
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--serial", required=True)
+    parser.add_argument("--input-bundle")
+    parser.add_argument("--recovery-folder")
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        print("a rebuild needs root", file=sys.stderr)
+        return 1
+    import rebuild_drive
+    from repair import RealRunner
+    runner, update = RealRunner(), None
+    if args.input_bundle:
+        if not args.recovery_folder:
+            print("a code update needs --recovery-folder as well", file=sys.stderr)
+            return 2
+        import installed_drive_update as iu
+
+        def update():
+            with __import__("tempfile").TemporaryDirectory(prefix="baseline-drive-update-") as root:
+                return iu.update(runner, serial=args.serial, input_bundle=args.input_bundle, recovery_folder=args.recovery_folder, root=root)
+    try:
+        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update), indent=1))
+    except Exception as exc:                                                # noqa: BLE001 - reported, nonzero exit
+        print(f"rebuild refused: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

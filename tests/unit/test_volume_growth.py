@@ -74,3 +74,30 @@ def test_room_is_computed_from_what_the_filesystem_reports_available_with_its_ov
     item = vg.room_needed(cache, 5 * GIB, 100 * GIB)
     assert item["add_gib"] == 3                                                  # (5 - 3) * 1.08 = 2.16 -> 3
     assert vg.room_needed(dict(cache, available_bytes=6 * GIB), 5 * GIB, 100 * GIB) is None
+
+
+def test_collect_gives_every_role_the_whole_group_as_its_ceiling():
+    import json
+    import subprocess
+    import drive_installer as di
+
+    name, _, table_ceiling, label, mountpoint = di.baseline_volumes_for()[0]
+
+    class R:
+        def run(self, argv, timeout=None):
+            if argv[0] == "lvs":
+                out = {"report": [{"lv": [{"lv_name": name, "lv_size": str(10 * GIB)}]}]}
+            elif argv[0] == "vgs":
+                out = {"report": [{"vg": [{"vg_free": str(90 * GIB)}]}]}
+            else:
+                return subprocess.CompletedProcess(argv, 0, "Used Avail Size\n9 1 10\n", "")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(out), "")
+
+    monkey = vg.di
+    original = monkey.parse_df_output
+    monkey.parse_df_output = lambda text: {"used_bytes": 9 * GIB, "available_bytes": GIB}
+    try:
+        rows, _ = vg.collect(R(), "vg")
+    finally:
+        monkey.parse_df_output = original
+    assert rows and rows[0]["max_gib"] == 100

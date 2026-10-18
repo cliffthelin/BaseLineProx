@@ -375,6 +375,7 @@ cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
 cp "$SRC/baseline/INSTALLER_UUID" /opt/baseline/INSTALLER_UUID
 cp "$SRC/baseline/lib/cardinality.py" /opt/baseline/lib/cardinality.py         # exactly-one checks and the read-only host survey
 cp "$SRC/baseline/lib/twin_sync.py" /opt/baseline/lib/twin_sync.py               # keeps two paired Baseline drives the same (DR272)
+cp "$SRC/baseline/lib/data_vault.py" /opt/baseline/lib/data_vault.py               # every data volume under git; backed up at a rebuild
 cp "$SRC/baseline/bin/baseline-twin" /opt/baseline/bin/baseline-twin
 chmod 755 /opt/baseline/bin/baseline-twin
 # Deliberate drive enrollment and the installer plan (discover/autofill/validate/compile), 2026-10-03.

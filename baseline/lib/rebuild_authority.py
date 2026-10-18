@@ -1,4 +1,4 @@
-"""Remote authorization of a full rebuild (a wipe of a named drive), decided by a root service and approved with a one-time code.
+"""Remote authorization of a full rebuild (an in-place rebuild of a named drive: data backed up and versioned, code updated, nothing formatted), decided by a root service and approved with a one-time code.
 
 The flow, which works from any device that can reach the person's chat or shell:
   1. `request <target>`   the service records a pending request and returns its id and a one-time code (valid for the hours asked, within the policy's maximum; a day by default);

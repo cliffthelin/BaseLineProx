@@ -2,7 +2,7 @@
 """Ask the rebuild service (see baseline-rebuild-service) for a rebuild, and approve it with its one-time code.
 
   baseline-rebuild request PC601 [HOURS] -> prints a request id and a one-time code (valid up to the policy's maximum, a day by default)
-  baseline-rebuild approve <id> <code>  -> the rebuild (wipe + install of that drive) starts
+  baseline-rebuild approve <id> <code>  -> the in-place rebuild starts (data backed up and versioned; nothing is formatted)
   baseline-rebuild status
 """
 import json
