@@ -48,7 +48,7 @@ an external UUID through a separate cross-map table (registry type `baseline_ext
 deliberately non-deterministic (random own id, stable once recorded: `identifiers.map_external`, `lookup_external`, `external_of`).
 `02-7f` are reserved for future handling, `80-ff` for experiments. Readers treat an unknown value as special, never as ordinary. The
 own id is therefore 6 hex digits (24 bits) with the parent pointer taken from the host hash; collisions are still caught at mint.
-This changed PC601's host identifier from `...10c2-bc48c28f0ace` to `...10be-bc48c28f0a00`; nothing had been built on the earlier value.
+This changed PC601's host identifier from <an earlier host identifier> to <the new host identifier>; nothing had been built on the earlier value.
 
 ## Rollout of the backbone
 
@@ -79,11 +79,11 @@ One registry type for every level, keyed by the identifier:
 ## Illustrative values (prototype; lane `4af8c95a-...`, PC601)
 
 ```
-host       4af8c95a-fd01-271b-10be-bc48c28f0a00
-substrate  4af8c95a-fd01-271b-110d-bc48c1c77a36      baseline
-vm         4af8c95a-fd01-271b-124a-bc4812c66066      ubuntu-desktop
-application 12c6f39c-fd01-271b-1336-bc48388aa637     chrome in that VM   (lane dropped: 12c6 = parent pointer, f39c = class)
-hardware   c1c7f065-fd01-271b-142f-bc4892249f4b      nic ens3 under the substrate
+host       <host identifier>
+substrate  <host identifier>      baseline
+vm         <host identifier>      ubuntu-desktop
+application <host identifier>     chrome in that VM   (lane dropped: 12c6 = parent pointer, f39c = class)
+hardware   <host identifier>      nic ens3 under the substrate
 ```
 
 ## Trade-offs and limits

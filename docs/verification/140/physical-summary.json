@@ -1,10 +1,10 @@
 {
   "scope": "actual read-only physical metadata; no writes, mounts or AppData migration",
   "selected_substrate": {
-    "serial": "FD01N6557110C271B",
+    "serial": "<PC601 drive serial>",
     "action": "keep"
   },
-  "selected_baseline": "MD89N41071210AP4E",
+  "selected_baseline": "<PC401 drive serial>",
   "volumes": [
     "BASELINE",
     "INSTALLER_CACHE",
@@ -15,7 +15,7 @@
   ],
   "valid": false,
   "errors": [
-    "Baseline drive MD89N41071210AP4E: missing volumes APPDATA_ADMIN, APPDATA_PERSONAL; run repair on it or lay it out"
+    "Baseline drive <PC401 drive serial>: missing volumes APPDATA_ADMIN, APPDATA_PERSONAL; run repair on it or lay it out"
   ],
   "executed": false
 }

@@ -151,8 +151,8 @@ def test_a_thin_session_temp_is_created_as_a_thin_volume_in_the_pool_not_a_thick
 def test_the_group_name_is_the_drives_own_and_matches_the_offline_isolation():
     import single_drive_storage as sds
     import hashlib
-    assert hl.volume_group_name_for("FD01N6557110C271B") == "baseline_" + hashlib.sha256(b"FD01N6557110C271B").hexdigest()[:12]
-    assert hl.volume_group_name_for("FD01N6557110C271B") != hl.volume_group_name_for("MD89N41071210AP4E")
+    assert hl.volume_group_name_for("SYNTHDRIVEA00001") == "baseline_" + hashlib.sha256(b"SYNTHDRIVEA00001").hexdigest()[:12]
+    assert hl.volume_group_name_for("SYNTHDRIVEA00001") != hl.volume_group_name_for("SYNTHDRIVEB00002")
     with pytest.raises(hl.LayoutError):
         hl.volume_group_name_for("bad serial")
     assert hasattr(sds, "isolate_volume_group")
@@ -184,9 +184,9 @@ def test_the_group_is_renamed_by_uuid_files_follow_and_the_boot_loader_is_regene
     grub = tmp_path / "grub.cfg"
     grub.write_text("linux /boot/vmlinuz root=/dev/mapper/pve-root ro quiet\nset root='lvm/pve-root'\n")
     runner = GroupRunner()
-    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1", name_files=(str(fstab),),
+    done = hl.name_the_volume_group_for_drive(runner, serial="SYNTHDRIVEA00001", vg="pve", vg_uuid="U-1", name_files=(str(fstab),),
                                               grub_config=str(grub), mapper_dir=str(tmp_path / "mapper"))
-    new = hl.volume_group_name_for("FD01N6557110C271B")
+    new = hl.volume_group_name_for("SYNTHDRIVEA00001")
     assert done == {"renamed": True, "files": [str(fstab), str(grub)], "name": new, "regenerated": True}
     assert not (tmp_path / "mapper").exists()          # no device node behind the new name here: nothing is linked, and never in /dev
     assert grub.read_text() == f"linux /boot/vmlinuz root=/dev/mapper/{new}-root ro quiet\nset root='lvm/{new}-root'\n"
@@ -197,15 +197,15 @@ def test_the_group_is_renamed_by_uuid_files_follow_and_the_boot_loader_is_regene
 
 
 def test_a_second_run_changes_nothing_and_a_name_owned_by_another_group_is_refused(tmp_path):
-    new = hl.volume_group_name_for("FD01N6557110C271B")
+    new = hl.volume_group_name_for("SYNTHDRIVEA00001")
     fstab = tmp_path / "fstab"
     fstab.write_text(PC601_FSTAB.replace("/dev/pve/", f"/dev/{new}/"))
     runner = GroupRunner()
-    done = hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg=new, vg_uuid="U-1", name_files=(str(fstab),),
+    done = hl.name_the_volume_group_for_drive(runner, serial="SYNTHDRIVEA00001", vg=new, vg_uuid="U-1", name_files=(str(fstab),),
                                               grub_config=str(tmp_path / "none"), mapper_dir=str(tmp_path / "mapper"))
     assert done == {"renamed": False, "files": [], "name": new} and runner.calls == []
     with pytest.raises(hl.LayoutError):
-        hl.name_the_volume_group_for_drive(GroupRunner(other="U-OTHER\n"), serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1",
+        hl.name_the_volume_group_for_drive(GroupRunner(other="U-OTHER\n"), serial="SYNTHDRIVEA00001", vg="pve", vg_uuid="U-1",
                                            name_files=(str(fstab),), grub_config=str(tmp_path / "none"), mapper_dir=str(tmp_path / "mapper"))
 
 
@@ -225,7 +225,7 @@ def test_failed_boot_regeneration_is_pending_and_retry_finishes_after_vg_already
         return original_run(argv, timeout=timeout)
 
     monkeypatch.setattr(runner, "run", failed_grub)
-    options = dict(serial="FD01N6557110C271B", vg_uuid="U-1", name_files=(str(fstab),),
+    options = dict(serial="SYNTHDRIVEA00001", vg_uuid="U-1", name_files=(str(fstab),),
                    grub_config=str(grub), mapper_dir=str(tmp_path / "mapper"))
     with pytest.raises(hl.LayoutError, match="pending"):
         hl.name_the_volume_group_for_drive(runner, vg="pve", **options)
@@ -245,6 +245,6 @@ def test_unknown_destination_vg_ownership_refuses_before_rename(tmp_path, monkey
     runner = GroupRunner()
     monkeypatch.setattr(runner, "run", lambda argv, timeout=10: FakeProc(1, "", "cannot read VGs"))
     with pytest.raises(hl.LayoutError, match="ownership"):
-        hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1",
+        hl.name_the_volume_group_for_drive(runner, serial="SYNTHDRIVEA00001", vg="pve", vg_uuid="U-1",
             name_files=(), grub_config=str(tmp_path / "grub.cfg"), mapper_dir=str(tmp_path / "mapper"))
     assert not Path(str(tmp_path / "grub.cfg") + ".baseline-vg-rename.json").exists()

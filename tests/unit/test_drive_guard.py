@@ -78,7 +78,7 @@ def test_a_drive_with_data_and_no_installer_uuid_is_refused_with_no_override():
 
 
 def test_a_drive_with_data_and_an_installer_uuid_may_be_formatted():
-    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
+    dg.register_installer_uuid(GUID, serial="SYNTHDRIVEB00002")
     assert dg.require_may_format("/dev/sdb", run=runner(DATA)) is None
 
 
@@ -146,7 +146,7 @@ class Cmd:
 
 def test_a_baseline_drive_can_be_stamped_and_is_then_recognised():
     cmd = Cmd()
-    result = dg.stamp_installer_identity(cmd, "/dev/sdb", serial="MD89N41071210AP4E", read=cmd.reader)
+    result = dg.stamp_installer_identity(cmd, "/dev/sdb", serial="SYNTHDRIVEB00002", read=cmd.reader)
     assert result.ok is True
     assert [c for c in cmd.calls if c[0] == "sgdisk"][0][:2] == ["sgdisk", "-U"]
     assert dg.require_may_format("/dev/sdb", run=cmd.reader) is None                  # now protected-but-formattable by the installer
@@ -202,8 +202,8 @@ def test_a_failing_sgdisk_is_reported_and_nothing_is_registered():
 # formatted. While this effort is locked to ONE named development drive, that risk does not exist for that drive; for
 # every other drive, and for every drive once the lock is removed, the rule is the same hard requirement as before.
 
-PC601 = "FD01N6557110C271B"
-PC401 = "MD89N41071210AP4E"
+PC601 = "SYNTHDRIVEA00001"
+PC401 = "SYNTHDRIVEB00002"
 
 
 def runner_with_serial(listing, serial, serial_rc=0):
@@ -214,11 +214,24 @@ def runner_with_serial(listing, serial, serial_rc=0):
     return run
 
 
-def test_the_lock_names_exactly_one_drive_and_changing_that_is_a_conscious_edit():
-    assert dg.DEVELOPMENT_LOCKED_SERIALS == frozenset({PC601})
-    assert PC401 not in dg.DEVELOPMENT_LOCKED_SERIALS
-    assert dg._locked_serials_for("4af8c95a-1c9b-437a-a306-c53855d4077f") == frozenset({PC601})
-    assert dg._locked_serials_for("5029a80d-c748-4616-aa08-99ac560f5311") == frozenset({PC401})
+def test_the_lock_comes_from_the_operators_own_data_file_and_covers_only_what_that_file_marks_disposable(tmp_path):
+    f = tmp_path / "own-drives"
+    f.write_text("# this lane's drives\nSYNTHDRIVEA00001 disposable\nSYNTHDRIVEB00002\nbad serial here\nSYNTHDRIVEC00003 something-else\n")
+    lane = "4af8c95a-1c9b-437a-a306-c53855d4077f"
+    assert dg.own_drive_serials(f, lane) == frozenset({PC601, PC401})                                   # allowed targets: every well-formed line
+    assert dg.own_drive_serials(f, lane, disposable_only=True) == frozenset({PC601})                    # the lock: only what the operator marked
+    assert dg.own_drive_serials(f, None) == frozenset() and dg.own_drive_serials(tmp_path / "absent", lane) == frozenset()   # no lane identity, or no file: nothing
+    assert dg.record_own_drive("SYNTHDRIVEC00003", f) is True and dg.record_own_drive("SYNTHDRIVEC00003", f) is False
+    assert "SYNTHDRIVEC00003" in dg.own_drive_serials(f, lane) and "SYNTHDRIVEC00003" not in dg.own_drive_serials(f, lane, disposable_only=True)
+    with pytest.raises(ValueError):
+        dg.record_own_drive("bad serial; rm", f)
+
+
+def test_no_serial_is_stored_in_the_guards_source():
+    import re
+    from pathlib import Path
+    source = Path(dg.__file__).read_text()
+    assert not re.search(r"['\"][A-Z0-9]{12,}['\"]", source)                                         # a long bare serial-looking literal would be a stored serial
 
 
 LANE_TARGET = PC601
@@ -229,12 +242,35 @@ def test_the_locked_development_drive_may_be_formatted_even_though_it_holds_fore
     assert dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, LANE_TARGET + "\n")) is None
 
 
-def test_the_other_lane_drive_stays_protected_even_if_lsblk_reports_it_as_empty():
-    with pytest.raises(dg.DataProtectionError, match=PROTECTED_TARGET):
-        dg.require_may_format("/dev/sdb", run=runner_with_serial(BLANK, PROTECTED_TARGET + "\n"))
+OTHER_LANE = "11111111-2222-4333-8444-555555555555"            # a lane that is not this one (a lane identifier, not a drive)
 
 
-@pytest.mark.parametrize("serial", [PROTECTED_TARGET, "SOMEONE-ELSES-TERABYTES", "FD01N6557110C271", LANE_TARGET.lower(), ""])
+def listing_with_stamp(stamp):
+    return f"sdb disk  {stamp} \n"                               # no partitions at all: an empty-looking disk, but carrying a stamp
+
+
+def test_a_drive_stamped_by_another_lane_stays_protected_even_if_lsblk_reports_it_as_empty():
+    """Protection comes from the identifier on the drive itself (the lane that installed it, proved by the drive's own serial inside the identifier), not from a list of serials."""
+    import identifiers
+    stamp = identifiers.host_id(OTHER_LANE, PROTECTED_TARGET)
+    with pytest.raises(dg.DataProtectionError, match="another installer lane"):
+        dg.require_may_format("/dev/sdb", run=runner_with_serial(listing_with_stamp(stamp), PROTECTED_TARGET + "\n"))
+    assert dg.lane_verdict(stamp, PROTECTED_TARGET) == "other"
+    assert dg.lane_verdict(stamp, "SOMEOTHERSERIAL01") == "none"                     # the same identifier on a drive with a different serial proves nothing
+    assert dg.lane_verdict(identifiers.host_id("4af8c95a-1c9b-437a-a306-c53855d4077f", LANE_TARGET), LANE_TARGET) == "ours"
+    assert dg.lane_verdict(None, PROTECTED_TARGET) == "none" and dg.lane_verdict("not-a-guid", PROTECTED_TARGET) == "none"
+
+
+def test_another_lanes_stamp_is_refused_even_for_a_drive_the_operator_listed_as_disposable(monkeypatch):
+    import identifiers
+    from conftest import set_own_drives
+    set_own_drives(monkeypatch, [])
+    stamp = identifiers.host_id(OTHER_LANE, LANE_TARGET)
+    with pytest.raises(dg.DataProtectionError, match="another installer lane"):
+        dg.require_may_format("/dev/sdb", run=runner_with_serial(listing_with_stamp(stamp), LANE_TARGET + "\n"))
+
+
+@pytest.mark.parametrize("serial", [PROTECTED_TARGET, "SOMEONE-ELSES-TERABYTES", "SYNTHDRIVEA0000", LANE_TARGET.lower(), ""])
 def test_every_other_drive_holding_data_is_still_refused(serial):
     with pytest.raises(dg.DataProtectionError, match="no override"):
         dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, serial + "\n"))
@@ -265,7 +301,8 @@ def test_the_lock_never_applies_to_a_drive_whose_contents_cannot_be_read():
 
 
 def test_removing_the_lock_restores_the_hard_requirement_for_that_drive_too(monkeypatch):
-    monkeypatch.setattr(dg, "DEVELOPMENT_LOCKED_SERIALS", frozenset())
+    from conftest import set_own_drives
+    set_own_drives(monkeypatch, [])
     with pytest.raises(dg.DataProtectionError, match="no override"):
         dg.require_may_format("/dev/sdb", run=runner_with_serial(DATA, LANE_TARGET + "\n"))
 

@@ -145,7 +145,7 @@ def test_wrong_session_id_denied(self_signed_cert):
 def test_hardware_mismatch_denied(self_signed_cert):
     srv, sess, fp = _fresh_server(self_signed_cert)
     try:
-        bad_body = {"network_interfaces": [{"mac": "de:ad:be:ef:00:00"}], "dmi": {"system": {"name": "wrong-vm"}}}
+        bad_body = {"network_interfaces": [{"mac": "02:00:5e:00:00:00"}], "dmi": {"system": {"name": "wrong-vm"}}}
         status, body = post_pinned("127.0.0.1", srv.port, f"/answer/{sess.session_id}", bad_body, fp)
         assert status == 403
         assert body == b"hardware mismatch"

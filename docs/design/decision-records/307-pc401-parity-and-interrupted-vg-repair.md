@@ -33,7 +33,7 @@ The full unit run after merging, before the added fixes, recorded 3,661 passed,
 full-suite claim. HTTP/socket and console checks need a runtime-capable session.
 
 Read-only PC401 preflight stopped on missing `/dev/sdm`. Host sysfs/lsblk lists
-PC401 serial `MD89N41071210AP4E`, but this execution namespace exposes neither
+PC401 serial `<PC401 drive serial>`, but this execution namespace exposes neither
 that block node nor `/dev/kvm`. No drive write, format, credential operation,
 VM launch or physical boot was performed. Evidence: `docs/verification/307/`.
 

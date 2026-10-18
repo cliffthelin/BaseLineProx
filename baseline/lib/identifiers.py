@@ -157,6 +157,20 @@ def lane_prefix(guid: str) -> str | None:
     return parse(guid).lane
 
 
+def stamped_lane(guid, serial) -> str | None:
+    """The installer lane (8 hex digits) a drive's disk GUID says installed it, or None. Only a well-formed HOST identifier whose serial hint matches THIS drive's own serial counts, so a
+    copied or unrelated GUID says nothing; this is how a drive is recognised as another lane's without any table of serials."""
+    try:
+        parsed = parse(str(uuid.UUID(str(guid))))
+    except (ValueError, IdentifierError):
+        return None
+    if parsed.kind != "host" or not isinstance(serial, str) or not _SERIAL.match(serial):
+        return None
+    if parsed.head != serial_hex(serial, 4) or parsed.tail != serial_hex(serial, 4, from_end=True):
+        return None
+    return parsed.lane
+
+
 def same_drive(a: str, b: str) -> bool:
     """Whether two identifiers belong to the same install on the same drive, judged from the digits alone (the serial hint and the host
     discriminator); exact ancestry is the registry's `parent`."""

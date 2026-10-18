@@ -1,7 +1,7 @@
 # PC601 UEFI portability preflight
 
 Observed 2026-10-09 against the current mounted EFI partition, selected by
-the host inventory as PC601 serial `FD01N6557110C271B` (historically `/dev/sdb`;
+the host inventory as PC601 serial `<PC601 drive serial>` (historically `/dev/sdb`;
 the name is not a persistent identity).
 
 - `findmnt -no SOURCE,TARGET,OPTIONS /mnt/sdb2` reported `/dev/sdb2`,

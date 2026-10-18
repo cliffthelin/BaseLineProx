@@ -65,10 +65,10 @@ def quiesce_source(runner, *, serial, allowed_serials, pds_runner=None):
 
 
 def _offline_disk(runner, serial):
-    listing = _json_command(runner, ["lsblk", "-J", "-b", "-p", "-o", "NAME,TYPE,SERIAL,SIZE,FSTYPE,MOUNTPOINTS"])
+    listing = _json_command(runner, ["lsblk", "-J", "-b", "-p", "-o", "NAME,TYPE,SERIAL,SIZE,FSTYPE,MOUNTPOINTS,PTUUID"])
     disks = [d for d in _walk(listing.get("blockdevices")) if d.get("type") == "disk" and d.get("serial") == serial]
     if len(disks) != 1 or type(disks[0].get("size")) is not int or disks[0]["size"] <= 0:
-        raise RecoveryError("serial does not identify exactly one measured source disk")
+        raise RecoveryError(f"serial does not identify exactly one measured source disk ({len(disks)} found: {', '.join(sorted(str(d.get('name')) for d in disks)) or 'none'})")
     disk = disks[0]
     for node in _walk([disk]):
         if "mountpoints" not in node or not isinstance(node["mountpoints"], list):

@@ -42,19 +42,22 @@ def baseline_growth_plan(current_bytes, vg_free_bytes, *, target_bytes=50*1024**
 
 
 def _require_update_serial(serial):
-    if serial in drive_guard.OTHER_LANE_PROTECTED_SERIALS:
-        raise UpdateError('Selected serial belongs to the other installer lane; update refused')
     if serial not in drive_admin.allowed_target_serials():
-        raise UpdateError('Selected drive is not enrolled')
+        raise UpdateError('Selected drive is not one of this installer lane\'s drives or enrolled; update refused')
 
 
-def discover_path(serial):
+def discover_path(serial, runner=None):
     from repair import RealRunner
     _require_update_serial(serial)
-    listing=storage._json_command(RealRunner(),['lsblk','-J','-b','-p','-o','NAME,TYPE,SERIAL,SIZE'])
+    import cardinality
+    listing=storage._json_command(runner or RealRunner(),['lsblk','-J','-b','-p','-o','NAME,TYPE,SERIAL,SIZE,PTUUID'])
     disks=[d for d in listing.get('blockdevices',[]) if d.get('type')=='disk' and d.get('serial')==serial]
-    if len(disks)!=1:
-        raise UpdateError('Selected serial does not identify exactly one attached drive')
+    try:
+        cardinality.exactly_one(disks,'drive with the selected serial',describe=lambda d:str(d.get('name')))
+    except cardinality.CardinalityError:
+        raise UpdateError('Selected serial does not identify exactly one attached drive') from None
+    if drive_guard.lane_verdict(disks[0].get('ptuuid'),serial)=='other':
+        raise UpdateError('Selected drive carries another installer lane\'s stamp; update refused')
     return pds.validate_target_device(disks[0]['name'],expected_serial=serial,
         min_size_bytes=disks[0]['size'],max_size_bytes=disks[0]['size'])['path']
 
@@ -118,6 +121,8 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
     if uid.returncode or uid.stdout.strip() != '0':
         raise UpdateError('Complete target-use inspection requires root')
     disk = drive_recovery._offline_disk(runner,serial)
+    if drive_guard.lane_verdict(disk.get('ptuuid'),serial)=='other':
+        raise UpdateError('Selected drive carries another installer lane\'s stamp; update refused')
     target = pds.validate_target_device(disk['name'],expected_serial=serial,
         min_size_bytes=disk['size'],max_size_bytes=disk['size'],runner=pds_runner)
     partitions = [n['name'] for n in drive_recovery._walk([disk])

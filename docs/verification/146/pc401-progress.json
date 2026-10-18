@@ -1,5 +1,5 @@
 {
-  "serial": "MD89N41071210AP4E",
+  "serial": "<PC401 drive serial>",
   "stages": {
     "recovery": "verified-from-10TB-image",
     "installer": "Proxmox-9.2-8-HTTP-answer",

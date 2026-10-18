@@ -2,8 +2,8 @@
 
 **Status:** accepted from the operator's direct instruction, 2026-10-11  
 **Scope:** the data-protection guard for physical drive actions  
-**Codex target:** PC401, serial `MD89N41071210AP4E`  
-**Claude target:** PC601, serial `FD01N6557110C271B`
+**Codex target:** PC401, serial `<PC401 drive serial>`  
+**Claude target:** PC601, serial `<PC601 drive serial>`
 
 ## Context
 

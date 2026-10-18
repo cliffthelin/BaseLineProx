@@ -329,8 +329,8 @@ def ensure_mounted_with_options(runner: Runner, lv_path: str, mountpoint: str, o
 
 # Names used before 2026-09-30, when "persistence" was dropped from every
 # volume name (direct instruction). Volumes already provisioned or laid
-# out under these names still exist on real disks - the Baseline drive with serial
-# MD89N41071210AP4E carries them as GPT partition names - so they must be
+# out under these names still exist on real disks (a drive installed before that carries them as GPT
+# partition names), so they must be
 # recognised, never silently treated as absent.
 _LEGACY_LABEL_PREFIX = "USER_PERSISTENCE_"
 _LEGACY_LV_PREFIX = "baseline_user_persistence_"

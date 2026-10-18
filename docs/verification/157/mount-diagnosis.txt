@@ -1,6 +1,6 @@
 Read-only mount diagnosis; recovery image unchanged.
 {
-  "serial": "MD89N41071210AP4E",
+  "serial": "<PC401 drive serial>",
   "recovery": "not_checked_read_only_diagnostic",
   "installation": "present",
   "previous_disk_boot": "QEMU login screen observed in DR146",

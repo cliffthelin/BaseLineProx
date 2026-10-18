@@ -5,7 +5,7 @@ Status: read-only preflight complete; second-machine native boot remains open.
 
 ## Result
 
-The selected disk remains PC601, serial `FD01N6557110C271B`. Its EFI
+The selected disk remains PC601, serial `<PC601 drive serial>`. Its EFI
 partition was available at `/mnt/sdb2` and `findmnt` reported it mounted
 read-only. The mounted EFI files included:
 
@@ -41,7 +41,7 @@ from its own controller on the actual second machine.
 
 1. On the current host, unmount `/mnt/sdb2` normally and use the supported
    device-removal flow after confirming the whole device still maps to serial
-   `FD01N6557110C271B`. Avoid commands based on a remembered `/dev/sdX` name.
+   `<PC601 drive serial>`. Avoid commands based on a remembered `/dev/sdX` name.
 2. Install PC601 in the second machine with power off. Use UEFI mode and its
    one-time boot menu to select the PC601 NVMe. Leave that machine's other
    disks untouched. Do not change its boot order permanently or run an

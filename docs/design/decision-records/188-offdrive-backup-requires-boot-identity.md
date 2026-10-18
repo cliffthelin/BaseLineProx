@@ -30,7 +30,7 @@ device node is absent. `tests/unit/test_physical_device_safety.py`,
 `tests/unit/test_guest_backup.py`, `tests/unit/test_backup_recurring.py`, and
 `tests/unit/test_operations_page.py` passed: 134 tests, using synthetic
 runners and temporary test destinations. A read-only host probe resolved the
-boot serial as `SN211808916391` through the sysfs fallback. No real backup was
+boot serial as `<boot drive serial>` through the sysfs fallback. No real backup was
 attempted and no physical drive was written or verified.
 
 ## Remaining work

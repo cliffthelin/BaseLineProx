@@ -18,8 +18,8 @@ SOMEONES = f"sdb disk  {GUID} \nsdb1 part ntfs  Media\n"
 SIZE = 512_110_190_592
 
 
-TEST_SERIAL = "FD01N6557110C271B"     # PC601, this lane's own drive: the guard needs the validated serial and refuses the other lane's
-PC401_SERIAL = "MD89N41071210AP4E"
+TEST_SERIAL = "SYNTHDRIVEA00001"     # PC601, this lane's own drive: the guard needs the validated serial and refuses the other lane's
+PC401_SERIAL = "SYNTHDRIVEB00002"
 
 
 def pds(table, *, serial=TEST_SERIAL, **kw):
@@ -43,7 +43,8 @@ class Runner(FakeRunner):
 @pytest.fixture(autouse=True)
 def _blank_unless_stated(monkeypatch):
     monkeypatch.setattr(dg, "_default_run", lambda argv: (0, BLANK))
-    monkeypatch.setattr(dg, "DEVELOPMENT_LOCKED_SERIALS", frozenset())
+    from conftest import set_own_drives
+    set_own_drives(monkeypatch, [], enrolled=[TEST_SERIAL])
 
 
 def test_the_action_is_destructive_and_never_pre_approved_and_needs_a_confirmation():
@@ -64,12 +65,12 @@ def test_it_never_prepares_a_drive_that_is_not_empty_or_baselines_own(table):
 def test_a_baseline_drive_without_an_installer_identity_is_refused_then_adopted_then_allowed(monkeypatch):
     with pytest.raises(ValueError, match="installer"):
         da.prepare_action("lay_out_baseline_drive", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
-    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
+    dg.register_installer_uuid(GUID, serial="SYNTHDRIVEB00002")
     assert da.prepare_action("lay_out_baseline_drive", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
 
 
 def test_a_baseline_drive_with_data_needs_a_recent_backup(monkeypatch):
-    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
+    dg.register_installer_uuid(GUID, serial="SYNTHDRIVEB00002")
     monkeypatch.setattr(da, "backup_is_fresh", lambda: False)
     with pytest.raises(ValueError, match="backup"):
         da.prepare_action("lay_out_baseline_drive", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))

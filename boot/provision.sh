@@ -373,6 +373,7 @@ cp "$SRC/baseline/lib/web_security.py" /opt/baseline/lib/web_security.py
 cp "$SRC/baseline/lib/hitl.py" /opt/baseline/lib/hitl.py
 cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
 cp "$SRC/baseline/INSTALLER_UUID" /opt/baseline/INSTALLER_UUID
+cp "$SRC/baseline/lib/cardinality.py" /opt/baseline/lib/cardinality.py         # exactly-one checks and the read-only host survey
 # Deliberate drive enrollment and the installer plan (discover/autofill/validate/compile), 2026-10-03.
 cp "$SRC/baseline/lib/drive_enrollment.py" /opt/baseline/lib/drive_enrollment.py
 cp "$SRC/baseline/lib/install_plan.py" /opt/baseline/lib/install_plan.py

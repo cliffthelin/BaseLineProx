@@ -139,7 +139,7 @@ def test_limited_logins_cannot_open_audit_or_approvals(tmp_path, role, path):
 def test_the_approvals_page_lists_daily_authorizations_and_an_admin_can_revoke_one(tmp_path):
     case, store = _case(tmp_path)
     try:
-        chal = store.challenge("s", "repair", {"device_path": "/dev/sdb"}, "MD89N41071210AP4E", "x")
+        chal = store.challenge("s", "repair", {"device_path": "/dev/sdb"}, "SYNTHDRIVEB00002", "x")
         store.confirm("s", chal["id"], chal["phrase"], SECRET, daily_for="botrepair")
         status, body = case.get("/approvals")
         assert status == 200 and b"botrepair" in body and b"repair" in body

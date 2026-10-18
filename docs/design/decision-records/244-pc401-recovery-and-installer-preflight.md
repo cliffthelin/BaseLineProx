@@ -6,8 +6,8 @@ Date: 2026-10-10
 
 ## Decision
 
-Continue PC401 work by serial `MD89N41071210AP4E`, leaving PC601
-`FD01N6557110C271B` untouched. Keep the operator-facing installer test on
+Continue PC401 work by serial `<PC401 drive serial>`, leaving PC601
+`<PC601 drive serial>` untouched. Keep the operator-facing installer test on
 loopback port 8101 so it does not collide with another service or test target.
 Do not claim PC401 ready for native comparison until its authenticated
 application review, PolicyKit-authorized update, and independent boot/network

@@ -4,7 +4,7 @@
 statements for the installed-drive update. Its evidence boundaries remain valid.
 
 The operator explicitly requested automatic preparation and execution, selected
-PC401 MD89N41071210AP4E, and protected PC601 FD01N6557110C271B. The signed-in
+PC401 <PC401 drive serial>, and protected PC601 <PC601 drive serial>. The signed-in
 browser can capture source inputs, review the exact serial, and request native
 execution without repeated manual web forms. Session ownership, origin checks,
 single-use expiry and native PolicyKit execution remain enforced. Native-pending

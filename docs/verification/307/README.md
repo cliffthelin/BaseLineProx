@@ -36,7 +36,7 @@ checkout:
 baseline/bin/baseline-allscript-install --target PC401 --stage preflight
 ```
 
-Do not reuse `/dev/sdm` as identity; re-resolve serial `MD89N41071210AP4E`.
+Do not reuse `/dev/sdm` as identity; re-resolve serial `<PC401 drive serial>`.
 Read `docs/INSTALL.md` and inspect current target use and verified recovery
 before deployment. A destructive reinstall requires the operator's explicit
 wipe command; no wipe command was executed or scheduled here. Keep the other

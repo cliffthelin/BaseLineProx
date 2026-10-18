@@ -11,7 +11,7 @@
 # deactivates exactly the volume group it activated. PC401 is not accepted.
 set -euo pipefail
 
-declare -A SERIALS=( [PC601]=FD01N6557110C271B )
+declare -A SERIALS=( [PC601]=SYNTHDRIVEA00001 )
 NAME="${1:-}"; MODE="${2:-}"
 [ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: authorize-monitor-key PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
 [ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || [ "$MODE" = "--with-password" ] || { echo "unknown option $MODE" >&2; exit 2; }

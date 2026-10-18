@@ -448,9 +448,9 @@ verification/166. Changes remain local; the production web service was not reloa
 
 > **Drive letters in this document are as of when it was written and are not stable.**
 > Identify drives by serial, never by `/dev/sdX`. As of 2026-09-30:
-> serial `FD01N6557110C271B` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
-> `MD89N41071210AP4E` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
-> `ls -l /dev/disk/by-id/ | grep -E 'FD01N6557110C271B|MD89N41071210AP4E'` (v0.2 rows 27-29).
+> serial `<PC601 drive serial>` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
+> `<PC401 drive serial>` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
+> `ls -l /dev/disk/by-id/ | grep -E '<PC601 drive serial>|<PC401 drive serial>'` (v0.2 rows 27-29).
 
 ## Current application-task handoff — 2026-10-03, DR134
 
@@ -472,7 +472,7 @@ worked; the console displayed Chromium's real Proxmox login. 2839 guarded unit
 tests passed. Evidence: [verification/117](verification/117/README.md).
 
 **No physical drive was modified and no bare-metal deployment was verified.**
-Source PC601 serial FD01N6557110C271B was read-only under a disposable /tmp
+Source PC601 serial <PC601 drive serial> was read-only under a disposable /tmp
 QEMU overlay. The other SK hynix drive was untouched. Current clone root was
 expanded to 24 GiB; the minimal new-install preset is now 16 GiB, not 5 GiB.
 Full provisioning, physical mounts/bind redirects/reboot/production kiosk gate,
@@ -1033,7 +1033,7 @@ Direct instruction: the configuration surface is going to grow to "everything an
 - Full suite: 1348/1348 (was 1339).
 
 **Not done / left for next session:**
-1. No real click-through of the corrected action against physical hardware yet this pass - the fix was found by code inspection (comparing what the JS sends to what the server required), not by re-running the failed attempt. `/dev/sdd` is still the real target (512GB SK Hynix, serial `FD01N6557110C271B`); `/dev/sdb` still has the empty `baseline_persist` LVM VG left over from the earlier "Install" mishap (harmless - drive was empty - but still real, current state).
+1. No real click-through of the corrected action against physical hardware yet this pass - the fix was found by code inspection (comparing what the JS sends to what the server required), not by re-running the failed attempt. `/dev/sdd` is still the real target (512GB SK Hynix, serial `<PC601 drive serial>`); `/dev/sdb` still has the empty `baseline_persist` LVM VG left over from the earlier "Install" mishap (harmless - drive was empty - but still real, current state).
 2. Real hardware needs a Proxmox source ISO at one of `DEFAULT_SOURCE_ISO_SEARCH_PATHS` in `self_installer.py`, or the action will now cleanly refuse ("no Proxmox source ISO found") instead of crashing - check that path exists on the actual box before the next click.
 3. QEMU SLIRP's `10.0.2.2` reaching the host-run `EphemeralAnswerServer` is still not empirically verified on this host - reasoned as correct, distinguished from the different, confirmed-broken `guestfwd` mechanism (decision records 15-16), but nobody has watched a real round-trip succeed yet.
 4. Work-queue item #18 (run `homeassistant-lxc`/`haos-vm` under real QEMU) still untouched.
@@ -1125,7 +1125,7 @@ Full suite: **922/922 passing.** `docs/design/v0.1-work-queue.md` items #14 and 
 
 ### Right now, unfinished - a live disk-merge investigation, nothing executed yet
 
-User decided to **merge the two physical drives** from `docs/INSTALL.md`'s table (`sdd`, the Proxmox substrate, serial `FD01N6557110C271B`; `sdb`, the persistence backend, serial `MD89N41071210AP4E`) into one - "not the end result and doesn't need to be the journey," both currently connected via USB to the dev machine (this machine, **not** the laptop), neither currently in the laptop.
+User decided to **merge the two physical drives** from `docs/INSTALL.md`'s table (`sdd`, the Proxmox substrate, serial `<PC601 drive serial>`; `sdb`, the persistence backend, serial `<PC401 drive serial>`) into one - "not the end result and doesn't need to be the journey," both currently connected via USB to the dev machine (this machine, **not** the laptop), neither currently in the laptop.
 
 **Real facts gathered, read-only, both drives left exactly as found (mounted/activated then cleanly unmounted/deactivated afterward):**
 
@@ -2156,7 +2156,7 @@ read-only. Physical native cold boot remains unverified.
 
 ## 2026-10-07 — DR167 installed-drive update continuation
 
-PC401 MD89N41071210AP4E selected; preserve PC601 FD01N6557110C271B. Current native
+PC401 <PC401 drive serial> selected; preserve PC601 <PC601 drive serial>. Current native
 observations resolved these to /dev/sdc and /dev/sdb respectively; resolve afresh.
 Actual read-only LVM/debugfs inspection found idle PC401 volumes and matching
 independent marker/role fstab. BASELINE remains 8 GiB; no resize or physical write.
@@ -2258,7 +2258,7 @@ overlay/data proof remain open (queue72/74/75/76/78). See DR173 and
 
 ## 2026-10-08 — PC601 selected; preserve existing Proxmox (DR174)
 
-The user selected PC601 serial `FD01N6557110C271B`. Host-visible read-only
+The user selected PC601 serial `<PC601 drive serial>`. Host-visible read-only
 inspection in this continuation found the existing Debian 13/Proxmox system
 on the `pve` VG (`pve-root`, `pve-swap`, `pve-data`); package files and an
 enabled `pveproxy` unit are present. The root filesystem was about 87% used

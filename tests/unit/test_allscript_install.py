@@ -32,13 +32,13 @@ def test_unknown_stage_is_refused():
 
 
 def test_wipe_needs_the_exact_typed_phrase_for_that_serial():
-    assert allscript.confirmation_ok("WIPE MD89N41071210AP4E", "MD89N41071210AP4E")
-    assert allscript.confirmation_ok("  WIPE MD89N41071210AP4E\n", "MD89N41071210AP4E")
-    for typed in ("wipe MD89N41071210AP4E", "WIPE", "yes", "", "WIPE FD01N6557110C271B", "WIPE MD89N41071210AP4"):
-        assert not allscript.confirmation_ok(typed, "MD89N41071210AP4E")
+    assert allscript.confirmation_ok("WIPE SYNTHDRIVEB00002", "SYNTHDRIVEB00002")
+    assert allscript.confirmation_ok("  WIPE SYNTHDRIVEB00002\n", "SYNTHDRIVEB00002")
+    for typed in ("wipe SYNTHDRIVEB00002", "WIPE", "yes", "", "WIPE SYNTHDRIVEA00001", "WIPE MD89N41071210AP4"):
+        assert not allscript.confirmation_ok(typed, "SYNTHDRIVEB00002")
 
 
-PC401, PC601 = "MD89N41071210AP4E", "FD01N6557110C271B"
+PC401, PC601 = "SYNTHDRIVEB00002", "SYNTHDRIVEA00001"
 
 
 @pytest.fixture

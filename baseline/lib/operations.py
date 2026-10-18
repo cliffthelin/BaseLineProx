@@ -107,7 +107,7 @@ def _destination(get_setting, run):
     destination = get_setting("backups", "offdrive_destination")
     if not destination:
         raise offdrive_backup.BackupError("no backup destination is configured (backups.offdrive_destination)")
-    return offdrive_backup.resolve_destination(destination, run=run, allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS,
+    return offdrive_backup.resolve_destination(destination, run=run, allowed_serials=drive_admin.allowed_target_serials(),
                                                boot_serial=offdrive_backup._boot_serial())
 
 

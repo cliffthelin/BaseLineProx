@@ -3,7 +3,7 @@
 
 Runs in the Proxmox installer live environment, not on an installed host.
 No disk formatting, network egress, mocked commands, or operator credentials.
-Requires the sole test drive to have serial CODEXTEST40101. Source is carried
+Requires the sole test drive to have serial SYNTHTESTDISK01. Source is carried
 read-only on a separate test ISO; results may be sent to /dev/ttyS0.
 The installer shell must have loopback enabled (ip link set lo up).
 """
@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--source-root", type=Path, required=True)
     args = parser.parse_args()
     if (os.geteuid() != 0 or os.environ.get("BASELINE_DISPOSABLE_QEMU_ACCEPTANCE") != "1"
-            or command(["lsblk", "-dn", "-o", "SERIAL", "/dev/vda"]) != "CODEXTEST40101"):
+            or command(["lsblk", "-dn", "-o", "SERIAL", "/dev/vda"]) != "SYNTHTESTDISK01"):
         raise RuntimeError("This check requires the explicitly disposable QEMU test drive")
     sys.path.insert(0, str(args.source_root / "baseline/lib"))
     import layered_settings as ls

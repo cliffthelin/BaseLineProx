@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='baseline-auto-browser-') as temporary:
         installer_repo_root=repository(root/'source'),
         draft_store=configuration_drafts.DraftStore(root/'drafts.sqlite'),
         install_plan_discovery=lambda:discover(proxmox_disk(),baseline_disk()),
-        installer_selected_serial='MD89N41071210AP4E',installer_protected_serials=['FD01N6557110C271B'],
+        installer_selected_serial='SYNTHDRIVEB00002',installer_protected_serials=['SYNTHDRIVEA00001'],
         installed_update_discovery=lambda serial:'/dev/sdb',
         installed_update_recovery=lambda serial:root/'recovery',pds_runner=FakePdsRunner(),pkexec_executor=executor))
     try:
@@ -31,10 +31,10 @@ with tempfile.TemporaryDirectory(prefix='baseline-auto-browser-') as temporary:
             page=context.new_page()
             errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(f'http://127.0.0.1:{case.port}/install-plan')
-            page.locator('[data-drive-serial="MD89N41071210AP4E"]').wait_for()
-            page.locator('[data-drive-serial="MD89N41071210AP4E"]').drag_to(page.locator('#installation-target'))
-            assert 'MD89N41071210AP4E' in page.locator('#installation-target').inner_text()
-            assert page.locator('[data-drive-serial="FD01N6557110C271B"]').get_attribute('draggable')=='false'
+            page.locator('[data-drive-serial="SYNTHDRIVEB00002"]').wait_for()
+            page.locator('[data-drive-serial="SYNTHDRIVEB00002"]').drag_to(page.locator('#installation-target'))
+            assert 'SYNTHDRIVEB00002' in page.locator('#installation-target').inner_text()
+            assert page.locator('[data-drive-serial="SYNTHDRIVEA00001"]').get_attribute('draggable')=='false'
             page.locator('[data-os-variant="server"]').scroll_into_view_if_needed()
             page.screenshot(path='/tmp/baseline-installer-before-drag.png', full_page=True)
             page.locator('[data-os-variant="server"]').drag_to(page.locator('#environment-target'))
@@ -56,9 +56,9 @@ with tempfile.TemporaryDirectory(prefix='baseline-auto-browser-') as temporary:
             page.screenshot(path='/tmp/baseline-installer-grouped-desktop.png', full_page=True)
             page.locator('#start-installation-update').click()
             page.locator('#update-status').filter(has_text='Deployment complete').wait_for(timeout=30000)
-            assert page.locator('#update-serial').input_value()=='MD89N41071210AP4E'
+            assert page.locator('#update-serial').input_value()=='SYNTHDRIVEB00002'
             assert page.locator('#update-input-job').input_value()
-            assert 'MD89N41071210AP4E' in executor.calls[0][0]
+            assert 'SYNTHDRIVEB00002' in executor.calls[0][0]
             assert page.locator('#update-secret').input_value()==''
             assert not errors,errors
             assert len(jobs.listing())==2 and all(job['state']=='completed' for job in jobs.listing())

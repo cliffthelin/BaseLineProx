@@ -6,7 +6,7 @@ Follows DR245-248 and the merge note `parallel-effort-merge.md`.
 
 ## Decisions (operator, 2026-10-11)
 
-- Development-phase drive split: this effort works on **PC601** (`FD01N6557110C271B`); **PC401** (`MD89N41071210AP4E`) is the parallel
+- Development-phase drive split: this effort works on **PC601** (`<PC601 drive serial>`); **PC401** (`<PC401 drive serial>`) is the parallel
   effort's, locked, and this effort makes no change to it. The finished product has no binding to any particular drive, not even the
   machine's active primary drive, once much more development and testing has shown that to be completely safe.
 - The 2026-10-01 data-protection guard exists because drive selection was once uncontrolled and a drive full of real data was nearly
@@ -95,7 +95,7 @@ the end of the day, one new one per install. Now (`installer_identity.py`, `base
   characters read from the front, the second the last four read from the back, in written order; a serial with too few hex
   characters is filled with the reserved value `0`. So those two groups are a recognisable hint and the hash group binds the identity
   to the exact serial. The same installer and drive always give the same UUID; it differs between lanes and between drives. PC601's:
-  `4af8c95a-fd01-271b-b1ae-f19827f945b7`; PC401 would be `4af8c95a-d894-0a4e-b168-...` (`MD89N41071210AP4E`: M, N and P skipped).
+  `<host identifier>`; PC401 would be `<another drive's host identifier>` (`<PC401 drive serial>`: M, N and P skipped).
   (The first version of this design used a plain uuid5; the layout replaced it the same day, so the earlier `f337b480-...` PC601
   entry is stale.)
 - After the installer's VM has exited, success or failure (`finally` in `main`, or `--stage identity` on its own), the disk identifier is set

@@ -1,6 +1,6 @@
 """Drives deliberately added to the ones Baseline may act on (direct instruction 2026-10-03, extending v0.2 row 55).
 
-Row 55 limits every drive action to the SK hynix drives Baseline is set up with (`drive_admin.ALLOWED_TARGET_SERIALS`).
+Row 55 limits every drive action to the SK hynix drives Baseline is set up with (`drive_admin.allowed_target_serials()`).
 An installer has to work on whatever drives are in front of it, so another drive can be added, but only deliberately:
 `drive_admin.enroll_drive` requires the operator to type the serial, the drive itself to report that serial, and a
 person to confirm the request like every other drive action. This module only remembers the result.

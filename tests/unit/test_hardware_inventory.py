@@ -29,13 +29,13 @@ LSUSB = (
 )
 
 LSBLK = (
-    'NAME="sda" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" SERIAL="WCV00YLT" TRAN="sata"\n'
-    'NAME="nvme0n1" SIZE="1.8T" MODEL="Corsair MP400" SERIAL="212079230001307818BC" TRAN="nvme"\n'
+    'NAME="sda" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" SERIAL="SYNTHH01" TRAN="sata"\n'
+    'NAME="nvme0n1" SIZE="1.8T" MODEL="Corsair MP400" SERIAL="SYNTHNVME0000000001" TRAN="nvme"\n'
 )
 
 IP_LINK = (
     '1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 state UNKNOWN \\    link/loopback 00:00:00:00:00:00\n'
-    '2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP \\    link/ether a8:5e:45:cd:11:22\n'
+    '2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP \\    link/ether 02:00:5e:00:00:00\n'
 )
 
 
@@ -149,7 +149,7 @@ def test_collect_block_returns_every_disk_with_identity():
     disks = hi.collect_block(_runner())
     assert len(disks) == 2
     assert disks[0].name == "sda"
-    assert disks[0].serial == "WCV00YLT"
+    assert disks[0].serial == "SYNTHH01"
     assert disks[1].transport == "nvme"
 
 
@@ -158,7 +158,7 @@ def test_collect_block_returns_every_disk_with_identity():
 def test_collect_net_returns_interfaces_with_state():
     ifaces = {i.name: i for i in hi.collect_net(_runner())}
     assert ifaces["eno1"].state == "UP"
-    assert ifaces["eno1"].mac == "a8:5e:45:cd:11:22"
+    assert ifaces["eno1"].mac == "02:00:5e:00:00:00"
 
 
 def test_collect_net_excludes_loopback():

@@ -5,7 +5,7 @@
 
 ## Host-use checks
 
-PC401 was resolved afresh by serial `MD89N41071210AP4E` to the whole disk for
+PC401 was resolved afresh by serial `<PC401 drive serial>` to the whole disk for
 this observation. Its partition tree showed no mounted filesystems. Its LVM PV
 had an empty sysfs `holders` directory; the host had no `/sys/class/block/dm-*`
 devices; no readable process mount namespace referenced the PC401 VG or mapped

@@ -9,7 +9,7 @@ import machine_context as mc
 import references as ref
 
 LANE = "4af8c95a-1c9b-437a-a306-c53855d4077f"
-SERIAL = "FD01N6557110C271B"
+SERIAL = "SYNTHDRIVEA00001"
 
 
 @pytest.fixture
@@ -48,16 +48,16 @@ def test_with_no_firmware_identity_the_wired_nic_addresses_are_the_identity_and_
 
 def test_with_a_firmware_identity_the_nics_are_only_parts_so_swapping_one_is_a_change_not_a_new_machine(tmp_path, host):
     uid = "11111111-2222-4333-8444-555555555555"
-    first = mc.observe(host, mc.read_fingerprint(machine(tmp_path, "a", uuid=uid, macs=("aa:aa:aa:aa:aa:01",))))
+    first = mc.observe(host, mc.read_fingerprint(machine(tmp_path, "a", uuid=uid, macs=("02:00:5e:00:00:00",))))
     assert first["state"] == "first_machine"
-    swapped = mc.observe(host, mc.read_fingerprint(machine(tmp_path, "b", uuid=uid, macs=("bb:bb:bb:bb:bb:02",))))
+    swapped = mc.observe(host, mc.read_fingerprint(machine(tmp_path, "b", uuid=uid, macs=("02:00:5e:00:00:01",))))
     assert swapped["state"] == "changed" and swapped["differs"] == ["nics"]
 
 
 def test_a_machine_with_no_firmware_identity_is_recorded_by_its_nics_instead_of_staying_unreadable(tmp_path, host):
     assert mc.observe(host, mc.read_fingerprint(machine(tmp_path, "vm")))["state"] == "first_machine"
     assert mc.observe(host, mc.read_fingerprint(machine(tmp_path, "vm2")))["state"] == "known"
-    assert mc.observe(host, mc.read_fingerprint(machine(tmp_path, "other", macs=("cc:cc:cc:cc:cc:03",))))["state"] == "new_machine"
+    assert mc.observe(host, mc.read_fingerprint(machine(tmp_path, "other", macs=("02:00:5e:00:00:02",))))["state"] == "new_machine"
 
 
 def test_readiness_stages_follow_what_is_actually_up(tmp_path):

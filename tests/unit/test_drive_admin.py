@@ -15,7 +15,7 @@ class FakePdsRunner:
     (.run(argv)->str, .lstat, .realpath, .read_size_file) - mirrors
     test_physical_device_safety.py's own fake."""
 
-    def __init__(self, *, serial="FD01N6557110C271B", size_bytes=500_000_000_000,
+    def __init__(self, *, serial="SYNTHDRIVEA00001", size_bytes=500_000_000_000,
                  findmnt_root="/dev/nvme0n1p2", pkname_of_root="nvme0n1", boot_serial="BootDriveSerial-999",
                  drive_table="sdb disk  11111111-2222-3333-4444-555555555555 \n"):
         self.drive_table = drive_table
@@ -295,10 +295,10 @@ def test_classify_drive_type_other_when_nothing_is_known():
 # -- parse_candidate_drives / list_candidate_drives --------------------------
 
 LSBLK_PAIRS_OUTPUT = (
-    'NAME="sda" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" TRAN="sata" ROTA="1" SERIAL="WCV00YLT" TYPE="disk"\n'
-    'NAME="sdb" SIZE="476.9G" MODEL="PC401 NVMe SK hynix 512GB" TRAN="usb" ROTA="1" SERIAL="FD01N6557110C271B" TYPE="disk"\n'
+    'NAME="sda" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" TRAN="sata" ROTA="1" SERIAL="SYNTHH01" TYPE="disk"\n'
+    'NAME="sdb" SIZE="476.9G" MODEL="PC401 NVMe SK hynix 512GB" TRAN="usb" ROTA="1" SERIAL="SYNTHDRIVEA00001" TYPE="disk"\n'
     'NAME="loop0" SIZE="520.1M" MODEL="" TRAN="" ROTA="0" SERIAL="" TYPE="loop"\n'
-    'NAME="nvme0n1" SIZE="953.9G" MODEL="GIGABYTE GP-GSM2NE3100TNTD" TRAN="nvme" ROTA="0" SERIAL="SN211808916391" TYPE="disk"\n'
+    'NAME="nvme0n1" SIZE="953.9G" MODEL="GIGABYTE GP-GSM2NE3100TNTD" TRAN="nvme" ROTA="0" SERIAL="SYNTHBOOTNVME01" TYPE="disk"\n'
 )
 
 
@@ -386,7 +386,7 @@ def test_summarize_drive_partitions_raises_on_a_real_lsblk_failure():
 def test_list_candidate_drives_excludes_the_real_boot_device():
     from fake_runner import FakeRunner as _FR
     runner = _FR(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(0, LSBLK_PAIRS_OUTPUT, ""))])
-    pds_runner = FakePdsRunner(boot_serial="SN211808916391", pkname_of_root="nvme0n1")
+    pds_runner = FakePdsRunner(boot_serial="SYNTHBOOTNVME01", pkname_of_root="nvme0n1")
     drives = da.list_candidate_drives(runner, pds_runner=pds_runner)
     paths = {d["path"] for d in drives}
     assert "/dev/nvme0n1" not in paths
@@ -466,7 +466,7 @@ def test_vgcreate_argv():
 # hynix". This reverses an earlier recorded instruction that targets should not
 # be locked to two drives (v0.2 row 55).
 
-ALLOWED = ("FD01N6557110C271B", "FD01N6557110C271B")
+ALLOWED = ("SYNTHDRIVEA00001", "SYNTHDRIVEA00001")
 
 
 def test_resolve_target_accepts_each_allowed_drive():
@@ -477,7 +477,7 @@ def test_resolve_target_accepts_each_allowed_drive():
 
 def test_resolve_target_refuses_every_other_drive():
     import pytest
-    for other in ("SomeOtherRealDriveSerial-123", "ZCT2WCM2", "S6WRNS0TA12638A", ""):
+    for other in ("SomeOtherRealDriveSerial-123", "SYNTHH06", "SYNTHSATA000001", ""):
         with pytest.raises(pds.PhysicalDeviceSafetyError):
             da.resolve_target("/dev/sdX", pds_runner=FakePdsRunner(serial=other))
 
@@ -516,7 +516,7 @@ def test_rebuild_persistence_lvm_refuses_the_machines_own_boot_device():
 
 def test_rebuild_persistence_lvm_wipes_then_creates_pv_and_vg_on_the_selected_device():
     runner = FakeRunner()
-    pds_runner = FakePdsRunner(serial="FD01N6557110C271B")
+    pds_runner = FakePdsRunner(serial="SYNTHDRIVEA00001")
     result = da.rebuild_persistence_lvm(runner, device_path="/dev/sdb", pds_runner=pds_runner)
     assert result.ok is True
     assert pds_runner.wipe_calls == [["wipefs", "-a", "/dev/sdb"]]
@@ -540,7 +540,7 @@ def test_rebuild_persistence_lvm_reports_a_real_pvcreate_failure_and_never_calls
         (lambda a: a[0] == "pvcreate", FakeProc(1, "", "device or resource busy")),
     ])
     result = da.rebuild_persistence_lvm(runner, device_path="/dev/sdb",
-                                         pds_runner=FakePdsRunner(serial="FD01N6557110C271B"))
+                                         pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"))
     assert result.ok is False
     assert "busy" in result.detail
     assert not any(c[0] == "vgcreate" for c in runner.calls)
@@ -551,7 +551,7 @@ def test_rebuild_persistence_lvm_reports_a_real_vgcreate_failure():
         (lambda a: a[0] == "vgcreate", FakeProc(1, "", "already exists")),
     ])
     result = da.rebuild_persistence_lvm(runner, device_path="/dev/sdb",
-                                         pds_runner=FakePdsRunner(serial="FD01N6557110C271B"))
+                                         pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"))
     assert result.ok is False
     assert "already exists" in result.detail
 
@@ -627,7 +627,7 @@ def test_install_drive_runs_rebuild_then_creates_volumes_on_success():
         (lambda a: "vgs" in a, FakeProc(0, "1099511627776\n", "")),  # 1TiB free
         (lambda a: "lvs" in a, FakeProc(0, "", "")),
     ])
-    result = da.install_drive(runner, device_path="/dev/sdb", pds_runner=FakePdsRunner(serial="FD01N6557110C271B"))
+    result = da.install_drive(runner, device_path="/dev/sdb", pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"))
     assert result.ok is True
     assert ["pvcreate", "-ff", "-y", "/dev/sdb"] in runner.calls
     assert any(c[0] == "lvcreate" for c in runner.calls)
@@ -637,7 +637,7 @@ def test_install_drive_stops_before_creating_volumes_when_rebuild_fails():
     runner = FakeRunner(command_responses=[
         (lambda a: a[0] == "pvcreate", FakeProc(1, "", "device or resource busy")),
     ])
-    result = da.install_drive(runner, device_path="/dev/sdb", pds_runner=FakePdsRunner(serial="FD01N6557110C271B"))
+    result = da.install_drive(runner, device_path="/dev/sdb", pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"))
     assert result.ok is False
     assert "busy" in result.detail
     assert not any(c[0] in ("vgcreate", "lvcreate") for c in runner.calls)
@@ -939,11 +939,11 @@ def test_unmount_partition_proves_selected_drive_owns_mount_before_unmounting():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["findmnt"], FakeProc(0, "/dev/sdb2\n", "")),
         (lambda a: a[:1] == ["lsblk"], FakeProc(0, "sdb\n", "")),
-        (lambda a: a[:1] == ["udevadm"], FakeProc(0, "ID_SERIAL_SHORT=FD01N6557110C271B\n", "")),
+        (lambda a: a[:1] == ["udevadm"], FakeProc(0, "ID_SERIAL_SHORT=SYNTHDRIVEA00001\n", "")),
         (lambda a: a[:1] == ["umount"], FakeProc(0, "", "")),
     ])
     result = da.unmount_mounted_partition(
-        runner, device_path="/dev/sdb", expected_serial="FD01N6557110C271B", partition_mountpoint="/mnt/sdb2"
+        runner, device_path="/dev/sdb", expected_serial="SYNTHDRIVEA00001", partition_mountpoint="/mnt/sdb2"
     )
     assert result.ok is True
     assert runner.calls[-1] == ["umount", "--", "/mnt/sdb2"]
@@ -953,10 +953,10 @@ def test_unmount_partition_refuses_mount_from_other_drive_without_unmounting():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["findmnt"], FakeProc(0, "/dev/sdc1\n", "")),
         (lambda a: a[:1] == ["lsblk"], FakeProc(0, "sdc\n", "")),
-        (lambda a: a[:1] == ["udevadm"], FakeProc(0, "ID_SERIAL_SHORT=JEHBBVWM\n", "")),
+        (lambda a: a[:1] == ["udevadm"], FakeProc(0, "ID_SERIAL_SHORT=SYNTHH05\n", "")),
     ])
     result = da.unmount_mounted_partition(
-        runner, device_path="/dev/sdb", expected_serial="FD01N6557110C271B", partition_mountpoint="/mnt/sdb2"
+        runner, device_path="/dev/sdb", expected_serial="SYNTHDRIVEA00001", partition_mountpoint="/mnt/sdb2"
     )
     assert result.ok is False and "not proven" in result.detail
     assert all(call[0] != "umount" for call in runner.calls)
@@ -967,7 +967,7 @@ def test_unmount_partition_native_authorization_runs_through_pkexec():
     import hitl
     import web_origin_helper
     params={"device_path":"/dev/sdb", "partition_mountpoint":"/mnt/sdb2"}
-    pds_runner=FakePdsRunner(serial="FD01N6557110C271B")
+    pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001")
     prepared=da.prepare_action("unmount_partition", params, pds_runner=pds_runner)
     store=hitl.ConfirmationStore(verify_secret=lambda _secret:False, min_wait_s=0)
     challenge=store.challenge("owner", "unmount_partition", prepared["params"], prepared["serial"], prepared["summary"])
@@ -978,7 +978,7 @@ def test_unmount_partition_native_authorization_runs_through_pkexec():
         command=argv[1:]
         if command[0] == "findmnt": stdout=b"/dev/sdb2\n"
         elif command[0] == "lsblk": stdout=b"sdb\n"
-        elif command[0] == "udevadm": stdout=b"ID_SERIAL_SHORT=FD01N6557110C271B\n"
+        elif command[0] == "udevadm": stdout=b"ID_SERIAL_SHORT=SYNTHDRIVEA00001\n"
         else: stdout=b""
         return subprocess.CompletedProcess(argv, 0, stdout, b"")
     origin=web_origin_helper.origin_for("drive_action", {"action_id":"unmount_partition", "params":prepared["params"]})
@@ -1189,7 +1189,7 @@ def test_an_action_on_a_drive_outside_the_allowlist_is_refused_and_runs_nothing(
     if action_id == "update_installed_drive":
         params.update(input_bundle="/tmp/bundle", recovery_folder="/tmp/recovery")
     result = perform_with_origin(runner, action_id, params,
-                               pds_runner=FakePdsRunner(serial="ZCT2WCM2"))
+                               pds_runner=FakePdsRunner(serial="SYNTHH06"))
     assert result.ok is False and "allowed" in result.detail.lower()
     assert runner.calls == [], f"{action_id} ran commands against a drive outside the allowlist"
 
@@ -1197,7 +1197,7 @@ def test_an_action_on_a_drive_outside_the_allowlist_is_refused_and_runs_nothing(
 @pytest.mark.parametrize("action_id", ["repair", "mount_volume", "unmount_volume"])
 def test_an_action_on_an_allowed_drive_is_let_through(action_id):
     runner = FakeRunner()
-    perform_confirmed(runner, action_id, {"device_path": "/dev/sdb"}, pds_runner=FakePdsRunner(serial="FD01N6557110C271B"))
+    perform_confirmed(runner, action_id, {"device_path": "/dev/sdb"}, pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"))
     assert runner.calls, f"{action_id} should have reached the real action for an allowed drive"
 
 
@@ -1213,7 +1213,7 @@ def test_the_action_receives_the_validated_path_not_the_raw_string():
                 return "/dev/sdb" if path == "/dev/disk/by-id/some-link" else path
         # a path that resolves to the real device: the action must get the resolved one
         perform_with_origin(FakeRunner(), "probe", {"device_path": "/dev/sdb"},
-                          pds_runner=Resolving(serial="FD01N6557110C271B"))
+                          pds_runner=Resolving(serial="SYNTHDRIVEA00001"))
         assert seen["p"] == "/dev/sdb"
     finally:
         del da.ACTIONS["probe"]
@@ -1250,7 +1250,7 @@ def _act(action_id, **params):
     """Valid requests are confirmed through the real flow; invalid ones cannot be (they never get a challenge),
     so a refusal here must come from validation, never from a missing confirmation."""
     runner = _runner_with_a_volume_group()
-    pds_runner = FakePdsRunner(serial="FD01N6557110C271B")
+    pds_runner = FakePdsRunner(serial="SYNTHDRIVEA00001")
     request = {**ALLOWED_DEV, **params}
     try:
         auth, store = authorize(action_id, request, pds_runner=pds_runner)
@@ -1264,7 +1264,7 @@ def _act(action_id, **params):
 
 @pytest.mark.parametrize("action_id,extra", [
     ("repair", {"lv_name": "root"}), ("repair", {"anything": "x"}), ("mount_volume", {"selected": ["A"]}),
-    ("unmount_volume", {"expected_serial": "FD01N6557110C271B"}), ("build_self_installer", {"lv_name": "root"}),
+    ("unmount_volume", {"expected_serial": "SYNTHDRIVEA00001"}), ("build_self_installer", {"lv_name": "root"}),
     ("build_self_installer", {"pds_runner": "x"}), ("build_self_installer", {"on_progress": "x"}),
 ])
 def test_unknown_parameters_are_refused_and_nothing_runs(action_id, extra):
@@ -1295,7 +1295,7 @@ def test_a_valid_volume_name_and_mountpoint_still_work():
                         files={"/dev/pve/data-vol": ""})
     result = perform_confirmed(runner, "mount_volume",
                                {"device_path": "/dev/sdb", "lv_name": "data-vol", "mountpoint": "/mnt/pve-inspect"},
-                               pds_runner=FakePdsRunner(serial="FD01N6557110C271B"))
+                               pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"))
     assert result.ok is True and any(c[0] == "mount" for c in runner.calls)
 
 
@@ -1320,7 +1320,7 @@ def test_installer_overrides_are_validated_before_anything_runs(params):
 
 
 def test_valid_installer_overrides_are_accepted_by_the_validator():
-    ok = {"expected_serial": "FD01N6557110C271B", "proxmox_source_iso": "/mnt/INSTALLER_CACHE/isos/proxmox.iso",
+    ok = {"expected_serial": "SYNTHDRIVEA00001", "proxmox_source_iso": "/mnt/INSTALLER_CACHE/isos/proxmox.iso",
           "server_host": "10.0.2.2", "cert_path": "/etc/baseline/cert.pem", "key_path": "/var/lib/baseline/key.pem",
           "target_mac": "aa:bb:cc:dd:ee:ff", "target_dmi_product": "ASUS ROG STRIX B650E-F"}
     assert da.validate_action_params("build_self_installer", {"device_path": "/dev/sdb", **ok}) == {"device_path": "/dev/sdb", **ok}
@@ -1340,7 +1340,7 @@ def test_an_unsafe_value_would_have_reached_mount_if_it_were_not_refused():
     assert result.ok is True and any(c[0] == "mount" for c in runner.calls)
 
 
-@pytest.mark.parametrize("value", ["SomeOtherDrive-1", "ZCT2WCM2", "", "a"])
+@pytest.mark.parametrize("value", ["SomeOtherDrive-1", "SYNTHH06", "", "a"])
 def test_expected_serial_must_be_one_of_the_allowed_drives(value):
     with pytest.raises(ValueError):
         da.validate_action_params("build_self_installer", {"device_path": "/dev/sdb", "expected_serial": value})
@@ -1355,7 +1355,7 @@ def test_expected_serial_must_be_one_of_the_allowed_drives(value):
 ])
 def test_no_drive_action_runs_without_a_confirmation_and_no_command_is_issued(action_id, extra):
     runner = _runner_with_a_volume_group()
-    result = perform_with_origin(runner, action_id, {**ALLOWED_DEV, **extra}, pds_runner=FakePdsRunner(serial="FD01N6557110C271B"))
+    result = perform_with_origin(runner, action_id, {**ALLOWED_DEV, **extra}, pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"))
     assert result.ok is False and "human confirmation" in result.detail
     assert runner.calls == []
 
@@ -1369,13 +1369,13 @@ def test_update_selected_also_needs_a_confirmation():
 @pytest.mark.parametrize("bogus", ["yes", True, 1, "approved", {"ok": 1}, object()])
 def test_a_made_up_authorization_does_not_work(bogus):
     runner = _runner_with_a_volume_group()
-    result = perform_with_origin(runner, "repair", ALLOWED_DEV, pds_runner=FakePdsRunner(serial="FD01N6557110C271B"),
+    result = perform_with_origin(runner, "repair", ALLOWED_DEV, pds_runner=FakePdsRunner(serial="SYNTHDRIVEA00001"),
                                authorization=bogus)
     assert result.ok is False and runner.calls == []
 
 
 def test_an_authorization_for_one_request_does_not_run_a_different_one():
-    pds_runner = FakePdsRunner(serial="FD01N6557110C271B")
+    pds_runner = FakePdsRunner(serial="SYNTHDRIVEA00001")
     auth, store = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
     runner = _runner_with_a_volume_group()
     result = perform_with_origin(runner, "mount_volume", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store)
@@ -1383,7 +1383,7 @@ def test_an_authorization_for_one_request_does_not_run_a_different_one():
 
 
 def test_an_authorization_works_once_and_a_replay_is_refused():
-    pds_runner = FakePdsRunner(serial="FD01N6557110C271B")
+    pds_runner = FakePdsRunner(serial="SYNTHDRIVEA00001")
     auth, store = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
     first = _runner_with_a_volume_group()
     assert perform_with_origin(first, "repair", ALLOWED_DEV, pds_runner=pds_runner, authorization=auth, hitl_store=store).ok is not None
@@ -1394,7 +1394,7 @@ def test_an_authorization_works_once_and_a_replay_is_refused():
 
 
 def test_an_authorization_from_a_different_store_is_refused():
-    pds_runner = FakePdsRunner(serial="FD01N6557110C271B")
+    pds_runner = FakePdsRunner(serial="SYNTHDRIVEA00001")
     auth, _ = authorize("repair", ALLOWED_DEV, pds_runner=pds_runner)
     other_store = __import__("hitl_helpers").new_store()
     runner = _runner_with_a_volume_group()
@@ -1404,5 +1404,5 @@ def test_an_authorization_from_a_different_store_is_refused():
 
 def test_the_confirmation_is_checked_after_validation_so_a_bad_drive_is_still_refused_for_the_right_reason():
     result = perform_with_origin(FakeRunner(), "repair", {"device_path": "/dev/sda"},
-                               pds_runner=FakePdsRunner(serial="ZCT2WCM2"))
+                               pds_runner=FakePdsRunner(serial="SYNTHH06"))
     assert "allowed drives" in result.detail

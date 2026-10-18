@@ -64,7 +64,7 @@ destination is refused unless the running boot-drive serial is known, so a
 failed identity probe cannot be interpreted as evidence that the destination is
 separate. When `/dev` omits the mounted root node, the fallback resolves its
 major:minor through sysfs and asks udev for the parent disk serial. A read-only
-host probe resolved `SN211808916391`; 134 focused tests passed against
+host probe resolved `<boot drive serial>`; 134 focused tests passed against
 synthetic runners. No physical backup was made. REAL-005 retains the remaining
 ancestry and complete storage-graph work.
 

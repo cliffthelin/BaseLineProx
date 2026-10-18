@@ -7,8 +7,8 @@ import identifiers as idn
 
 LANE = "4af8c95a-1c9b-437a-a306-c53855d4077f"
 OTHER_LANE = "5029a80d-c748-4616-aa08-99ac560f5311"
-PC601 = "FD01N6557110C271B"
-PC401 = "MD89N41071210AP4E"
+PC601 = "SYNTHDRIVEA00001"
+PC401 = "SYNTHDRIVEB00002"
 
 
 def hexpos(guid, start, stop):
@@ -19,21 +19,21 @@ def test_a_host_identifier_has_the_layout_the_operator_described():
     host = idn.host_id(LANE, PC601)
     assert str(uuid.UUID(host)) == host
     assert hexpos(host, 0, 8) == "4af8c95a"          # first 8 of the installer lane
-    assert hexpos(host, 8, 12) == "fd01"             # first 4 hex characters of the serial
-    assert hexpos(host, 12, 16) == "271b"            # last 4 hex characters of the serial
+    assert hexpos(host, 8, 12) == "dea0"             # first 4 hex characters of the serial
+    assert hexpos(host, 12, 16) == "0001"            # last 4 hex characters of the serial
     assert hexpos(host, 16, 17) == "1"               # layout version
     assert hexpos(host, 17, 18) == "0"               # kind: host
     assert idn.is_valid(host)
 
 
 def test_non_hex_serial_characters_are_skipped_and_a_short_serial_is_filled_with_the_reserved_value():
-    host = idn.host_id(LANE, PC401)                  # MD89N41071210AP4E: M, N, P are not hex digits
-    assert hexpos(host, 8, 12) == "d894" and hexpos(host, 12, 16) == "0a4e"
+    host = idn.host_id(LANE, PC401)                  # SYNTHDRIVEB00002: M, N, P are not hex digits
+    assert hexpos(host, 8, 12) == "deb0" and hexpos(host, 12, 16) == "0002"
     assert idn.serial_hex("GH1JKL2M", 4) == "1200" and idn.serial_hex("GH1JKL2M", 4, from_end=True) == "0012"
 
 
 def test_the_host_identifier_of_pc601_is_pinned():
-    assert idn.host_id(LANE, PC601) == "4af8c95a-fd01-271b-10be-bc48c28f0a00"
+    assert idn.host_id(LANE, PC601) == "4af8c95a-dea0-0001-10c1-3f4194178800"
 
 
 def test_the_same_inputs_always_give_the_same_identifier_and_different_inputs_do_not():
@@ -83,7 +83,7 @@ def test_an_identifier_can_be_read_back_into_its_fields():
     vm = idn.child_id(host, "vm", "ubuntu-desktop")
     app = idn.child_id(vm, "application", "chrome/main")
     parsed = idn.parse(vm)
-    assert (parsed.kind, parsed.lane, parsed.head, parsed.tail, parsed.version) == ("vm", "4af8c95a", "fd01", "271b", "1")
+    assert (parsed.kind, parsed.lane, parsed.head, parsed.tail, parsed.version) == ("vm", "4af8c95a", "dea0", "0001", "1")
     assert idn.parse(host).kind == "host"
     assert idn.parse(app).kind == "application" and idn.parse(app).lane is None and idn.parse(app).class_code == idn.class_code("chrome")
     assert idn.same_drive(host, vm) and idn.same_drive(host, app)
@@ -92,8 +92,8 @@ def test_an_identifier_can_be_read_back_into_its_fields():
 
 def test_a_damaged_or_foreign_identifier_is_not_valid():
     host = idn.host_id(LANE, PC601)
-    assert not idn.is_valid(host.replace("fd01", "fd02", 1))                       # a field changed: its check fails
-    assert not idn.is_valid("4af8c95a-fd01-271b-b1ae-f19827f945b7")                # the earlier layout (version b)
+    assert not idn.is_valid(host.replace("dea0", "dea1", 1))                       # a field changed: its check fails
+    assert not idn.is_valid("4af8c95a-dea0-0001-b1ae-f19827f945b7")                # the earlier layout (version b)
     assert not idn.is_valid(str(uuid.uuid4())) and not idn.is_valid("not a uuid")
     with pytest.raises(idn.IdentifierError):
         idn.parse("not a uuid")

@@ -31,14 +31,14 @@ Recorded command outputs are in docs/verification/143/physical-metadata.json.
 Kernel device names below identify observations only; durable identity is the
 drive serial, re-resolved before any future action.
 
-PC601 serial FD01N6557110C271B currently resolves to /dev/sdc. Its third
+PC601 serial <PC601 drive serial> currently resolves to /dev/sdc. Its third
 partition is a 475.9 GiB LVM physical volume containing visible Proxmox logical
 volumes: pve-root 5 GiB, pve-swap 2 GiB and pve-data 28 GiB thin storage, with
 1 GiB thin metadata. The root filesystem was already mounted read-write by the
 environment; df reported 87% used and 626 MiB available. This inspection did
 not enumerate inactive guest volumes or establish remaining VG capacity.
 
-PC401 serial MD89N41071210AP4E currently resolves to /dev/sdd. It instead has
+PC401 serial <PC401 drive serial> currently resolves to /dev/sdd. It instead has
 six ext4 partitions: BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE,
 USER_ADMIN and USER_PERSONAL. It has no observed Proxmox EFI/root layout.
 The running development root is /dev/nvme0n1p2, not either inspected target.

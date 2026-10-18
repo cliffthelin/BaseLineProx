@@ -155,7 +155,7 @@ def test_it_needs_the_web_app(dest_root):
 
 def test_a_destination_on_an_sk_hynix_drive_is_still_refused(dest_root):
     with pytest.raises(ob.BackupError):
-        ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "MD89N41071210AP4E"}),
+        ob.run_guest_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "SYNTHDRIVEB00002"}),
                             guest_run=FakeProxmox(), now=1.0, allowed_serials=ALLOWED,
                             origin=woh.origin_for("backup_guests", {"dry_run": False}))
 

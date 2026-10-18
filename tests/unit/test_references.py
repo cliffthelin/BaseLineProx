@@ -8,7 +8,7 @@ import references as ref
 import registry
 
 LANE = "4af8c95a-1c9b-437a-a306-c53855d4077f"
-SERIAL = "FD01N6557110C271B"
+SERIAL = "SYNTHDRIVEA00001"
 
 
 @pytest.fixture
@@ -46,11 +46,11 @@ def test_a_registry_entry_is_linked_to_an_identifier_and_found_again_from_either
     assert ref.reference_for("gateway_route", "caddy") == guid
     assert ref.resolve(guid)["source"] == {"type": "gateway_route", "id": "caddy"}
     assert ref.resolve(guid)["parent"] == host
-    assert ref.reference_for("gateway_route", "unknown") is None and ref.resolve(idn.host_id(LANE, "MD89N41071210AP4E")) is None
+    assert ref.reference_for("gateway_route", "unknown") is None and ref.resolve(idn.host_id(LANE, "SYNTHDRIVEB00002")) is None
 
 
 def test_the_same_entry_id_under_two_registry_types_has_two_references(host):
-    assert ref.link("drive", "FD01N6557110C271B", kind="hardware") != ref.link("route", "FD01N6557110C271B", kind="application")
+    assert ref.link("drive", "SYNTHDRIVEA00001", kind="hardware") != ref.link("route", "SYNTHDRIVEA00001", kind="application")
 
 
 def test_a_naming_code_becomes_an_identifier_by_its_cluster_and_medium(host):
@@ -77,7 +77,7 @@ def test_a_reference_that_is_not_an_identifier_is_refused_in_a_message():
     with pytest.raises(ref.ReferenceError):
         ref.stamp({}, source="not an identifier")
     with pytest.raises(ref.ReferenceError):
-        ref.stamp({}, subject="4af8c95a-fd01-271b-b1ae-f19827f945b7")      # a valid UUID but the earlier layout
+        ref.stamp({}, subject="4af8c95a-dea0-0001-b1ae-f19827f945b7")      # a valid UUID but the earlier layout
 
 
 def test_the_hosts_own_reference_is_the_default_source_when_asked(host):

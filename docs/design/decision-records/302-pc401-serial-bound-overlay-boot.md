@@ -14,7 +14,7 @@ recommended an e1000e NIC to expose install-time NIC-name assumptions.
 
 QEMU/KVM attached PC401's raw disk as the backing source of a separate qcow2
 copy-on-write overlay, setting its virtual block serial to
-`MD89N41071210AP4E`. The NIC was e1000e. QEMU user networking used
+`<PC401 drive serial>`. The NIC was e1000e. QEMU user networking used
 `restrict=on` and forwarded only `127.0.0.1:18103` to guest port 8006. The
 guest reached the BaselineOS console/dashboard and Proxmox HTTPS API. A request
 to `/api2/json/version` returned `401 No ticket`; no credentials or login

@@ -38,8 +38,8 @@ def _asked_by_the_web_app(monkeypatch):
         monkeypatch.setattr(ob, name, wrapper)
 
 
-ALLOWED = frozenset({"MD89N41071210AP4E", "FD01N6557110C271B"})   # the two SK hynix drives
-MEDIA_SERIAL = "JEHBBVWM"
+ALLOWED = frozenset({"SYNTHDRIVEB00002", "SYNTHDRIVEA00001"})   # the two SK hynix drives
+MEDIA_SERIAL = "SYNTHH05"
 DEFAULT_CHAIN = (("sdj1", "part"), ("sdj", "disk"))
 
 
@@ -138,15 +138,15 @@ def test_a_destination_layered_on_an_sk_hynix_drive_is_refused(dest_root):
     """e.g. an LVM volume whose underlying disk is one of the SK hynix drives."""
     with pytest.raises(ob.BackupError, match="not separate"):
         _dest(dest_root, source="/dev/mapper/pve-data", chain=(("dm-3", "lvm"), ("sdc", "disk")),
-              serials={"sdc": "FD01N6557110C271B"})
+              serials={"sdc": "SYNTHDRIVEA00001"})
 
 
 def test_a_destination_on_an_enrolled_drive_is_refused_like_an_sk_hynix_drive(dest_root):
     """A drive enrolled for Baseline to manage (drive_enrollment.py) is never also its separate backup drive."""
     import drive_enrollment
-    drive_enrollment.enroll("S6WRNS0TA12638A", size_bytes=1, model="m", now=0.0)
+    drive_enrollment.enroll("SYNTHSATA000001", size_bytes=1, model="m", now=0.0)
     with pytest.raises(ob.BackupError, match="not separate"):
-        _dest(dest_root, serials={"sdj": "S6WRNS0TA12638A"})
+        _dest(dest_root, serials={"sdj": "SYNTHSATA000001"})
 
 
 def test_unreadable_enrollment_store_refuses_backup_destination(dest_root, monkeypatch):
@@ -469,7 +469,7 @@ def test_the_job_skips_quietly_when_a_recent_backup_exists(dest_root, sources, m
 def test_the_job_creates_nothing_when_the_destination_is_refused(dest_root, sources):
     before = _snapshot(dest_root)
     with pytest.raises(ob.BackupError):
-        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "MD89N41071210AP4E"}),
+        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "SYNTHDRIVEB00002"}),
                       sources=sources, now=1.0, allowed_serials=ALLOWED)
     assert _snapshot(dest_root) == before and not (dest_root / "baseline-backups").exists()
 
@@ -505,7 +505,7 @@ def test_a_dry_run_validates_sizes_and_checks_space_but_writes_nothing(dest_root
 
 def test_a_dry_run_still_refuses_a_bad_destination(dest_root, sources):
     with pytest.raises(ob.BackupError, match="not separate"):
-        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "MD89N41071210AP4E"}),
+        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "SYNTHDRIVEB00002"}),
                       sources=sources, now=1.0, allowed_serials=ALLOWED, dry_run=True)
 
 

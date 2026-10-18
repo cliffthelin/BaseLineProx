@@ -3,8 +3,8 @@
 # DR249 (parallel effort DR245): PC401 guarded installed-drive update completed
 
 Date: 2026-10-10. Continues DR244 and DR167. PC401 serial
-`MD89N41071210AP4E` is the only update target; PC601 serial
-`FD01N6557110C271B` remains preserved.
+`<PC401 drive serial>` is the only update target; PC601 serial
+`<PC601 drive serial>` remains preserved.
 
 ## Evidence
 
@@ -18,7 +18,7 @@ verified recovery snapshot at
 
 The durable update journal records:
 
-- `state: updated` and `serial: MD89N41071210AP4E`;
+- `state: updated` and `serial: <PC401 drive serial>`;
 - `identity_source_recovery_and_retention_verified`;
 - BASELINE growth by 45,097,156,608 bytes to 53,687,091,200 bytes (50 GiB),
   leaving 65,435,336,704 bytes free in the VG and preserving the 16 GiB reserve;

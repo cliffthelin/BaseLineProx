@@ -49,7 +49,7 @@ refusal is re-verified by first boot and recorded as `network_repaired` only on 
 
 ### 4. Run script: no default target; work folder off the repo (`4b1d513`)
 
-Two drives, two agents (Claude PC601 `FD01N6557110C271B`, Codex PC401 `MD89N41071210AP4E`). The script
+Two drives, two agents (Claude PC601 `<PC601 drive serial>`, Codex PC401 `<PC401 drive serial>`). The script
 hardcoded PC401 as the only target. Now `--target` is required for any stage touching a real drive (an exact
 `--confirm-wipe` serial implies it), the other drive is protected for that run, and the work folder is
 `/run/media/cane/CACHE/baseline-build/allscript-<target>` on ext4 instead of `<repo>/.runtime-proof173` on NTFS.

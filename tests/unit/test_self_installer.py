@@ -61,7 +61,7 @@ def test_lvm_size_presets_are_plain_numbers_not_g_suffixed_strings():
             assert isinstance(preset[key], (int, float)), f"{key} must be a real number, not {preset[key]!r}"
 
 
-REAL_SERIAL = "FD01N6557110C271B"
+REAL_SERIAL = "SYNTHDRIVEA00001"
 
 
 def _pds_runner_ok():
@@ -612,7 +612,7 @@ def test_the_child_identity_reaches_the_first_boot_hook(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     cache.mkdir()
     (cache / "MANIFEST.json").write_text("{}")
-    identity = {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "FD01N6557110C271B"}
+    identity = {"uuid": "4af8c95a-dea0-0001-b1ae-f19827f945b7", "serial": "SYNTHDRIVEA00001"}
     kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached-binary"
     si.build_and_write_self_installer(**kwargs, offline_cache=cache, child_identity=identity)
     assert seen["identity"] == identity

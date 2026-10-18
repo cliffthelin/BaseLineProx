@@ -517,12 +517,12 @@
     {
       "name": "eno1",
       "state": "UP",
-      "mac": "08:bf:b8:32:62:de"
+      "mac": "02:00:5e:00:00:00"
     },
     {
       "name": "wlp9s0",
       "state": "UP",
-      "mac": "c8:94:02:16:bd:7f"
+      "mac": "02:00:5e:00:00:01"
     },
     {
       "name": "mpqemubr0",
@@ -537,7 +537,7 @@
     {
       "name": "tap-dadf89c4e3c",
       "state": "UP",
-      "mac": "ae:dd:ba:35:13:e8"
+      "mac": "02:00:5e:00:00:02"
     }
   ]
 }

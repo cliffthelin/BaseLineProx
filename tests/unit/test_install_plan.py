@@ -48,7 +48,7 @@ def test_single_drive_stage_uses_the_identity_bound_executor_and_requires_measur
     assert stage["function"] == "provision_target"
     assert stage["requires"] == ["offline_root_mount", "measured_role_bytes", "verified_recovery"]
 
-PVE, BASE, EMPTY, OTHER, BOOT = "FD01N6557110C271B", "MD89N41071210AP4E", "S6WRNS0TA12638A", "WCV00YLT", "SN2118"
+PVE, BASE, EMPTY, OTHER, BOOT = "SYNTHDRIVEA00001", "SYNTHDRIVEB00002", "SYNTHSATA000001", "SYNTHH01", "SN2118"
 ALLOWED = frozenset({PVE, BASE, EMPTY, OTHER})
 INSTALLER_GUID = "8afe8468-ea73-4944-8842-0cbbe4a82d16"
 

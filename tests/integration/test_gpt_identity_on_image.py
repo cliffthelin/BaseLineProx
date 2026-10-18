@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "baseline/lib"))
 import installer_identity as ii  # noqa: E402
 
 LANE = "4af8c95a-1c9b-437a-a306-c53855d4077f"
-PC601 = "FD01N6557110C271B"
+PC601 = "SYNTHDRIVEA00001"
 
 
 def _gpt_image(tmp_path):

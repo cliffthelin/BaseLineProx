@@ -3,7 +3,7 @@ import json
 import pytest
 from fake_runner import FakeRunner, FakeProc
 
-SERIAL = "FD01N6557110C271B"
+SERIAL = "SYNTHDRIVEA00001"
 VG_UUID = "vg-unique"
 PV_UUID = "pv-unique"
 

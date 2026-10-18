@@ -45,7 +45,7 @@ class FakePdsRunner:
     def __init__(self, serials_by_path=None, drive_table="sdb disk  11111111-2222-3333-4444-555555555555 \n"):
         self.drive_table = drive_table
         self.serials_by_path = serials_by_path or {
-            "/dev/sdb": "FD01N6557110C271B", "/dev/sdd": "FD01N6557110C271B",
+            "/dev/sdb": "SYNTHDRIVEA00001", "/dev/sdd": "SYNTHDRIVEA00001",
         }
 
     def run(self, argv):
@@ -76,7 +76,7 @@ class FakePdsRunner:
 
 _LSBLK_PAIRS = (
     'NAME="sdb" SIZE="476.9G" MODEL="PC401 NVMe SK hynix 512GB" TRAN="usb" ROTA="1" '
-    'SERIAL="FD01N6557110C271B" TYPE="disk"\n'
+    'SERIAL="SYNTHDRIVEA00001" TYPE="disk"\n'
     'NAME="sdz" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" TRAN="sata" ROTA="1" '
     'SERIAL="OtherRealSerial-1" TYPE="disk"\n'
 )

@@ -26,7 +26,7 @@ Every destructive action validates its target device via
 bare, unvalidated operator-typed path. The drives it may act on are
 **restricted** (v0.2 row 55, direct instruction 2026-10-01: "this
 can't have any effect outside of the SK hynix"): the SK hynix drives in
-`ALLOWED_TARGET_SERIALS`, plus any drive deliberately added with
+this lane's own drives (runtime data), plus any drive deliberately added with
 `enroll_drive` (direct instruction 2026-10-03; `drive_enrollment.py`),
 which needs the typed serial to match the drive and a human
 confirmation. This replaced an earlier "selectable, never restricted"
@@ -72,21 +72,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 from repair import Runner
 
 
-# The two SK hynix drives Baseline is set up with (decision records 45-47): the
-# PC601 holding the Proxmox install and the PC401 that is the Baseline drive.
-# Direct instruction, 2026-10-01: "this can't have any effect outside of the SK
-# hynix". So this is an ENFORCED allowlist, not a pre-selection hint: the picker
-# offers only these, and every device action refuses any other drive before it
-# runs anything (`perform_action`). It reverses an earlier recorded instruction
-# that targets should not be locked to two drives (v0.2 row 55). Matched by
-# serial because two drives of one model would otherwise look identical.
-ALLOWED_TARGET_SERIALS = frozenset({"MD89N41071210AP4E", "FD01N6557110C271B"})
-DEFAULT_TARGET_SERIALS = ALLOWED_TARGET_SERIALS      # older name, same set
+# The drives THIS installer lane may act on: its own drives (runtime data on the persistent admin volume, written on the installed system itself, never in the repository) plus any drive deliberately
+# enrolled since (drive_enrollment.py). Direct instruction, 2026-10-01: "this can't have any effect outside of the SK hynix". So this is an ENFORCED allowlist, not a pre-selection hint: the picker
+# offers only these, and every device action refuses any other drive before it runs anything (`perform_action`). Matched by serial because two drives of one model would otherwise look identical.
+# No other lane's drive is listed anywhere: it is refused unless someone enrolls it on purpose, and the guard also recognises it from the stamp on the drive.
 
 
 def allowed_target_serials() -> frozenset:
-    """The SK hynix drives plus the drives deliberately enrolled since (drive_enrollment.py)."""
-    return ALLOWED_TARGET_SERIALS | drive_enrollment.enrolled_serials()
+    """This lane's own drives plus the drives deliberately enrolled since (drive_enrollment.py)."""
+    return drive_guard.own_drive_serials() | drive_enrollment.enrolled_serials()
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +530,7 @@ def list_candidate_drives(runner: Runner, *, pds_runner=None) -> list:
             "size": row.get("SIZE") or "?",
             "drive_type": classify_drive_type(tran=tran, rota=row.get("ROTA", ""),
                                                model=row.get("MODEL", ""), usb_bridge_model=usb_bridge_model),
-            "is_default": serial in DEFAULT_TARGET_SERIALS,
+            "is_default": serial in drive_guard.own_drive_serials(),
             "partition_count": summary["partition_count"],
             "usage_text": summary["usage_text"],
             **baseline_status,
@@ -1544,7 +1538,7 @@ def _check_server_host(value) -> str:
 
 def _check_expected_serial(value) -> str:
     value = _check_str("expected_serial", value)
-    if not _SERIAL_RE.match(value) or value not in ALLOWED_TARGET_SERIALS:
+    if not _SERIAL_RE.match(value) or value not in drive_guard.own_drive_serials():
         raise ValueError("expected_serial is not one of the drives Baseline is allowed to act on")
     return value
 

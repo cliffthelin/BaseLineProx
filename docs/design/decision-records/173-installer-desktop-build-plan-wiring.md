@@ -25,8 +25,8 @@ settings modal, protected-drive refusal, eligible-drive serial selection, OS
 selection, app selection, and app configuration saved into the canonical plan.
 Focused Installer tests pass 22; `git diff --check` passes. Test device
 discovery and privileged execution are synthetic. During this session, sysfs
-block inventory identified PC401 `MD89N41071210AP4E` and PC601
-`FD01N6557110C271B`, but this execution namespace exposed no `/dev/sdb` or
+block inventory identified PC401 `<PC401 drive serial>` and PC601
+`<PC601 drive serial>`, but this execution namespace exposed no `/dev/sdb` or
 `/dev/sdc` device nodes. No physical write, Proxmox boot, firewall/network, or
 overlay persistence check was run. No physical behavior is claimed verified.
 

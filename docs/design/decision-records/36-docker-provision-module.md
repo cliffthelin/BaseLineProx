@@ -44,7 +44,7 @@ resolution record 35 used for `pct_provision.py`.
 Checked directly in this session, both came back negative:
 
 - **No Proxmox host reachable at all.** This session's environment
-  (`cane-System-Product-Name`, a plain Ubuntu dev machine) has no
+  (`<dev-host>`, a plain Ubuntu dev machine) has no
   `qm`/`pct`/`pvesh` installed, and `~/.ssh/config` has no entry
   pointing at a Proxmox host. Whatever machine Track A1-A5's real
   hardware work ran against in earlier sessions is not reachable from

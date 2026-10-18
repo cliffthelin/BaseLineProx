@@ -23,7 +23,7 @@ installer first-boot connection still need implementation.
    late responses cannot overwrite newer choices.
 
 Actual read-only discovery on this machine found Proxmox
-FD01N6557110C271B and Baseline MD89N41071210AP4E. It selected keep and retain,
+<PC601 drive serial> and Baseline <PC401 drive serial>. It selected keep and retain,
 then refused compilation: the current six-volume layout lacks APPDATA_ADMIN
 and APPDATA_PERSONAL required by the eight-volume schema. No drive was enrolled,
 formatted, mounted or modified. Do not format to make the schema match: an

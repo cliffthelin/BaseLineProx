@@ -18,7 +18,7 @@ an unambiguous read-only serial probe.
 
 This checkout pins Codex lane UUID
 `5029a80d-c748-4616-aa08-99ac560f5311`. DR255's existing derivation produces
-PC401 host UUID `5029a80d-d894-0a4e-1023-eb118fbb8f00`: non-hex serial
+PC401 host UUID `<host identifier>`: non-hex serial
 characters are skipped, and the final byte is `00` for ordinary deterministic
 identities. The identifier implementation already reserves the final byte for
 special handling (`00` ordinary, `01` external UUID cross-map, `02` portable).

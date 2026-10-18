@@ -21,7 +21,7 @@ def run(argv):
 
 def verify():
     assert os.geteuid() == 0
-    serial = 'MD89N41071210AP4E'
+    serial = 'SYNTHDRIVEB00002'
     disks = [d for d in json.loads(run(['lsblk', '-J', '-b', '-p', '-o', 'NAME,TYPE,SERIAL,SIZE']))['blockdevices'] if d.get('serial') == serial]
     assert len(disks) == 1
     target = pds.validate_target_device(disks[0]['name'], expected_serial=serial,

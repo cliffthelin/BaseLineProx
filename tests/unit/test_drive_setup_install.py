@@ -175,7 +175,7 @@ def test_sparse_install_invocation_threads_target_serial_via_scsi_device_form():
         target_image=Path("/dev/sdd"), prepared_iso=Path("/ws/prepared.iso"),
         mac="52:54:00:ba:5e:11", smbios_product="baseline-test",
         serial_log=Path("/ws/serial.log"),
-        target_serial="FD01N6557110C271B",
+        target_serial="SYNTHDRIVEA00001",
     )
     drive_arg = next(a for a in inv.argv if a.startswith("file="))
     assert "serial=" not in drive_arg  # never on the -drive line itself
@@ -194,7 +194,7 @@ def test_sparse_install_invocation_threads_target_serial_via_scsi_device_form():
 
     boot_idx = inv.argv.index("-boot")
     assert inv.argv[boot_idx + 1] == "order=c,once=d"  # decision record 116
-    assert "serial=FD01N6557110C271B" in scsi_hd_arg
+    assert "serial=SYNTHDRIVEA00001" in scsi_hd_arg
 
 
 def test_sparse_install_invocation_network_is_slirp_restricted_by_default():
@@ -522,6 +522,6 @@ def test_a_disk_only_boot_can_present_the_drive_with_its_real_serial_like_the_in
     base = dict(target_image=tmp_path / "t.img", mac="52:54:00:00:00:01", smbios_product="x", serial_log=tmp_path / "s.log")
     plain = di.build_postinstall_boot_invocation(**base)
     assert not any("scsi-hd" in a for a in plain.argv)
-    scsi = di.build_postinstall_boot_invocation(**base, target_serial="FD01N6557110C271B")
-    assert "scsi-hd,drive=targetdisk,bus=targetscsi.0,serial=FD01N6557110C271B" in scsi.argv
+    scsi = di.build_postinstall_boot_invocation(**base, target_serial="SYNTHDRIVEA00001")
+    assert "scsi-hd,drive=targetdisk,bus=targetscsi.0,serial=SYNTHDRIVEA00001" in scsi.argv
     assert not any(a == "-cdrom" for a in scsi.argv)                    # still no installer media

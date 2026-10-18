@@ -3,7 +3,7 @@
 2026-10-05. In progress; physical cold boot remains unverified.
 
 Session restrictions were removed. Local sockets, actual Chromium and KVM now
-work. PC401 serial MD89N41071210AP4E was freshly validated and booted through a
+work. PC401 serial <PC401 drive serial> was freshly validated and booted through a
 new qcow2 overlay with explicit read-only raw physical backing. No physical
 source write was performed. The old runtime133 overlay was not reused because
 its kernel-assigned backing-device name no longer identified its original disk.

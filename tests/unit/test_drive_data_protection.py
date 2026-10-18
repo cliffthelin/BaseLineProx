@@ -14,7 +14,7 @@ DATA = f"sdb disk  {GUID} \nsdb1 part ntfs  Media\n"
 OWN = f"sdb disk  {GUID} \nsdb1 part ext4  BASELINE\nsdb2 part ext4  USER_ADMIN\n"
 
 
-TEST_SERIAL = "FD01N6557110C271B"
+TEST_SERIAL = "SYNTHDRIVEA00001"
 LANE_SERIAL = TEST_SERIAL
 
 
@@ -24,7 +24,8 @@ def pds(table, *, serial=TEST_SERIAL):
 
 @pytest.fixture(autouse=True)
 def _exercise_general_data_rule_without_lane_exception(monkeypatch):
-    monkeypatch.setattr(dg, "DEVELOPMENT_LOCKED_SERIALS", frozenset())
+    from conftest import set_own_drives
+    set_own_drives(monkeypatch, [], enrolled=[TEST_SERIAL])
 
 
 def test_prepare_refuses_a_data_drive_so_no_challenge_can_be_raised():
@@ -72,7 +73,7 @@ def test_a_blank_drive_may_be_prepared():
 
 
 def test_a_data_drive_carrying_a_registered_installer_uuid_may_be_prepared():
-    dg.register_installer_uuid(GUID, serial="FD01N6557110C271B")
+    dg.register_installer_uuid(GUID, serial="SYNTHDRIVEA00001")
     assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(DATA, serial=LANE_SERIAL))
 
 
@@ -132,7 +133,7 @@ def test_stamp_refuses_a_drive_with_someone_elses_data(monkeypatch):
 
 
 def test_a_baseline_drive_with_data_is_not_formatted_without_a_recent_backup(monkeypatch):
-    dg.register_installer_uuid(GUID, serial="FD01N6557110C271B")
+    dg.register_installer_uuid(GUID, serial="SYNTHDRIVEA00001")
     monkeypatch.setattr(da, "backup_is_fresh", lambda: False)
     with pytest.raises(ValueError, match="backup"):
         da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN, serial=LANE_SERIAL))

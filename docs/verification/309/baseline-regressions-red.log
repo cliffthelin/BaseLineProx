@@ -37,7 +37,7 @@ tests/unit/test_redirect_migration_files.py:41: in test_pending_migration_never_
 E   AttributeError: module 'persist_bind_mounts' has no attribute 'migrate_redirect_contents'
 ____________ test_pc601_update_lane_refuses_pc401_before_discovery _____________
 tests/unit/test_update_lane_protection.py:9: in test_pc601_update_lane_refuses_pc401_before_discovery
-    update.discover_path("MD89N41071210AP4E")
+    update.discover_path("<PC401 drive serial>")
 baseline/lib/installed_drive_update.py:50: in discover_path
     raise UpdateError('Selected serial does not identify exactly one attached drive')
 E   installed_drive_update.UpdateError: Selected serial does not identify exactly one attached drive
@@ -51,7 +51,7 @@ E     Expected regex: 'other installer lane'
 E     Actual message: 'Selected serial does not identify exactly one attached drive'
 _________ test_pc601_updater_refuses_pc401_even_with_an_invalid_bundle _________
 tests/unit/test_update_lane_protection.py:14: in test_pc601_updater_refuses_pc401_even_with_an_invalid_bundle
-    update.update(None, serial="MD89N41071210AP4E", input_bundle=tmp_path / "missing",
+    update.update(None, serial="<PC401 drive serial>", input_bundle=tmp_path / "missing",
 baseline/lib/installed_drive_update.py:107: in update
     installer_inputs.verify(bundle)  # Validate captured code before any device probe.
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

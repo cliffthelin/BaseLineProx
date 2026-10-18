@@ -7,7 +7,7 @@ import drive_admin as da
 import web_origin_helper as woh
 from hitl_helpers import authorize
 
-PDS = lambda: FakePdsRunner(serial="MD89N41071210AP4E")  # noqa: E731
+PDS = lambda: FakePdsRunner(serial="SYNTHDRIVEB00002")  # noqa: E731
 PARAMS = {"device_path": "/dev/sdb"}
 
 

@@ -46,8 +46,8 @@
           "extended-l2": false
         }
       },
-      "full-backing-filename": "/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E",
-      "backing-filename": "/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E",
+      "full-backing-filename": "/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_<PC401 drive serial>",
+      "backing-filename": "/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_<PC401 drive serial>",
       "dirty-flag": false
     },
     "iops_wr": 0,

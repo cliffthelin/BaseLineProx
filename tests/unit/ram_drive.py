@@ -7,7 +7,7 @@ import drive_admin as da
 
 
 class RamDrive:
-    def __init__(self, root: Path, serial: str = "FD01N6557110C271B"):
+    def __init__(self, root: Path, serial: str = "SYNTHDRIVEA00001"):
         self.root = Path(root)
         self.root.mkdir(parents=True)
         self.serial = serial

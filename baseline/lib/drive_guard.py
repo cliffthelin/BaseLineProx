@@ -5,10 +5,11 @@ partition table is empty, has none. A drive whose state cannot be read is treate
 mistake is refusing.
 
 A drive normally counts as installer-made only if its GPT disk GUID is one the installer generated and registered.
-Each pinned installer lane also has one explicit development serial: Claude's UUID maps to PC601 and Codex's UUID
-maps to PC401. The exact serial is checked with `lsblk`; the other lane's serial is refused before the empty-disk
-or installer-UUID paths. Missing/invalid lane identity enables neither development lock. These are source policy,
-not caller parameters.
+Each installer lane's own drives are runtime data on the persistent admin volume (the development lock: those may be
+reinstalled even when they hold old data); no serial is ever stored in the repository. Nothing lists another lane's drives: a drive whose disk GUID is a Baseline host stamp for
+its own serial from a DIFFERENT lane is recognised as that lane's (`lane_verdict`) and refused before the empty-disk
+or installer-UUID paths. Missing/invalid lane identity enables no development lock. These are source policy, not
+caller parameters.
 
 Adopting a drive that predates this rule (`stamp_installer_identity`) is non-destructive and is limited to a drive
 that is empty or whose every partition is one of Baseline's own volumes, so stamping cannot be used to launder a
@@ -25,21 +26,11 @@ from pathlib import Path
 import registry
 
 REGISTRY_TYPE = "installer_drives"
-# Each installer lane is pinned to its own target. This checkout's UUID chooses
-# one serial; the other known lane target is always protected in this lane.
-_LANE_SERIALS = {
-    "4af8c95a-1c9b-437a-a306-c53855d4077f": "FD01N6557110C271B",  # Claude / PC601
-    "5029a80d-c748-4616-aa08-99ac560f5311": "MD89N41071210AP4E",  # Codex / PC401
-}
-
-
-def _locked_serials_for(installer_uuid: str | None) -> frozenset[str]:
-    try:
-        canonical = str(uuid.UUID(installer_uuid)) if installer_uuid else None
-    except ValueError:
-        canonical = None
-    serial = _LANE_SERIALS.get(canonical)
-    return frozenset({serial}) if serial else frozenset()
+# This installer lane's own drives are DATA, never code: the file /etc/baseline/own-drives (one hardware serial per line), which lives on the persistent admin volume, is written on the installed
+# system itself (its first boot records the drive it runs from) and is never in the repository. BASELINE_OWN_DRIVES_FILE names another file (a build or test host). Another lane's drive is not
+# listed anywhere: it is recognised from the identifier stamped on the drive (identifiers.stamped_lane), which names the lane that installed it.
+OWN_DRIVES_PATH = "/etc/baseline/own-drives"
+_SERIAL_LINE = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")
 
 
 def _installer_lane_uuid() -> str | None:
@@ -50,8 +41,56 @@ def _installer_lane_uuid() -> str | None:
         return None
 
 
-DEVELOPMENT_LOCKED_SERIALS = _locked_serials_for(_installer_lane_uuid())
-OTHER_LANE_PROTECTED_SERIALS = frozenset(_LANE_SERIALS.values()) - DEVELOPMENT_LOCKED_SERIALS
+def own_drives_file() -> Path:
+    import os
+    return Path(os.environ.get("BASELINE_OWN_DRIVES_FILE") or OWN_DRIVES_PATH)
+
+
+def own_drive_serials(path=None, lane_uuid=..., *, disposable_only: bool = False) -> frozenset:
+    """The serials in the lane's own-drives file: `SERIAL` or `SERIAL disposable` per line (blank lines and # comments ignored). The drives are this lane's allowed targets; the `disposable` ones are the
+    development lock (they may be reinstalled over old data), and only the operator marks one so. Without a valid lane identity there are none; an absent or unreadable file means none."""
+    if lane_uuid is ...:
+        lane_uuid = _installer_lane_uuid()
+    if not lane_uuid:
+        return frozenset()
+    try:
+        lines = Path(path or own_drives_file()).read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return frozenset()
+    found = set()
+    for line in lines:
+        words = line.split("#", 1)[0].split()
+        if not words or not _SERIAL_LINE.match(words[0]) or len(words) > 2 or (len(words) == 2 and words[1] != "disposable"):
+            continue
+        if disposable_only and "disposable" not in words[1:]:
+            continue
+        found.add(words[0])
+    return frozenset(found)
+
+
+def record_own_drive(serial: str, path=None, *, disposable: bool = False) -> bool:
+    """Add one serial to the own-drives file (idempotent; a plain serial only; `disposable` only when the operator says so). Returns whether it was newly added."""
+    if not isinstance(serial, str) or not _SERIAL_LINE.match(serial):
+        raise ValueError("a drive serial is plain letters, digits and ._- , 8 to 64 characters")
+    target = Path(path or own_drives_file())
+    if serial in own_drive_serials(target):
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "a") as handle:
+        handle.write(serial + (" disposable" if disposable else "") + "\n")
+    return True
+
+
+def lane_verdict(ptuuid, serial) -> str:
+    """`ours`, `other` or `none`: whether the drive's disk GUID is a stamp from this installer lane, from another lane, or not a Baseline stamp for this drive at all."""
+    import identifiers
+    lane = identifiers.stamped_lane(ptuuid, serial) if ptuuid else None
+    ours = (_installer_lane_uuid() or "").replace("-", "")[:8]
+    if lane is None:
+        return "none"
+    return "ours" if ours and lane == ours else "other"
+
+
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 # Partition names Baseline itself creates, including the older names that real drives still carry.
 _OWN_LABEL_RE = re.compile(r"^(BASELINE|INSTALLER_CACHE|SESSION_TEMP|SUBSTRATE(_PERSISTENCE)?|USER(_[A-Z0-9_]+)?|"
@@ -174,12 +213,12 @@ def _authorize_format(device_path: str, state: DriveState, *, serial: str | None
     if serial is None:
         raise DataProtectionError(
             f"refused: {device_path} serial could not be read unambiguously; no override")
-    if serial in OTHER_LANE_PROTECTED_SERIALS:
-        raise DataProtectionError(f"refused: {device_path} belongs to the other installer lane ({serial}); no override")
+    if lane_verdict(state.ptuuid, serial) == "other":
+        raise DataProtectionError(f"refused: {device_path} carries another installer lane's stamp ({serial}); no override")
     if not state.known:
         raise DataProtectionError(
             f"refused: {device_path} drive state could not be read as one whole disk; no override")
-    if serial in DEVELOPMENT_LOCKED_SERIALS:
+    if serial in own_drive_serials(disposable_only=True):
         return None
     if not state.has_data:
         return None

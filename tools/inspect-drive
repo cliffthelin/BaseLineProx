@@ -7,7 +7,7 @@
 # /run/media/cane/CACHE/baseline-build/inspect/, unmounts and deactivates exactly the volume group it activated. Nothing on the drive changes.
 # Only PC601 is accepted. It never copies keys, passwords or hashes: the file list below is explicit.
 set -euo pipefail
-declare -A SERIALS=( [PC601]=FD01N6557110C271B )
+declare -A SERIALS=( [PC601]=SYNTHDRIVEA00001 )
 NAME="${1:-}"
 [ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: inspect-drive PC601   (only PC601 is accepted)" >&2; exit 2; }
 [ "$(id -u)" -eq 0 ] || { echo "needs root: run with sudo" >&2; exit 1; }

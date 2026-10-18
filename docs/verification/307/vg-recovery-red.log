@@ -7,7 +7,7 @@ tests/unit/test_host_layout.py:230: in test_failed_boot_regeneration_is_pending_
 E   Failed: DID NOT RAISE <class 'host_layout.LayoutError'>
 _________ test_unknown_destination_vg_ownership_refuses_before_rename __________
 tests/unit/test_host_layout.py:248: in test_unknown_destination_vg_ownership_refuses_before_rename
-    hl.name_the_volume_group_for_drive(runner, serial="FD01N6557110C271B", vg="pve", vg_uuid="U-1",
+    hl.name_the_volume_group_for_drive(runner, serial="<PC601 drive serial>", vg="pve", vg_uuid="U-1",
 baseline/lib/host_layout.py:178: in name_the_volume_group_for_drive
     _run(runner, ["vgrename", vg_uuid, new])
 baseline/lib/host_layout.py:66: in _run

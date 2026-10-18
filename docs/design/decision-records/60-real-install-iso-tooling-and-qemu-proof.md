@@ -36,7 +36,7 @@ Fix: added `makedirs()` to the `AnswerRunner` interface (+ `RealAnswerRunner`, +
 
 ## Part 4: `baseline/bin/baseline-prepare-real-install-iso` - new tool, operationalizes docs/INSTALL.md Step 2
 
-Real, sha256-verified assistant binary + a real self-signed TLS cert + a real `answer.toml` targeting the actual documented drive serial (`FD01N6557110C271B`, via `filter.ID_SERIAL_SHORT` - confirmed via web search against Proxmox's own forum-documented syntax, not guessed) + `prepare_iso_defensively` with `--fetch-from http` - all wired into one script. Verified for real, twice:
+Real, sha256-verified assistant binary + a real self-signed TLS cert + a real `answer.toml` targeting the actual documented drive serial (`<PC601 drive serial>`, via `filter.ID_SERIAL_SHORT` - confirmed via web search against Proxmox's own forum-documented syntax, not guessed) + `prepare_iso_defensively` with `--fetch-from http` - all wired into one script. Verified for real, twice:
 
 1. `prepare-iso` itself: every postcondition passed, including the two HTTP-specific ones (`url_matches`, `fingerprint_matches`) and `no_forbidden_canaries_in_iso` (the password hash and full answer content confirmed absent from the ISO file - the entire point of `http` mode).
 2. The serving half, for real, against a local HTTPS listener: wrong hardware → `403 hardware mismatch`; correct hardware → `200` with the exact real `answer.toml` content; a replay of the same session → `403 already consumed`. All three the actual, literal server responses, not asserted from the code alone.

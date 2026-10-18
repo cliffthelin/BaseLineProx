@@ -44,7 +44,7 @@ class Fake:
         if head == ["qm", "create"]:
             self.vms.append({"name": argv[argv.index("--name") + 1], "vmid": int(argv[2])})
             self.config = {argv[i][2:]: argv[i + 1] for i in range(3, len(argv), 2)}
-            self.config["net0"] = self.config.get("net0", "virtio,bridge=vmbr0") if "=" in self.config.get("net0", "").split(",")[0] else "virtio=BC:24:11:AA:BB:CC,bridge=vmbr0"
+            self.config["net0"] = self.config.get("net0", "virtio,bridge=vmbr0") if "=" in self.config.get("net0", "").split(",")[0] else "virtio=02:00:5E:00:00:00,bridge=vmbr0"
             if self.conf_dir is not None:
                 self.conf_dir.mkdir(parents=True, exist_ok=True)
                 (self.conf_dir / f"{argv[2]}.conf").write_text("x")

@@ -203,6 +203,27 @@ def step_dev_ssh_keys(directory, sshd_dropin, reload=True):
     mark("dev-ssh-keys", count=len(value.split("|")))
 
 
+def step_own_drive(read_serial=None, path=None):
+    """Record the drive this system runs from as one of this installer lane's own drives (runtime data on the persistent admin volume; the repository never holds a serial). The drive the system boots
+    from is by definition its own, so nothing needs to be typed or baked in."""
+    import drive_guard
+    if read_serial is None:
+        import repair
+        import single_drive_storage as storage
+
+        class Root(repair.RealRunner):
+            def run(self, argv, timeout=10):
+                if list(argv[:2]) == ["sudo", "-n"]:
+                    argv = argv[2:]
+                return super().run(argv, timeout=timeout)
+        serial = storage.running_target(Root())["serial"]
+    else:
+        serial = read_serial()
+    added = drive_guard.record_own_drive(serial, path=path)
+    log(f"own-drive: the boot drive is {'now recorded' if added else 'already recorded'} as this lane's own")
+    mark("own-drive", recorded=added)
+
+
 def step_volume_group():
     """The host's volume group takes this drive's own name before any role volume is created or mounted: two Baseline drives attached to one
     machine must never share the installer's name `pve`. Done first, so every volume mounted afterwards is mounted under its final name
@@ -498,7 +519,7 @@ def step_provision():
     mark("provision")
 
 
-STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("user-admin", step_user_admin), ("installer", step_installer),
+STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("own-drive", step_own_drive), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("user-admin", step_user_admin), ("installer", step_installer),
          ("os-isos", step_os_isos), ("os-list", step_os_list), ("provision", step_provision), ("dev-user", step_dev_user)]
 
 

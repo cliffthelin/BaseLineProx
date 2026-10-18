@@ -24,12 +24,12 @@ import physical_device_safety as pds
 import single_drive_storage as storage
 from repair import RealRunner
 
-SERIAL='MD89N41071210AP4E'
+SERIAL=os.environ.get('BASELINE_TARGET_SERIAL','')               # operator data, never stored in the repository
 SIZE=512110190592
-VG='baseline_1b75c1a556ee'
+VG=os.environ.get('BASELINE_TARGET_VG','')
 REPO=Path(__file__).resolve().parents[2]
 ROOT=Path('/tmp/baseline-pc401-target')
-RECOVERY=Path('/mnt/10TB/backup/baseline-recovery-20261004T095423Z-e228c4285b1047958cccbb164ec9ec6d')
+RECOVERY=Path(os.environ.get('BASELINE_RECOVERY_FOLDER','/nonexistent'))
 WORK=REPO/'.runtime-proof146'
 SOURCE=Path('/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso')
 KEY=WORK/'pc401-verification-key'

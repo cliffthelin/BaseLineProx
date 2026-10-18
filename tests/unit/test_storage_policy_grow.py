@@ -45,8 +45,8 @@ def test_a_grow_policy_cannot_be_edited_to_claim_a_different_capacity_or_drop_it
 
 def test_the_earlier_formats_still_validate_and_cannot_carry_the_grow_fields():
     for fmt in (sp.FORMAT, sp.LEGACY_FORMAT):
-        policy = sp.build_policy(serial="MD89N41071210AP4E", size_bytes=512_110_190_592,
-                                 required_bytes={v[3]: 0 for v in di.BASELINE_VOLUMES}, bindings=bindings_for("MD89N41071210AP4E"),
+        policy = sp.build_policy(serial="SYNTHDRIVEB00002", size_bytes=512_110_190_592,
+                                 required_bytes={v[3]: 0 for v in di.BASELINE_VOLUMES}, bindings=bindings_for("SYNTHDRIVEB00002"),
                                  policy_format=fmt)
         assert sp.validate_policy(policy) == policy and "installer_sizes" not in policy
         assert policy["capacity"]["capacity_basis"] == "measured-workload"

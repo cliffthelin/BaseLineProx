@@ -17,8 +17,8 @@ Queue72/74/75/76/78 remain open pending installed-guest and physical acceptance.
 ## Installer-lane drive locks — 2026-10-11 (DR300)
 
 The data-protection guard maps each pinned installer UUID to its assigned
-development serial: Codex to PC401 (`MD89N41071210AP4E`) and Claude to PC601
-(`FD01N6557110C271B`). An exact `lsblk` serial check enables only the current
+development serial: Codex to PC401 (`<PC401 drive serial>`) and Claude to PC601
+(`<PC601 drive serial>`). An exact `lsblk` serial check enables only the current
 lane's drive and refuses the other lane's drive before empty-disk or
 installer-UUID allowances. Failed or ambiguous observations do not grant the
 development exception. The current checkout is Claude's lane; PC401 boot,
@@ -611,7 +611,7 @@ Off-drive backup destination validation now refuses to proceed when the
 running system's boot-drive serial cannot be established. When the root block
 node is absent in this execution namespace, discovery follows findmnt's
 major:minor through sysfs and reads the parent disk serial with udev. A
-read-only host probe now resolves `SN211808916391`; this corrects DR187's
+read-only host probe now resolves `<boot drive serial>`; this corrects DR187's
 earlier inability to identify the development host's boot disk. Safety,
 backup, guest backup, recurrence, and operations tests pass (134 tests) with
 synthetic runners. No backup was written or physical drive verified. See
@@ -718,7 +718,7 @@ and [DR176](design/decision-records/176-pc601-uefi-portability-preflight.md).
 
 ## PC601 selected — existing Proxmox installation preserved (2026-10-08, DR174)
 
-The selected target is PC601 serial `FD01N6557110C271B`, which already contains
+The selected target is PC601 serial `<PC601 drive serial>`, which already contains
 Debian 13/Proxmox on the `pve` LVM layout. A read-only inspection found
 `pve-root`, `pve-swap`, and `pve-data`, with about 438.94 GiB free in the volume
 group; the root filesystem was about 87% used. Proxmox packages and an enabled
@@ -738,7 +738,7 @@ queue72/73/74/75/76/78. See [DR174](design/decision-records/174-pc601-selected-e
 
 ## PC601 UEFI portability preflight (2026-10-09, DR176)
 
-The current read-only EFI mount for serial `FD01N6557110C271B` contains the
+The current read-only EFI mount for serial `<PC601 drive serial>` contains the
 x86-64 UEFI fallback loader at `EFI/BOOT/BOOTx64.efi` and Proxmox's
 `EFI/proxmox/grubx64.efi`. The Proxmox EFI config searches for root UUID
 `fa48739d-a429-4ac2-a2d5-7a6ab0883046`, matching the physical `pve-root`
@@ -1013,7 +1013,7 @@ Open web work is listed in `docs/design/configuration-web-checklist.md`.
 ## Selected PC401 installation — 2026-10-04 (DR146, in progress)
 
 The current instruction is to write **one** SK hynix drive: PC401 serial
-`MD89N41071210AP4E`. PC601 `FD01N6557110C271B` remains unchanged.
+`<PC401 drive serial>`. PC601 `<PC601 drive serial>` remains unchanged.
 PC401's six filesystems were normally unmounted after root process-use checks.
 A whole-drive compressed recovery image passed `qemu-img check`, complete raw
 source comparison and independent SHA-256/image-size verification:
@@ -1085,14 +1085,14 @@ stopped before deactivation/boot. Drive completion remains open.
 
 ## Read-only storage inspection and audit continuation — 2026-10-04 (DR143)
 
-Read-only physical metadata confirms PC601 serial `FD01N6557110C271B` is
+Read-only physical metadata confirms PC601 serial `<PC601 drive serial>` is
 currently `/dev/sdc`, whose 475.9 GiB third partition is the Proxmox LVM PV:
 5 GiB `pve-root`, 2 GiB swap and a 28 GiB thin data pool are visible.
 Follow-up read-only LVM inspection (DR145) reports 471309746176 bytes of
 physical VG free space and 0.00 percent thin-pool data usage.
 The Proxmox root was already mounted rw by the desktop and is 87% used.
 The running development root is `/dev/nvme0n1p2`, not this Proxmox installation.
-The other SK hynix (`MD89N41071210AP4E`, currently `/dev/sdd`) still has six
+The other SK hynix (`<PC401 drive serial>`, currently `/dev/sdd`) still has six
 named ext4 Baseline partitions, including the two USER volumes, and no Proxmox
 EFI/root layout. Whole-drive copying it onto PC601 would replace Proxmox's
 layout. No copying, formatting, mounting or physical deployment occurred.
@@ -1185,16 +1185,16 @@ not resized. Root expansion still requires genuine free VG capacity.
 
 ## The two known real drives (Track A)
 
-**2026-09-30 event:** the Baseline drive (serial `MD89N41071210AP4E`) was repartitioned at the operator's instruction with `boot/prepare_scratch_drive.sh --apply`. It then held an `iso9660` image labelled `OMARCHY_202609` and no LVM or recognizable persistence layout; that was erased and replaced by a 200G/100G/176.9G GPT (`proxmox-rehearsal`, `luks-scratch`, `scratch-data`), which was in turn re-laid out the same day into Baseline's own volumes (`baseline_drive_layout.py`: BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE, USER_ADMIN, USER_PERSONAL). The Proxmox drive (`FD01N6557110C271B`) was not touched.
+**2026-09-30 event:** the Baseline drive (serial `<PC401 drive serial>`) was repartitioned at the operator's instruction with `boot/prepare_scratch_drive.sh --apply`. It then held an `iso9660` image labelled `OMARCHY_202609` and no LVM or recognizable persistence layout; that was erased and replaced by a 200G/100G/176.9G GPT (`proxmox-rehearsal`, `luks-scratch`, `scratch-data`), which was in turn re-laid out the same day into Baseline's own volumes (`baseline_drive_layout.py`: BASELINE, INSTALLER_CACHE, SESSION_TEMP, SUBSTRATE, USER_ADMIN, USER_PERSONAL). The Proxmox drive (`<PC601 drive serial>`) was not touched.
 
 | Serial (the identity) | Model | Kernel path on 2026-09-30 (re-verify, don't assume) | Role |
 |---|---|---|---|
-| `FD01N6557110C271B` | PC601 NVMe SK hynix 512GB | `/dev/sdc` (was `/dev/sdd` earlier the same month) | Proxmox substrate (steps 1-6); holds the `pve` volume group |
-| `MD89N41071210AP4E` | PC401 NVMe SK hynix 512GB | `/dev/sdd` (was `/dev/sdb`) | The Baseline drive: plain GPT volumes laid out by `baseline_drive_layout.py` (see `docs/layers/00-baseline-drive.md`). Steps 7-9's LVM-thin pool design is superseded for it (decision records 46-47) |
+| `<PC601 drive serial>` | PC601 NVMe SK hynix 512GB | `/dev/sdc` (was `/dev/sdd` earlier the same month) | Proxmox substrate (steps 1-6); holds the `pve` volume group |
+| `<PC401 drive serial>` | PC401 NVMe SK hynix 512GB | `/dev/sdd` (was `/dev/sdb`) | The Baseline drive: plain GPT volumes laid out by `baseline_drive_layout.py` (see `docs/layers/00-baseline-drive.md`). Steps 7-9's LVM-thin pool design is superseded for it (decision records 46-47) |
 
 Resolve a serial to its current device with
-`readlink -f /dev/disk/by-id/ata-PC601_NVMe_SK_hynix_512GB_FD01N6557110C271B` (substrate) and
-`readlink -f /dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E` (Baseline drive).
+`readlink -f /dev/disk/by-id/ata-PC601_NVMe_SK_hynix_512GB_<PC601 drive serial>` (substrate) and
+`readlink -f /dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_<PC401 drive serial>` (Baseline drive).
 
 `/dev/sdX` letters are **not** identity - re-resolve by serial every time (Step 3), never assume the same letter next boot.
 
@@ -1256,7 +1256,7 @@ baseline/bin/baseline-prepare-real-install-iso \
   --assistant-binary /usr/bin/proxmox-auto-install-assistant \
   --output /root/baseline-real-install.iso \
   --workspace /root/baseline-install-workspace \
-  --disk-serial FD01N6557110C271B \
+  --disk-serial <PC601 drive serial> \
   --server-host <a real LAN IP reachable from the target at boot - never 127.0.0.1, never QEMU's gateway> \
   --cert /root/answer-server.crt --key /root/answer-server.key \
   --target-mac <the real target's real NIC MAC> \
@@ -1279,14 +1279,14 @@ import os
 import physical_device_safety as pds
 
 # `validate_target_device` refuses symlinks, so resolve the by-id link first; the serial check is the guard.
-substrate_path = os.path.realpath("/dev/disk/by-id/ata-PC601_NVMe_SK_hynix_512GB_FD01N6557110C271B")
-baseline_path = os.path.realpath("/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_MD89N41071210AP4E")
+substrate_path = os.path.realpath("/dev/disk/by-id/ata-PC601_NVMe_SK_hynix_512GB_<PC601 drive serial>")
+baseline_path = os.path.realpath("/dev/disk/by-id/ata-PC401_NVMe_SK_hynix_512GB_<PC401 drive serial>")
 substrate = pds.validate_target_device(
-    substrate_path, expected_serial="FD01N6557110C271B",
+    substrate_path, expected_serial="<PC601 drive serial>",
     min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000,
 )
 baseline_drive = pds.validate_target_device(
-    baseline_path, expected_serial="MD89N41071210AP4E",
+    baseline_path, expected_serial="<PC401 drive serial>",
     min_size_bytes=500_000_000_000, max_size_bytes=520_000_000_000,
 )
 ```
@@ -1312,7 +1312,7 @@ never cache or assume a prior result still holds.
    code** (this repo's `physical_device_safety.py` validates a device
    *before* Baseline touches it for persistence/provisioning purposes;
    it does not run during Proxmox's own installer). Confirm the answer
-   file specifies the exact serial `FD01N6557110C271B` (`/dev/sdc` on
+   file specifies the exact serial `<PC601 drive serial>` (`/dev/sdc` on
    2026-09-30, but re-check by serial)
    before writing the USB stick, not just its expected disk letter.
 4. Reboot into the freshly-installed Proxmox host.
@@ -1786,11 +1786,11 @@ The profile is not evidence that either current drive is a complete installation
 ## Physical PC401 continuation (2026-10-04, DR146)
 
 The earlier read-only status above is superseded by DR146 for PC401 only. The
-selected drive `MD89N41071210AP4E` now has the Proxmox install, unique VG
+selected drive `<PC401 drive serial>` now has the Proxmox install, unique VG
 `baseline_1b75c1a556ee`, all eight physical storage roles, deployed Baseline
 services/packages, vanilla installer source in INSTALLER_CACHE, and 22
 checksum-verified files restored from its verified recovery image. These are
-real writes to PC401. PC601 `FD01N6557110C271B` was not modified.
+real writes to PC401. PC601 `<PC601 drive serial>` was not modified.
 
 PC401 has not yet passed post-rename boot verification. LVM reports its root LV
 open because the mount appears in the host `systemd-oomd` mount namespace; the

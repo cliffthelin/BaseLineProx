@@ -2,7 +2,7 @@
 
 2026-10-07. Continues DR146/DR158/DR165; does not supersede their boot evidence.
 
-The operator selected PC401 serial MD89N41071210AP4E and requested deployment
+The operator selected PC401 serial <PC401 drive serial> and requested deployment
 through the Installer. The existing source-preparation interface could capture
 inputs but could not execute a current-source update of that installation.
 Installer now offers a separate reviewed existing-installation update. This is

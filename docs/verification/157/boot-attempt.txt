@@ -1,6 +1,6 @@
 Verifying the existing 7.5 GiB whole-drive recovery image before writes...
 {
-  "serial": "MD89N41071210AP4E",
+  "serial": "<PC401 drive serial>",
   "recovery": "verified",
   "installation": "present",
   "previous_disk_boot": "QEMU login screen observed in DR146",

@@ -835,7 +835,7 @@ def main_guests(*, get_setting=None, now=time.time, print_fn=print, run=_default
         return 1
     try:
         result = run_guest_backup(destination=destination, run=run, guest_run=guest_run or _default_run, now=now(),
-                                  allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS, boot_serial=_boot_serial(),
+                                  allowed_serials=drive_admin.allowed_target_serials(), boot_serial=_boot_serial(),
                                   dry_run=dry_run, origin=origin)
     except BackupError as exc:
         print_fn(f"[FAILED] {exc}")
@@ -881,7 +881,7 @@ def main(*, get_setting=None, now=time.time, print_fn=print, run=_default_run, d
         return 1
     try:
         result = run_backup(destination=destination, run=run, sources=sources, now=now(),
-                            allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS, boot_serial=_boot_serial(),
+                            allowed_serials=drive_admin.allowed_target_serials(), boot_serial=_boot_serial(),
                             min_interval_hours=get_setting("backups", "offdrive_min_interval_hours"),
                             record_success=_record_freshness, dry_run=dry_run, force=force, origin=origin,
                             changes_only=CHANGES_ONLY_LABELS)

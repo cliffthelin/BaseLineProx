@@ -33,8 +33,8 @@ said, so a rule written as "never touch `sdb`" now points at an unrelated
 
 | Serial | Model | Kernel letter today | Was | Role |
 |---|---|---|---|---|
-| `FD01N6557110C271B` | PC601 NVMe SK hynix 512GB | `/dev/sdc` | `sdd` | Proxmox install (`pve` VG) |
-| `MD89N41071210AP4E` | PC401 NVMe SK hynix 512GB | `/dev/sdd` | `sdb` | Baseline drive (plain GPT) |
+| `<PC601 drive serial>` | PC601 NVMe SK hynix 512GB | `/dev/sdc` | `sdd` | Proxmox install (`pve` VG) |
+| `<PC401 drive serial>` | PC401 NVMe SK hynix 512GB | `/dev/sdd` | `sdb` | Baseline drive (plain GPT) |
 
 Every destructive step goes through
 [`physical_device_safety.validate_target_device`](../../baseline/lib/physical_device_safety.py)

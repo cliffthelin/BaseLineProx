@@ -11,12 +11,12 @@
 # prove. Once the drive is empty, Baseline stamps it as installer-made and may reinstall it freely from then on.
 set -euo pipefail
 
-declare -A SERIALS=( [PC601]=FD01N6557110C271B )      # only the drive assigned to Claude; PC401 is Codex's and is not listed
+declare -A SERIALS=( [PC601]=SYNTHDRIVEA00001 )      # only the drive assigned to Claude; PC401 is Codex's and is not listed
 NAME="${1:-}"; MODE="${2:-}"
 [ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: take-ownership PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
 [ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || [ "$MODE" = "--reuse-image" ] || { echo "unknown option $MODE" >&2; exit 2; }
 SERIAL="${SERIALS[$NAME]}"
-OTHER=MD89N41071210AP4E
+OTHER=SYNTHDRIVEB00002
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ALLSCRIPT="$REPO/baseline/bin/baseline-allscript-install"
 JOURNAL="/run/media/cane/CACHE/baseline-build/allscript-$NAME/progress.json"

@@ -7,12 +7,12 @@
 
 ## Scope and storage safety
 
-PC401 serial `MD89N41071210AP4E` was launched headlessly with its raw block
+PC401 serial `<PC401 drive serial>` was launched headlessly with its raw block
 device as a qcow2 backing file. The overlay, screenshots, downloaded signed
 Ubuntu `inxi` package and live output are retained on
 `/mnt/10TB/backup/baseline-tests/pc401-headless-20261010`. QEMU writes landed in
 that overlay. The guest was shut down through ACPI; `qemu-img check` found no
-errors. PC601 serial `FD01N6557110C271B` was not used. This is virtual execution
+errors. PC601 serial `<PC601 drive serial>` was not used. This is virtual execution
 of the installed physical source, not native cold boot on the other machine.
 
 ## Observed boot/runtime result

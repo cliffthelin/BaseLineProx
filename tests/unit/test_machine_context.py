@@ -5,7 +5,7 @@ import identifiers as idn
 import machine_context as mc
 
 LANE = "4af8c95a-1c9b-437a-a306-c53855d4077f"
-SERIAL = "FD01N6557110C271B"
+SERIAL = "SYNTHDRIVEA00001"
 
 
 @pytest.fixture

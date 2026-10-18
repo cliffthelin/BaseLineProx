@@ -4,10 +4,10 @@
 
 ## Actual physical checks
 
-PC401 serial MD89N41071210AP4E resolves to /dev/sdd in this observation; it is
+PC401 serial <PC401 drive serial> resolves to /dev/sdd in this observation; it is
 not persisted as device identity. Serial/512110190592-byte size and exact
 PV/VG UUID gates passed. The existing recovery image independently verified
-before the guarded boot-only attempt. PC601 FD01N6557110C271B is preserved.
+before the guarded boot-only attempt. PC601 <PC601 drive serial> is preserved.
 
 The read-only diagnosis found nine stacked root mounts per representative
 namespace and 23 distinct mount namespaces. Boot-only attempted ordinary

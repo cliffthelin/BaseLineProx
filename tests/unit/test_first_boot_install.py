@@ -12,7 +12,7 @@ import single_drive_storage as storage
 
 REPO = Path(__file__).resolve().parents[2]
 ASSISTANT = Path("/var/tmp/baseline-self-installer/acquire/extracted/usr/bin/proxmox-auto-install-assistant")
-SERIAL = "MD89N41071210AP4E"
+SERIAL = "SYNTHDRIVEB00002"
 
 
 def _root_ancestry(*disks):
@@ -347,7 +347,7 @@ def test_applications_already_prepared_in_a_seed_are_reused_not_downloaded_again
 
 # --- the child identity is carried into first boot, which sets the disk identifier before it records anything --------------
 
-IDENTITY = {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "FD01N6557110C271B"}
+IDENTITY = {"uuid": "4af8c95a-dea0-0001-b1ae-f19827f945b7", "serial": "SYNTHDRIVEA00001"}
 
 
 def test_a_hook_without_an_identity_is_unchanged(tmp_path):
@@ -358,18 +358,18 @@ def test_a_hook_without_an_identity_is_unchanged(tmp_path):
 def test_a_hook_with_an_identity_hands_it_to_the_installer_and_is_still_valid_shell(tmp_path):
     path = fbh.build_hook(REPO, tmp_path / "hook", child_identity=IDENTITY)
     last = path.read_text().rstrip().splitlines()[-1]
-    assert last == ('exec env BASELINE_CHILD_UUID=4af8c95a-fd01-271b-b1ae-f19827f945b7 BASELINE_CHILD_SERIAL=FD01N6557110C271B '
+    assert last == ('exec env BASELINE_CHILD_UUID=4af8c95a-dea0-0001-b1ae-f19827f945b7 BASELINE_CHILD_SERIAL=SYNTHDRIVEA00001 '
                     '/usr/bin/python3 "$dest/baseline/bin/baseline-first-boot-install"')
     assert subprocess.run(["sh", "-n", str(path)], capture_output=True).returncode == 0
     assert path.stat().st_size < fbh.PROXMOX_HOOK_LIMIT
 
 
 @pytest.mark.parametrize("identity", [
-    {"uuid": "x; rm -rf /", "serial": "FD01N6557110C271B"},
-    {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "bad serial; id"},
-    {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7", "serial": "SHORT"},
-    {"uuid": "4AF8C95A-FD01-271B-B1AE-F19827F945B7", "serial": "FD01N6557110C271B"},
-    {"uuid": "4af8c95a-fd01-271b-b1ae-f19827f945b7"},
+    {"uuid": "x; rm -rf /", "serial": "SYNTHDRIVEA00001"},
+    {"uuid": "4af8c95a-dea0-0001-b1ae-f19827f945b7", "serial": "bad serial; id"},
+    {"uuid": "4af8c95a-dea0-0001-b1ae-f19827f945b7", "serial": "SHORT"},
+    {"uuid": "4AF8C95A-FD01-271B-B1AE-F19827F945B7", "serial": "SYNTHDRIVEA00001"},
+    {"uuid": "4af8c95a-dea0-0001-b1ae-f19827f945b7"},
     {},
 ])
 def test_an_identity_that_is_not_a_plain_uuid_and_serial_is_never_written_into_a_script(tmp_path, identity):
@@ -378,10 +378,10 @@ def test_an_identity_that_is_not_a_plain_uuid_and_serial_is_never_written_into_a
 
 
 def test_the_disk_carrying_the_serial_is_found_exactly_once():
-    listing = "/dev/sda FD01N6557110C271B\n/dev/sdb MD89N41071210AP4E\n/dev/loop0 \n"
-    assert _installer().disks_with_serial(listing, "FD01N6557110C271B") == ["/dev/sda"]
+    listing = "/dev/sda SYNTHDRIVEA00001\n/dev/sdb SYNTHDRIVEB00002\n/dev/loop0 \n"
+    assert _installer().disks_with_serial(listing, "SYNTHDRIVEA00001") == ["/dev/sda"]
     assert _installer().disks_with_serial(listing, "NOT-THERE-1") == []
-    assert _installer().disks_with_serial(listing + "/dev/sdc FD01N6557110C271B\n", "FD01N6557110C271B") == ["/dev/sda", "/dev/sdc"]
+    assert _installer().disks_with_serial(listing + "/dev/sdc SYNTHDRIVEA00001\n", "SYNTHDRIVEA00001") == ["/dev/sda", "/dev/sdc"]
 
 
 def test_first_boot_sets_the_identifier_on_the_one_disk_with_that_serial_before_anything_else(tmp_path, monkeypatch):
@@ -392,12 +392,12 @@ def test_first_boot_sets_the_identifier_on_the_one_disk_with_that_serial_before_
     monkeypatch.setattr(installer, "STATE", tmp_path / "state")
     monkeypatch.setattr(installer, "LOG", tmp_path / "log")
     (tmp_path / "state").mkdir()
-    monkeypatch.setattr(installer, "list_disks", lambda: "/dev/sda FD01N6557110C271B\n/dev/sdb MD89N41071210AP4E\n")
+    monkeypatch.setattr(installer, "list_disks", lambda: "/dev/sda SYNTHDRIVEA00001\n/dev/sdb SYNTHDRIVEB00002\n")
     host_file = tmp_path / "etc" / "host-id"
     installer.step_identity(ensure=lambda device, wanted: calls.append((device, wanted)), host_id_path=host_file)
     assert calls == [("/dev/sda", IDENTITY["uuid"])]
     assert host_file.read_text() == IDENTITY["uuid"] + "\n"        # the backbone reference components read
-    assert [name for name, _ in installer.STEPS][:3] == ["identity", "volume-group", "storage"]   # the group is named before any role volume is mounted
+    assert [name for name, _ in installer.STEPS][:4] == ["identity", "volume-group", "own-drive", "storage"]   # the group is named before any role volume is mounted
 
 
 def test_first_boot_refuses_when_the_serial_is_on_no_disk_or_on_two(tmp_path, monkeypatch):
@@ -406,7 +406,7 @@ def test_first_boot_refuses_when_the_serial_is_on_no_disk_or_on_two(tmp_path, mo
     monkeypatch.setenv("BASELINE_CHILD_SERIAL", IDENTITY["serial"])
     monkeypatch.setattr(installer, "STATE", tmp_path)
     monkeypatch.setattr(installer, "LOG", tmp_path / "log")
-    for listing in ("/dev/sdb MD89N41071210AP4E\n", "/dev/sda FD01N6557110C271B\n/dev/sdc FD01N6557110C271B\n"):
+    for listing in ("/dev/sdb SYNTHDRIVEB00002\n", "/dev/sda SYNTHDRIVEA00001\n/dev/sdc SYNTHDRIVEA00001\n"):
         monkeypatch.setattr(installer, "list_disks", lambda l=listing: l)
         with pytest.raises(RuntimeError):
             installer.step_identity(ensure=lambda *a: None, host_id_path=tmp_path / "host-id")
@@ -474,7 +474,7 @@ def test_the_hook_carries_a_development_user_only_if_it_is_a_name_and_a_sha512cr
     line = fbh._exec_line(None, good)
     assert line.startswith("exec env BASELINE_DEV_USER='baseline:$6$abcdefgh$") and line.endswith('"')
     assert "BASELINE_DEV_USER" not in fbh._exec_line(None, None)
-    both = fbh._exec_line({"uuid": "4af8c95a-fd01-271b-10be-bc48c28f0a00", "serial": "FD01N6557110C271B"}, good)
+    both = fbh._exec_line({"uuid": "4af8c95a-dea0-0001-10c1-3f4194178800", "serial": "SYNTHDRIVEA00001"}, good)
     assert "BASELINE_CHILD_UUID=" in both and "BASELINE_DEV_USER='" in both
     for bad in ("baseline:CTEST1!", "Bad:" + good.split(":", 1)[1], good + "'; rm -rf /", "baseline:$6$x$short", ""):
         with pytest.raises(fbh.HookError):
@@ -604,3 +604,20 @@ def test_the_user_admin_step_stops_the_installation_when_the_volume_is_not_mount
     monkeypatch.setattr(installer, "log", lambda *a, **k: None)
     with pytest.raises(user_admin.UserAdminError, match="not a mounted volume"):
         installer.step_user_admin(root=tmp_path, host_id_path=tmp_path / "none", is_mount=lambda p: False)
+
+
+def test_first_boot_records_the_drive_it_runs_from_as_this_lanes_own_in_runtime_data_not_in_the_repository(tmp_path, monkeypatch):
+    installer = _installer()
+    monkeypatch.setattr(installer, "STATE", tmp_path / "state")
+    monkeypatch.setattr(installer, "LOG", tmp_path / "log")
+    (tmp_path / "state").mkdir()
+    own = tmp_path / "etc-baseline" / "own-drives"
+    installer.step_own_drive(read_serial=lambda: "SYNTHBOOTDRIVE001", path=own)
+    assert own.read_text() == "SYNTHBOOTDRIVE001\n"
+    installer.step_own_drive(read_serial=lambda: "SYNTHBOOTDRIVE001", path=own)
+    assert own.read_text() == "SYNTHBOOTDRIVE001\n"                                      # recorded once
+    import drive_guard
+    assert drive_guard.own_drive_serials(own) == frozenset({"SYNTHBOOTDRIVE001"}) if drive_guard._installer_lane_uuid() else True
+    import pytest
+    with pytest.raises(ValueError):
+        installer.step_own_drive(read_serial=lambda: "bad serial; rm", path=own)

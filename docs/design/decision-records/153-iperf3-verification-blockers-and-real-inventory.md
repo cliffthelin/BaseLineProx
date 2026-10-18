@@ -22,7 +22,7 @@ its service requires operator authentication; no credential was requested,
 accepted or used to proceed.
 
 The established PC401 read-only diagnosis revalidated serial
-`MD89N41071210AP4E`, measured size and PV/VG identity. Its root LV is still open
+`<PC401 drive serial>`, measured size and PV/VG identity. Its root LV is still open
 and referenced by 23 mount namespaces. The current diagnosis is preserved in
 verification/153/pc401-mount-diagnosis.txt. Boot was not attempted against this
 mounted target; no unmount, LVM deactivation, service restart, physical write or

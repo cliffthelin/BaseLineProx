@@ -30,7 +30,7 @@ UUID remains `5029a80d-c748-4616-aa08-99ac560f5311`.
 ## Actual QEMU scope
 
 QEMU TCG, Linux/Proxmox installer live environment, fresh disposable 64 GiB
-virtual disk serial `CODEXTEST40101`, isolated virtual NIC without host network
+virtual disk serial `<disposable test drive serial>`, isolated virtual NIC without host network
 connection. Neither physical drive was attached. Python 3.13 runs the carried
 production libraries and production HTTP server. No fake runners, mocked
 commands, replacement services or simulated cryptography are used in this
@@ -77,7 +77,7 @@ qemu-img create -f qcow2 /tmp/pc401-test.qcow2 64G
 qemu-system-x86_64 -machine pc,accel=tcg -cpu max -m 4096 -smp 2 \
   -netdev hubport,id=net0,hubid=0 -device e1000e,netdev=net0 \
   -drive if=none,id=baseline,file=/tmp/pc401-test.qcow2,format=qcow2 \
-  -device virtio-blk-pci,drive=baseline,serial=CODEXTEST40101 \
+  -device virtio-blk-pci,drive=baseline,serial=<disposable test drive serial> \
   -boot d -cdrom /absolute/path/pc401-disposable-test-final.iso
 ```
 

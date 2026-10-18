@@ -9,8 +9,8 @@ import pytest
 import drive_guard
 import installer_identity as ii
 
-PC601 = "FD01N6557110C271B"
-PC401 = "MD89N41071210AP4E"
+PC601 = "SYNTHDRIVEA00001"
+PC401 = "SYNTHDRIVEB00002"
 CODEX_LANE_UUID = "5029a80d-c748-4616-aa08-99ac560f5311"           # the parallel lane's value: never copied into this one
 CLAUDE_LANE_UUID = "4af8c95a-1c9b-437a-a306-c53855d4077f"          # this lane's value; every drive it installed derives from it
 
@@ -51,7 +51,7 @@ def test_a_uuid_can_be_checked_as_minted_by_a_lane_without_knowing_the_serial():
     mine = ii.child_uuid(CLAUDE_LANE_UUID, PC601)
     assert ii.minted_by(mine, CLAUDE_LANE_UUID)
     assert not ii.minted_by(mine, CODEX_LANE_UUID)                         # the parallel lane did not mint it
-    assert not ii.minted_by(mine.replace("fd01", "fd02", 1), CLAUDE_LANE_UUID)   # an altered field fails its check
+    assert not ii.minted_by(mine.replace("dea0", "dea1", 1), CLAUDE_LANE_UUID)   # an altered field fails its check
     assert not ii.minted_by("not-a-uuid", CLAUDE_LANE_UUID)
 
 
@@ -137,7 +137,7 @@ def test_a_merge_keeps_the_receiving_lanes_own_uuid_file():
 def test_older_entries_for_the_same_serial_are_retired_when_the_deterministic_identity_is_registered():
     import registry
     legacy = ["0b9adfbf-7213-4792-81e6-9fe668b01c57", "f337b480-e7d7-533f-8a38-6a6af014a614",
-              "4af8c95a-fd01-271b-b1ae-f19827f945b7"]    # random, first-version uuid5, and the earlier layout
+              "4af8c95a-dea0-0001-b1ae-f19827f945b7"]    # random, first-version uuid5, and the earlier layout
     for guid in legacy:
         drive_guard.register_installer_uuid(guid, serial=PC601)
     drive_guard.register_installer_uuid("a40a7971-2f3a-4cc1-972b-5c57bac8d29f", serial=PC401)         # another drive: untouched

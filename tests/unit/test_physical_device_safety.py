@@ -418,7 +418,7 @@ class _UdevadmOnlyRunner:
 
 
 def test_get_usb_bridge_model_reads_a_real_nvme_bridge_chip():
-    output = "ID_BUS=usb\nID_SERIAL_SHORT=MD89N41071210AP4E\nID_USB_MODEL=RTL9220DP_PCIe0\nID_USB_VENDOR=Realtek\n"
+    output = "ID_BUS=usb\nID_SERIAL_SHORT=SYNTHDRIVEB00002\nID_USB_MODEL=RTL9220DP_PCIe0\nID_USB_VENDOR=Realtek\n"
     assert pds.get_usb_bridge_model(_UdevadmOnlyRunner(output), "/dev/sdb") == "RTL9220DP_PCIe0"
 
 
@@ -428,5 +428,5 @@ def test_get_usb_bridge_model_reads_a_real_consumer_enclosure_brand():
 
 
 def test_get_usb_bridge_model_none_when_the_device_is_not_behind_usb_at_all():
-    output = "ID_BUS=ata\nID_SERIAL_SHORT=WCV00YLT\n"
+    output = "ID_BUS=ata\nID_SERIAL_SHORT=SYNTHH01\n"
     assert pds.get_usb_bridge_model(_UdevadmOnlyRunner(output), "/dev/sda") is None

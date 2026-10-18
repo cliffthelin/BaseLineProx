@@ -3,8 +3,8 @@
 Date: 2026-10-04. Status: in progress. Continues DR145 / REAL-013.
 
 The user directs installation onto one of the two connected 512 GB SK hynix
-drives. Select PC401 `MD89N41071210AP4E`; preserve PC601
-`FD01N6557110C271B`. Identical role layout does not imply cloned UUIDs.
+drives. Select PC401 `<PC401 drive serial>`; preserve PC601
+`<PC601 drive serial>`. Identical role layout does not imply cloned UUIDs.
 
 ## Physical evidence so far
 

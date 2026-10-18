@@ -29,7 +29,7 @@ def resolve_destination(path, run=None, *, boot_serial=None):
     if boot_serial is None and run is None:
         boot_serial=ob._boot_serial()
     return ob.resolve_destination(path,run=run or ob._default_run,
-                                  allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS,
+                                  allowed_serials=drive_admin.allowed_target_serials(),
                                   boot_serial=boot_serial)
 
 

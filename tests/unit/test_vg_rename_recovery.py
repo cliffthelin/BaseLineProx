@@ -5,7 +5,7 @@ import pytest
 
 import host_layout as layout
 
-SERIAL = "MD89N41071210AP4E"
+SERIAL = "SYNTHDRIVEB00002"
 
 
 def test_retry_after_live_rename_keeps_original_boot_reference(tmp_path):

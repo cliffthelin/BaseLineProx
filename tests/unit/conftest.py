@@ -120,6 +120,32 @@ _SAFE_DEVICES = {"/dev/null", "/dev/zero", "/dev/urandom", "/dev/random", "/dev/
                  "/dev/tty", "/dev/fd"}
 
 
+# Operator data for the tests: this lane's own drives and the host-side target names are DATA in files outside the repository on a real host; tests get synthetic ones (no real serial is ever stored in
+# the repository). Set before any test module imports a script that reads them.
+import json as _json
+import os as _os
+import tempfile as _tempfile
+
+_OPERATOR_DATA = _tempfile.mkdtemp(prefix="baseline-test-operator-data-")
+with open(_os.path.join(_OPERATOR_DATA, "own-drives"), "w") as _f:
+    _f.write("SYNTHDRIVEA00001 disposable\nSYNTHDRIVEB00002\n")
+with open(_os.path.join(_OPERATOR_DATA, "drives.json"), "w") as _f:
+    _json.dump({"drives": {"PC401": "SYNTHDRIVEB00002", "PC601": "SYNTHDRIVEA00001"}}, _f)
+_os.environ["BASELINE_OWN_DRIVES_FILE"] = _os.path.join(_OPERATOR_DATA, "own-drives")
+_os.environ["BASELINE_DRIVES_FILE"] = _os.path.join(_OPERATOR_DATA, "drives.json")
+
+
+def set_own_drives(monkeypatch, serials, enrolled=()):
+    """Point the lane's own-drives data file at a temporary file holding exactly `serials` (a test that needs none passes []); `enrolled` are drives deliberately enrolled instead, which are allowed
+    targets but carry no development lock."""
+    import drive_enrollment
+    monkeypatch.setattr(drive_enrollment, "enrolled_serials", lambda: frozenset(enrolled))
+    path = _os.path.join(_tempfile.mkdtemp(prefix="baseline-test-own-drives-"), "own-drives")
+    with open(path, "w") as handle:
+        handle.write("".join(f"{serial}\n" for serial in serials))
+    monkeypatch.setenv("BASELINE_OWN_DRIVES_FILE", path)
+
+
 class HardwareSafetyViolation(AssertionError):
     """A test tried to touch real hardware. An AssertionError so no code under test can swallow it as an ordinary
     failure by catching a narrower exception type."""

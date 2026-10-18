@@ -25,7 +25,7 @@ serial imply it; the OTHER drive is then protected for that run. Every destructi
 through physical_device_safety.validate_target_device. The data-protection guard in self_installer is honoured,
 never bypassed: the target must be empty or carry an installer-made identity.
 
-    sudo baseline/bin/baseline-allscript-install --target PC601 --from recovery --confirm-wipe FD01N6557110C271B
+    sudo baseline/bin/baseline-allscript-install --target PC601 --from recovery --confirm-wipe <the target's serial>
     baseline/bin/baseline-allscript-install --target PC601 --stage preflight    # read-only, no root needed
     baseline/bin/baseline-allscript-install --stage rehearse                    # sparse image, no real drive
 """
@@ -49,7 +49,23 @@ def locate_assistant(candidates):
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "baseline/lib"))
 
-DRIVES = {"PC401": "MD89N41071210AP4E", "PC601": "FD01N6557110C271B"}   # both 512110190592-byte SK hynix NVMe
+DRIVES_FILE = Path(os.environ.get("BASELINE_DRIVES_FILE") or "/run/media/cane/CACHE/baseline-build/drives.json")
+
+
+def load_drives(path=None) -> dict:
+    """target name -> hardware serial, from the operator's own file {"drives": {"NAME": "SERIAL", ...}}. The file is local operator data on the build volume, never in the repository: no serial is stored in
+    this code. A missing or malformed file means no targets, and the run says how to make one."""
+    import json
+    import re
+    try:
+        raw = json.loads(Path(path or DRIVES_FILE).read_text())["drives"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    return {str(n): s for n, s in raw.items() if re.fullmatch(r"[A-Za-z0-9_-]{1,20}", str(n)) and isinstance(s, str) and re.fullmatch(r"[A-Za-z0-9_.-]{8,64}", s)}
+
+
+os.environ.setdefault("BASELINE_OWN_DRIVES_FILE", str(DRIVES_FILE.with_name("own-drives")))   # this host's lane data (the drives it may act on, `disposable` ones reinstallable), beside drives.json
+DRIVES = load_drives()                  # every target is a drive the operator named in that file; with fewer than two the OTHER drive cannot be protected, so a drive run needs both
 SIZE = 512110190592
 REHEARSAL_DISK_BYTES = 384 * 2**30    # the rehearsal VM's virtual disk: a sparse file, a little smaller than the real 512 GB drives it stands in for; room for the full cache (Kasm base and every ready-made base, carried as the ISO and its expanded copy)
 REHEARSAL_MEMORY_MB = 16384           # Kasm's own VM runs inside it (nested), and Kasm setup refuses a host under 12 GiB
@@ -109,7 +125,7 @@ def target_for(target_arg, confirm_wipe, stages):
     agree."""
     implied = next((name for name, serial in DRIVES.items() if serial == confirm_wipe), None)
     if target_arg is not None and target_arg not in DRIVES:
-        raise ValueError(f"unknown target {target_arg!r}; targets are: {', '.join(DRIVES)}")
+        raise ValueError(f"unknown target {target_arg!r}; targets are: {', '.join(DRIVES) or 'none (name them in ' + str(DRIVES_FILE) + ')'}")
     if target_arg is not None and implied is not None and implied != target_arg:
         raise ValueError(f"--target {target_arg} but --confirm-wipe names {implied}'s serial; refusing")
     name = target_arg or implied
@@ -119,7 +135,8 @@ def target_for(target_arg, confirm_wipe, stages):
             raise ValueError(f"stages {', '.join(sorted(set(stages) & DRIVE_STAGES))} touch a real drive: "
                              f"name it with --target ({' or '.join(DRIVES)}); there is no default")
         return None, None, None
-    protected = next(serial for other, serial in DRIVES.items() if other != name)
+    import cardinality
+    protected = cardinality.at_most_one([serial for other, serial in DRIVES.items() if other != name], "other named drive to protect")   # two or more is refused, never "the first"
     return name, DRIVES[name], protected
 
 

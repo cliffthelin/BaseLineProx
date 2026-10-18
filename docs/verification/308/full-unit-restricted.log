@@ -4310,7 +4310,7 @@ baseline/lib/baseline_web.py:3368: in make_server
 E   PermissionError: [Errno 1] Operation not permitted
 ___ test_drive_admin_native_partition_route_reaches_pkexec_only_after_review ___
 tests/unit/test_installed_drive_update.py:238: in test_drive_admin_native_partition_route_reaches_pkexec_only_after_review
-    case=_RealServerCase(_base_deps(pds_runner=FakePdsRunner(serial='FD01N6557110C271B'),pkexec_executor=executor))
+    case=_RealServerCase(_base_deps(pds_runner=FakePdsRunner(serial='<PC601 drive serial>'),pkexec_executor=executor))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 tests/unit/test_baseline_web.py:447: in __init__
     self.server = bw.make_server(deps=deps, host="127.0.0.1", port=0)
