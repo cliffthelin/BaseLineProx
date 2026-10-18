@@ -237,8 +237,20 @@ def cache_status(cache_dir, repo_root=None, kasm_base=None, os_bases=None):
         return "without_apps"
     if kasm_base is not None and not (cache_dir / "kasm" / "KASM.json").is_file():
         return "stale"
-    if os_bases is not None and not list((cache_dir / "os-bases").glob("*-base.json")):
-        return "stale"                          # ready-made bases are wanted and the cache carries none
+    if os_bases is not None:
+        carried = {m.name: m for m in (cache_dir / "os-bases").glob("*-base.json")}
+        if not carried:
+            return "stale"                      # ready-made bases are wanted and the cache carries none
+        import json
+        for wanted in Path(os_bases).glob("*-base.json"):
+            try:
+                manifest = json.loads(wanted.read_text())
+                if manifest.get("holds_install_state_or_secrets") is not False:
+                    continue                    # one that cannot be carried is reported by the cache build, not a reason to rebuild forever
+                if wanted.name not in carried or json.loads(carried[wanted.name].read_text()).get("sha256") != manifest.get("sha256"):
+                    return "stale"              # a wanted base is missing from the cache, or the cache holds an older build of it
+            except (OSError, ValueError):
+                return "stale"
     if repo_root is not None:
         import offline_cache
         if not offline_cache.cache_is_current(cache_dir, repo_root)[0]:

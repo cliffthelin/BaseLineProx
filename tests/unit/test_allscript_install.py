@@ -312,3 +312,24 @@ def test_a_cache_with_no_ready_made_bases_is_stale_when_bases_are_wanted(tmp_pat
     (cache / "os-bases").mkdir()
     (cache / "os-bases" / "debian-base.json").write_text("{}")
     assert allscript.cache_status(cache, None, os_bases=tmp_path / "bases") == "complete"
+
+
+def test_a_cache_missing_one_of_the_wanted_bases_or_carrying_an_old_copy_of_one_is_stale(tmp_path):
+    """Found when the base set grew from two to seven: the cache stage called a two-base cache complete."""
+    import json
+    cache, bases = tmp_path / "c", tmp_path / "bases"
+    (cache / "apps").mkdir(parents=True)
+    (cache / "os-bases").mkdir()
+    bases.mkdir()
+    (cache / "MANIFEST.json").write_text("{}")
+    def manifest(folder, os_id, sha):
+        (folder / f"{os_id}-base.json").write_text(json.dumps({"base": f"{os_id}-base.qcow2", "sha256": sha, "holds_install_state_or_secrets": False}))
+    manifest(bases, "debian", "a" * 64)
+    manifest(cache / "os-bases", "debian", "a" * 64)
+    assert allscript.cache_status(cache, None, os_bases=bases) == "complete"
+    manifest(bases, "ubuntu", "b" * 64)
+    assert allscript.cache_status(cache, None, os_bases=bases) == "stale"                    # a wanted base is not carried
+    manifest(cache / "os-bases", "ubuntu", "c" * 64)
+    assert allscript.cache_status(cache, None, os_bases=bases) == "stale"                    # carried, but an older build of it
+    manifest(cache / "os-bases", "ubuntu", "b" * 64)
+    assert allscript.cache_status(cache, None, os_bases=bases) == "complete"
