@@ -30,7 +30,10 @@ def test_connection_modal_disables_admin_switch_when_state_is_unknown():
     assert "_admin_up_at_open" in ast.unparse(disabled)
     assert "None" in ast.unparse(disabled)
     save = next(node for node in modal.body if isinstance(node, ast.FunctionDef) and node.name == "run_save_and_close")
-    assert "_admin_up_at_open is not None" in ast.unparse(save)
+    # the save now goes through the logic the web console shares; an unknown power state must still never be toggled
+    assert "admin_up_at_open=self._admin_up_at_open" in ast.unparse(save)
+    shared = (ROOT / "baseline" / "lib" / "network_connection.py").read_text()
+    assert "admin_up_at_open is not None" in shared
 
 
 def test_network_dashboard_does_not_hide_bridge_member_probe_errors():
