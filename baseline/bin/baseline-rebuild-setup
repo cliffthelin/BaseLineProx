@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-time (re-run to refresh): installs the remote-rebuild service. Needs root: sudo baseline/bin/baseline-rebuild-setup
 # Usage: sudo baseline/bin/baseline-rebuild-setup [--group GROUP] [--hours N] [DRIVE ...]   (default: every drive in the operator's drives file, group = the caller's primary group, 24 hours)
-# Makes a root-owned copy of the committed source for the service to run, writes its settings, and enables the systemd unit.
+# Makes a root-owned copy of the SERVICE (it only changes when this is re-run); the source a rebuild installs is pinned per request, at the commit current when the request is made, writes its settings, and enables the systemd unit.
 set -eu
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -33,13 +33,13 @@ for line in subprocess.run(["lsblk", "-dbn", "-o", "SERIAL,SIZE"], capture_outpu
 missing = [n for n, serial in chosen.items() if serial not in sizes]
 if missing:
     sys.exit("these drives are not attached, so their identity cannot be pinned: " + ", ".join(missing))
-policy = rp.build({n: rp.drive_identity(s, sizes[s]) for n, s in chosen.items()}, source=rp.source_digest(src), ttl_hours=hours)
+policy = rp.build({n: rp.drive_identity(s, sizes[s]) for n, s in chosen.items()}, ttl_hours=hours)
 rp.write("/etc/baseline-rebuild/policy.json", "/etc/baseline-rebuild/policy.sha256", policy)
 print("policy covers:", ", ".join(sorted(chosen)), "- command pinned by", rp.policy_digest(policy))
 P
 chmod 644 /etc/baseline-rebuild/policy.json /etc/baseline-rebuild/policy.sha256
 cat > /etc/baseline-rebuild.json <<J
-{"drives_file": "$DRIVES", "own_drives_file": "$OWN", "gid": $GID, "policy_file": "/etc/baseline-rebuild/policy.json", "policy_digest_file": "/etc/baseline-rebuild/policy.sha256"}
+{"drives_file": "$DRIVES", "own_drives_file": "$OWN", "gid": $GID, "repo": "$REPO", "policy_file": "/etc/baseline-rebuild/policy.json", "policy_digest_file": "/etc/baseline-rebuild/policy.sha256"}
 J
 chmod 644 /etc/baseline-rebuild.json
 cat > /etc/systemd/system/baseline-rebuild.service <<U

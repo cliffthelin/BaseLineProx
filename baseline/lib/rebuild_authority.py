@@ -47,7 +47,7 @@ class Authority:
     def _save(self, req):
         self._path(req["id"]).write_text(json.dumps(req))
 
-    def request(self, target: str, hours=None) -> dict:
+    def request(self, target: str, hours=None, meta=None) -> dict:
         seconds = self.max_seconds if hours is None else int(float(hours) * 3600)
         if not 0 < seconds <= self.max_seconds:
             return {"ok": False, "error": f"approval time must be up to {self.max_seconds // 3600} hours"}
@@ -56,8 +56,8 @@ class Authority:
         if any(r["target"] == target and r["state"] in ("approved", "running") for r in self._all()):
             return {"ok": False, "error": f"a rebuild of {target} is already approved or running"}
         request_id, code = secrets.token_hex(8), f"{secrets.randbelow(10**8):08d}"
-        self._save({"id": request_id, "target": target, "state": "pending", "tries": 0, "code_hash": _hash(code, request_id), "expires": self.now() + seconds})
-        return {"ok": True, "id": request_id, "code": code, "target": target, "expires_in_s": seconds}
+        self._save({"id": request_id, "target": target, "state": "pending", "tries": 0, "code_hash": _hash(code, request_id), "expires": self.now() + seconds, **(meta or {})})
+        return {"ok": True, "id": request_id, "code": code, "target": target, "expires_in_s": seconds, **(meta or {})}
 
     def approve(self, request_id: str, code: str) -> dict:
         req = self._load(request_id)

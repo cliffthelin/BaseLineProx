@@ -6,7 +6,7 @@ ID = rp.drive_identity("SYNTH-1", 1000)
 
 
 def policy(**kw):
-    return rp.build({"ONE": ID}, source="s" * 64, **kw)
+    return rp.build({"ONE": ID}, **kw)
 
 
 def test_policy_holds_no_serial():
@@ -28,7 +28,7 @@ def test_verified_policy_loads(tmp_path):
 
 
 def cmd(**kw):
-    args = dict(target="ONE", serial="SYNTH-1", size_bytes=1000, src="/s", python="py", current_source="s" * 64)
+    args = dict(target="ONE", serial="SYNTH-1", size_bytes=1000, src="/s", python="py", current_source="s" * 64, approved_source="s" * 64)
     args.update(kw)
     return rp.command_for(policy(), **args)
 

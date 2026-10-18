@@ -29,6 +29,29 @@ def live_drive(serial):
     return None
 
 
+def git(*args, cwd=None):
+    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=600)
+    if done.returncode:
+        raise rp.PolicyError(f"git {args[0]} failed: {done.stderr.strip()[-200:]}")
+    return done.stdout.strip()
+
+
+def prepare_request(cfg, target):
+    """Pin the source of a request: a root-owned checkout of the repository's current commit, its digest, and what changed since the last rebuild that was approved, all returned for the approver to see."""
+    repo = cfg["repo"]
+    commit = git("-C", repo, "rev-parse", "HEAD")
+    work = STATE / "src" / commit[:12]
+    if not work.exists():
+        work.parent.mkdir(parents=True, exist_ok=True)
+        git("clone", "-q", "--no-hardlinks", repo, str(work))
+        git("checkout", "-q", commit, cwd=str(work))
+    last = STATE / "last-approved-commit"
+    since = last.read_text().strip() if last.exists() else ""
+    changes = git("diff", "--stat", "--stat-width=100", since, commit, cwd=str(work)) if since else "no earlier approved rebuild to compare with"
+    return {"commit": commit, "subject": git("log", "-1", "--format=%s", commit, cwd=str(work)), "source_sha256": rp.source_digest(work),
+            "source_dir": str(work), "changes_since_last_approved": changes[-1500:]}
+
+
 def load_drives(path):
     try:
         return dict(json.loads(Path(path).read_text()).get("drives", {}))
@@ -36,10 +59,11 @@ def load_drives(path):
         return {}
 
 
-def handle(auth, msg):
+def handle(auth, msg, prepare=None):
     op = msg.get("op")
     if op == "request":
-        return auth.request(str(msg.get("target", "")), msg.get("hours"))
+        meta = prepare(str(msg.get("target", ""))) if prepare else None
+        return auth.request(str(msg.get("target", "")), msg.get("hours"), meta)
     if op == "approve":
         return auth.approve(str(msg.get("id", "")), str(msg.get("code", "")))
     if op == "status":
@@ -47,11 +71,11 @@ def handle(auth, msg):
     return {"ok": False, "error": "unknown operation"}
 
 
-def drain_inbox(auth):
+def drain_inbox(auth, prepare=None):
     for f in sorted(INBOX.glob("*.json")):
         out = f.with_suffix(".out")
         try:
-            reply = handle(auth, json.loads(f.read_text()))
+            reply = handle(auth, json.loads(f.read_text()), prepare)
         except (OSError, ValueError):
             reply = {"ok": False, "error": "unreadable message"}
         out.write_text(json.dumps(reply))
@@ -71,7 +95,6 @@ def main():
     os.chown(INBOX, 0, int(cfg["gid"]))
     os.chmod(LOGS, 0o755)
     running = {}
-    src = Path(os.environ.get("BASELINE_REBUILD_SRC", "/opt/baseline-rebuilder/src"))
     while True:
         try:
             policy = rp.load_verified(cfg["policy_file"], cfg["policy_digest_file"])    # re-checked every pass: a changed policy stops everything
@@ -80,7 +103,7 @@ def main():
             time.sleep(30)
             continue
         auth = ra.Authority(STATE, {n: None for n in policy["drives"]}, max_seconds=policy["max_approval_hours"] * 3600)
-        drain_inbox(auth)
+        drain_inbox(auth, lambda target: prepare_request(cfg, target))
         for rid, (proc, _) in list(running.items()):
             if proc.poll() is not None:
                 auth.finish(rid, proc.returncode)
@@ -92,7 +115,9 @@ def main():
                 size = live_drive(serial)
                 if size is None:
                     raise rp.PolicyError(f"{req['target']} is not attached")
-                argv = rp.command_for(policy, target=req["target"], serial=serial, size_bytes=size, src=str(src), python=sys.executable, current_source=rp.source_digest(src))
+                work = req["source_dir"]
+                argv = rp.command_for(policy, target=req["target"], serial=serial, size_bytes=size, src=work, python=sys.executable, current_source=rp.source_digest(work), approved_source=req["source_sha256"])
+                (STATE / "last-approved-commit").write_text(req["commit"] + "\n")
             except rp.PolicyError as exc:
                 auth.finish(req["id"], 126)
                 (LOGS / f"{req['id']}.log").write_text(f"refused: {exc}\n")
