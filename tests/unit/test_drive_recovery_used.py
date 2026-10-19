@@ -136,3 +136,11 @@ def test_verify_snapshot_dispatches_on_the_manifest_format(tmp_path):
                                                          "includes_unallocated_space": False}))
     with pytest.raises(dr.RecoveryError, match="missing"):
         dr.verify_snapshot(FakeRunner(), tmp_path, expected_serial="S")
+
+
+def test_a_grown_volume_listed_once_per_segment_is_still_one_volume(tmp_path, monkeypatch):
+    two_segments = dict(LV, lv_name="root")
+    s = Setup(tmp_path, monkeypatch, [("LVM2_member", 400 * 2 ** 30)], lvs=[two_segments, dict(two_segments), dict(SWAP)])
+    import drive_recovery_used as du
+    names = [v["name"] for v in du.plan_volumes(s.runner, "/dev/sdx")]
+    assert names == ["vg0.root", "vg0.swap"]

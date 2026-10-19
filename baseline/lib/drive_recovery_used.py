@@ -65,9 +65,11 @@ def plan_volumes(runner, disk_path) -> list:
         pvs = _json_command(runner, ["pvs", "--reportformat", "json", "-o", "pv_name,vg_name,vg_uuid", pv])["report"][0]["pv"]
         for row in pvs:
             lvs = _json_command(runner, ["lvs", "--reportformat", "json", "--units", "b", "--nosuffix", "-o", "lv_name,lv_path,lv_size,segtype,lv_attr", "--select", f"vg_uuid={row['vg_uuid']}"])["report"][0]["lv"]
+            seen = set()
             for lv in lvs:
-                if lv["segtype"] in SKIP_SEGTYPES or lv["lv_name"].startswith("["):
-                    continue
+                if lv["segtype"] in SKIP_SEGTYPES or lv["lv_name"].startswith("[") or lv["lv_name"] in seen:
+                    continue                                       # `lvs` prints one row per SEGMENT: a volume that has been grown is listed more than once
+                seen.add(lv["lv_name"])
                 out.append({"kind": "lv", "name": f"{row['vg_name']}.{lv['lv_name']}", "lv": lv["lv_name"], "path": lv["lv_path"], "size": int(float(lv["lv_size"])), "fstype": None,
                             "vg_name": row["vg_name"], "vg_uuid": row["vg_uuid"]})
     return out
