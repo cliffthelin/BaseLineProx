@@ -11,6 +11,7 @@ import drive_admin
 import lane_files
 lane_files.apply_defaults(__import__('os').environ)      # a build host's lane data, found as the installer finds it
 import drive_recovery
+import drive_recovery_used
 import offdrive_backup
 import physical_device_safety
 
@@ -27,7 +28,7 @@ def main():
         if args.quiesce:
             mounts = drive_recovery.quiesce_source(runner, serial=args.serial, allowed_serials=allowed)
             print(json.dumps({"quiesced_serial": args.serial, "unmounted": mounts}), flush=True)
-        folder = drive_recovery.create_snapshot(runner, serial=args.serial,
+        folder = drive_recovery_used.create_snapshot_used(runner, serial=args.serial,
                                                 destination=args.destination, allowed_serials=allowed)
         manifest = drive_recovery.verify_snapshot(runner, folder, expected_serial=args.serial)
         print(json.dumps({"snapshot": str(folder), "manifest": manifest}, indent=2), flush=True)

@@ -458,10 +458,11 @@ def stage_preflight(r):
 
 def stage_recovery(r):
     import drive_recovery
+    import drive_recovery_used
     identify(r)
     mounts = drive_recovery.quiesce_source(r, serial=SERIAL, allowed_serials=[SERIAL])
     say("quiesced:", mounts)
-    folder = drive_recovery.create_snapshot(r, serial=SERIAL, destination=str(BACKUP_ROOT), allowed_serials=[SERIAL])
+    folder = drive_recovery_used.create_snapshot_used(r, serial=SERIAL, destination=str(BACKUP_ROOT), allowed_serials=[SERIAL])      # only what is in use; never the empty space
     manifest = drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
     say("verified recovery image:", folder)
     record("recovery", folder=str(folder), manifest=manifest)

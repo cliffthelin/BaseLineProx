@@ -13,7 +13,7 @@ def test_recovery_snapshot_refuses_any_mounted_descendant_before_writing(tmp_pat
         (lambda a: a[0] == "lsblk", FakeProc(0, json.dumps(listing), "")),
     ])
     with pytest.raises(recovery.RecoveryError, match="mounted"):
-        recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path),
+        recovery.create_snapshot(runner, allow_whole_device=True, serial="DRIVE-A", destination=str(tmp_path),
                                  allowed_serials={"DRIVE-A"})
     assert not list(tmp_path.iterdir())
     assert not any(a[0] == "qemu-img" for a in runner.calls)
@@ -105,7 +105,7 @@ def test_the_recovery_image_is_written_under_a_kernel_cap_of_a_tenth_of_the_driv
     being imaged (operator rule 2026-10-11: a drive that is about 5% used must not be backed up at its full size)."""
     free, total = 819_542_622_208, 10_000_611_147_776
     recovery, runner = _snapshot_setup(tmp_path, monkeypatch, free=free, total=total)
-    folder = recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
+    folder = recovery.create_snapshot(runner, allow_whole_device=True, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
     import offdrive_backup as ob
     qemu = [a for a in runner.calls if "qemu-img" in a]
     budget = int(json.loads((folder / "MANIFEST.json").read_text())["size_bytes"] * ob.IMAGE_CAP_FRACTION)
@@ -120,7 +120,7 @@ def test_a_destination_at_its_reserve_is_refused_before_anything_is_written(tmp_
     total = 10 * 2**40
     recovery, runner = _snapshot_setup(tmp_path, monkeypatch, free=int(total * 0.03), total=total)
     with pytest.raises(ob.BackupError, match="3%"):
-        recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
+        recovery.create_snapshot(runner, allow_whole_device=True, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
     assert not any("qemu-img" in a for a in runner.calls)
     assert not [p for p in tmp_path.iterdir() if p.name.startswith("baseline-recovery-")]
 
@@ -130,6 +130,6 @@ def test_an_image_that_outgrows_its_budget_fails_and_stays_incomplete(tmp_path, 
     recovery, runner = _snapshot_setup(tmp_path, monkeypatch, free=free, total=total)
     runner.command_responses.insert(0, (lambda a: a[0] == "prlimit", FakeProc(153, "", "File size limit exceeded")))
     with pytest.raises(recovery.RecoveryError, match="write budget"):
-        recovery.create_snapshot(runner, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
+        recovery.create_snapshot(runner, allow_whole_device=True, serial="DRIVE-A", destination=str(tmp_path), allowed_serials={"DRIVE-A"})
     folder = next(p for p in tmp_path.iterdir() if p.name.startswith("baseline-recovery-"))
     assert (folder / "INCOMPLETE.json").exists() and not (folder / "MANIFEST.json").exists()

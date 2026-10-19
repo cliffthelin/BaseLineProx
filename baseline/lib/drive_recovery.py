@@ -103,7 +103,9 @@ def _publish_complete_manifest(folder, manifest):
         os.close(directory_fd)
 
 
-def create_snapshot(runner, *, serial, destination, allowed_serials, pds_runner=None):
+def create_snapshot(runner, *, serial, destination, allowed_serials, pds_runner=None, allow_whole_device=False):
+    if not allow_whole_device:
+        raise RecoveryError("whole-drive images store the drive's empty space and are never made; use drive_recovery_used.create_snapshot_used (operator, 2026-10-19)")
     if serial not in allowed_serials:
         raise RecoveryError("source serial is not enrolled")
     disk = _offline_disk(runner, serial)
@@ -153,6 +155,13 @@ def create_snapshot(runner, *, serial, destination, allowed_serials, pds_runner=
 
 def verify_snapshot(runner, folder, *, expected_serial):
     folder = Path(folder)
+    try:
+        fmt = json.loads((folder / "MANIFEST.json").read_text()).get("format")
+    except (OSError, ValueError):
+        fmt = None
+    if fmt == "baseline-drive-recovery-v2":
+        import drive_recovery_used
+        return drive_recovery_used.verify_used_snapshot(folder, expected_serial=expected_serial)
     try:
         manifest = json.loads((folder / "MANIFEST.json").read_text())
     except (OSError, ValueError):
