@@ -23,6 +23,8 @@ def main():
     if os.geteuid() != 0:
         print("a rebuild needs root", file=sys.stderr)
         return 1
+    import lane_files
+    lane_files.apply_defaults(os.environ)            # the drives this host may act on, found the same way the installer finds them
     import managed_mode
     import rebuild_drive
     from repair import RealRunner

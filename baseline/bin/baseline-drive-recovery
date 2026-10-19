@@ -8,6 +8,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from repair import RealRunner
 import drive_admin
+import lane_files
+lane_files.apply_defaults(__import__('os').environ)      # a build host's lane data, found as the installer finds it
 import drive_recovery
 import offdrive_backup
 import physical_device_safety
