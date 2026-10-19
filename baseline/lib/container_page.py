@@ -207,7 +207,11 @@ def render_backups(destination='', sets=(), error=''):
     e=lambda x:html.escape(str(x),quote=True)
     content='<p><a href="/containers">Distro containers</a></p><h2>Retained backup sets</h2>'
     content+='<p>Includes /home, /root and /data of a cleanly stopped container. OS packages, /etc, native base disks and original login hashes are excluded. Numeric owners, modes, links, POSIX ACLs and user xattrs are preserved; other extended-attribute namespaces, nested mounts and special files are refused. Restore currently requires the same unchanged base on this host and a new unused name; original data is kept. Incomplete restores need inspection.</p>'
-    content+=f'<form method="GET"><label>Separate backup-drive folder<input name="destination" value="{e(destination)}" required></label><button>List sets</button></form><p>{e(error)}</p>'
+    import path_picker
+    content+=(path_picker.picker_html("backup-pick", destination, label="Separate backup-drive folder")
+              + f"<p role=\"alert\">{e(error)}</p>" + path_picker.picker_script()
+              + "<script>document.getElementById('backup-pick').addEventListener('pathchange',function(){"
+                "location.href='/containers/backups?destination='+encodeURIComponent(this.dataset.value)});</script>")
     for item in sets:
         source=item.get('source',{})
         content+=f'<div class="card"><strong>{e(source.get("name",""))}</strong><p>{e(item.get("backup_id",""))}<br>{e(source.get("template",""))}</p>'

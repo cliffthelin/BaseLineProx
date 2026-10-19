@@ -84,6 +84,7 @@ def test_retained_backup_and_new_name_restore_are_available_through_durable_jobs
     c,h=case(tmp_path)
     dest=tmp_path/'separate';dest.mkdir()
     c.server.deps['container_backup_run']=ScriptedRun(dest)
+    c.server.deps['fs_roots']=(str(tmp_path),)           # the folder picker only allows connected-drive places; the test's drive is tmp_path
     try:
         c.post_json('/containers/action',{'action':'create','name':'work','template':h.catalog()[0]['name'],
                                         'cache_storage':'source-cache','os_storage':'os-thin'})
@@ -100,4 +101,17 @@ def test_retained_backup_and_new_name_restore_are_available_through_durable_jobs
         assert c.post_json('/containers/action',body)[1]['ok']
         assert (h.data_path('restored','data')/'saved').read_text()=='keep'
         assert (h.data_path('work','data')/'saved').read_text()=='keep'
+    finally:c.close()
+
+
+def test_the_backup_destination_is_chosen_not_typed_and_an_unlisted_place_is_refused(tmp_path):
+    c,h=case(tmp_path)
+    c.server.deps['fs_roots']=(str(tmp_path/'drive'),)
+    (tmp_path/'drive').mkdir()
+    try:
+        status,page=c.get('/containers/backups')
+        text=page.decode()
+        assert status==200 and 'class="path-picker"' in text and 'name="destination"' not in text
+        status,page=c.get('/containers/backups?destination=/etc')
+        assert status==200 and b'not on a connected drive' in page
     finally:c.close()

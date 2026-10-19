@@ -42,9 +42,12 @@ Branch `claude/whats-left-fixes` (pushed, not merged to main). Everything below 
 
 ## Next
 
-1. **Path picker: done for Managed server mode** (`path_picker.py`, routes `/fs/browse` and `/fs/validate`, server re-validates on save; the page is one section with one description). Reuse `picker_html`/`picker_script` for every other path in the console (backup file in Settings, the installer pages) and remove any remaining typed path fields.
+1. **Path picker: done for Managed server mode, container backup destination, inspection mountpoint (removed), partition unmount (a list of mounted partitions, `/drive-admin/mounted`) and the setup rebuild target (generated disposable image).** Remaining typed-path surface to look for: none known; re-grep `input name=...path|dir|folder` when adding pages. Earlier note: **Path picker: done for Managed server mode** (`path_picker.py`, routes `/fs/browse` and `/fs/validate`, server re-validates on save; the page is one section with one description). Reuse `picker_html`/`picker_script` for every other path in the console (backup file in Settings, the installer pages) and remove any remaining typed path fields.
 2. Rebuild the remaining pages on the shared components, one at a time, judged with `baseline-page-shot` at 1280/1440/1920 and a narrow width: Hardware panels, Network, Sensors, Virtual machines, then the Installer pages. Empty selects should say "None found".
 3. Move the 13 build-manager functions into the console under Installer, each with a typed confirmation where it erases, and close the gaps in `parity_gaps.json` as they land.
 4. Wire the in-place code update (bundle preparation from the installer page, write only files that differ), then update PC401 and PC601 in place; pair the two drives; install the remote rebuild service if the operator wants it.
 5. Deploy a build to a drive so the console can be seen where it runs; verify the web address setting on a real Proxmox boot.
 6. Still open from before: Ollama LXC and app-VM first-boot verification, codex's installed-QEMU acceptance checks and a native cold boot of each drive, local-account paths (`/run/media/cane/...`) and `INSTALLER_UUID` in the repo (operator was asked), moving VG names from serial to child UUID (offered, unanswered).
+
+## Continued 2026-10-18 (second session on this handoff)
+Typed paths removed from the container backup page, Drive Administration (mountpoint and partition unmount) and the setup rebuild form; the server validates the backup destination again. Full unit suite: 5073 passed, 3 strict xfails. The container-backup test and the new picker tests were written after the code, not before.

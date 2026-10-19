@@ -573,13 +573,12 @@ function updateSelectedParamsHtml() {{
 function mountVolumeParamsHtml() {{
   return `<label>Logical volume name (as it exists in the drive's real volume group)
       <input id="paramLvName" value="root"></label>
-    <label>Mountpoint (leave blank for the default: /mnt/&lt;vg&gt;-&lt;lv&gt;-inspect)
-      <input id="paramMountpoint" placeholder="/mnt/pve-root-inspect"></label>`;
+    <p class="muted">It is mounted read-only at its own inspection folder; no location is typed.</p>`;
 }}
 
 function partitionUnmountParamsHtml() {{
-  return `<label>Mounted partition location
-      <input id="paramPartitionMountpoint" value="/mnt/sdb2" autocomplete="off"></label>
+  return `<label>Mounted partition
+      <select id="paramPartitionMountpoint"><option value="">Loading the mounted partitions...</option></select></label>
     <p class="muted">The app checks that this mount belongs to the selected drive before unmounting it.</p>`;
 }}
 
@@ -597,6 +596,14 @@ document.querySelectorAll(".drive-admin-action").forEach(btn => {{
       requiresDeviceById[pendingActionId]
         ? deviceSelectHtml(currentlySelectedDrivePath()) + extra
         : extra;
+    if (pendingActionId === "unmount_partition") {{
+      fetch("/drive-admin/mounted", {{credentials: "same-origin"}}).then(r => r.json()).then(list => {{
+        const sel = document.getElementById("paramPartitionMountpoint");
+        sel.replaceChildren();
+        if (!list.length) {{ const o = document.createElement("option"); o.value = ""; o.textContent = "None found"; sel.append(o); return; }}
+        list.forEach(m => {{ const o = document.createElement("option"); o.value = m.target; o.textContent = m.target + "  (" + m.source + ")"; sel.append(o); }});
+      }});
+    }}
     const consoleEl = document.getElementById("driveAdminModalConsole");
     consoleEl.textContent = "";
     consoleEl.hidden = true;
@@ -731,9 +738,7 @@ document.getElementById("driveAdminModalConfirm").addEventListener("click", asyn
   }}
   if (pendingActionId === "mount_volume" || pendingActionId === "unmount_volume") {{
     const lvName = document.getElementById("paramLvName");
-    const mountpoint = document.getElementById("paramMountpoint");
     if (lvName && lvName.value.trim() !== "") params.lv_name = lvName.value.trim();
-    if (mountpoint && mountpoint.value.trim() !== "") params.mountpoint = mountpoint.value.trim();
   }}
   if (pendingActionId === "unmount_partition") {{
     params.partition_mountpoint = document.getElementById("paramPartitionMountpoint").value.trim();
@@ -2609,6 +2614,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(502, {"error": f"screendump capture failed: {exc}"})
             return self._binary_response(200, png_bytes, "image/png")
 
+        if path == "/drive-admin/mounted":
+            import mounted_places
+            import repair
+            done = (deps.get("runner") or repair.RealRunner()).run(["findmnt", "-J", "-o", "TARGET,SOURCE,FSTYPE"], timeout=15)
+            return self._json(200, mounted_places.parse(done.stdout) if done.returncode == 0 else [])
+
         if path == "/drive-admin/approvals":
             return self._json(200, {"grants": _hitl_store(deps).list_grants(self._cookie_token())})
 
@@ -2679,8 +2690,14 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             dest=parse_qs(urlparse(self.path).query).get('destination',[''])[0]
             sets=[];error=''
             if dest:
-                try:sets=container_backup.listing(dest,deps.get('container_backup_run'))
-                except (vh.VmError,OSError,ValueError,RuntimeError) as exc:error=str(exc)
+                import path_picker
+                checked=path_picker.validate(dest,path_picker.roots(deps.get("fs_roots") or ()))      # a pasted address is checked again here
+                if not checked["ok"]:
+                    dest,error="",checked["message"]
+                else:
+                    dest=checked["path"]
+                    try:sets=container_backup.listing(dest,deps.get('container_backup_run'))
+                    except (vh.VmError,OSError,ValueError,RuntimeError) as exc:error=str(exc)
             return self._html_response(200,_with_nav(container_page.render_backups(dest,sets,error),path))
 
         if path == "/containers":

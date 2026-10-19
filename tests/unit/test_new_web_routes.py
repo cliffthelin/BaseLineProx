@@ -355,3 +355,37 @@ def test_the_audio_bluetooth_page_lists_devices_and_actions_are_exact_commands(c
     req(case, "POST", "/audio/bluetooth", {"mac": "AA:BB:CC:DD:EE:01; reboot", "action": "connect"})
     req(case, "POST", "/audio/bluetooth", {"mac": "AA:BB:CC:DD:EE:01", "action": "poweroff"})
     assert len(calls) == n
+
+
+def test_the_drive_administration_page_has_no_typed_mountpoint_for_inspection(case):
+    status, _, page = req(case, "GET", "/drive-admin")
+    assert status == 200 and 'id="paramMountpoint"' not in page and "paramMountpoint" not in page
+
+
+def test_the_setup_rebuild_form_offers_no_typed_location(case):
+    import settings_web as sw
+    page = sw.render_new_setup_page(first_run=False) if hasattr(sw, "render_new_setup_page") else None
+    if page is None:
+        import inspect
+        text = inspect.getsource(sw)
+        assert 'placeholder="/tmp/example-target.img"' not in text
+    else:
+        html = page.decode() if isinstance(page, bytes) else page
+        assert 'type="hidden" name="target"' in html and 'placeholder=' not in html
+
+
+def test_a_mounted_partition_is_chosen_from_a_list_not_typed(case):
+    import json as _json
+    from types import SimpleNamespace as NS
+    tree = _json.dumps({"filesystems": [{"target": "/", "source": "/dev/mapper/vg-root", "fstype": "ext4", "children": [
+        {"target": "/mnt/sdb2", "source": "/dev/sdb2", "fstype": "ext4"}, {"target": "/proc", "source": "proc", "fstype": "proc"}]}]})
+
+    class Runner:
+        def run(self, argv, timeout=0):
+            return NS(returncode=0, stdout=tree, stderr="")
+    case.server.deps["runner"] = Runner()                                           # type: ignore[attr-defined]
+    assert req(case, "GET", "/drive-admin/mounted", cookie=False)[0] in (303, 401)
+    status, _, body = req(case, "GET", "/drive-admin/mounted")
+    assert status == 200 and _json.loads(body) == [{"target": "/mnt/sdb2", "source": "/dev/sdb2", "fstype": "ext4"}]
+    _, _, page = req(case, "GET", "/drive-admin")
+    assert '<select id="paramPartitionMountpoint">' in page and 'id="paramPartitionMountpoint" value=' not in page

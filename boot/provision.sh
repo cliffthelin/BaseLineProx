@@ -442,6 +442,7 @@ cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
+cp "$SRC/baseline/lib/mounted_places.py" /opt/baseline/lib/mounted_places.py
 cp "$SRC/baseline/lib/audio_bluetooth.py" /opt/baseline/lib/audio_bluetooth.py
 cp "$SRC/baseline/lib/power_control.py" /opt/baseline/lib/power_control.py
 cp "$SRC/baseline/lib/vm_power.py" /opt/baseline/lib/vm_power.py

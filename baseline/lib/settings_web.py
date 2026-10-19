@@ -1907,10 +1907,10 @@ touches your current running settings until you explicitly initiate a
 rebuild from it, and that rebuild is only ever allowed against a
 disposable target.</p>"""
     else:
-        body = """
+        body = f"""
 <form method="post" action="/setup/rebuild">
-  <label>Rebuild target (disposable path)
-  <input name="target" placeholder="/tmp/example-target.img"></label>
+  <p>The rebuild is tried on a new disposable image; no location is typed.</p>
+  <input type="hidden" name="target" value="/tmp/baseline-rebuild-{secrets.token_hex(6)}.img">
   <button type="submit" class="danger">Initiate rebuild</button>
 </form>
 <p class="hint">Only targets under a configured disposable prefix are
