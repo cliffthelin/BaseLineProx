@@ -96,6 +96,16 @@ figure.chart{margin:.6rem 0;display:inline-block}figure.chart svg{color:var(--ac
 .cfg-remove{align-self:flex-start;padding:.2rem .8rem;font-size:.82rem;color:#ffb3b9;border-color:rgba(255,125,134,.35)}
 .cfg-add{min-height:4rem;border:2px dashed var(--line);background:transparent;color:var(--dim);border-radius:var(--r-sm)}.cfg-add:hover{border-color:var(--accent);color:var(--ink);background:rgba(95,214,196,.06)}
 .cfg-empty{grid-column:1/-1;margin:0;color:var(--dim)}
+/* ---- path picker ---- */
+.path-picker{margin:.8rem 0}.pp-current{display:flex;flex-wrap:wrap;align-items:baseline;gap:.6rem;margin-bottom:.5rem}.pp-label{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.pp-value{background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:var(--r-sm);padding:.25rem .6rem}
+.pp-actions{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}.pp-paste{min-width:16rem;flex:1;max-width:28rem}
+.pp-msg.ok{color:var(--ok)}.pp-msg.bad{color:var(--bad)}
+.pp-dialog{width:min(34rem,92vw);border:1px solid var(--line);border-radius:var(--r);background:#12142a;color:var(--ink);padding:0}.pp-dialog::backdrop{background:rgba(0,0,0,.6)}
+.pp-head{display:flex;justify-content:space-between;align-items:center;padding:.9rem 1.1rem;border-bottom:1px solid var(--line)}.pp-close{padding:.1rem .7rem;font-size:1.2rem}
+.pp-crumbs{padding:.6rem 1.1rem;color:var(--dim);font-family:var(--mono);font-size:.82rem;word-break:break-all}
+.pp-list{list-style:none;margin:0;padding:0 .6rem;max-height:18rem;overflow:auto}.pp-list button{width:100%;text-align:left;border:0;border-radius:var(--r-sm);background:transparent;padding:.55rem .6rem}.pp-list button:hover{background:var(--glass-2)}
+.pp-empty{padding:.7rem;color:var(--dim)}.pp-foot{padding:.9rem 1.1rem;border-top:1px solid var(--line);display:flex;justify-content:flex-end}
 [role=status]{color:var(--dim)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 @media (max-width:640px){.baseline-nav{position:static}}

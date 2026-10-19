@@ -20,7 +20,9 @@ def test_the_pages_i_rebuilt_use_choices_before_typing():
     import managed_mode_page, web_address_page
     m = managed_mode_page.render({"mode": "standalone"}, [{"folder": "/mnt/x/baseline-vault", "volume": "/mnt/x"}]).decode()
     w = web_address_page.render({"bind_host": "0.0.0.0", "port": 8100}, ["10.0.0.5"]).decode()
-    assert 'class="tiles"' in m and 'class="switch"' in m and "Another place" in m and '<details class="reveal"' in m
+    assert 'class="tiles"' in m and 'class="switch"' in m and 'class="path-picker"' in m and "Browse" in m and 'id="other"' not in m
+    assert m.count('type="text"') == 1 and 'class="pp-paste"' in m                    # the only text box is the paste-only, validated one
+    assert m.count('<p class="lead">') == 1                                         # one description
     assert 'class="tiles"' in w and 'class="chips"' in w and 'type="number"' not in w
 
 

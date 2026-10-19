@@ -42,7 +42,7 @@ Branch `claude/whats-left-fixes` (pushed, not merged to main). Everything below 
 
 ## Next
 
-1. **Path picker (operator feedback, in progress):** one component for every path: a "Browse" folder browser (server lists directories under allowed roots) and a paste box that accepts paste only and validates at entry (exists, is a folder or creatable under a writable parent, inside allowed roots); the server validates again on save. Remove the typed "Another place" field and the duplicated intro text from the Managed server mode page (one description only).
+1. **Path picker: done for Managed server mode** (`path_picker.py`, routes `/fs/browse` and `/fs/validate`, server re-validates on save; the page is one section with one description). Reuse `picker_html`/`picker_script` for every other path in the console (backup file in Settings, the installer pages) and remove any remaining typed path fields.
 2. Rebuild the remaining pages on the shared components, one at a time, judged with `baseline-page-shot` at 1280/1440/1920 and a narrow width: Hardware panels, Network, Sensors, Virtual machines, then the Installer pages. Empty selects should say "None found".
 3. Move the 13 build-manager functions into the console under Installer, each with a typed confirmation where it erases, and close the gaps in `parity_gaps.json` as they land.
 4. Wire the in-place code update (bundle preparation from the installer page, write only files that differ), then update PC401 and PC601 in place; pair the two drives; install the remote rebuild service if the operator wants it.

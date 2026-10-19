@@ -385,6 +385,7 @@ cp "$SRC/baseline/lib/managed_mode.py" /opt/baseline/lib/managed_mode.py        
 cp "$SRC/baseline/lib/managed_mode_page.py" /opt/baseline/lib/managed_mode_page.py
 cp "$SRC/baseline/lib/nav_tree.py" /opt/baseline/lib/nav_tree.py
 cp "$SRC/baseline/lib/console_theme.py" /opt/baseline/lib/console_theme.py          # the one look every console page shares
+cp "$SRC/baseline/lib/path_picker.py" /opt/baseline/lib/path_picker.py              # folders are browsed or pasted-and-validated, never typed
 cp "$SRC/baseline/lib/settings_ui.py" /opt/baseline/lib/settings_ui.py                # how settings are shown: cards, plain names, the right control
 cp "$SRC/baseline/lib/console_charts.py" /opt/baseline/lib/console_charts.py            # inline charts shared by the console pages
 cp "$SRC/baseline/lib/hardware_overview.py" /opt/baseline/lib/hardware_overview.py

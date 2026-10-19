@@ -2398,6 +2398,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path == "/status":
             return self._json(200, _status_line(deps))
 
+        if path in ("/fs/browse", "/fs/validate"):
+            import path_picker
+            wanted = qs.get("path", [""])[0]
+            allowed = path_picker.roots(deps.get("fs_roots") or ())
+            return self._json(200, path_picker.list_dirs(wanted, allowed) if path == "/fs/browse" else path_picker.validate(wanted, allowed))
+
         if path == "/network/connection":
             import network, netpref, network_connection, network_connection_page
             ifname = qs.get("dev", [""])[0]
@@ -3558,6 +3564,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(403,{'message':'Changing managed server mode requires an operator account'})
             if not isinstance(body,dict) or set(body)-{'mode','parent_vault','remote_rebuild'} or not isinstance(body.get('parent_vault'),(str,type(None))) or not isinstance(body.get('remote_rebuild',False),bool):
                 return self._json(400,{'message':'Provide a mode, a parent folder and whether remote rebuild is allowed'})
+            if body.get('parent_vault'):
+                import path_picker
+                checked = path_picker.validate(body['parent_vault'], path_picker.roots(deps.get("fs_roots") or ()))
+                if not checked['ok']:
+                    return self._json(400,{'message':checked['message']})
+                body = dict(body, parent_vault=checked['path'])
             try:
                 saved=managed_mode.save(body,deps.get("managed_file"))
             except (managed_mode.ManagedError,OSError) as exc:

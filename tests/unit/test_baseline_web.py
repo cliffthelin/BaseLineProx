@@ -1349,12 +1349,13 @@ def test_cache_page_offers_typed_native_source_acquisition_and_actual_file_link(
 
 def test_managed_mode_page_defaults_to_standalone_and_saves_a_change(tmp_path):
     f = tmp_path / "managed.json"
-    case = _RealServerCase(_base_deps(managed_file=f))
+    case = _RealServerCase(_base_deps(managed_file=f, fs_roots=[str(tmp_path)]))
     try:
         status, body = case.get('/managed-mode')
         assert status == 200 and b"On its own" in body and b"nothing ever connects to a parent" in body
         assert any(p == "/managed-mode" for p, _ in bw.NAV_TABS)
         assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': None, 'remote_rebuild': False})[0] == 400
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': '/etc/not-allowed', 'remote_rebuild': False})[0] == 400      # validated again on the server
         assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': str(tmp_path / 'v'), 'remote_rebuild': False})[0] == 200
         assert json.loads(f.read_text())["mode"] == "managed"
         assert case.post_json('/managed-mode', {'mode': 'standalone', 'parent_vault': None})[0] == 200
@@ -1422,5 +1423,19 @@ def test_memory_page_says_so_when_the_volume_group_cannot_be_read(monkeypatch):
     try:
         status, body = case.get('/memory')
         assert status == 200 and b"Swap could not be read" in body
+    finally:
+        case.close()
+
+
+def test_folder_browser_and_paste_check_routes_stay_inside_the_allowed_places(tmp_path):
+    (tmp_path / "drive" / "sub").mkdir(parents=True)
+    case = _RealServerCase(_base_deps(fs_roots=[str(tmp_path)]))
+    try:
+        status, body = case.get(f"/fs/browse?path={tmp_path}/drive")
+        assert status == 200 and [d["name"] for d in json.loads(body)["dirs"]] == ["sub"]
+        assert json.loads(case.get("/fs/browse?path=/etc")[1])["dirs"] == []
+        assert json.loads(case.get(f"/fs/validate?path={tmp_path}/drive")[1])["ok"] is True
+        assert json.loads(case.get("/fs/validate?path=/etc")[1])["ok"] is False
+        assert json.loads(case.get("/fs/validate?path=relative")[1])["ok"] is False
     finally:
         case.close()
