@@ -244,9 +244,6 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
     try:
         run(['mount','-o','ro,noload',f'/dev/{vg}/root',root]);mounted.append(root)
         observed = storage.inspect_target(runner,expected_serial=serial,root_mount=str(root))
-        marker = json.loads(_target_path(root,'etc/baseline/independent-drive.json').read_text())
-        if any(marker.get(k) != observed[k] for k in ('serial','root_uuid','pv_uuid','vg_uuid')):
-            raise UpdateError('Installed root marker does not match physical identities')
         role_devices = {}
         for name,_,_,label,mountpoint in roles:
             device = f'/dev/{vg}/{name}'
@@ -255,6 +252,17 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
             if facts.get('TYPE') != 'ext4' or facts.get('LABEL') != label or not facts.get('UUID'):
                 raise UpdateError('Storage role filesystem identity is missing: '+label)
             role_devices[label]=(device,facts['UUID'],mountpoint)
+        marker_file = _target_path(root,'etc/baseline/independent-drive.json')
+        if not marker_file.is_file():
+            # /etc/baseline is kept on USER_ADMIN and bound over the root's own (empty) folder at boot: the identity marker is read from there, mounted read-only
+            user_admin = _target_path(root,'mnt/USER_ADMIN')
+            if not user_admin.is_dir() or user_admin.is_symlink():
+                raise UpdateError('Installed USER_ADMIN mountpoint missing')
+            run(['mount','-o','ro,noload',role_devices['USER_ADMIN'][0],user_admin]);mounted.append(user_admin)
+            marker_file = user_admin/'etc-baseline'/'independent-drive.json'
+        marker = json.loads(marker_file.read_text())
+        if any(marker.get(k) != observed[k] for k in ('serial','root_uuid','pv_uuid','vg_uuid')):
+            raise UpdateError('Installed root marker does not match physical identities')
         substrate = _target_path(root,'mnt/SUBSTRATE')
         if not substrate.is_dir() or substrate.is_symlink():
             raise UpdateError('Installed SUBSTRATE mountpoint missing')

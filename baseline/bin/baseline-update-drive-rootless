@@ -80,10 +80,12 @@ def main(argv):
     report = {"target": args[0], "bundle": bundles[-1].name, "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
     subprocess.run([*SUDO, "vgchange", "-ay", "--select", f"vg_uuid={vg_uuid}"], check=True, capture_output=True)
     try:
+        with ru.Volume(f"/dev/{vg}/baseline_substrate", base, "substrate") as substrate:       # the drive's own storage policy names the drive it belongs to
+            import storage_policy
+            policy = storage_policy.validate_policy(json.loads((substrate / "storage-policy.json").read_text()))
+            if policy.get("serial") != serial:
+                raise SystemExit("the drive's storage policy names a different drive; refusing")
         with ru.Volume(f"/dev/{vg}/root", base, "root") as root:
-            marker = json.loads((root / "etc/baseline/independent-drive.json").read_text())
-            if marker.get("serial") != serial:
-                raise SystemExit("the root volume's own record names a different drive; refusing")
             if dry:
                 report["code"] = {"dry_run": True, "plan": {k: len(v) for k, v in plan.items()}}
             else:
@@ -109,6 +111,9 @@ def main(argv):
             copied, waiting, remaining = [], [], free - 2 * GIB
             for unit in units:
                 name, src, rel = unit[0], unit[1], unit[2]
+                if name == "offline-cache/MANIFEST" and waiting:                # the manifest says the cache is complete: only written when everything it names is there
+                    waiting.append((name, 0))
+                    continue
                 if len(unit) == 4:                                              # a named part of a folder (an OS base's two files, or the manifest files)
                     stem = unit[3]
                     parts = [p for p in Path(src).iterdir() if p.is_file() and (p.stem == stem or p.name.startswith(stem + "."))] if stem != "MANIFEST" else [p for p in Path(src).iterdir() if p.is_file() and p.name in ("MANIFEST.json", "BUILT_FOR.json")]
