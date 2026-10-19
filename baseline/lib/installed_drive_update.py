@@ -241,6 +241,7 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
     mounted=[]
     service_policy=None
     service_policy_created=False
+    user_admin_mount=None
     try:
         run(['mount','-o','ro,noload',f'/dev/{vg}/root',root]);mounted.append(root)
         observed = storage.inspect_target(runner,expected_serial=serial,root_mount=str(root))
@@ -258,7 +259,7 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
             user_admin = _target_path(root,'mnt/USER_ADMIN')
             if not user_admin.is_dir() or user_admin.is_symlink():
                 raise UpdateError('Installed USER_ADMIN mountpoint missing')
-            run(['mount','-o','ro,noload',role_devices['USER_ADMIN'][0],user_admin]);mounted.append(user_admin)
+            run(['mount','-o','ro,noload',role_devices['USER_ADMIN'][0],user_admin]);mounted.append(user_admin);user_admin_mount=user_admin
             marker_file = user_admin/'etc-baseline'/'independent-drive.json'
         marker = json.loads(marker_file.read_text())
         if any(marker.get(k) != observed[k] for k in ('serial','root_uuid','pv_uuid','vg_uuid')):
@@ -284,6 +285,8 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
                     or not (set(di.mount_options_for(label).split(',')) - {'defaults'}).issubset(set(entries[0][3].split(',')))):
                 raise UpdateError('Installed role fstab routing is unsafe: '+label)
         run(['umount','--',substrate]);mounted.pop()
+        if user_admin_mount is not None:                                  # mounted only to read the identity marker: it must be released before the root volume can be
+            run(['umount','--',user_admin_mount]);mounted.remove(user_admin_mount)
         run(['umount','--',root]);mounted.pop()
         installer_inputs.verify(bundle)
         record('identity_source_recovery_and_retention_verified')

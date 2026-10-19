@@ -340,3 +340,10 @@ def test_boot_images_are_rebuilt_only_when_what_they_are_made_from_changed(tmp_p
     changed = iu.boot_inputs_digest(root)
     (root / "boot/vmlinuz-6.2").write_bytes(b"k" * 12)
     assert iu.boot_inputs_digest(root) != changed
+
+
+def test_the_usb_admin_volume_mounted_to_read_the_marker_is_released_before_the_root_volume():
+    import inspect
+    import installed_drive_update as iu
+    text = inspect.getsource(iu.update)
+    assert text.index("umount','--',user_admin_mount") < text.index("umount','--',root")          # a volume mounted inside the root volume keeps it busy
