@@ -66,6 +66,9 @@ does not prove any of these; `tests/unit/test_established_expectations.py` recor
   root drive. `/mnt/INSTALLER_CACHE` and `~/.ubuntu26-usb` are symlinks into `CACHE/baseline-build/installer-cache`.
 - **Both SK hynix drives are the operator's development drives for this lane** (Codex relinquished PC401 on 2026-10-18); updates are done in place, never by a wipe when an
   update will do.
+- **Backups never store empty space; a compact mirror of each build lives on CACHE and holds the version-controlled persistence data for the drive and its children;
+  a child backs up to its parent over the network or by being attached to the parent** (operator 2026-10-01 and 2026-10-19, DR273). The attached-drive path and the
+  per-volume history exist (`rebuild_drive`, `parent_vault`); the compact mirror and the network path are NOT built. PC401 is on hold.
 - **Never attach drives behind this host's faulty USB port** (xHCI 0000:0a:00.0, `usb2-port5`; the bounce timer is deliberate).
 
 ## Credential rules
