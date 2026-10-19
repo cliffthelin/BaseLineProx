@@ -381,6 +381,20 @@ def identify(r):
     return target
 
 
+def drive_has_build(r) -> bool:
+    """True when the target drive carries an installer-made identity (its disk GUID names the lane and its own serial), i.e. it already holds a Baseline build. Read from the partition table only, so a mounted or
+    active drive is still recognised. A drive that cannot be read is treated as having a build: nothing is erased on a guess."""
+    import identifiers
+    done = r.run(["lsblk", "-J", "-b", "-p", "-o", "NAME,TYPE,SERIAL,PTUUID"], timeout=30)
+    try:
+        disks = [d for d in json.loads(done.stdout)["blockdevices"] if d.get("type") == "disk" and d.get("serial") == SERIAL]
+    except (ValueError, KeyError, TypeError):
+        return True
+    if len(disks) != 1:
+        return True
+    return identifiers.stamped_lane(disks[0].get("ptuuid"), SERIAL) is not None
+
+
 def guarded(target):
     import physical_device_safety as pds
 
@@ -838,8 +852,6 @@ def main():
                         help="a prepared Kasm base (the folder baseline-build-kasm-base wrote); the cache then carries it (about 15 GiB) so Kasm is built on the new setup")
     parser.add_argument("--os-bases", type=Path, metavar="DIR",
                         help="the folder baseline-build-os-base wrote; the cache then carries each ready-made VM base that passes its checks, so the listed systems can be created already set up")
-    parser.add_argument("--reinstall", "--force", dest="force", action="store_true",
-                        help="erase and install again even though this drive is already installed (a full install writes about 170 GiB to it; code changes go in place with baseline-rebuild-drive instead)")
     parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
                         help="authorize erasing the target (after its verified recovery image); its exact serial")
     args = parser.parse_args()
@@ -876,13 +888,10 @@ def main():
         CURRENT_BUILD = build_currency.source_state(r, REPO)
         verdict = build_currency.assess(journal()["stages"].get("install", {}).get("build"), CURRENT_BUILD)
         say(f"build check for {TARGET_NAME}: {verdict['action']} - {verdict['reason']}")
-        installed_before = "install" in journal()["stages"]
-        if installed_before and verdict["action"] == "install":
-            verdict = {"action": "skip", "reason": verdict["reason"] + "; this drive is already installed, so the code is updated in place (baseline-rebuild-drive), not by rewriting the drive"}
-            say(f"build check for {TARGET_NAME}: {verdict['reason']}")
-        if verdict["action"] == "skip" and not args.force:
+        if "install" in journal()["stages"] or drive_has_build(r):
+            say(f"{TARGET_NAME} already carries a Baseline build ({verdict['reason']}). An existing build is only ever updated in place "
+                "(baseline-rebuild-drive); the installer never rewrites one and has no option to.")
             stages = [s for s in stages if s not in ("recovery", "install", "firstboot", "kiosk")]
-            say(f"{TARGET_NAME} is left as it is (nothing erased or written); add --reinstall to erase and install anyway")
             if not stages:
                 return
     functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,

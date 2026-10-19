@@ -333,3 +333,37 @@ def test_a_cache_missing_one_of_the_wanted_bases_or_carrying_an_old_copy_of_one_
     assert allscript.cache_status(cache, None, os_bases=bases) == "stale"                    # carried, but an older build of it
     manifest(cache / "os-bases", "ubuntu", "b" * 64)
     assert allscript.cache_status(cache, None, os_bases=bases) == "complete"
+
+
+# -- an existing build is only ever updated (operator, 2026-10-19): no option rewrites it ------------------------------
+
+def _runner_with(listing):
+    import json as _json
+    from fake_runner import FakeProc, FakeRunner
+    return FakeRunner(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(0, _json.dumps(listing), ""))])
+
+
+def test_a_drive_stamped_by_an_installer_is_recognised_as_already_built(monkeypatch):
+    import identifiers
+    allscript.select_target("PC9", "SYNTH-SERIAL-01", None)
+    lane = "11111111-2222-4333-8444-555555555555"
+    stamped = identifiers.host_id(lane, "SYNTH-SERIAL-01")
+    assert allscript.drive_has_build(_runner_with({"blockdevices": [{"name": "/dev/sdx", "type": "disk", "serial": "SYNTH-SERIAL-01", "ptuuid": stamped}]})) is True
+
+
+def test_a_blank_or_unstamped_drive_is_not_treated_as_built():
+    allscript.select_target("PC9", "SYNTH-SERIAL-01", None)
+    assert allscript.drive_has_build(_runner_with({"blockdevices": [{"name": "/dev/sdx", "type": "disk", "serial": "SYNTH-SERIAL-01", "ptuuid": None}]})) is False
+    assert allscript.drive_has_build(_runner_with({"blockdevices": [{"name": "/dev/sdx", "type": "disk", "serial": "SYNTH-SERIAL-01", "ptuuid": "12345678-1234-4234-8234-123456789abc"}]})) is False
+
+
+def test_an_unreadable_or_ambiguous_drive_listing_counts_as_built_so_nothing_is_erased_on_a_guess():
+    allscript.select_target("PC9", "SYNTH-SERIAL-01", None)
+    assert allscript.drive_has_build(_runner_with({"blockdevices": []})) is True
+    two = {"blockdevices": [{"name": "/dev/a", "type": "disk", "serial": "SYNTH-SERIAL-01", "ptuuid": None}, {"name": "/dev/b", "type": "disk", "serial": "SYNTH-SERIAL-01", "ptuuid": None}]}
+    assert allscript.drive_has_build(_runner_with(two)) is True
+
+
+def test_the_installer_has_no_option_that_rewrites_an_existing_build():
+    text = _PATH.read_text()
+    assert "--reinstall" not in text.split("def main")[1] and "args.force" not in text

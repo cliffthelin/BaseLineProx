@@ -6,7 +6,7 @@ Branch `claude/whats-left-fixes` (pushed, not merged to main). Everything below 
 
 - **No hardware identifiers in the repo.** No serials, MACs or hostnames in code, tests or docs. They are operator data on git-ignored volumes (`baseline-build/drives.json`, `own-drives`). Tests use synthetic `SYNTH...` values; `tests/unit/test_no_real_hardware_identifiers_in_tracked_files.py` checks this against the machine it runs on. Git history on origin still holds earlier values (rewriting it needs the operator's approval).
 - **Never type credentials or create accounts** through VM screens or pages. Owners are the signed-in Proxmox user, no password.
-- **Never rewrite what did not change**, and do not wipe a drive when an in-place update will do. A full install wrote 168.8 GiB to a drive; avoid it.
+- **An existing build is only updated, never rewritten.** No flag, no "reinstall". **Never rewrite what did not change** either. A full install wrote 168.8 GiB to a drive; avoid it.
 - **Typed paths are not allowed.** A path is browsed to, or pasted and then validated at entry (see "Next" 1).
 - **Desktop-size renders only.** Do not resize any window the operator can see (Playwright's Chrome window was left at a stuck size and confused them). Use `baseline/bin/baseline-page-shot` (headless Chrome).
 - **Never `pkill -f`/`pgrep -f` with text in your own command line** (kills your shell). Use pid files or `ss -ltnp`.
@@ -20,7 +20,7 @@ Branch `claude/whats-left-fixes` (pushed, not merged to main). Everything below 
 - Seed runner for Bazzite and Omarchy, six ready-made OS owner flows verified on real Proxmox.
 
 **Install and rebuild**
-- `baseline-allscript-install`: build check (`build_currency.py`) skips a wipe when the drive already carries the build; an installed drive is refused a rewrite without `--reinstall`; each install reports bytes written (`device_wear.py`); the rehearsal mirror on CACHE is exactly the child drive's size (sparse).
+- `baseline-allscript-install`: build check (`build_currency.py`) skips a wipe when the drive already carries the build; an existing build is **only ever updated in place**: the installer refuses to erase a drive that carries an installer-made identity, and has no option to override that (operator, 2026-10-19); each install reports bytes written (`device_wear.py`); the rehearsal mirror on CACHE is exactly the child drive's size (sparse).
 - The installer asks the system for root itself (`elevate.py`: Ubuntu's dialog, or sudo) instead of being wrapped.
 - **Rebuild never wipes** (`rebuild_drive.py`, `baseline-rebuild-drive`): attaches the drive, snapshots every data volume into git (`data_vault.py`), writes bundles onto INSTALLER_CACHE, and (only with a reviewed bundle) updates the code layer through the existing guarded `installed_drive_update`. Fluid volume sizes: `volume_growth.py` has no per-role ceiling now and runs every 2 minutes.
 - Unchanged files are never rewritten (`write_once.py`, a content-compare `cp` in `provision.sh`, vault bundles skipped when history has not moved).
