@@ -1,0 +1,20 @@
+Here's everything uncommitted right now, split by what actually matters:
+
+**Real, this-session-relevant work (from decision record 83, the merged Baseline web app):**
+- `M baseline/lib/control_panel_web.py`
+- `M baseline/lib/settings_web.py`
+- `M tests/unit/test_settings_web.py`
+- `?? baseline/lib/baseline_web.py` (new, 473 lines)
+- `?? baseline/lib/drive_admin.py` (new, 305 lines)
+- `?? tests/unit/test_baseline_web.py` (new)
+- `?? tests/unit/test_drive_admin.py` (new)
+
+**The handoff itself:**
+- `M docs/SESSION_HANDOFF.md`
+
+**Pre-existing, not from this work, don't touch without investigating (flagged this way since much earlier in the project's own history):**
+- `?? backups/`
+- `?? docs/design/.~lock.drive-setup-gui-v2-prd.md#` (a LibreOffice lock file — someone has that doc open)
+- `?? sdc2.img`
+
+That first group is real, tested (1276/1276 passing), but unreviewed by anyone in this thread and has no decision record written for it yet — that's why I didn't commit it on my own. Want me to write decision record 83 and commit the whole group now, or hold off until you've looked at it?
