@@ -285,3 +285,58 @@ def test_disposable_volume_growth_keeps_retained_storage_and_vg_reserve():
     assert update.baseline_growth_plan(50*gib,20*gib)['grow_bytes']==0
     with pytest.raises(update.UpdateError,match='reserve'):
         update.baseline_growth_plan(8*gib,45*gib)
+
+
+def test_an_inactive_volume_group_is_recognised_so_it_can_be_activated_before_the_use_check():
+    import installed_drive_update as iu
+    inactive = [{"lv_name": "root", "lv_attr": "-wi-------", "lv_device_open": "unknown"}, {"lv_name": "swap", "lv_attr": "-wi-------", "lv_device_open": "unknown"}]
+    active = [{"lv_name": "root", "lv_attr": "-wi-a-----", "lv_device_open": ""}]
+    assert iu.all_inactive(inactive) is True and iu.all_inactive(active) is False and iu.all_inactive([]) is False
+    assert iu.all_inactive(inactive + active) is False                                  # a partly active group is not activated blindly
+
+
+def test_a_thin_pool_held_open_by_its_own_volumes_is_not_a_user_but_an_open_volume_is():
+    import installed_drive_update as iu
+    pool_open = [{"lv_name": "pool", "lv_attr": "twi-aotz--", "lv_device_open": "open"}, {"lv_name": "root", "lv_attr": "-wi-a-----", "lv_device_open": ""},
+                 {"lv_name": "thin", "lv_attr": "Vwi-a-tz--", "lv_device_open": ""}]
+    assert iu.volumes_in_use(pool_open) == []
+    assert iu.volumes_in_use(pool_open + [{"lv_name": "data", "lv_attr": "-wi-ao----", "lv_device_open": "open"}]) == ["data"]
+    assert iu.volumes_in_use([{"lv_name": "root", "lv_attr": "-wi-------", "lv_device_open": "unknown"}]) == ["root"]     # unknown is never treated as free
+
+
+def test_staging_the_source_writes_only_files_that_differ(tmp_path):
+    import os
+    import installed_drive_update as iu
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    (src / "a").mkdir(parents=True)
+    (src / "a" / "same.py").write_text("same")
+    (src / "a" / "edit.py").write_text("new")
+    (src / "added.py").write_text("added")
+    (dst / "a").mkdir(parents=True)
+    (dst / "a" / "same.py").write_text("same")
+    (dst / "a" / "edit.py").write_text("old")
+    (dst / "keep.txt").write_text("not in the source")
+    os.utime(dst / "a" / "same.py", ns=(1, 1))
+    out = iu.copy_changed(src, dst)
+    assert out == {"copied": 2, "unchanged": 1}
+    assert os.stat(dst / "a" / "same.py").st_mtime_ns == 1                       # an unchanged file is not touched
+    assert (dst / "a" / "edit.py").read_text() == "new" and (dst / "added.py").read_text() == "added" and (dst / "keep.txt").exists()
+    assert iu.copy_changed(src, dst) == {"copied": 0, "unchanged": 3}              # a second pass writes nothing
+
+
+def test_boot_images_are_rebuilt_only_when_what_they_are_made_from_changed(tmp_path):
+    import installed_drive_update as iu
+    root = tmp_path
+    (root / "etc/initramfs-tools").mkdir(parents=True)
+    (root / "etc/initramfs-tools/modules").write_text("a")
+    (root / "boot").mkdir()
+    (root / "boot/vmlinuz-6.1").write_bytes(b"k" * 10)
+    first = iu.boot_inputs_digest(root)
+    (root / "opt").mkdir()
+    (root / "opt/baseline.txt").write_text("code changes do not matter")
+    assert iu.boot_inputs_digest(root) == first
+    (root / "etc/initramfs-tools/modules").write_text("b")
+    assert iu.boot_inputs_digest(root) != first
+    changed = iu.boot_inputs_digest(root)
+    (root / "boot/vmlinuz-6.2").write_bytes(b"k" * 12)
+    assert iu.boot_inputs_digest(root) != changed

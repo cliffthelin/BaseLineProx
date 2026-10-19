@@ -12,12 +12,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 
+def cache_sources(explicit):
+    """[(folder on this machine, folder inside INSTALLER_CACHE)]: the built offline cache (OS bases, Kasm base, apps, packages) and the OS images."""
+    import lane_files
+    build = Path(explicit) if explicit else Path(os.environ.get("BASELINE_DRIVES_FILE") or lane_files.BUILD_DRIVES_FILE).parent
+    pairs = [(build / "offline-cache", "installer/expanded/baseline-cache"), (build / "installer-cache" / "isos", "isos")]
+    return [(src, rel) for src, rel in pairs if src.is_dir()]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--serial", required=True)
-    parser.add_argument("--parent", default=None, help="the parent/server backup folder; by default the one managed mode names, and none when managed mode is off")
-    parser.add_argument("--mirror", default=None, help="the folder holding the compact mirrors; by default the one managed mode names, and none when managed mode is off")
+    parser.add_argument("--mirror", default=None, help="where the mirror lives; by default the one managed mode names, and none when managed mode is off")
     parser.add_argument("--with", dest="peers", action="append", default=[], metavar="SERIAL", help="another drive of this drive's combination (repeatable); without it the drive is a combination of one")
+    parser.add_argument("--cache-from", default=None, help="the built offline cache and OS images to bring the drive's INSTALLER_CACHE up to date with (only missing or changed files are written); default: the build volume's own")
     parser.add_argument("--input-bundle")
     parser.add_argument("--recovery-folder")
     args = parser.parse_args()
@@ -25,12 +33,14 @@ def main():
         print("a rebuild needs root", file=sys.stderr)
         return 1
     import lane_files
-    lane_files.apply_defaults(os.environ)            # the drives this host may act on, found the same way the installer finds them
+    lane_files.apply_defaults(os.environ)
+    if args.input_bundle and os.environ.get("BASELINE_UPDATE_PRIVATE_MOUNT_NS") != "1":      # the update mounts and chroots into the drive: do it in a private mount namespace, as the update tool always did
+        env = dict(os.environ, BASELINE_UPDATE_PRIVATE_MOUNT_NS="1")
+        os.execvpe("unshare", ["unshare", "--mount", "--propagation", "private", sys.executable, sys.argv[0], *sys.argv[1:]], env)            # the drives this host may act on, found the same way the installer finds them
     import managed_mode
     import rebuild_drive
     from repair import RealRunner
-    args.parent = args.parent or managed_mode.parent_vault()           # standalone: no parent is ever contacted
-    args.mirror = args.mirror or managed_mode.mirror_root()
+    args.mirror = args.mirror or managed_mode.mirror_root()            # standalone: no mirror is ever written
     runner, update = RealRunner(), None
     if args.input_bundle:
         if not args.recovery_folder:
@@ -42,7 +52,7 @@ def main():
             with __import__("tempfile").TemporaryDirectory(prefix="baseline-drive-update-") as root:
                 return iu.update(runner, serial=args.serial, input_bundle=args.input_bundle, recovery_folder=args.recovery_folder, root=root)
     try:
-        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update, parent_root=args.parent, peer_serials=args.peers, mirror_root=args.mirror, allowed_serials=[args.serial]), indent=1))
+        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update, peer_serials=args.peers, mirror_root=args.mirror, allowed_serials=[args.serial], cache_sources=cache_sources(args.cache_from)), indent=1))
     except Exception as exc:                                                # noqa: BLE001 - reported, nonzero exit
         print(f"rebuild refused: {exc}", file=sys.stderr)
         return 1

@@ -1,19 +1,25 @@
-"""The compact mirror: the files a child drive holds, kept on the parent's mirror partition, updated by change and never rewritten whole.
+"""The compact mirror: the files each volume of a child drive holds, kept by volume ROLE on the parent's mirror partition, updated by change and never rewritten whole.
 
-For each child there is one folder, `<root>/mirror/<combination>/<child uuid>/`, with the drive's partition table and volume layout (small files) and, for every filesystem, a copy of its FILES
-(`volumes/<name>/`). A refresh walks the drive's files and updates only what differs: a changed file is updated in place, block by block (`rsync --no-whole-file --inplace`, so ten changed
-files write ten files' worth of changes, a thousand write a thousand, and a change inside a big file writes only the changed blocks), a new file is added, a deleted file is removed, and everything unchanged
-is left alone (not read for writing, not touched). Only files are stored, so there is no empty space in the mirror; nothing sparse or preallocated is created. Ownership, permissions, hard links, ACLs and
-extended attributes are kept, so a volume can be rebuilt from it: make the filesystem as `volumes.json` describes and copy the files back. While a refresh runs the mirror is marked incomplete.
-Persistence data is also versioned in git (`parent_vault`); this mirror is the whole drive's current contents.
+The volumes are the ones the build defines (`drive_installer.baseline_volumes_for`): USER_ADMIN and USER_PERSONAL (the user's data), APPDATA_ADMIN and APPDATA_PERSONAL (each application's
+writable data), SUBSTRATE (configuration and recovery data), BASELINE (app, VM and container state), INSTALLER_CACHE (ISOs and driver packages), plus the general OS (ROOT) and the boot partitions. A
+volume is found only through that table, never by guessing at what is on the drive, and each one is checked against the drive's own storage policy (its serial and the filesystem UUID recorded for
+that role) before anything is copied; a logical volume the build does not define is refused, not copied. SESSION_TEMP is scratch for running sessions and is not mirrored.
+
+Each role keeps its own folder: `<root>/mirror/<combination>/<child uuid>/volumes/<ROLE>/`, with the partition table and volume layout beside it. A refresh walks a volume's files and updates only
+what differs: a changed file is updated in place, block by block (`rsync --no-whole-file --inplace`), a new file is added, a deleted file is removed, and everything unchanged is left alone. Only files are
+stored, so there is no empty space; nothing sparse or preallocated is created. Ownership, permissions, hard links, ACLs and extended attributes are kept, so a volume can be rebuilt from it: make
+the filesystem as `volumes.json` describes and copy the files back. While a refresh runs the mirror is marked incomplete. The version history of the user's and applications' data is kept in the same
+mirror (`mirror_history`).
 """
 from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 
+import drive_installer as di
 import drive_recovery as dr
 import drive_recovery_used as du
 import offdrive_backup
@@ -23,10 +29,16 @@ from write_once import write_if_changed
 STATE = "mirror-state.json"
 RSYNC = ["rsync", "-aHAXS", "--numeric-ids", "--delete", "--no-whole-file", "--inplace", "--modify-window=-1", "--stats", "--human-readable"]      # -1: times compared to the nanosecond, so a change made in the same second as the last refresh is not missed
 READ_ONLY = {"ext2": "ro,noload", "ext3": "ro,noload", "ext4": "ro,noload", "xfs": "ro,norecovery", "btrfs": "ro", "vfat": "ro"}
+NOT_MIRRORED = ("SESSION_TEMP",)
 
 
 class MirrorError(RuntimeError):
     pass
+
+
+def role_for_lv() -> dict:
+    """logical volume name -> role, from the build's own volume table."""
+    return {lv: label for lv, _, _, label, _ in di.baseline_volumes_for()}
 
 
 def child_dir(root, combination: str, child: str) -> Path:
@@ -41,7 +53,7 @@ def parse_stats(text: str) -> dict:
             return 0
         value = float(m.group(1).replace(",", ""))
         return int(value * {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}[m.group(2)])
-    return {"files_changed": number("Number of regular files transferred"), "bytes_sent": number("Literal data")}       # literal data: the bytes actually written
+    return {"files_changed": number("Number of regular files transferred"), "bytes_sent": number("Literal data")}
 
 
 def sync_volume(runner, source_dir, dest_dir) -> dict:
@@ -59,7 +71,38 @@ def _fs_info(runner, path) -> dict:
     return {"fstype": info.get("TYPE"), "uuid": info.get("UUID"), "label": info.get("LABEL")}
 
 
-def refresh(runner, *, serial, child, combination, root, allowed_serials, pds_runner=None, mount_base="/mnt/MIRROR-SRC") -> dict:
+def classify(item: dict, info: dict) -> str:
+    """The role of one thing on the drive, only from the build's own tables: a defined volume, the OS root, swap, or a boot partition. Anything else is refused."""
+    if info["fstype"] == "swap":
+        return "SWAP"
+    if item["kind"] == "lv":
+        if item["lv"] in role_for_lv():
+            return role_for_lv()[item["lv"]]
+        if item["lv"] == "root":
+            return "ROOT"
+        raise MirrorError(f"{item['lv']} is not a volume this build defines; refused, not copied")
+    if info["fstype"] == "vfat":
+        return "EFI"
+    if info["fstype"] is None and item["size"] <= du.RAW_SMALL_MAX:
+        return "BIOS_BOOT"
+    raise MirrorError(f"{item['name']} is not a partition this build defines; refused, because copying it whole would store its empty space")
+
+
+def read_policy(mount_dir):
+    import storage_policy
+    return storage_policy.validate_policy(json.loads((Path(mount_dir) / "storage-policy.json").read_text()))
+
+
+def verify_roles(policy: dict, serial: str, role_uuids: dict) -> None:
+    """Every defined role on the drive must be the filesystem the drive's own storage policy recorded for it (the same check an update makes)."""
+    if policy.get("serial") != serial:
+        raise MirrorError("the drive's storage policy belongs to a different drive")
+    for role, uuid in role_uuids.items():
+        if role in role_for_lv().values() and policy["bindings"].get(role) != {"serial": serial, "uuid": uuid}:
+            raise MirrorError(f"the {role} volume is not the one the drive's storage policy recorded; nothing was copied")
+
+
+def refresh(runner, *, serial, child, combination, root, allowed_serials, pds_runner=None, mount_base="/mnt/MIRROR-SRC", policy_reader=read_policy) -> dict:
     """Bring the child's mirror up to date from the (offline, unmounted) drive. Returns what changed."""
     if serial not in allowed_serials:
         raise MirrorError("source serial is not enrolled")
@@ -73,8 +116,8 @@ def refresh(runner, *, serial, child, combination, root, allowed_serials, pds_ru
     layout_tmp.unlink(missing_ok=True)
     du._run(runner, ["sgdisk", f"--backup={layout_tmp}", target["path"]], "saving the partition table")
     write_if_changed_bytes(directory / "layout.sgdisk", layout_tmp)
-    volumes, report, mounted, activated = [], {}, [], []
     plan = du.plan_volumes(runner, target["path"])
+    volumes, report, mounted, activated = [], {}, [], []
     try:
         for vg_uuid in sorted({v["vg_uuid"] for v in plan if v["kind"] == "lv"}):
             name = next(v["vg_name"] for v in plan if v.get("vg_uuid") == vg_uuid)
@@ -84,38 +127,50 @@ def refresh(runner, *, serial, child, combination, root, allowed_serials, pds_ru
             write_if_changed_bytes(directory / f"vg-{vg_uuid}.cfg", cfg)
             du._run(runner, ["vgchange", "-ay", "--select", f"vg_uuid={vg_uuid}"], "activating the volume group to read it")
             activated.append(vg_uuid)
+        found = []
         for item in plan:
             info = _fs_info(runner, item["path"])
-            record = {"name": item["name"], "kind": item["kind"], "device_bytes": item["size"], **info}
-            volumes.append(record)
-            if info["fstype"] == "swap":
-                continue                                                              # swap holds nothing worth keeping: its size is recorded, nothing is stored
-            if info["fstype"] not in READ_ONLY:
-                if item["size"] > du.RAW_SMALL_MAX:
-                    raise MirrorError(f"{item['name']} has no filesystem the mirror understands; refused, because copying it whole would store its empty space")
-                raw = Path(item["path"]).read_bytes()                                  # the BIOS boot area: tiny, copied only when it differs
-                write_if_changed_bytes(directory / f"{item['name']}.raw", raw)
-                record["fstype"] = None
-                record["kind"] = "raw-small"
-                continue
-            point = Path(mount_base) / item["name"]
+            found.append((classify(item, info), item, info))
+        by_role = {role: (item, info) for role, item, info in found}
+        if "SUBSTRATE" in by_role:                                                       # the drive's own policy says which filesystem is which role: check before copying anything
+            item, info = by_role["SUBSTRATE"]
+            point = Path(mount_base) / "SUBSTRATE-CHECK"
             point.mkdir(parents=True, exist_ok=True)
-            du._run(runner, ["mount", "-t", info["fstype"], "-o", READ_ONLY[info["fstype"]] + ",nodev,nosuid,noexec", item["path"], str(point)], f"mounting {item['name']} to read it")
+            du._run(runner, ["mount", "-t", info["fstype"], "-o", READ_ONLY[info["fstype"]] + ",nodev,nosuid,noexec", item["path"], str(point)], "mounting SUBSTRATE to read its policy")
+            try:
+                verify_roles(policy_reader(point), serial, {role: i["uuid"] for role, (_, i) in by_role.items()})
+            finally:
+                runner.run(["umount", str(point)], timeout=120)
+        else:
+            raise MirrorError("the drive has no SUBSTRATE volume, so its roles cannot be verified; nothing was copied")
+        for role, item, info in found:
+            record = {"role": role, "name": item["name"], "kind": item["kind"], "device_bytes": item["size"], **info}
+            volumes.append(record)
+            if role == "SWAP" or role in NOT_MIRRORED:
+                record["skipped"] = "swap" if role == "SWAP" else "scratch space"
+                continue                                                                  # recorded by size; nothing is stored
+            if role == "BIOS_BOOT":
+                raw = Path(item["path"]).read_bytes()                                       # tiny, copied only when it differs
+                write_if_changed_bytes(directory / f"{role}.raw", raw)
+                record["fstype"] = None
+                continue
+            point = Path(mount_base) / role
+            point.mkdir(parents=True, exist_ok=True)
+            du._run(runner, ["mount", "-t", info["fstype"], "-o", READ_ONLY[info["fstype"]] + ",nodev,nosuid,noexec", item["path"], str(point)], f"mounting {role} to read it")
             mounted.append(point)
-            report[item["name"]] = sync_volume(runner, point, directory / "volumes" / item["name"])
+            report[role] = sync_volume(runner, point, directory / "volumes" / role)
     finally:
         for point in reversed(mounted):
             runner.run(["umount", str(point)], timeout=120)
         for vg_uuid in activated:
             runner.run(["vgchange", "-an", "--select", f"vg_uuid={vg_uuid}"], timeout=120)
-    keep = {v["name"] for v in volumes}
+    keep = {v["role"] for v in volumes}
     volumes_root = directory / "volumes"
     if volumes_root.is_dir():
-        import shutil
         for old in volumes_root.iterdir():
             if old.name not in keep:
-                shutil.rmtree(old)                                                     # a volume the drive no longer has
-    write_if_changed(directory / "volumes.json", json.dumps({"serial_hint": None, "size_bytes": target["size_bytes"], "volumes": volumes}, indent=1) + "\n")
+                shutil.rmtree(old)                                                     # a role the drive no longer has
+    write_if_changed(directory / "volumes.json", json.dumps({"size_bytes": target["size_bytes"], "volumes": volumes}, indent=1) + "\n")
     (directory / STATE).write_text(json.dumps({"complete": True, "finished": time.strftime("%Y-%m-%dT%H:%M:%S")}) + "\n")
     return {"folder": str(directory), "volumes": report, "files_changed": sum(v["files_changed"] for v in report.values()),
             "bytes_sent": sum(v["bytes_sent"] for v in report.values()), "includes_unallocated_space": False}

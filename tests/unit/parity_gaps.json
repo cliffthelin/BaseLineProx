@@ -9,6 +9,6 @@
  "build.install.rehearse",
  "build.install.wipe_install",
  "build.iso",
- "managed.parent_vault",
+ "managed.mirror_history",
  "managed.remote_rebuild"
 ]

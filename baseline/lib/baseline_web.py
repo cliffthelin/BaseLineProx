@@ -3605,14 +3605,14 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import managed_mode
             if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
                 return self._json(403,{'message':'Changing managed server mode requires an operator account'})
-            if not isinstance(body,dict) or set(body)-{'mode','parent_vault','remote_rebuild'} or not isinstance(body.get('parent_vault'),(str,type(None))) or not isinstance(body.get('remote_rebuild',False),bool):
-                return self._json(400,{'message':'Provide a mode, a parent folder and whether remote rebuild is allowed'})
-            if body.get('parent_vault'):
+            if not isinstance(body,dict) or set(body)-{'mode','mirror_root','remote_rebuild'} or not isinstance(body.get('mirror_root'),(str,type(None))) or not isinstance(body.get('remote_rebuild',False),bool):
+                return self._json(400,{'message':'Provide a mode, where the mirror is kept and whether remote rebuild is allowed'})
+            if body.get('mirror_root'):
                 import path_picker
-                checked = path_picker.validate(body['parent_vault'], path_picker.roots(deps.get("fs_roots") or ()))
+                checked = path_picker.validate(body['mirror_root'], path_picker.roots(deps.get("fs_roots") or ()))
                 if not checked['ok']:
                     return self._json(400,{'message':checked['message']})
-                body = dict(body, parent_vault=checked['path'])
+                body = dict(body, mirror_root=checked['path'])
             try:
                 saved=managed_mode.save(body,deps.get("managed_file"))
             except (managed_mode.ManagedError,OSError) as exc:

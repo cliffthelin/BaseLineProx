@@ -12,10 +12,10 @@ class R:
 def fakes(monkeypatch, tmp_path):
     calls = []
     mounts = {"INSTALLER_CACHE": str(tmp_path / "IC"), "USER_PERSONAL": str(tmp_path / "UP")}
-    monkeypatch.setattr(twin_sync, "peer_by_serial", lambda r, s: "c" * 32)
-    monkeypatch.setattr(twin_sync, "attach_twin", lambda r, c, mount_base: calls.append("attach") or {"vg_uuid": "v", "mounts": dict(mounts)})
+    monkeypatch.setattr(twin_sync, "peer_by_serial", lambda r, s: "4af8c95a-d894-0a4e-10cb-2472edbff000")
+    monkeypatch.setattr(twin_sync, "attach_twin", lambda r, c, mount_base, include=None: calls.append("attach") or {"vg_uuid": "v", "mounts": dict(mounts)})
     monkeypatch.setattr(twin_sync, "detach_twin", lambda r, a, mount_base: calls.append("detach"))
-    monkeypatch.setattr(rd.data_vault, "backup_all", lambda r, vols, dest, message, tag: calls.append(("backup", sorted(vols), str(dest))) or [{"role": "USER_PERSONAL"}])
+    monkeypatch.setattr(rd.data_history, "backup_all", lambda r, vols, dest, message, tag: calls.append(("backup", sorted(vols), str(dest))) or [{"role": "USER_PERSONAL"}])
     return calls
 
 
@@ -31,7 +31,7 @@ def test_update_runs_only_after_the_backup_and_detach(fakes):
 
 
 def test_no_installer_cache_stops_before_any_backup(fakes, monkeypatch):
-    monkeypatch.setattr(twin_sync, "attach_twin", lambda r, c, mount_base: {"vg_uuid": "v", "mounts": {"USER_PERSONAL": "/x"}})
+    monkeypatch.setattr(twin_sync, "attach_twin", lambda r, c, mount_base, include=None: {"vg_uuid": "v", "mounts": {"USER_PERSONAL": "/x"}})
     with pytest.raises(rd.RebuildError):
         rd.rebuild(R(), serial="S")
     assert not any(isinstance(c, tuple) for c in fakes)
@@ -52,6 +52,8 @@ def test_missing_role_volumes_are_reported_for_in_place_adding_not_wiping(fakes)
 
 def test_histories_are_filed_on_the_parent_while_the_drive_is_attached(fakes, monkeypatch):
     seen = []
-    monkeypatch.setattr(rd.parent_vault, "push", lambda r, path, root, child_ids, this_child, role: seen.append((fakes[-1], role, root, child_ids)) or {"role": role})
-    out = rd.rebuild(R(), serial="S", parent_root="/parent")
-    assert seen and seen[0][0][0] == "backup" and "detach" not in fakes[:-1] and out["parent_backup"] == [{"role": "USER_PERSONAL"}]
+    monkeypatch.setattr(rd.mirror_history, "push", lambda r, path, root, child_ids, this_child, role: seen.append((fakes[-1], role, root, child_ids)) or {"role": role})
+    monkeypatch.setattr(rd.mirror_history, "migrate_legacy", lambda root: [])
+    monkeypatch.setattr(rd.mirror, "refresh", lambda *a, **k: {"files_changed": 0})
+    out = rd.rebuild(R(), serial="S", mirror_root="/parent")
+    assert seen and seen[0][0][0] == "backup" and "detach" not in fakes[:-1] and out["history"] == [{"role": "USER_PERSONAL"}]

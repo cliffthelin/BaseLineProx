@@ -2,12 +2,12 @@ import subprocess
 
 import pytest
 
-import data_vault as dv
+import data_history as dv
 from repair import RealRunner
 
 
 def git_out(volume, *args):
-    return subprocess.run(["git", "--git-dir", str(volume / dv.VAULT), *args], capture_output=True, text=True).stdout
+    return subprocess.run(["git", "--git-dir", str(volume / dv.HISTORY), *args], capture_output=True, text=True).stdout
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def vol(tmp_path):
 
 def test_first_snapshot_puts_the_volume_under_git(vol):
     out = dv.snapshot(RealRunner(), vol, "USER_PERSONAL", message="build")
-    assert out["created"] and out["changed"] and (vol / dv.VAULT / "HEAD").exists()
+    assert out["created"] and out["changed"] and (vol / dv.HISTORY / "HEAD").exists()
     assert "docs/a.txt" in git_out(vol, "ls-tree", "-r", "--name-only", "HEAD")
 
 
@@ -44,7 +44,7 @@ def test_live_databases_images_and_oversize_files_are_not_versioned(vol, monkeyp
     assert out["left_out_too_large"] == ["big.bin"]
 
 
-def test_vault_and_twin_state_never_enter_the_history(vol):
+def test_the_history_directory_and_twin_state_never_enter_the_history(vol):
     (vol / ".baseline-twin").mkdir()
     (vol / ".baseline-twin" / "s").write_text("x")
     dv.snapshot(RealRunner(), vol, "USER_PERSONAL", message="m")
@@ -75,3 +75,12 @@ def test_backup_all_reports_a_missing_volume(vol, tmp_path):
     out = dv.backup_all(RealRunner(), {"USER_PERSONAL": str(vol)}, tmp_path / "bk", message="m", tag="t")
     assert any(e["role"] == "USER_PERSONAL" and e["bundle"].endswith(".bundle") for e in out)
     assert {"role": "APPDATA_ADMIN", "skipped": "not mounted"} in out
+
+
+def test_a_history_directory_with_the_old_name_is_renamed_not_copied(vol):
+    r = RealRunner()
+    dv.snapshot(r, vol, "USER_PERSONAL", message="m")
+    (vol / dv.HISTORY).rename(vol / dv.LEGACY_HISTORY)
+    inode = (vol / dv.LEGACY_HISTORY).stat().st_ino
+    out = dv.snapshot(r, vol, "USER_PERSONAL", message="m2")
+    assert out["created"] is False and (vol / dv.HISTORY).stat().st_ino == inode and not (vol / dv.LEGACY_HISTORY).exists()

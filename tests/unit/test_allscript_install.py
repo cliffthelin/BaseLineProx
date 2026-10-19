@@ -367,3 +367,22 @@ def test_an_unreadable_or_ambiguous_drive_listing_counts_as_built_so_nothing_is_
 def test_the_installer_has_no_option_that_rewrites_an_existing_build():
     text = _PATH.read_text()
     assert "--reinstall" not in text.split("def main")[1] and "args.force" not in text
+
+
+def test_the_newest_recovery_snapshot_that_verifies_is_the_one_used():
+    folders = ["/b/baseline-recovery-20261001T000000Z-a", "/b/baseline-recovery-20261011T000000Z-b", "/b/baseline-recovery-20261018T000000Z-c"]
+    bad = {"/b/baseline-recovery-20261018T000000Z-c"}
+
+    def verify(folder):
+        if folder in bad:
+            raise RuntimeError("did not verify")
+    assert allscript.latest_verified_recovery(folders, verify) == "/b/baseline-recovery-20261011T000000Z-b"
+    assert allscript.latest_verified_recovery(folders, lambda f: (_ for _ in ()).throw(RuntimeError("no"))) is None
+    assert allscript.latest_verified_recovery([], verify) is None
+
+
+def test_update_is_a_root_stage_that_touches_the_drive_but_never_erases_it():
+    assert "update" in allscript.ROOT_STAGES and "update" in allscript.DRIVE_STAGES
+    assert allscript.select_stages("update", None) == ["update"]
+    text = _PATH.read_text()
+    assert text.index("stages = [\"update\"]") < text.index('if "install" in stages and not wipe_authorized(CONFIRMED_WIPE)')      # the erase confirmation is only asked of a drive with no build

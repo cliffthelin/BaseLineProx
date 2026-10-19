@@ -77,7 +77,7 @@ FEATURES = (
     F("build.drives", "installer", "Name the drives this machine builds for", "/drive-names", (W, '"/drive-names/assign"')),
     F("managed.mode", "installer", "Managed server mode", "/managed-mode", (W, '"/managed-mode"')),
     F("managed.web_address", "installer", "Web address", "/web-address", (W, '"/web-address"')),
-    F("managed.parent_vault", "installer", "Parent vault: browse and restore backups", "/managed-mode"),
+    F("managed.mirror_history", "installer", "Mirror: browse version history and restore", "/managed-mode"),
     F("managed.remote_rebuild", "installer", "Remote rebuild: setup, request, approve", "/managed-mode"),
 )
 

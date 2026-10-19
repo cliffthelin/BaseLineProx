@@ -68,7 +68,7 @@ def plan_volumes(runner, disk_path) -> list:
             for lv in lvs:
                 if lv["segtype"] in SKIP_SEGTYPES or lv["lv_name"].startswith("["):
                     continue
-                out.append({"kind": "lv", "name": f"{row['vg_name']}.{lv['lv_name']}", "path": lv["lv_path"], "size": int(float(lv["lv_size"])), "fstype": None,
+                out.append({"kind": "lv", "name": f"{row['vg_name']}.{lv['lv_name']}", "lv": lv["lv_name"], "path": lv["lv_path"], "size": int(float(lv["lv_size"])), "fstype": None,
                             "vg_name": row["vg_name"], "vg_uuid": row["vg_uuid"]})
     return out
 

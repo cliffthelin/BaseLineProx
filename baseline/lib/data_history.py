@@ -1,7 +1,7 @@
-"""Every data volume is under git from the build, and a rebuild backs it up first.
+"""Every data volume keeps its version history (git) from the build, and a rebuild records it first.
 
 A rebuild updates the code layer and may add configuration, user data or app data; it never formats a drive and never discards data. So each data volume (the user's and the applications'
-files) keeps its own version history in a git directory kept beside the files (`.baseline-vault`, never inside the user's folders, never file-synced to the twin: each drive keeps its own
+files) keeps its own version history in a git directory kept beside the files (`.baseline-history`, never inside the user's folders, never file-synced to the twin: each drive keeps its own
 history). `snapshot` records the current state as a commit (and a tag when asked); `bundle` writes a self-contained copy of the whole history, which lands on a volume the twin carries.
 
 What is left out of the history is what must never be versioned as files: live databases and journals, running VMs' disk images, sockets, pid and lock files, and any single file over
@@ -16,22 +16,23 @@ from pathlib import Path
 import twin_sync
 from write_once import write_if_changed
 
-VAULT = ".baseline-vault"
+HISTORY = ".baseline-history"
+LEGACY_HISTORY = ".baseline-vault"          # the name this directory had before the rename; moved to the new name when found
 MAX_FILE_BYTES = 64 * 1024 * 1024
 DATA_ROLES = ("USER_ADMIN", "USER_PERSONAL", "APPDATA_ADMIN", "APPDATA_PERSONAL")
-_NEVER_TRACKED = twin_sync._NEVER + (twin_sync.STATE_DIR + "/", VAULT + "/", "lost+found/")
+_NEVER_TRACKED = twin_sync._NEVER + (twin_sync.STATE_DIR + "/", HISTORY + "/", LEGACY_HISTORY + "/", "lost+found/")
 
 
-class VaultError(RuntimeError):
+class HistoryError(RuntimeError):
     pass
 
 
 def _git(runner, volume, *args, timeout=600):
-    argv = ["git", "--git-dir", str(Path(volume) / VAULT), "--work-tree", str(volume), "-c", "user.name=Baseline", "-c", "user.email=baseline@localhost",
+    argv = ["git", "--git-dir", str(Path(volume) / HISTORY), "--work-tree", str(volume), "-c", "user.name=Baseline", "-c", "user.email=baseline@localhost",
             "-c", "core.quotepath=off", "-c", "gc.auto=0", *args]
     done = runner.run(argv, timeout=timeout)
     if done.returncode:
-        raise VaultError(f"git {args[0]} failed on {volume}: {(done.stderr or done.stdout or '').strip()[-300:]}")
+        raise HistoryError(f"git {args[0]} failed on {volume}: {(done.stderr or done.stdout or '').strip()[-300:]}")
     return (done.stdout or "").strip()
 
 
@@ -46,7 +47,7 @@ def oversize(volume, roots) -> list:
     for root in roots:
         base = Path(volume) / root
         for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [d for d in dirnames if d not in (VAULT, twin_sync.STATE_DIR, "lost+found")]
+            dirnames[:] = [d for d in dirnames if d not in (HISTORY, LEGACY_HISTORY, twin_sync.STATE_DIR, "lost+found")]
             for name in filenames:
                 path = Path(dirpath) / name
                 try:
@@ -61,8 +62,10 @@ def ensure(runner, volume, role: str) -> dict:
     """Put the volume under git if it is not already; the same call at build time and at every rebuild."""
     volume = Path(volume)
     if not volume.is_dir():
-        raise VaultError(f"{volume} is not a folder")
-    created = not (volume / VAULT / "HEAD").exists()
+        raise HistoryError(f"{volume} is not a folder")
+    if (volume / LEGACY_HISTORY).is_dir() and not (volume / HISTORY).exists():
+        (volume / LEGACY_HISTORY).rename(volume / HISTORY)                      # the same history under its new name; nothing is copied
+    created = not (volume / HISTORY / "HEAD").exists()
     if created:
         _git(runner, volume, "init", "-q")
     return {"volume": str(volume), "role": role, "created": created}
@@ -73,11 +76,11 @@ def snapshot(runner, volume, role: str, *, message: str, tag: str | None = None)
     info = ensure(runner, volume, role)
     roots = tuple(r for r in tracked_roots(role) if r == "." or (Path(volume) / r).is_dir())      # a folder that does not exist yet has nothing to record
     big = oversize(volume, roots)
-    write_if_changed(Path(volume) / VAULT / "info" / "exclude", "\n".join([*_NEVER_TRACKED, *("/" + b for b in big)]) + "\n")
+    write_if_changed(Path(volume) / HISTORY / "info" / "exclude", "\n".join([*_NEVER_TRACKED, *("/" + b for b in big)]) + "\n")
     if roots:
         _git(runner, volume, "add", "-A", "--", *roots)
     dirty = bool(roots) and bool(_git(runner, volume, "status", "--porcelain", "--", *roots))
-    has_head = runner.run(["git", "--git-dir", str(Path(volume) / VAULT), "rev-parse", "-q", "--verify", "HEAD"], timeout=30).returncode == 0
+    has_head = runner.run(["git", "--git-dir", str(Path(volume) / HISTORY), "rev-parse", "-q", "--verify", "HEAD"], timeout=30).returncode == 0
     if dirty or not has_head:
         _git(runner, volume, "commit", "-q", "--allow-empty", "-m", message)
     commit = _git(runner, volume, "rev-parse", "HEAD")

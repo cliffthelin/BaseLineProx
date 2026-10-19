@@ -1354,11 +1354,11 @@ def test_managed_mode_page_defaults_to_standalone_and_saves_a_change(tmp_path):
         status, body = case.get('/managed-mode')
         assert status == 200 and b"On its own" in body and b"nothing ever connects to a parent" in body
         assert any(p == "/managed-mode" for p, _ in bw.NAV_TABS)
-        assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': None, 'remote_rebuild': False})[0] == 400
-        assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': '/etc/not-allowed', 'remote_rebuild': False})[0] == 400      # validated again on the server
-        assert case.post_json('/managed-mode', {'mode': 'managed', 'parent_vault': str(tmp_path / 'v'), 'remote_rebuild': False})[0] == 200
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'mirror_root': None, 'remote_rebuild': False})[0] == 400
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'mirror_root': '/etc/not-allowed', 'remote_rebuild': False})[0] == 400      # validated again on the server
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'mirror_root': str(tmp_path / 'v'), 'remote_rebuild': False})[0] == 200
         assert json.loads(f.read_text())["mode"] == "managed"
-        assert case.post_json('/managed-mode', {'mode': 'standalone', 'parent_vault': None})[0] == 200
+        assert case.post_json('/managed-mode', {'mode': 'standalone', 'mirror_root': None})[0] == 200
         assert json.loads(f.read_text())["mode"] == "standalone"
     finally:
         case.close()
@@ -1368,7 +1368,7 @@ def test_managed_mode_needs_an_operator_account(tmp_path):
     case = _RealServerCase(_base_deps(managed_file=tmp_path / "m.json"))
     try:
         case.token = case.server.deps['sessions'].create('viewer', now=1700000000, role='viewer').token
-        assert case.post_json('/managed-mode', {'mode': 'standalone', 'parent_vault': None})[0] == 403
+        assert case.post_json('/managed-mode', {'mode': 'standalone', 'mirror_root': None})[0] == 403
     finally:
         case.close()
 

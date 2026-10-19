@@ -50,7 +50,7 @@ def mode_for(role: str):
 
 def filter_args(role: str | None) -> list:
     """The rsync filters for a role: never the live-state files, and for a role with an include list only those folders."""
-    args = [f"--exclude={pattern}" for pattern in _NEVER] + ["--exclude=/.baseline-vault/"]          # each drive keeps its own data history (data_vault.py)
+    args = [f"--exclude={pattern}" for pattern in _NEVER] + ["--exclude=/.baseline-history/", "--exclude=/.baseline-vault/"]          # each drive keeps its own data history (data_vault.py)
     include = (_RULES.get(role) or {}).get("include") if role else None
     if include:
         for folder in include:
@@ -283,7 +283,7 @@ def _cmd(runner, argv, what, timeout=120):
     return proc.stdout or ""
 
 
-def attach_twin(runner, peer: str, *, mount_base: str = "/mnt/TWIN") -> dict:
+def attach_twin(runner, peer: str, *, mount_base: str = "/mnt/TWIN", include=None) -> dict:
     """Activate the twin drive's volume group (selected by UUID, because both drives may carry a group of the same name) and mount its syncable volumes under `mount_base/<ROLE>`. The twin is found by its child
     UUID and must be exactly one attached drive, and its group must not be the running system's own."""
     import cardinality
@@ -307,7 +307,8 @@ def attach_twin(runner, peer: str, *, mount_base: str = "/mnt/TWIN") -> dict:
     mounts = {}
     try:
         for lv_name, _, _, label, _ in di.baseline_volumes_for():
-            if mode_for(label) is None or lv_name not in paths:
+            wanted = include(label) if include is not None else mode_for(label) is not None             # the twin sync mounts what it syncs; a backup names its own volumes
+            if not wanted or lv_name not in paths:
                 continue
             target = Path(mount_base) / label
             target.mkdir(parents=True, exist_ok=True)

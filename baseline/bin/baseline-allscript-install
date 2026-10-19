@@ -73,7 +73,7 @@ REHEARSAL_LVM = dict(lvm_maxroot=16, lvm_maxvz=8, lvm_swapsize=2)   # leaves mos
 TARGET_NAME = None                    # chosen per run by select_target(); there is deliberately no default
 SERIAL = None                         # the chosen target's serial
 PROTECTED = None                      # the other drive's serial: never a target in this run
-DRIVE_STAGES = {"preflight", "recovery", "install", "firstboot", "kiosk", "identity"}  # touch a real drive (rehearse does not)
+DRIVE_STAGES = {"preflight", "recovery", "install", "firstboot", "kiosk", "identity", "update"}  # touch a real drive (rehearse does not)
 WORK = None                           # set by select_work(): BUILD/allscript-<target>
 SOURCE_ISO = Path("/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso")
 _ASSISTANT_REL = "extracted/usr/bin/proxmox-auto-install-assistant"
@@ -97,8 +97,8 @@ INSTALL_VM = None                                         # the install stage's 
 OPENED_PATH = None                                        # the device node that session opened (a USB reset changes it)
 
 STAGES = ("preflight", "recovery", "cache", "install", "firstboot", "kiosk")
-OPTIONAL_STAGES = ("rehearse", "identity")        # run explicitly: --stage rehearse, then --stage firstboot/kiosk in one go
-ROOT_STAGES = {"recovery"}             # imaging needs a complete process-use inspection (drive_recovery.quiesce_source); install does not,
+OPTIONAL_STAGES = ("rehearse", "identity", "update")        # run explicitly: --stage rehearse, then --stage firstboot/kiosk in one go
+ROOT_STAGES = {"recovery", "update"}             # imaging needs a complete process-use inspection (drive_recovery.quiesce_source); install does not,
                                        # once the drive carries no LVM volumes (see deactivate_target_vgs)
 
 
@@ -108,8 +108,8 @@ def select_stages(stage, start):
     if stage == "rehearse":
         return ["rehearse", "firstboot", "kiosk"]           # one KVM session from install to kiosk
     if stage is not None:
-        if stage not in STAGES + ("identity",):
-            raise ValueError(f"unknown stage {stage!r}; stages are: {', '.join(STAGES)}, identity")
+        if stage not in STAGES + ("identity", "update"):
+            raise ValueError(f"unknown stage {stage!r}; stages are: {', '.join(STAGES)}, identity, update")
         return [stage]
     if start is not None:
         if start not in STAGES:
@@ -379,6 +379,39 @@ def identify(r):
         protected = None
     refuse_protected(target, protected)
     return target
+
+
+def latest_verified_recovery(folders, verify):
+    """The newest recovery snapshot (by folder name, which starts with its UTC time) that verifies, or None."""
+    for folder in sorted(folders, reverse=True):
+        try:
+            verify(folder)
+            return folder
+        except Exception:                                   # noqa: BLE001 - a snapshot that does not verify is not used
+            continue
+    return None
+
+
+def stage_update(r):
+    """Bring an existing build up to date in place: nothing is erased, only what differs is written (code, the cache and OS images, the mirror). Asks the system for root itself (the installer's own elevation)."""
+    import drive_recovery
+    import update_bundle
+    if not drive_has_build(r):
+        raise RuntimeError(f"{TARGET_NAME} carries no Baseline build, so there is nothing to update; install it first")
+    candidates = sorted(BACKUP_ROOT.glob("baseline-recovery-*")) if BACKUP_ROOT.is_dir() else []
+    recovery = latest_verified_recovery(candidates, lambda f: drive_recovery.verify_snapshot(r, f, expected_serial=SERIAL))
+    if recovery is None:
+        say("no verified recovery snapshot of", TARGET_NAME, "yet; making one (only what the drive uses is stored)")
+        stage_recovery(r)
+        recovery = Path(journal()["stages"]["recovery"]["folder"])
+    bundle = update_bundle.prepare_update_bundle(r, REPO, BUILD / "update-bundles", TARGET_NAME, known_targets=set(DRIVES))
+    say("updating", TARGET_NAME, "in place from", bundle.name, "with recovery snapshot", Path(recovery).name)
+    done = subprocess.run([sys.executable, str(REPO / "baseline/bin/baseline-rebuild-drive"), "--serial", SERIAL, "--input-bundle", str(bundle), "--recovery-folder", str(recovery)],
+                          capture_output=True, text=True)
+    sys.stdout.write(done.stdout)
+    if done.returncode:
+        raise RuntimeError(f"the in-place update did not complete: {(done.stderr or done.stdout).strip()[-400:]}")
+    record("update", bundle=bundle.name, recovery=str(recovery), build=CURRENT_BUILD)
 
 
 def drive_has_build(r) -> bool:
@@ -864,8 +897,6 @@ def main():
     WORK = work_dir(TARGET_NAME, stages)
     if TARGET_NAME:
         say(f"target {TARGET_NAME} ({SERIAL}); protected for this run: {PROTECTED}; work folder {WORK}")
-    if "install" in stages and not wipe_authorized(CONFIRMED_WIPE):
-        raise RuntimeError(f"the install stage erases {TARGET_NAME}: add  --confirm-wipe {SERIAL}")
     needs_root = root_required(stages)
     if needs_root and os.geteuid() != 0:
         import elevate
@@ -889,14 +920,14 @@ def main():
         verdict = build_currency.assess(journal()["stages"].get("install", {}).get("build"), CURRENT_BUILD)
         say(f"build check for {TARGET_NAME}: {verdict['action']} - {verdict['reason']}")
         if "install" in journal()["stages"] or drive_has_build(r):
-            say(f"{TARGET_NAME} already carries a Baseline build ({verdict['reason']}). An existing build is only ever updated in place "
-                "(baseline-rebuild-drive); the installer never rewrites one and has no option to.")
-            stages = [s for s in stages if s not in ("recovery", "install", "firstboot", "kiosk")]
-            if not stages:
-                return
+            say(f"{TARGET_NAME} already carries a Baseline build ({verdict['reason']}). An existing build is only ever updated in place; "
+                "the installer never rewrites one and has no option to. Updating it now.")
+            stages = ["update"]
+    if "install" in stages and not wipe_authorized(CONFIRMED_WIPE):          # only a drive with no build can reach here: an existing build was switched to an in-place update above
+        raise RuntimeError(f"the install stage erases {TARGET_NAME}: add  --confirm-wipe {SERIAL}")
     functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,
                  "rehearse": stage_rehearse, "install": stage_install, "firstboot": stage_session_firstboot,
-                 "kiosk": stage_session_kiosk, "identity": lambda r: finalize_target_identity()}
+                 "kiosk": stage_session_kiosk, "identity": lambda r: finalize_target_identity(), "update": stage_update}
     try:
         for stage in stages:
             say(f"=== {stage} ===")

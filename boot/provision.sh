@@ -15,6 +15,17 @@ cp() {
   command cp "$@"
 }
 
+# Nothing already correct is rewritten. `put FILE < content` writes FILE only when its content would change; `sync_tree SRC DST` copies only files that differ (a file with the same content is left untouched).
+put() {
+  _t=$(mktemp) && cat > "$_t" || return 1
+  if [ -f "$1" ] && cmp -s "$_t" "$1"; then rm -f "$_t"; else cat "$_t" > "$1" && rm -f "$_t"; fi
+}
+sync_tree() {
+  ( cd "$1" && find . -type f -not -path '*/__pycache__/*' -print0 ) | while IFS= read -r -d '' f; do
+    if ! cmp -s "$1/$f" "$2/$f" 2>/dev/null; then mkdir -p "$(dirname "$2/$f")" && command cp "$1/$f" "$2/$f"; fi
+  done
+}
+
 # Self-contained installs (baseline-first-boot-install) set BASELINE_PACKAGE_CACHE to the drive's own offline
 # package cache and APT_CONFIG to sources that point only at it: nothing below then reaches the internet.
 if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
@@ -184,7 +195,7 @@ cp "$SRC/baseline/bin/baseline-persist-bind-mounts" /opt/baseline/bin/baseline-p
 # for an operator to run by hand (`baseline-drive-inventory collect`)
 # on demand. Collects only; never repairs, reconfigures, or restarts
 # anything.
-cp -r "$SRC/baseline/lib/inventory" /opt/baseline/lib/inventory
+sync_tree "$SRC/baseline/lib/inventory" /opt/baseline/lib/inventory
 cp "$SRC/baseline/bin/baseline-drive-inventory" /opt/baseline/bin/baseline-drive-inventory
 # Track A5: unified sensors + per-VM dashboard. proxmox_vm_metrics.py
 # queries Proxmox's own pvesh for live/historical per-VM stats (no
@@ -351,7 +362,7 @@ cp "$SRC/boot/baseline-storage-verify.service" /etc/systemd/system/baseline-stor
 cp "$SRC/boot/baseline-storage-reconcile.service" /etc/systemd/system/baseline-storage-reconcile.service
 for storage_unit in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service; do
     mkdir -p "/etc/systemd/system/$storage_unit.d"
-    cat > "/etc/systemd/system/$storage_unit.d/storage.conf" <<'STORAGE_GATE'
+    put "/etc/systemd/system/$storage_unit.d/storage.conf" <<'STORAGE_GATE'
 [Unit]
 Requires=baseline-storage-verify.service
 After=baseline-storage-verify.service
@@ -359,7 +370,7 @@ STORAGE_GATE
 done
 # Proxmox's storage definitions are reconciled once pve-cluster runs (after the redirects); Baseline's own services wait for that.
 for reconcile_unit in baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service; do
-    cat > "/etc/systemd/system/$reconcile_unit.d/reconcile.conf" <<'RECONCILE_GATE'
+    put "/etc/systemd/system/$reconcile_unit.d/reconcile.conf" <<'RECONCILE_GATE'
 [Unit]
 Requires=baseline-storage-reconcile.service
 After=baseline-storage-reconcile.service
@@ -399,7 +410,7 @@ cp "$SRC/baseline/lib/web_address_page.py" /opt/baseline/lib/web_address_page.py
 cp "$SRC/baseline/bin/baseline-managed" /opt/baseline/bin/baseline-managed
 chmod 755 /opt/baseline/bin/baseline-managed
 cp "$SRC/baseline/lib/twin_sync.py" /opt/baseline/lib/twin_sync.py               # keeps two paired Baseline drives the same (DR272)
-cp "$SRC/baseline/lib/data_vault.py" /opt/baseline/lib/data_vault.py               # every data volume under git; backed up at a rebuild
+cp "$SRC/baseline/lib/data_history.py" /opt/baseline/lib/data_history.py           # every data volume keeps its version history; recorded at a rebuild
 cp "$SRC/baseline/bin/baseline-twin" /opt/baseline/bin/baseline-twin
 chmod 755 /opt/baseline/bin/baseline-twin
 # Deliberate drive enrollment and the installer plan (discover/autofill/validate/compile), 2026-10-03.
@@ -703,7 +714,7 @@ systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
 # smartd exits 17 ("no SMART devices to monitor") on a machine whose drives are all USB bridges or virtual; that is not a failure.
 mkdir -p /etc/systemd/system/smartmontools.service.d
-cat > /etc/systemd/system/smartmontools.service.d/baseline.conf <<'SMARTD_DROPIN'
+put /etc/systemd/system/smartmontools.service.d/baseline.conf <<'SMARTD_DROPIN'
 [Service]
 SuccessExitStatus=17
 SMARTD_DROPIN
@@ -716,14 +727,14 @@ fi
 # The drive itself sits behind a USB-NVMe bridge. With UAS (the fast USB mode) the host controller stalled the command queue
 # ("Transfer event ... for unknown stream ring", commands aged 61 s, resets): the root filesystem went read-only and the machine froze
 # (PC601 on two machines, 2026-10-12). These bridges are told to use plain usb-storage instead, which every controller handles.
-cat > /etc/modprobe.d/baseline-usb-storage.conf <<'USB_QUIRKS'
+put /etc/modprobe.d/baseline-usb-storage.conf <<'USB_QUIRKS'
 # Baseline: no UAS for USB-NVMe bridges that stall the xHCI stream rings (Realtek RTL9210/RTL9220, JMicron JMS583).
 options usb-storage quirks=0bda:9210:u,0bda:9220:u,152d:0583:u
 USB_QUIRKS
 update-initramfs -u -k all || true
 systemctl daemon-reload
 # Proxmox as a fresh host should show it; the subscription notice comes back with a package upgrade, so the hook removes it again.
-cat > /etc/apt/apt.conf.d/99baseline-proxmox-defaults <<'APT_HOOK'
+put /etc/apt/apt.conf.d/99baseline-proxmox-defaults <<'APT_HOOK'
 DPkg::Post-Invoke { "/opt/baseline/bin/baseline-proxmox-defaults nag >/dev/null 2>&1 || true"; };
 APT_HOOK
 /opt/baseline/bin/baseline-proxmox-defaults || true
@@ -742,7 +753,7 @@ systemctl enable baseline-twin-sync.timer baseline-twin-health.timer
 chmod 644 /etc/systemd/system/baseline*.service /etc/systemd/system/baseline*.timer 2>/dev/null || true
 # The browser's bookmarks bar: where Proxmox's tools and Baseline are, visible on every page.
 mkdir -p /etc/chromium/policies/managed
-cat > /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
+put /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
 {
   "BookmarkBarEnabled": true,
   "ManagedBookmarks": [

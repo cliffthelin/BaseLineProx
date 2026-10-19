@@ -3,10 +3,10 @@
 # Usage: sudo baseline/bin/baseline-rebuild-setup [--group GROUP] [--hours N] [DRIVE ...]   (default: every drive in the operator's drives file, group = the caller's primary group, 24 hours)
 # Makes a root-owned copy of the SERVICE (it only changes when this is re-run); the source a rebuild installs is pinned per request, at the commit current when the request is made, writes its settings, and enables the systemd unit.
 set -eu
-# Remote rebuild is part of managed server mode, which is opt-in: baseline-managed enable --parent-vault FOLDER --remote-rebuild
+# Remote rebuild is part of managed server mode, which is opt-in: baseline-managed enable --mirror-root FOLDER --remote-rebuild
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
 REPO0=$(cd "$(dirname "$0")/../.." && pwd)
-python3 -c "import sys; sys.path.insert(0, sys.argv[1] + '/baseline/lib'); import managed_mode as m; sys.exit(0 if m.remote_rebuild_enabled() else 1)" "$REPO0" || { echo "managed server mode with remote rebuild is not enabled; run: baseline/bin/baseline-managed enable --parent-vault FOLDER --remote-rebuild" >&2; exit 1; }
+python3 -c "import sys; sys.path.insert(0, sys.argv[1] + '/baseline/lib'); import managed_mode as m; sys.exit(0 if m.remote_rebuild_enabled() else 1)" "$REPO0" || { echo "managed server mode with remote rebuild is not enabled; run: baseline/bin/baseline-managed enable --mirror-root FOLDER --remote-rebuild" >&2; exit 1; }
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 OPERATOR=${SUDO_USER:-${PKEXEC_UID:+$(id -nu "$PKEXEC_UID")}}
 GROUP=""; HOURS=24

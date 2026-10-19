@@ -80,3 +80,19 @@ def test_links_and_empty_directories_survive_and_holes_are_not_expanded(tmp_path
     mirror.sync_volume(Real(), src, dst)
     assert os.stat(dst / "a").st_ino == os.stat(dst / "b").st_ino and (dst / "empty").is_dir() and os.readlink(dst / "link") == "a"
     assert os.stat(dst / "holey").st_blocks * 512 < 1 * 2 ** 20                                    # the 64 MiB of hole is not stored
+
+
+def test_cache_sync_adds_only_what_is_missing_and_never_deletes(tmp_path):
+    import cache_sync
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    tree(src, 40)
+    (dst / "d0").mkdir(parents=True)
+    import shutil
+    shutil.copy2(src / "d0" / "f0.txt", dst / "d0" / "f0.txt")                   # already there, same content and time
+    (dst / "only-here.txt").write_text("keep me")                              # not in the source
+    measured = cache_sync.measure(Real(), src, dst)
+    assert measured["files_changed"] == 39                                      # 40 files, one already there
+    done = Real().run([*cache_sync.FLAGS, str(src) + "/", str(dst) + "/"])
+    assert done.returncode == 0 and (dst / "only-here.txt").read_text() == "keep me"
+    again = cache_sync.measure(Real(), src, dst)
+    assert again["files_changed"] == 0

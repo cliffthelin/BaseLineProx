@@ -2,7 +2,7 @@
 """Turn managed server mode on or off. Off (standalone) is the default; nothing requires a parent.
 
     baseline-managed status
-    baseline-managed enable --parent-vault FOLDER [--remote-rebuild]
+    baseline-managed enable --mirror-root FOLDER [--remote-rebuild]
     baseline-managed disable
 """
 import argparse
@@ -19,13 +19,13 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status")
     en = sub.add_parser("enable")
-    en.add_argument("--parent-vault", required=True)
+    en.add_argument("--mirror-root", required=True, help="the drive or folder that holds the mirror")
     en.add_argument("--remote-rebuild", action="store_true")
     sub.add_parser("disable")
     args = parser.parse_args(argv)
     try:
         if args.cmd == "enable":
-            result = mm.save({"mode": "managed", "parent_vault": args.parent_vault, "remote_rebuild": args.remote_rebuild})
+            result = mm.save({"mode": "managed", "mirror_root": args.mirror_root, "remote_rebuild": args.remote_rebuild})
         elif args.cmd == "disable":
             result = mm.save({"mode": "standalone"})
         else:

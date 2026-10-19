@@ -19,6 +19,7 @@ import uuid
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'lib'))
 import drive_installer as di
+import write_once
 import drive_recovery
 import physical_device_safety as pds
 import single_drive_storage as storage
@@ -449,7 +450,7 @@ def finish(runner,target,pv):
         efi=ROOT/'boot/efi';efi.mkdir(parents=True,exist_ok=True)
         run(['mount',target['path']+'2',efi]);mounted.append(efi)
         for tree in ('baseline','boot','automation','packaging','docs'):
-            guard();shutil.copytree(REPO/tree,ROOT/'opt/baseline-src'/tree,dirs_exist_ok=True,
+            guard();write_once.copy_changed(REPO/tree,ROOT/'opt/baseline-src'/tree,
                 ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
         console=ROOT/'opt/baseline-src/tests/console_font_check.sh'
         guard();console.parent.mkdir(parents=True,exist_ok=True)

@@ -31,6 +31,40 @@ class UpdateError(RuntimeError):
     pass
 
 
+from write_once import copy_changed        # the one way a tree is copied onto an existing build: only files that differ are written
+
+
+BOOT_INPUTS = ('etc/initramfs-tools','etc/default/grub','etc/default/grub.d','etc/modules','etc/modules-load.d','etc/modprobe.d','etc/fstab','etc/crypttab','etc/kernel','etc/grub.d')
+
+
+def boot_inputs_digest(root) -> str:
+    """A digest of everything that decides what the boot images and the boot menu contain: their configuration, and which kernels and images exist (name and size, not content)."""
+    import hashlib
+    root = Path(root)
+    digest = hashlib.sha256()
+    for relative in BOOT_INPUTS:
+        base = root / relative
+        files = [base] if base.is_file() else sorted(p for p in base.rglob('*') if p.is_file()) if base.is_dir() else []
+        for path in files:
+            digest.update(str(path.relative_to(root)).encode() + b'\0' + hashlib.sha256(path.read_bytes()).digest())
+    boot = root / 'boot'
+    if boot.is_dir():
+        for path in sorted(boot.iterdir()):
+            if path.name.startswith(('vmlinuz-', 'initrd.img-', 'config-')) and path.is_file():
+                digest.update(path.name.encode() + b'\0' + str(path.stat().st_size).encode())
+    return digest.hexdigest()
+
+
+def all_inactive(inventory) -> bool:
+    """True when every logical volume of the group is inactive (a group that is not active reports every volume's use-state as unknown, not as free)."""
+    return bool(inventory) and all(len(row.get('lv_attr','')) > 4 and row['lv_attr'][4] != 'a' for row in inventory)
+
+
+def volumes_in_use(inventory) -> list:
+    """The volumes that are open or whose use-state is unknown. A thin pool is held open by its own thin volumes once they are active: that is not a user, so only the volumes are checked."""
+    return [row['lv_name'] for row in inventory if not row.get('lv_attr','').startswith('t') and row.get('lv_device_open') != '']
+
+
 def baseline_growth_plan(current_bytes, vg_free_bytes, *, target_bytes=50*1024**3, reserve_bytes=16*1024**3):
     values=(current_bytes,vg_free_bytes,target_bytes,reserve_bytes)
     if any(type(value) is not int or value<0 for value in values) or not current_bytes or not target_bytes:
@@ -139,24 +173,45 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
     vg = identity['vg_name']
     if not re.fullmatch(r'[A-Za-z0-9_+.-]+',vg) or vg.startswith('-'):
         raise UpdateError('Invalid target VG identity')
-    inventory = storage._json_command(runner,['lvs','--devices',pv,'--reportformat','json',
-        '-o','lv_name,lv_attr,lv_device_open',vg])['report'][0]['lv']
+    def read_inventory():
+        return storage._json_command(runner,['lvs','--devices',pv,'--reportformat','json',
+            '-o','lv_name,lv_attr,lv_device_open',vg])['report'][0]['lv']
+    inventory = read_inventory()
+    activated_here = False
+    # A volume group that is not active reports every volume's use-state as unknown. When ALL of them are inactive nothing can be using them, so the group
+    # is activated here (by its UUID: another drive may carry a group of the same name) and deactivated again when the update ends.
+    if all_inactive(inventory):
+        activation = runner.run(['vgchange','-ay','--select','vg_uuid='+identity['vg_uuid']],timeout=120)
+        if activation.returncode:
+            raise UpdateError('The target volume group could not be activated to update it')
+        activated_here = True
+        inventory = read_inventory()
     names = {row['lv_name'] for row in inventory}
     roles = di.baseline_volumes_for()
     if len(names) != len(inventory) or not {'root',*(v[0] for v in roles)}.issubset(names):
         raise UpdateError('Installed storage roles are incomplete; recovery/repair required')
-    if any(row.get('lv_device_open') != '' for row in inventory):
+    def deactivate():
+        if activated_here:
+            runner.run(['vgchange','-an','--select','vg_uuid='+identity['vg_uuid']],timeout=120)
+    # a thin pool is held open by its own thin volumes once they are active: that is not a user of the volumes, so only the volumes themselves are checked
+    if volumes_in_use(inventory):
+        deactivate()
         raise UpdateError('Target volumes are open or use-state is unknown')
     for name in ('root',*(v[0] for v in roles)):
         used = runner.run(['fuser','--',f'/dev/{vg}/{name}'],timeout=15)
         if used.returncode != 1 or used.stdout.strip():
+            deactivate()
             raise UpdateError('Target volume has users or process inspection failed')
-    recovered = drive_recovery.verify_snapshot(runner,recovery_folder,expected_serial=serial)
-    if recovered['size_bytes'] != target['size_bytes']:
-        raise UpdateError('Recovery snapshot capacity differs from target')
-    root = Path(root)
-    if root.is_symlink() or not root.is_dir() or any(root.iterdir()):
-        raise UpdateError('Private target mount directory must be empty and real')
+    try:
+        recovered = drive_recovery.verify_snapshot(runner,recovery_folder,expected_serial=serial)
+        if recovered['size_bytes'] != target['size_bytes']:
+            raise UpdateError('Recovery snapshot capacity differs from target')
+        root = Path(root)
+        if root.is_symlink() or not root.is_dir() or any(root.iterdir()):
+            raise UpdateError('Private target mount directory must be empty and real')
+    except Exception:
+        deactivate()
+        raise
     journal = bundle.parent / (bundle.name + '-update.json')
     state = {'format':'baseline.installed-drive-update/v1','serial':serial,
              'pv_uuid':identity['pv_uuid'],'vg_uuid':identity['vg_uuid'],
@@ -252,8 +307,8 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
             guard()
             destination = _target_path(root,'opt/baseline-src/'+tree)
             _require_plain_tree(destination)
-            shutil.copytree(payload/tree,destination,dirs_exist_ok=True,
-                            ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+            staged = copy_changed(payload/tree,destination,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))      # only files that differ are written
+            state.setdefault('source_files',{})[tree] = staged
         record('captured_source_staged')
         # Keep the policy writer in the private target, never start target services
         # against the development host while provisioning an offline root.
@@ -266,19 +321,25 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
         resolver=_target_path(root,'etc/resolv.conf')
         if resolver.is_symlink():
             raise UpdateError('Offline resolver symlink requires target-specific repair')
-        guard();shutil.copy2('/etc/resolv.conf',resolver)
+        import filecmp
+        if not (resolver.is_file() and filecmp.cmp('/etc/resolv.conf',resolver,shallow=False)):      # written only when it differs
+            guard();shutil.copy2('/etc/resolv.conf',resolver)
         for name,args in (('dev',['mount','--rbind','/dev']),('proc',['mount','-t','proc','proc']),
                           ('sys',['mount','--rbind','/sys'])):
             dest=_target_path(root,name)
             run(args+[str(dest)]);mounted.append(dest)
             if name in ('dev','sys'):run(['mount','--make-rslave',dest])
         installer_inputs.verify(bundle)
+        boot_before = boot_inputs_digest(root)
         run(['chroot',root,'/usr/bin/env','BASELINE_OFFLINE_INSTALL=1',
              '/bin/bash','/opt/baseline-src/boot/provision.sh'],timeout=5400)
         record('current_baseline_provisioned')
-        run(['chroot',root,'update-initramfs','-u','-k','all'],timeout=900)
-        run(['chroot',root,'update-grub'],timeout=300)
-        record('boot_files_refreshed')
+        if boot_inputs_digest(root) != boot_before:                  # the boot images and menu are rebuilt only when something they are made from changed
+            run(['chroot',root,'update-initramfs','-u','-k','all'],timeout=900)
+            run(['chroot',root,'update-grub'],timeout=300)
+            record('boot_files_refreshed')
+        else:
+            record('boot_files_unchanged')
         run(['sync'],timeout=300)
         state['state']='updated'
     except Exception:
@@ -293,6 +354,8 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
             except Exception:cleanup_failed.append(str(mountpoint))
         if cleanup_failed:
             state['state']='cleanup_failed'
+        else:
+            deactivate()                                       # the group is left as it was found
         record('cleanup_finished' if not cleanup_failed else 'cleanup_refused')
         if cleanup_failed:
             raise UpdateError('Ordinary unmount failed; target must not be booted: '+', '.join(cleanup_failed))
