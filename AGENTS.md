@@ -63,7 +63,7 @@ does not prove any of these; `tests/unit/test_established_expectations.py` recor
   USER_ADMIN, USER_DATA (`USER_<PERSONA>`), APP_DATA (`APPDATA_<PERSONA>`) and SESSION_TEMP, never SUBSTRATE. The browser front screen for VMs
   and OSes is `/launcher` (a phone-style launcher, right-click menu, Console/Window/Fullscreen). Rehearsed in QEMU 2026-10-15 (Proxmox state on USER_ADMIN survives a reboot; two boot-order bugs found and fixed, see DR259's rehearsal evidence); not run on real hardware.
 - **Everything of Baseline's lives on CACHE** (operator 2026-10-18): build output, OS images, bundles, previews and checkouts, never the home folder or the
-  root drive. `/mnt/INSTALLER_CACHE` and `~/.ubuntu26-usb` are symlinks into `CACHE/baseline-build/installer-cache`.
+  root drive. the OS images are in `CACHE/baseline-build/installer-cache/isos` (`~/.ubuntu26-usb` is a symlink to it; `/mnt/INSTALLER_CACHE` must NOT be a symlink: installer_sources refuses one).
 - **Both SK hynix drives are the operator's development drives for this lane** (Codex relinquished PC401 on 2026-10-18); updates are done in place, never by a wipe when an
   update will do.
 - **Backups never store empty space; a compact mirror of each build lives on CACHE and holds the version-controlled persistence data for the drive and its children;
