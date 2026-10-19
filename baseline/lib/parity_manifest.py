@@ -74,7 +74,7 @@ FEATURES = (
     F("build.cache.kasm_base", "installer", "Build the Kasm base", "/installer-cache"),
     F("build.cache.os_bases", "installer", "Build the ready-made OS bases", "/installer-cache"),
     F("build.iso", "installer", "Build an installer ISO", "/install-plan"),
-    F("build.drives", "installer", "Name the drives this machine builds for", "/install-plan"),
+    F("build.drives", "installer", "Name the drives this machine builds for", "/drive-names", (W, '"/drive-names/assign"')),
     F("managed.mode", "installer", "Managed server mode", "/managed-mode", (W, '"/managed-mode"')),
     F("managed.web_address", "installer", "Web address", "/web-address", (W, '"/web-address"')),
     F("managed.parent_vault", "installer", "Parent vault: browse and restore backups", "/managed-mode"),

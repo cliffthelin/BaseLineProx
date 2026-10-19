@@ -389,3 +389,30 @@ def test_a_mounted_partition_is_chosen_from_a_list_not_typed(case):
     assert status == 200 and _json.loads(body) == [{"target": "/mnt/sdb2", "source": "/dev/sdb2", "fstype": "ext4"}]
     _, _, page = req(case, "GET", "/drive-admin")
     assert '<select id="paramPartitionMountpoint">' in page and 'id="paramPartitionMountpoint" value=' not in page
+
+
+def test_drives_are_named_through_the_console_and_the_boot_drive_is_refused(case):
+    import json as _json
+    from types import SimpleNamespace as NS
+    tree = _json.dumps({"blockdevices": [
+        {"name": "sda", "size": 500107862016, "model": "Fast", "serial": "SYNTHAAAA111111", "tran": "usb", "type": "disk", "children": []},
+        {"name": "sdb", "size": 500107862016, "model": "Fast", "serial": "SYNTHBBBB222222", "tran": "usb", "type": "disk",
+         "children": [{"name": "sdb1", "mountpoints": ["/"]}]}]})
+
+    class Runner:
+        def run(self, argv, timeout=0):
+            return NS(returncode=0, stdout=tree, stderr="")
+    drives = case.tmp / "drives.json"
+    case.server.deps["runner"] = Runner()                                           # type: ignore[attr-defined]
+    case.server.deps["drives_file"] = str(drives)                                   # type: ignore[attr-defined]
+    assert req(case, "GET", "/drive-names", cookie=False)[0] == 303
+    status, _, page = req(case, "GET", "/drive-names")
+    assert status == 200 and "Name this drive" in page and "baseline-nav" in page
+    assert req(case, "POST", "/drive-names/assign", {"name": "BUILD1", "serial": "SYNTHAAAA111111"}, cookie=False)[0] in (303, 401)
+    assert not drives.exists()
+    req(case, "POST", "/drive-names/assign", {"name": "BUILD1", "serial": "SYNTHAAAA111111"})
+    assert _json.loads(drives.read_text()) == {"drives": {"BUILD1": "SYNTHAAAA111111"}}
+    req(case, "POST", "/drive-names/assign", {"name": "BOOT", "serial": "SYNTHBBBB222222"})
+    assert "BOOT" not in drives.read_text()
+    status, location, _ = req(case, "POST", "/drive-names/remove", {"name": "BUILD1"})
+    assert status == 303 and _json.loads(drives.read_text()) == {"drives": {}}

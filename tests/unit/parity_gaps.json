@@ -2,7 +2,6 @@
  "build.cache.kasm_base",
  "build.cache.offline",
  "build.cache.os_bases",
- "build.drives",
  "build.install.checkpoints",
  "build.install.progress",
  "build.install.rebuild",

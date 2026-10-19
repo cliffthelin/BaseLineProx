@@ -2341,6 +2341,14 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(ai_setup_page.render_overview(
                 providers.check_providers(), status, [notice] if notice else [], providers.harness_status()), "/ai-setup"))
 
+        if path == "/drive-names":
+            import drive_names
+            import repair
+            drives_file = deps.get("drives_file") or drive_names.default_path()
+            return self._html_response(200, _with_nav(drive_names.render(
+                drive_names.attached(deps.get("runner") or repair.RealRunner()), drive_names.load(drives_file),
+                qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
         if path == "/home":
             import home_page
             return self._html_response(200, _with_nav(home_page.render(), path))
@@ -3104,6 +3112,24 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._html_response(200, _with_nav(power_control.render_done(action), "/power"))
             except ValueError as exc:
                 return self._redirect("/power?notice=" + html.escape(str(exc)).replace(" ", "+"))
+
+        if path in ("/drive-names/assign", "/drive-names/remove"):
+            import drive_names
+            import repair
+            drives_file = deps.get("drives_file") or drive_names.default_path()
+            try:
+                if path == "/drive-names/assign":
+                    drive_names.assign(drives_file, str(body.get("name", "")), str(body.get("serial", "")),
+                                       drive_names.attached(deps.get("runner") or repair.RealRunner()))
+                    notice = "Named."
+                else:
+                    drive_names.remove(drives_file, str(body.get("name", "")))
+                    notice = "Name removed."
+                if deps.get("audit"):
+                    deps["audit"]({"event": "drive_name_changed", "action": path.rsplit("/", 1)[-1]})        # never the serial
+            except (ValueError, OSError) as exc:
+                notice = str(exc)[:160]
+            return self._redirect("/drive-names?notice=" + html.escape(notice).replace(" ", "+"))
 
         if path == "/audio/bluetooth":
             import audio_bluetooth
