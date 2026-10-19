@@ -15,7 +15,7 @@ from pathlib import Path
 from write_once import write_if_changed
 
 MODES = ("standalone", "managed")
-DEFAULTS = {"mode": "standalone", "parent_vault": None, "remote_rebuild": False}
+DEFAULTS = {"mode": "standalone", "parent_vault": None, "remote_rebuild": False, "mirror_root": None}
 
 
 class ManagedError(ValueError):
@@ -50,6 +50,14 @@ def parent_vault(path=None) -> str | None:
     """Where the parent keeps its backups, only in managed mode."""
     cfg = load(path)
     return cfg["parent_vault"] if cfg["mode"] == "managed" and cfg["parent_vault"] else None
+
+
+def mirror_root(path=None) -> str | None:
+    """Where the compact mirror of each child lives (managed mode only). Unless set, the folder beside the parent vault, so one dedicated partition holds both."""
+    cfg = load(path)
+    if cfg["mode"] != "managed" or not cfg["parent_vault"]:
+        return None
+    return cfg["mirror_root"] or str(Path(cfg["parent_vault"]).parent)
 
 
 def remote_rebuild_enabled(path=None) -> bool:

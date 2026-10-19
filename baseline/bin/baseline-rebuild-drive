@@ -16,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--serial", required=True)
     parser.add_argument("--parent", default=None, help="the parent/server backup folder; by default the one managed mode names, and none when managed mode is off")
+    parser.add_argument("--mirror", default=None, help="the folder holding the compact mirrors; by default the one managed mode names, and none when managed mode is off")
     parser.add_argument("--with", dest="peers", action="append", default=[], metavar="SERIAL", help="another drive of this drive's combination (repeatable); without it the drive is a combination of one")
     parser.add_argument("--input-bundle")
     parser.add_argument("--recovery-folder")
@@ -29,6 +30,7 @@ def main():
     import rebuild_drive
     from repair import RealRunner
     args.parent = args.parent or managed_mode.parent_vault()           # standalone: no parent is ever contacted
+    args.mirror = args.mirror or managed_mode.mirror_root()
     runner, update = RealRunner(), None
     if args.input_bundle:
         if not args.recovery_folder:
@@ -40,7 +42,7 @@ def main():
             with __import__("tempfile").TemporaryDirectory(prefix="baseline-drive-update-") as root:
                 return iu.update(runner, serial=args.serial, input_bundle=args.input_bundle, recovery_folder=args.recovery_folder, root=root)
     try:
-        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update, parent_root=args.parent, peer_serials=args.peers), indent=1))
+        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update, parent_root=args.parent, peer_serials=args.peers, mirror_root=args.mirror, allowed_serials=[args.serial]), indent=1))
     except Exception as exc:                                                # noqa: BLE001 - reported, nonzero exit
         print(f"rebuild refused: {exc}", file=sys.stderr)
         return 1

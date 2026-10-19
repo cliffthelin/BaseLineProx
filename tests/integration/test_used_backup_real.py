@@ -68,3 +68,14 @@ def test_an_image_larger_than_the_data_it_holds_is_a_failure_not_a_backup(tmp_pa
     assert ub.accept_size(used_bytes=10 * MIB, image_bytes=11 * MIB) is True
     with pytest.raises(ub.UsedBackupError, match="empty space"):
         ub.accept_size(used_bytes=10 * MIB, image_bytes=300 * MIB)
+
+
+def test_an_unchanged_volume_is_linked_not_written_again_and_a_changed_one_is_imaged(tmp_path):
+    """Real partclone: the second image of an unchanged filesystem is a hard link to the first (no new data), and a changed one is a new image."""
+    fs = make_ext4(tmp_path, "vol.img", size_mib=32, files_mib=4)
+    first = ub.image_volume(fs, tmp_path / "one", "vol", fstype="ext4")
+    again = ub.image_volume(fs, tmp_path / "two", "vol", fstype="ext4", previous=first, previous_dir=tmp_path / "one")
+    assert again.get("reused") is True and os.stat(tmp_path / "two" / again["image"]).st_ino == os.stat(tmp_path / "one" / first["image"]).st_ino
+    subprocess.run(["debugfs", "-w", "-R", "write /etc/hostname changed.txt", str(fs)], check=True, capture_output=True)
+    changed = ub.image_volume(fs, tmp_path / "three", "vol", fstype="ext4", previous=first, previous_dir=tmp_path / "one")
+    assert not changed.get("reused") and changed["sha256"] != first["sha256"]

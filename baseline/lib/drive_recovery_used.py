@@ -73,7 +73,14 @@ def plan_volumes(runner, disk_path) -> list:
     return out
 
 
-def create_snapshot_used(runner, *, serial, destination, allowed_serials, pds_runner=None, imager=ub.image_volume, detector=ub.detect_fstype, raw_copier=_raw_small) -> Path:
+def create_snapshot_used(runner, *, serial, destination, allowed_serials, pds_runner=None, imager=ub.image_volume, detector=ub.detect_fstype, raw_copier=_raw_small, previous=None) -> Path:
+    """`previous` is an earlier snapshot folder of this same drive: a volume whose used blocks have not changed is not written again (its image is linked from there)."""
+    earlier = {}
+    if previous:
+        try:
+            earlier = {v["name"]: v for v in json.loads((Path(previous) / "MANIFEST.json").read_text()).get("volumes", [])}
+        except (OSError, ValueError):
+            earlier = {}
     if serial not in allowed_serials:
         raise dr.RecoveryError("source serial is not enrolled")
     disk = dr._offline_disk(runner, serial)
@@ -110,9 +117,10 @@ def create_snapshot_used(runner, *, serial, destination, allowed_serials, pds_ru
                     raise dr.RecoveryError(f"{item['name']} ({item['size'] // 2**20} MiB) has no filesystem this backup understands; refused, because copying it whole would store empty space")
                 record = raw_copier(item["path"], folder, item["name"], item["size"])
             else:
-                record = imager(item["path"], folder, item["name"], fstype=fstype)
+                kwargs = {"previous": earlier[item["name"]], "previous_dir": previous} if item["name"] in earlier else {}
+                record = imager(item["path"], folder, item["name"], fstype=fstype, **kwargs)
                 record["kind"] = item["kind"]
-            written += record["image_bytes"]
+            written += 0 if record.get("reused") else record["image_bytes"]            # a reused image is a link to data already there: nothing was written
             if written > budget:
                 raise dr.RecoveryError("the snapshot would not fit on the destination; stopped")
             volumes.append(record)

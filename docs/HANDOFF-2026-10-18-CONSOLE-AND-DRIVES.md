@@ -51,3 +51,10 @@ Branch `claude/whats-left-fixes` (pushed, not merged to main). Everything below 
 
 ## Continued 2026-10-18 (second session on this handoff)
 Typed paths removed from the container backup page, Drive Administration (mountpoint and partition unmount) and the setup rebuild form; the server validates the backup destination again. Full unit suite: 5073 passed, 3 strict xfails. The container-backup test and the new picker tests were written after the code, not before.
+
+## Addendum 2026-10-19: the mirror partition, update-only, used-only backups
+
+- **`/run/media/cane/BASELINE_MIRROR`** (a dedicated ext4 partition on the CACHE drive, `nvme0n1p2`; CACHE is `nvme0n1p1`, mount it with `udisksctl mount -b /dev/nvme0n1p1` if it is not up) holds the parent vault (`vault/`, persistence data in git per combination) and the compact mirror (`mirror/<combination>/<child>/latest`). Managed mode is enabled on the build host with that vault path (operator data in `baseline-build/managed.json`, not in git).
+- **Compact mirror** (`mirror.py`): each child's used contents only (partition table, volume layout, one partclone+zstd image per filesystem), unchanged volumes hard-linked not rewritten, one snapshot per child. **No empty space is stored anywhere**: no sparse or preallocated files, no whole-drive images (`drive_recovery.create_snapshot` refuses; recovery snapshots are `baseline-drive-recovery-v2`). The CACHE rehearsal disk (`rehearsal/disk.raw`) is still a sparse file the size of the drive and should be replaced by something restored from the mirror.
+- **Update-only**: the installer refuses to erase a drive that carries a build and has no override. `baseline-rebuild-drive` (backup + version data, update code, refresh the mirror) is the only way a built drive changes.
+- **Not done**: restoring a drive from a v2 snapshot or the mirror (the manifest carries what is needed, nothing rebuilds from it yet); network transport for child to parent backup; the in-place update of PC601 has still not run because sudo is blocked inside Claude's session and terminal panel (run `sh .../update-pc601.sh` from a terminal outside the app).

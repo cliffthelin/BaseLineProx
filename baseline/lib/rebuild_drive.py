@@ -1,5 +1,6 @@
 """Rebuild an installed Baseline drive in place: its data is versioned and backed up first, and nothing is formatted, partitioned or removed.
 
+After the update, when a mirror folder is given, the drive's used contents are mirrored there (`mirror`: no empty space, unchanged volumes not rewritten).
 The same histories are pushed to the parent vault (parent_vault: the CACHE drive's server copy, filed by combination id) when one is given.
 
 Steps: find the drive by its serial (and refuse a copy of another drive's identifier), activate its volume group by UUID and mount its volumes, snapshot every data volume into its git history
@@ -13,6 +14,7 @@ import time
 from pathlib import Path
 
 import data_vault
+import mirror
 import parent_vault
 import twin_sync
 
@@ -30,7 +32,7 @@ def volumes_to_add(mounted: dict) -> list:
     return sorted(wanted - set(mounted))
 
 
-def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, stamp: str | None = None, parent_root=None, peer_serials=()) -> dict:
+def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, stamp: str | None = None, parent_root=None, peer_serials=(), mirror_root=None, allowed_serials=()) -> dict:
     stamp = stamp or time.strftime("%Y%m%dT%H%M%S")
     try:
         child = twin_sync.peer_by_serial(runner, serial)
@@ -56,4 +58,7 @@ def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, s
         report["code_layer"] = "not changed: no reviewed update bundle was given"
     else:
         report["code_layer"] = update()
+    if mirror_root:                                         # the drive is unmounted again: refresh the compact mirror (only what changed is written)
+        report["mirror"] = mirror.refresh(runner, serial=serial, child=child, combination=parent_vault.combination_for([child, *peers]), root=mirror_root,
+                                          allowed_serials=set(allowed_serials) or {serial})
     return report

@@ -8,6 +8,7 @@ compressed with zstd, and checked with `partclone.chkimg`. A filesystem the tool
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -49,8 +50,31 @@ def _info(stderr: str) -> dict:
     return {"used_bytes": int(used.group(3)) * bs, "device_bytes": int(size.group(3)) * bs, "block_size": bs}
 
 
-def image_volume(source, out_dir, name, *, fstype=None) -> dict:
-    """Image one volume (a block device or a file holding a filesystem) into `out_dir/<name>.<fstype>.pc.zst`; returns its record."""
+def stream_fingerprint(source, fstype) -> dict:
+    """Read a volume's used blocks and hash them without writing anything: {"stream_sha256", "used_bytes", "device_bytes"}. Reading costs a drive nothing, so this is how an unchanged volume is
+    recognised before anything is written for it."""
+    import tempfile
+    tool = FS_TOOLS.get(fstype)
+    if tool is None:
+        raise UsedBackupError(f"filesystem {fstype} is not supported; refused rather than copied whole")
+    digest = hashlib.sha256()
+    with tempfile.TemporaryDirectory(prefix="baseline-fp-") as scratch, open(Path(scratch) / "err", "w+") as err:
+        clone = subprocess.Popen([tool, "-c", "-L", str(Path(scratch) / "log"), "-s", str(source), "-o", "-"], stdout=subprocess.PIPE, stderr=err)
+        for chunk in iter(lambda: clone.stdout.read(4 * 2 ** 20), b""):
+            digest.update(chunk)
+        clone.wait()
+        err.seek(0)
+        stderr = err.read()
+    if clone.returncode:
+        raise UsedBackupError(f"reading {source} failed: {stderr.strip()[-200:]}")
+    info = _info(stderr)
+    return {"stream_sha256": digest.hexdigest(), "used_bytes": info["used_bytes"], "device_bytes": info["device_bytes"]}
+
+
+def image_volume(source, out_dir, name, *, fstype=None, previous=None, previous_dir=None) -> dict:
+    """Image one volume (a block device or a file holding a filesystem) into `out_dir/<name>.<fstype>.pc.zst`; returns its record.
+    When `previous` (the earlier record of this volume) and `previous_dir` are given and the volume's used blocks are byte-for-byte what they were, nothing is written: the earlier image is hard-linked
+    into place (no copy, no new data) and the record says `reused`."""
     source, out_dir = Path(source), Path(out_dir)
     fstype = fstype or detect_fstype(source)
     tool = FS_TOOLS.get(fstype)
@@ -58,6 +82,15 @@ def image_volume(source, out_dir, name, *, fstype=None) -> dict:
         raise UsedBackupError(f"filesystem {fstype} is not supported; refused rather than copied whole")
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{name}.{fstype}.pc.zst"
+    fingerprint = stream_fingerprint(source, fstype)
+    if previous and previous_dir and previous.get("stream_sha256") == fingerprint["stream_sha256"] and previous.get("fstype") == fstype:
+        old = Path(previous_dir) / str(previous.get("image"))
+        if old.is_file() and not old.is_symlink():
+            try:
+                os.link(old, target)
+                return dict(previous, used_bytes=fingerprint["used_bytes"], device_bytes=fingerprint["device_bytes"], image=target.name, reused=True)
+            except OSError:
+                pass                                    # not the same filesystem: write the image again rather than copy the old one
     log = out_dir / f"{name}.partclone.log"
     clone = subprocess.Popen([tool, "-c", "-L", str(log), "-s", str(source), "-o", "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     compress = subprocess.Popen(["zstd", "-q", "-T0", "-o", str(target)], stdin=clone.stdout)
@@ -82,7 +115,7 @@ def image_volume(source, out_dir, name, *, fstype=None) -> dict:
         for chunk in iter(lambda: stream.read(4 * 2 ** 20), b""):
             digest.update(chunk)
     return {"name": name, "fstype": fstype, "device_bytes": info["device_bytes"], "used_bytes": info["used_bytes"],
-            "image": target.name, "image_bytes": size, "sha256": digest.hexdigest(), "includes_unallocated_space": False}
+            "image": target.name, "image_bytes": size, "sha256": digest.hexdigest(), "stream_sha256": fingerprint["stream_sha256"], "includes_unallocated_space": False}
 
 
 def check_image(image, fstype, *, log=None) -> bool:
