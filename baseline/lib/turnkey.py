@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import app_catalogue
 import app_environment
+import signin_share
 import prebuilt_environment as pe
 import vault_grants
 from app_environment import AppEnvError  # noqa: F401  (callers catch it)
@@ -19,6 +20,18 @@ def _merge(extras) -> dict:
         for key in merged:
             merged[key].extend(extra.get(key, []))
     return merged
+
+
+_MANIFEST_NAMES = {"google-chrome": "chrome", "google-chrome-stable": "chrome", "code": "vscode", "spotify-client": "spotify", "claude-desktop": "claude"}
+
+
+def preinstalled(os_bases_dir, os_id, read_manifest=pe.read_manifest) -> set:
+    """The guest applications the carried base already has installed (its manifest says so): they are not downloaded again at first boot."""
+    try:
+        apps = read_manifest(os_bases_dir, os_id).get("apps") or {}
+    except (pe.PrebuiltError, OSError):
+        return set()
+    return {_MANIFEST_NAMES.get(name, name) for name in apps} if isinstance(apps, dict) else set()
 
 
 def resolved_plan(app, os_id, *, catalogue=None, resolve=app_catalogue.resolve) -> dict:
@@ -36,8 +49,8 @@ def resolved_plan(app, os_id, *, catalogue=None, resolve=app_catalogue.resolve) 
 
 
 def run(host, owner_user, entries, carried, os_bases_dir, *, vault_names, grants_path, create=pe.create, plan_for=resolved_plan, install_base=pe.install_base,
-        owner_for=pe.owner_account) -> dict:
-    report = {"created": [], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": [], "needs_owner": False}
+        owner_for=pe.owner_account, installed_in=preinstalled) -> dict:
+    report = {"created": [], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": [], "needs_owner": False, "apps_preinstalled": {}}
     vault_names = [name for name in vault_names if name != "AI_SETUP_DEFAULT"]  # AI profiles use their own explicit target grants
     have = {vm["name"] for vm in host.list_vms()}
     try:
@@ -57,8 +70,14 @@ def run(host, owner_user, entries, carried, os_bases_dir, *, vault_names, grants
             continue
         try:
             extras, skipped = [], {}
+            ready = installed_in(os_bases_dir, ident)
             if pe.SYSTEMS[ident]["seed"]:
                 for app in entry.get("apps", []):
+                    if app in ready:                                     # already in the carried base: nothing to download; only started with the shared password store
+                        report["apps_preinstalled"].setdefault(ident, []).append(app)
+                        if ident in ("debian", "ubuntu") and signin_share.wrapper_files(app):
+                            extras.append({"write_files": signin_share.wrapper_files(app)})
+                        continue
                     try:
                         extras.append(app_environment.seed_extra(plan_for(app, ident), tag=app))
                     except AppEnvError as exc:

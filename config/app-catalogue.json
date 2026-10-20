@@ -91,7 +91,17 @@
      ]
     },
     "flatpak": {
-     "id": "com.google.Chrome"
+     "id": "com.google.Chrome",
+     "only": [
+      "debian",
+      "ubuntu",
+      "cachyos",
+      "bazzite",
+      "omarchy"
+     ]
+    },
+    "nix": {
+     "attr": "google-chrome"
     }
    },
    "data": [
@@ -247,6 +257,9 @@
     },
     "proot": {
      "name": "claude"
+    },
+    "web": {
+     "url": "https://claude.ai"
     }
    },
    "data": [
@@ -269,6 +282,9 @@
     },
     "proot": {
      "name": "chatgpt"
+    },
+    "web": {
+     "url": "https://chatgpt.com"
     }
    },
    "data": [

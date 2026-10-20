@@ -13,11 +13,12 @@ from pathlib import Path
 
 FORMAT = "baseline.app-catalogue/v1"
 CATEGORIES = ("browsers", "developer-tools", "ai-tools", "media", "ai-image-tools", "office-tools")
-ROUTES = ("apt", "deb", "pacman", "nix", "flatpak", "appimage", "service", "proot", "container")
+ROUTES = ("apt", "deb", "pacman", "nix", "flatpak", "appimage", "service", "proot", "container", "web")
 # What each system prefers first. Immutable and declarative systems have narrower choices; Ubuntu's repository packages for browsers are snaps, so it prefers Flatpak.
+# `web` comes last everywhere (except Kasm, which has its own routes): an application that has no program for a system is opened as its own window of the website, in Chrome, signed in with the person's own Chrome profile.
 PREFERENCE = {
-    "debian": ("apt", "deb", "flatpak", "appimage", "service"), "ubuntu": ("flatpak", "deb", "apt", "appimage", "service"), "cachyos": ("pacman", "flatpak", "appimage", "service"),
-    "omarchy": ("pacman", "flatpak", "appimage", "service"), "bazzite": ("flatpak", "appimage", "service"), "nixos": ("nix", "flatpak"), "kasm": ("proot", "container"),
+    "debian": ("apt", "deb", "flatpak", "appimage", "service", "web"), "ubuntu": ("flatpak", "deb", "apt", "appimage", "service", "web"), "cachyos": ("pacman", "flatpak", "appimage", "service", "web"),
+    "omarchy": ("pacman", "flatpak", "appimage", "service", "web"), "bazzite": ("flatpak", "appimage", "service", "web"), "nixos": ("nix", "flatpak", "web"), "kasm": ("proot", "container"),
 }
 # Publishers whose Debian package index (or fixed download) is read to find the current file; the index also gives the SHA-256 that is checked before the package is installed.
 PUBLISHERS = {
@@ -56,6 +57,7 @@ def validate_entry(entry) -> dict:
               "appimage": lambda p: str(p.get("url", "")).startswith("https://") and not re.search(r"[\s'\"`$;&|<>\\]", str(p.get("url", ""))) and _APPIMAGE_NAME.match(str(p.get("name", ""))),
               "service": lambda p: _RELEASE.match(str(p.get("release", ""))) and _ASSET.match(str(p.get("asset", ""))) and isinstance(p.get("port"), int) and 1 <= p["port"] <= 65535
               and str(p.get("models", "")).startswith("/") and ".." not in str(p.get("models", "")) and not re.search(r"[\s'\"`$;&|<>\\]", str(p.get("models", ""))),
+              "web": lambda p: re.fullmatch(r"https://[a-z0-9.-]+\.[a-z]{2,}(/[A-Za-z0-9._~/-]*)?", str(p.get("url", ""))) is not None,
               "container": lambda p: _IMAGE.match(str(p.get("image", ""))) and isinstance(p.get("ports"), list) and all(isinstance(x, int) and 1 <= x <= 65535 for x in p["ports"])
               and str(p.get("config", "")).startswith("/")}[route](params)
         if not ok:
@@ -126,7 +128,23 @@ def install_script(entry: dict, os_id: str, resolved: dict = None):
         return "\n".join(head + ([prerequisite] if prerequisite else []) + [f"flatpak remote-add --if-not-exists --system flathub {FLATHUB}", f"flatpak install -y --system --noninteractive flathub {params['id']}"]) + "\n"
     if route in ("deb", "appimage", "service"):
         return "\n".join(head + _download_lines(entry, route, params, resolved or {})) + "\n"
+    if route == "web":
+        return "\n".join(head + _web_lines(entry, params)) + "\n"
     return None
+
+
+def web_command(entry_id: str) -> str:
+    return f"baseline-web-{entry_id}"
+
+
+def _web_lines(entry: dict, params: dict) -> list:
+    """The application as its own window of the website, in Chrome (the program the person signs in to once); started with the password store every machine shares, so the shared sign-in opens."""
+    key, url = entry["id"], params["url"]
+    command = web_command(key)
+    run = (f'if command -v google-chrome-stable >/dev/null 2>&1; then exec google-chrome-stable --password-store=basic --app={url} "$@"; '
+           f'else exec flatpak run com.google.Chrome --password-store=basic --app={url} "$@"; fi')
+    return [f"cat > /usr/local/bin/{command} <<'WRAPPER'", "#!/bin/sh", run, "WRAPPER", f"chmod 0755 /usr/local/bin/{command}", "mkdir -p /usr/local/share/applications",
+            f"cat > /usr/local/share/applications/{command}.desktop <<'ENTRY'", "[Desktop Entry]", "Type=Application", f"Name={entry['name']}", f"Exec=/usr/local/bin/{command}", "Categories=Network;", "ENTRY"]
 
 
 # A freshly built base has no package lists and may have no curl: fetch both before anything is downloaded, whichever package manager the system has.

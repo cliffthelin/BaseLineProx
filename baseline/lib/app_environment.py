@@ -66,7 +66,7 @@ def plan(app_id: str, os_id: str, *, shares=(), resolved=None, catalogue=None) -
         raise AppEnvError(f"{entry['name']} on {os_id} comes by the {route} route, which is declared or belongs to another side, not installed in a VM at first boot")
     launch = None
     if app_id not in HEADLESS:
-        launch = f"flatpak run {params['id']}" if route == "flatpak" else entry.get("launch")
+        launch = f"flatpak run {params['id']}" if route == "flatpak" else (ac.web_command(app_id) if route == "web" else entry.get("launch"))
         if not launch:
             raise AppEnvError(f"{entry['name']} has no command to start it")
     return {"app": app_id, "name": entry["name"], "os": os_id, "base": pe.base_name(os_id), "route": route, "script": script, "launch": launch, "headless": app_id in HEADLESS,

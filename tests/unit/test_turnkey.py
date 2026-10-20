@@ -107,3 +107,20 @@ def test_without_a_name_for_the_person_no_machine_is_made_and_the_person_is_aske
     report = tk.run(Host(), "root@pam", ENTRIES, {"debian"}, "/bases", vault_names=["GOOGLE_LOGIN"], grants_path=tmp_path / "g.json",
                     create=make(created), plan_for=plan, install_base=lambda *a: None, owner_for=owner_for)
     assert created == [] and report["needs_owner"] is True and report["created"] == []
+
+
+def test_applications_already_in_the_carried_base_are_not_downloaded_again(tmp_path):
+    created = []
+    report = tk.run(Host(), "cliff", ENTRIES, {"debian", "ubuntu"}, "/bases", vault_names=[], grants_path=tmp_path / "g.json", create=make(created), plan_for=plan,
+                    install_base=lambda *a: None, owner_for=lambda h, u: u, installed_in=lambda d, os_id: {"vscode", "chrome"} if os_id == "debian" else set())
+    debian = created[0][3]
+    assert "/var/lib/baseline/install-app-vscode.sh" not in {f["path"] for f in debian["write_files"]}
+    assert "/usr/local/bin/google-chrome-stable" in {f["path"] for f in debian["write_files"]}        # started with the shared password store
+    assert report["apps_preinstalled"]["debian"] == ["vscode", "chrome"]
+    assert "/var/lib/baseline/install-app-vscode.sh" in {f["path"] for f in created[1][3]["write_files"]}
+
+
+def test_the_manifest_of_a_base_names_what_it_carries():
+    manifest = {"holds_install_state_or_secrets": False, "apps": {"vscode": "1", "google-chrome": "nixpkgs", "spotify": "x"}}
+    assert tk.preinstalled("/b", "nixos", read_manifest=lambda d, o: manifest) == {"vscode", "chrome", "spotify"}
+    assert tk.preinstalled("/b", "cachyos", read_manifest=lambda d, o: {"holds_install_state_or_secrets": False}) == set()

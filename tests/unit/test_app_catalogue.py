@@ -82,3 +82,20 @@ def test_an_apt_update_error_is_reported_but_the_install_that_follows_decides(ca
     script = ac.install_script(cat["firefox"], "debian")
     assert "apt-get update ||" in script and script.index("apt-get update") < script.index("apt-get install -y firefox-esr")
     assert "apt-get update ||" in ac.install_script(cat["vivaldi"], "ubuntu")                          # also before Flatpak is installed
+
+
+def test_claude_and_chatgpt_reach_every_system_that_has_no_program_for_them_as_their_own_window(cat):
+    for system in ("debian", "ubuntu"):
+        assert ac.route_for(cat["claude"], system)[0] == "deb"                  # the real program where there is one
+    for system in ("cachyos", "omarchy", "bazzite", "nixos"):
+        assert ac.route_for(cat["claude"], system)[0] == "web" and ac.route_for(cat["chatgpt"], system)[0] == "web"
+    script = ac.install_script(cat["claude"], "bazzite")
+    assert "https://claude.ai" in script and "--password-store=basic" in script and "/usr/local/bin/baseline-web-claude" in script and script.startswith("#!/bin/sh\nset -eu")
+    import subprocess
+    assert subprocess.run(["sh", "-n"], input=script, text=True).returncode == 0
+
+
+def test_a_web_route_takes_only_a_plain_https_address():
+    for bad in ("http://x.com", "https://x.com/a b", "https://x.com/'; rm", "https://localhost", "javascript:x"):
+        with pytest.raises(ac.CatalogueError):
+            ac.validate_entry({"id": "x", "name": "X", "category": "ai-tools", "routes": {"web": {"url": bad}}})

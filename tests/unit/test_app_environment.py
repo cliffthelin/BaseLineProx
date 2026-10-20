@@ -26,8 +26,11 @@ def test_the_plan_follows_the_base_and_its_route_and_starts_the_application_on_i
 
 
 def test_an_application_with_no_route_for_that_linux_type_is_refused_with_the_reason(cat):
+    only_deb = {**cat, "claude": {**cat["claude"], "routes": {"deb": cat["claude"]["routes"]["deb"]}}}
     with pytest.raises(ae.AppEnvError, match="no route that fits cachyos"):
-        ae.plan("claude", "cachyos", catalogue=cat)
+        ae.plan("claude", "cachyos", catalogue=only_deb)
+    web = ae.plan("claude", "cachyos", catalogue=cat)                       # with the website route it is the application's own window
+    assert web["route"] == "web" and web["launch"] == "baseline-web-claude"
     with pytest.raises(ae.AppEnvError, match="not in the application catalogue"):
         ae.plan("notepad", "debian", catalogue=cat)
     with pytest.raises(ae.AppEnvError, match="declared or belongs to another side"):
