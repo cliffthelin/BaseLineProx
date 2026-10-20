@@ -73,7 +73,7 @@ def render_claude(state):
     return _page("Connect Claude", refresh + body)
 
 
-def render_vault(states, notice=""):
+def render_vault(states, notice="", secrets=(), places=()):
     """states: [{label, has_passphrase, unlocked, count}] for the admin and personal vaults."""
     rows = ""
     for st in states:
@@ -94,8 +94,44 @@ def render_vault(states, notice=""):
                   "<button type='submit'>Unlock</button></form><form method=\"post\" action=\"/vault/lock\">"
                   "<button type='submit'>Lock now</button></form></section>")
     note = f"<p>{html.escape(notice)}</p>" if notice else ""
-    return _page("Credential vault", f"{note}<table><thead><tr><th>Vault</th><th>State</th><th>Secrets</th></tr></thead><tbody>{rows}"
-                 f"</tbody></table>{forms}<p><a href='/ai-setup'>AI providers</a></p>")
+    held = "".join(
+        f"<tr><td>{html.escape(item['name'])}</td><td>{html.escape(item['label'])}</td>"
+        f"<td>{'sealed' if item.get('locked') else str(item.get('length')) + ' characters'}</td><td><code>{html.escape(item['fingerprint'])}</code></td>"
+        f"<td><button type='button' data-act='show' data-scope='{html.escape(item['scope'], quote=True)}' data-name='{html.escape(item['name'], quote=True)}'>Show</button> "
+        f"<button type='button' data-act='delete' data-scope='{html.escape(item['scope'], quote=True)}' data-name='{html.escape(item['name'], quote=True)}'>Delete</button> "
+        f"<code class='shown'></code></td></tr>" for item in secrets) or "<tr><td colspan='5'>Nothing stored yet. Add a password, token or key below.</td></tr>"
+    add = ("<section><h2>Add a secret</h2><form id='vault-add'><input name='name' placeholder='NAME_IN_CAPITALS' pattern='[A-Z][A-Z0-9_]{2,63}' required> "
+           "<input name='value' type='password' autocomplete='off' placeholder='the password, token or key' required> "
+           "<select name='scope'><option value='personal'>Mine (USER_PERSONAL)</option><option value='admin'>This computer's (USER_ADMIN)</option></select> "
+           "<button type='submit'>Save</button></form></section>")
+    names = sorted({item["name"] for item in secrets})
+    cards = ""
+    for place in places:
+        boxes = "".join(f"<label><input type='checkbox' data-target='{html.escape(place['target'], quote=True)}' data-name='{html.escape(n, quote=True)}'"
+                        f"{' checked' if n in place.get('granted', []) else ''}> {html.escape(n)}</label> " for n in names) or "<span>No secrets yet.</span>"
+        cards += (f"<section><h3>{html.escape(place['label'])}</h3><div class='grants'>{boxes}</div>"
+                  f"<button type='button' data-send='{html.escape(place['target'], quote=True)}'>Send the chosen secrets now</button> <span class='sent' role='status'></span></section>")
+    use = ("<h2>Where each secret can be used</h2><p>Tick what a place may use, then send. The value goes into that machine's memory only "
+           "(<code>/run/baseline-vault/NAME</code>, readable by its owner); it is never written to its disk and is gone when it stops. Web applications on this console use the vault directly.</p>"
+           + (cards or "<p>No machines to send to yet.</p>"))
+    script = """<script>
+document.addEventListener('change',async e=>{const c=e.target.closest('input[data-target]');if(!c)return;
+  const j=await call(c.checked?'/vault/grant':'/vault/revoke',{target:c.dataset.target,name:c.dataset.name});if(!j.ok){alert(j.message);c.checked=!c.checked;}});
+document.addEventListener('click',async e=>{const b=e.target.closest('button[data-send]');if(!b)return;const out=b.parentElement.querySelector('.sent');out.textContent='Sending…';
+  const j=await call('/vault/deliver',{target:b.dataset.send});out.textContent=j.message+(j.skipped&&Object.keys(j.skipped).length?' — '+Object.entries(j.skipped).map(([k,v])=>k+': '+v).join('; '):'');});
+async function call(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
+document.getElementById('vault-add').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);const j=await call('/vault/put',Object.fromEntries(f));
+  if(!j.ok){alert(j.message);return;}location.href='/vault?notice='+encodeURIComponent(j.message);});
+document.addEventListener('click',async e=>{const b=e.target.closest('button[data-act]');if(!b)return;const row=b.closest('tr');
+  if(b.dataset.act==='delete'){if(!confirm('Delete '+b.dataset.name+'?'))return;const j=await call('/vault/delete',{scope:b.dataset.scope,name:b.dataset.name});
+    if(!j.ok){alert(j.message);return;}location.reload();}
+  else{const out=row.querySelector('.shown');if(out.textContent){out.textContent='';b.textContent='Show';return;}
+    const j=await call('/vault/reveal',{scope:b.dataset.scope,name:b.dataset.name});if(!j.ok){alert(j.message);return;}
+    out.textContent=j.value;b.textContent='Hide';setTimeout(()=>{out.textContent='';b.textContent='Show';},30000);}});
+</script>"""
+    return _page("Credential vault", f"{note}<table><thead><tr><th>Secret</th><th>Vault</th><th>Size</th><th>Fingerprint</th><th></th></tr></thead><tbody>{held}</tbody></table>"
+                 f"{add}{use}<h2>Protection</h2><table><thead><tr><th>Vault</th><th>State</th><th>Secrets</th></tr></thead><tbody>{rows}"
+                 f"</tbody></table>{forms}<p><a href='/ai-setup'>AI providers</a></p>{script}")
 
 
 def render_security(pending, notice=""):

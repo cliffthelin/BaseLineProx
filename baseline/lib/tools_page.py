@@ -44,12 +44,11 @@ def render(results: dict) -> bytes:
     for row in rows(results):
         mark = "installed" if row["state"] == "installed" else "NOT INSTALLED"
         body.append("<tr><td>%s</td><td class='%s'>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-            html.escape(row["tool"]), row["state"], mark, html.escape(row["version"]), html.escape(row["path"]),
+            "<a href='/tools/%s'>%s</a>" % (row["tool"], html.escape(row["tool"])), row["state"], mark, html.escape(row["version"]), html.escape(row["path"]),
             html.escape(PURPOSE[row["tool"]])))
     installed = sum(1 for r in rows(results) if r["state"] == "installed")
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Diagnostic tools</title><style>"
             ".installed{color:#6fcf97}.missing{color:#eb5757;font-weight:600}</style></head><body>"
             f"<h1>Diagnostic tools ({installed} of {len(PURPOSE)} installed)</h1>"
-            "<p>Installed on this host from the drive's own package repository at first boot. Run them in a shell on this host "
-            "(Proxmox: node &gt; Shell).</p><table><thead><tr><th>Tool</th><th>State</th><th>Version</th><th>Where</th><th>Use</th></tr>"
+            "<p>Installed on this host from the drive's own package repository at first boot. Open a tool to run it here in the browser.</p><table><thead><tr><th>Tool</th><th>State</th><th>Version</th><th>Where</th><th>Use</th></tr>"
             "</thead><tbody>" + "".join(body) + "</tbody></table></body></html>").encode()

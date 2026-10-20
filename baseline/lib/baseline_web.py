@@ -36,6 +36,7 @@ import http.server
 import json
 import sqlite3
 import os
+import shutil
 import re
 import threading
 import time
@@ -1715,15 +1716,17 @@ def _shell_run(deps: dict, line: str, harness_id: str) -> list:
         return [f"[{line.split()[0] if line.split() else 'command'}] failed: {exc}"]
 
 
-def _vault_roots():
+def _vault_roots(deps=None):
     import vault
+    if deps and deps.get("vault_roots"):
+        return tuple(deps["vault_roots"])
     return (("USER_ADMIN", "admin", vault.ADMIN_VAULT), ("USER_PERSONAL", "personal", vault.PERSONAL_VAULT))
 
 
 def _vault_states(deps: dict) -> list:
     import vault
     out = []
-    for label, _scope, root in _vault_roots():
+    for label, _scope, root in _vault_roots(deps):
         store = vault.Vault(root)
         try:
             out.append({"label": label, "has_passphrase": store.has_passphrase(), "count": len(store.names()),
@@ -1731,6 +1734,84 @@ def _vault_states(deps: dict) -> list:
         except (vault.VaultError, OSError):
             out.append({"label": label, "has_passphrase": False, "count": 0, "unlocked": False})
     return out
+
+
+def _vault_secrets(deps: dict) -> list:
+    """What the Vault page lists: every secret in both vaults by name, length and fingerprint (never the value)."""
+    import vault
+    out = []
+    for label, scope, root in _vault_roots(deps):
+        try:
+            out += [dict(item, scope=scope, label=label) for item in vault.Vault(root).status()]
+        except (vault.VaultError, OSError):
+            pass
+    return out
+
+
+def _vault_store(deps: dict, scope: str):
+    import vault
+    for _label, key, root in _vault_roots(deps):
+        if key == scope:
+            return _vault_for(deps, root) if deps.get("vault_passphrase") else vault.Vault(root)
+    raise ValueError("unknown vault")
+
+
+def _vault_grants_path(deps: dict) -> str:
+    return deps.get("vault_grants_path") or "/mnt/USER_ADMIN/vault-grants.json"
+
+
+def _vault_targets(deps: dict) -> list:
+    """Where a secret can be granted: Kasm, and each virtual machine this host manages."""
+    out = [{"target": "kasm", "label": "Kasm workspaces"}]
+    try:
+        out += [{"target": f"vm:{vm['name']}", "label": f"Virtual machine {vm['name']}"} for vm in _vm_host_for(deps).list_vms()]
+    except (vh.VmError, OSError, ValueError, AttributeError):
+        pass
+    return out
+
+
+def _vault_places(deps: dict) -> list:
+    import vault_grants
+    grants = _vault_grants_path(deps)
+    return [dict(place, granted=vault_grants.granted(grants, place["target"])) for place in _vault_targets(deps)]
+
+
+def _vault_push_for(deps: dict, target: str):
+    """The function that runs a command inside the guest with the value on stdin: the guest agent of that VM, or of the Kasm machine."""
+    if deps.get("vault_push"):
+        return lambda argv, data: deps["vault_push"](target, argv, data)
+    if target.startswith("vm:"):
+        host = _vm_host_for(deps)
+        return lambda argv, data: host.guest_exec(target[3:], argv, data)
+    if target == "kasm":
+        import kasm_setup
+        import proxmox_vm_host
+        vmid = (deps.get("kasm_machine") or kasm_setup.KasmSetup()).existing_vmid()
+        if vmid is None:
+            raise OSError("the Kasm machine does not exist yet")
+        def push(argv, data):
+            rc, _out, _err = proxmox_vm_host._input(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", "60", "--", *argv], data)
+            if rc:
+                raise OSError("the Kasm machine's guest agent did not accept the secret (is it running?)")
+        return push
+    raise OSError("that place cannot receive secrets")
+
+
+def _vault_reader(deps: dict):
+    import vault
+    def read(name):
+        for _label, scope, _root in _vault_roots(deps):
+            try:
+                value = _vault_store(deps, scope).get(name)
+            except (vault.VaultLocked, vault.WrongPassphrase):
+                import vault_grants
+                raise vault_grants.Unavailable("the vault is locked; unlock it first")
+            except (vault.VaultError, OSError):
+                continue
+            if value:
+                return value
+        return None
+    return read
 
 
 def _vault_for(deps: dict, root: str):
@@ -2322,7 +2403,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import ai_setup_page
             import vault
             return self._html_response(200, _with_nav(ai_setup_page.render_vault(
-                _vault_states(deps), qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+                _vault_states(deps), qs.get("notice", [""])[0][:200].replace("+", " "), _vault_secrets(deps),
+                _vault_places(deps)), path))
 
         if path in ("/ai-setup", "/ai-setup/claude"):
             import ai_setup_page
@@ -2454,6 +2536,38 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import sensors_collect
             history = sensors_view.hottest_history(rows, db_path=deps.get("sensors_db") or sensors_collect.DB_PATH, window_s=3600)
             return self._html_response(200, _with_nav(sensors_view.render(rows, history), path))
+
+        if path == "/files":
+            import file_manager
+            import path_picker
+            allowed = path_picker.roots(deps.get("fs_roots") or ())
+            return self._html_response(200, _with_nav(file_manager.render(file_manager.listing(qs.get("path", [""])[0], allowed), allowed), path))
+
+        if path == "/files/download":
+            import file_manager
+            import path_picker
+            try:
+                real, size = file_manager.open_for_download(qs.get("path", [""])[0], path_picker.roots(deps.get("fs_roots") or ()))
+                handle = open(real, "rb")
+            except (file_manager.FileManagerError, OSError):
+                return self._html_response(404, b"<p>That file is not available.</p>")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(os.path.basename(real)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            with handle:
+                shutil.copyfileobj(handle, self.wfile)
+            return
+
+        if path.startswith("/tools/") and path[7:] in __import__("tool_runner").TOOLS:
+            import tool_runner
+            name = path[7:]
+            action = qs.get("action", [""])[0]
+            spec = tool_runner.TOOLS[name]["actions"].get(action)
+            result = tool_runner.run(name, action, qs.get("value", [""])[0]) if spec and not spec.get("post") else None
+            return self._html_response(200, _with_nav(tool_runner.render(name, result), "/tools"))
 
         if path == "/tools":
             import tools_page
@@ -2887,10 +3001,43 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path.split("?", 1)[0]):
             return
 
+        if path == "/files/upload":
+            import file_manager
+            import path_picker
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+                made = file_manager.save_upload(parse_qs(urlparse(self.path).query).get("path", [""])[0], parse_qs(urlparse(self.path).query).get("name", [""])[0],
+                                                self.rfile, length, path_picker.roots(deps.get("fs_roots") or ()))
+                if deps.get("audit"):
+                    deps["audit"]({"event": "file_uploaded", "path": made, "bytes": length})
+                return self._json(200, {"ok": True, "message": "Uploaded"})
+            except (file_manager.FileManagerError, ValueError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)})
+
         try:
             body = self._read_request_body()
         except ValueError as exc:
             return self._json(400,{"ok":False,"message":str(exc)})
+
+        if path == "/files/op":
+            import file_manager
+            import path_picker
+            allowed = path_picker.roots(deps.get("fs_roots") or ())
+            try:
+                op = body.get("op")
+                if op == "mkdir":
+                    file_manager.make_folder(str(body.get("path", "")), str(body.get("name", "")), allowed)
+                elif op == "rename":
+                    file_manager.rename(str(body.get("path", "")), str(body.get("name", "")), allowed)
+                elif op == "delete":
+                    file_manager.delete(str(body.get("path", "")), allowed)
+                else:
+                    raise file_manager.FileManagerError("Unknown action.")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "file_" + op, "path": str(body.get("path", ""))})
+                return self._json(200, {"ok": True, "message": "Done"})
+            except file_manager.FileManagerError as exc:
+                return self._json(409, {"ok": False, "message": str(exc)})
 
         if path == '/hardware/driver':
             import hardware_configuration as hc
@@ -3185,12 +3332,62 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 notice = str(exc)[:160]
             return self._redirect("/security?notice=" + html.escape(notice).replace(" ", "+"))
 
+        if path.startswith("/tools/") and path[7:] in __import__("tool_runner").TOOLS:
+            import tool_runner
+            name = path[7:]
+            action = str(body.get("action", ""))
+            spec = tool_runner.TOOLS[name]["actions"].get(action)
+            result = tool_runner.run(name, action, str(body.get("value", ""))) if spec and spec.get("post") else None
+            return self._html_response(200, _with_nav(tool_runner.render(name, result), "/tools"))
+
+        if path in ("/vault/grant", "/vault/revoke", "/vault/deliver"):
+            import vault_grants
+            try:
+                target, name = str(body.get("target", "")), str(body.get("name", ""))
+                grants = _vault_grants_path(deps)
+                if path == "/vault/grant":
+                    vault_grants.grant(grants, target, name)
+                    return self._json(200, {"ok": True, "message": f"{name} granted to {target}"})
+                if path == "/vault/revoke":
+                    vault_grants.revoke(grants, target, name)
+                    return self._json(200, {"ok": True, "message": f"{name} no longer granted to {target}"})
+                report = vault_grants.deliver(grants, target, _vault_reader(deps), _vault_push_for(deps, target))
+                if deps.get("audit"):
+                    deps["audit"]({"event": "vault_delivered", "target": target, "delivered": report["delivered"], "skipped": sorted(report["skipped"])})
+                return self._json(200, {"ok": not report["skipped"], "message": f"Sent {len(report['delivered'])}; skipped {len(report['skipped'])}", **report})
+            except (vault_grants.GrantError, ValueError, OSError, vh.VmError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)[:200]})
+
+        if path in ("/vault/put", "/vault/delete", "/vault/reveal"):
+            import vault
+            try:
+                store = _vault_store(deps, str(body.get("scope", "")))
+                name = str(body.get("name", ""))
+                if path == "/vault/put":
+                    store.put(name, str(body.get("value", "")))
+                    notice = f"{name} saved"
+                elif path == "/vault/delete":
+                    store.delete(name) if hasattr(store, "delete") else store.vault.delete(name)
+                    notice = f"{name} deleted"
+                else:
+                    value = store.get(name)
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "vault_secret_shown", "name": name})
+                    return self._json(200, {"ok": value is not None, "value": value or "", "message": "" if value is not None else "No such secret"})
+                if deps.get("audit"):
+                    deps["audit"]({"event": "vault_" + path.rsplit("/", 1)[1], "name": name})
+                return self._json(200, {"ok": True, "message": notice})
+            except (vault.VaultLocked, vault.WrongPassphrase):
+                return self._json(409, {"ok": False, "message": "Unlock the vault first."})
+            except (vault.VaultError, vault.SealError, ValueError, OSError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)[:160]})
+
         if path in ("/vault/set", "/vault/unlock", "/vault/lock"):
             import vault
             notice = ""
             try:
                 if path == "/vault/lock":
-                    for _label, _scope, root in _vault_roots():
+                    for _label, _scope, root in _vault_roots(deps):
                         vault.Vault(root).lock(vault.RUNTIME_DIR)
                     deps.pop("vault_passphrase", None)
                     notice = "Vault locked"
@@ -3199,12 +3396,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     if path == "/vault/set":
                         if passphrase != str(body.get("again", "")):
                             raise ValueError("the two passphrases differ")
-                        for _label, _scope, root in _vault_roots():
+                        for _label, _scope, root in _vault_roots(deps):
                             store = vault.Vault(root)
                             if not store.has_passphrase():
                                 store.set_passphrase(passphrase)
                     names = []
-                    for _label, _scope, root in _vault_roots():
+                    for _label, _scope, root in _vault_roots(deps):
                         store = vault.Vault(root)
                         if store.has_passphrase():
                             names += store.unlock(passphrase, vault.RUNTIME_DIR)

@@ -455,6 +455,9 @@ cp "$SRC/baseline/lib/drive_admin.py" /opt/baseline/lib/drive_admin.py
 cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
 cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
+cp "$SRC/baseline/lib/tool_runner.py" /opt/baseline/lib/tool_runner.py
+cp "$SRC/baseline/lib/file_manager.py" /opt/baseline/lib/file_manager.py
+cp "$SRC/baseline/lib/vault_grants.py" /opt/baseline/lib/vault_grants.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
 cp "$SRC/baseline/lib/drive_names.py" /opt/baseline/lib/drive_names.py
 cp "$SRC/baseline/lib/mounted_places.py" /opt/baseline/lib/mounted_places.py

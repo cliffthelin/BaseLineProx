@@ -1447,3 +1447,69 @@ def test_the_launcher_offers_the_systems_the_machine_carries_when_no_list_was_wr
     entries = os_list.derived({"ubuntu", "nixos"}, ["ubuntu-26.04.1-desktop-amd64.iso"])
     out = launcher_model.available_to_create(entries, ["ubuntu-26.04.1-desktop-amd64.iso"], [], 16384, bases={"ubuntu", "nixos"})
     assert {e["id"] for e in out} == {"ubuntu", "nixos"} and all(e["plan"]["prebuilt"] for e in out)
+
+
+def test_files_page_downloads_uploads_and_stays_inside_the_drives(tmp_path):
+    drive = tmp_path / "drive"; drive.mkdir(); (drive / "a.txt").write_text("hello")
+    case = _RealServerCase(_base_deps(fs_roots=[str(tmp_path)]))
+    try:
+        status, body = case.get(f"/files?path={drive}")
+        assert status == 200 and b"a.txt" in body
+        assert case.get(f"/files/download?path={drive}/a.txt") == (200, b"hello")
+        assert case.get("/files/download?path=/etc/hostname")[0] == 404
+        assert case.post_json("/files/op", {"op": "mkdir", "path": str(drive), "name": "new"})[1]["ok"]
+        assert (drive / "new").is_dir()
+        assert not case.post_json("/files/op", {"op": "delete", "path": "/etc/hostname"})[1]["ok"]
+        url = f"http://127.0.0.1:{case.port}/files/upload?path={drive}&name=up.bin"
+        req = urllib.request.Request(url, data=b"abc", method="POST", headers={"Content-Type": "application/octet-stream", "Cookie": f"session={case.token}",
+                                                                              "Origin": f"http://127.0.0.1:{case.port}"})
+        assert json.loads(urllib.request.urlopen(req, timeout=5).read())["ok"] and (drive / "up.bin").read_bytes() == b"abc"
+    finally:
+        case.close()
+
+
+def test_each_tool_has_its_own_address(tmp_path):
+    case = _RealServerCase(_base_deps())
+    try:
+        for name in ("lm-sensors", "nvme-cli", "smartmontools", "iperf3", "ethtool"):
+            status, body = case.get(f"/tools/{name}")
+            assert status == 200 and name.encode() in body
+        status, body = case.get("/tools/lm-sensors?action=readings")
+        assert status == 200 and b"Result" in body
+        assert case.get("/tools/nothing")[0] in (404,)
+    finally:
+        case.close()
+
+
+def test_vault_page_lists_adds_shows_and_deletes_secrets(tmp_path):
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    case = _RealServerCase(_base_deps(vault_roots=roots))
+    try:
+        assert case.post_json("/vault/put", {"scope": "personal", "name": "GOOGLE_LOGIN", "value": "hunter2hunter2"})[1]["ok"]
+        page = case.get("/vault")[1]
+        assert b"GOOGLE_LOGIN" in page and b"hunter2hunter2" not in page
+        shown = case.post_json("/vault/reveal", {"scope": "personal", "name": "GOOGLE_LOGIN"})[1]
+        assert shown["ok"] and shown["value"] == "hunter2hunter2"
+        assert not case.post_json("/vault/put", {"scope": "personal", "name": "bad name", "value": "hunter2hunter2"})[1]["ok"]
+        assert case.post_json("/vault/delete", {"scope": "personal", "name": "GOOGLE_LOGIN"})[1]["ok"]
+        assert b"GOOGLE_LOGIN" not in case.get("/vault")[1]
+    finally:
+        case.close()
+
+
+def test_vault_grants_and_delivery_reach_a_guest_through_stdin_only(tmp_path):
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    sent = []
+    case = _RealServerCase(_base_deps(vault_roots=roots, vault_grants_path=str(tmp_path / "grants.json"),
+                                      vault_push=lambda target, argv, data: sent.append((target, argv, data))))
+    try:
+        case.post_json("/vault/put", {"scope": "personal", "name": "GOOGLE_LOGIN", "value": "hunter2hunter2"})
+        assert case.post_json("/vault/grant", {"target": "kasm", "name": "GOOGLE_LOGIN"})[1]["ok"]
+        assert not case.post_json("/vault/grant", {"target": "../x", "name": "GOOGLE_LOGIN"})[1]["ok"]
+        report = case.post_json("/vault/deliver", {"target": "kasm"})[1]
+        assert report["delivered"] == ["GOOGLE_LOGIN"]
+        assert sent[0][0] == "kasm" and sent[0][2] == b"hunter2hunter2" and "hunter2" not in " ".join(sent[0][1])
+        assert b"data-send='kasm'" in case.get("/vault")[1]
+        assert case.post_json("/vault/revoke", {"target": "kasm", "name": "GOOGLE_LOGIN"})[1]["ok"]
+    finally:
+        case.close()

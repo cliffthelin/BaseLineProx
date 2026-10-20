@@ -116,6 +116,8 @@ touch /run/baseline-home-ready
         "write_files": [{"path": "/etc/baseline-environment.json", "permissions": "0644", "content": json.dumps({"format": "baseline.prebuilt-environment/v1", "os": os_id}, sort_keys=True) + "\n"}],
         "runcmd": [["systemctl", "enable", "--now", "qemu-guest-agent"]],
     }
+    import vault_grants
+    config["write_files"].extend(dict(item) for item in vault_grants.GUEST_FILES)      # the vault's secrets, once delivered, are usable from this system
     for unit in spec["greeter"]:                         # the login screen must not appear before the retained home is mounted
         config["write_files"].append({"path": f"/etc/systemd/system/{unit}.service.d/baseline-home.conf", "permissions": "0644",
                                       "content": "[Unit]\nRequiresMountsFor=/home\nConditionPathExists=/run/baseline-home-ready\n"})

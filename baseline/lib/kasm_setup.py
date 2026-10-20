@@ -275,7 +275,9 @@ class KasmSetup:
         target = iso_dir / f"{VM_NAME}-seed.iso"
         src = self.layout.root_dir / "seed"
         src.mkdir(parents=True, exist_ok=True)
-        (src / "user-data").write_text("#cloud-config\nssh_pwauth: false\ndisable_root: true\n")
+        import vault_grants
+        (src / "user-data").write_text("#cloud-config\nssh_pwauth: false\ndisable_root: true\nwrite_files:\n" + "".join(
+            f"  - path: {f['path']}\n    permissions: '{f['permissions']}'\n    content: {json.dumps(f['content'])}\n" for f in vault_grants.GUEST_FILES))
         (src / "meta-data").write_text(f"instance-id: {VM_NAME}-{vmid}\nlocal-hostname: kasm\n")
         self._command(["xorriso", "-as", "mkisofs", "-quiet", "-V", "cidata", "-J", "-r", "-o", str(target), str(src)])
         shutil.rmtree(src, ignore_errors=True)
