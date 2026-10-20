@@ -53,6 +53,16 @@ def test_delivery_sends_the_value_on_stdin_only(tmp_path):
     assert "/run/baseline-vault" in " ".join(argv) and "GOOGLE_LOGIN" in " ".join(argv)
 
 
+def test_guest_secret_directory_is_owned_by_the_recipient_and_private(tmp_path):
+    path = tmp_path / "grants.json"
+    vg.grant(path, "vm:d", "GOOGLE_LOGIN")
+    sent = []
+    vg.deliver(path, "vm:d", lambda _name: "synthetic-secret", lambda argv, data: sent.append((argv, data)), owner_uid=1100)
+    script = " ".join(sent[0][0])
+    assert "1100" in script and "-m 0700" in script and "chmod 0600" in script
+    assert "BASELINE_VAULT_DIR" in next(f["content"] for f in vg.GUEST_FILES if f["path"].endswith("baseline-vault.sh"))
+
+
 def test_a_sealed_or_missing_secret_is_skipped_with_a_reason_not_a_crash(tmp_path):
     path = tmp_path / "grants.json"
     vg.grant(path, "kasm", "GOOGLE_LOGIN"); vg.grant(path, "kasm", "OTHER_SECRET")

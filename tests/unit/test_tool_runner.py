@@ -21,6 +21,10 @@ def test_every_tool_has_a_page_and_at_least_one_action():
         assert tool["actions"], name
 
 
+def test_active_iperf_client_run_is_post_only():
+    assert tr.TOOLS["iperf3"]["actions"]["test"]["post"] is True
+
+
 def test_a_fixed_action_runs_its_own_command_with_a_time_limit():
     calls = []
     result = tr.run("lm-sensors", "readings", "", runner=fake(calls, "temp1: 41C\n"))

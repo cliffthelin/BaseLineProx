@@ -78,10 +78,10 @@ def render_vault(states, notice="", secrets=(), places=()):
     """states: [{label, has_passphrase, unlocked, count}] for the admin and personal vaults."""
     rows = ""
     for st in states:
-        state = "No passphrase (stored as plain files)" if not st["has_passphrase"] else ("Unlocked for this boot" if st["unlocked"] else "Locked")
+        state = "Not mounted" if not st.get("available", True) else "No passphrase (stored as plain files)" if not st["has_passphrase"] else ("Unlocked for this boot" if st["unlocked"] else "Locked")
         rows += f"<tr><td>{html.escape(st['label'])}</td><td>{html.escape(state)}</td><td>{st['count']}</td></tr>"
-    any_unset = any(not st["has_passphrase"] for st in states)
-    any_sealed = any(st["has_passphrase"] for st in states)
+    any_unset = any(st.get("available", True) and not st["has_passphrase"] for st in states)
+    any_sealed = any(st.get("available", True) and st["has_passphrase"] for st in states)
     forms = ""
     if any_unset:
         forms += ("<section><h2>Set a vault passphrase</h2><p>Seals every secret on the drive (AES-256, authenticated). The passphrase is "

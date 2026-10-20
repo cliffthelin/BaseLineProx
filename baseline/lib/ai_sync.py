@@ -64,7 +64,9 @@ def run(*, config_path='/mnt/USER_ADMIN/ai-setup.json', runtime=vault.RUNTIME_DI
             errors['kasm'] = 'Kasm workspace inventory unavailable'
     def push(target, selected):
         if target in ('substrate', 'baseline'):
-            ai_runtime.install(selected, account='root', source=Path(ai_runtime.__file__).read_text(), launcher='/opt/baseline/bin/baseline-ai-run',
+            # The launcher is installed by boot/provision.sh. This service deliberately
+            # cannot write to the read-only /opt/baseline tree.
+            ai_runtime.install(selected, account='root',
                 history_root='/mnt/APPDATA_ADMIN/claude-code/.claude' if config.get('claude_history') else None)
         else:
             argv, data = ai.delivery(selected, account='root' if target == 'kasm' else None)

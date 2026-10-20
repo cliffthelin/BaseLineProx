@@ -225,6 +225,9 @@ class Unlocked:
     def names(self):
         return self._vault.names()
 
+    def delete(self, name):
+        return self._vault.delete(name)
+
 
 def build_aware_roots():
     """Installed role volumes, or encrypted parent staging on CACHE for preboot builds."""
@@ -233,12 +236,27 @@ def build_aware_roots():
     if os.path.ismount('/mnt/USER_ADMIN'):
         return ADMIN_VAULT, PERSONAL_VAULT
     import lane_files
-    build = Path(os.environ.get('BASELINE_DRIVES_FILE') or lane_files.BUILD_DRIVES_FILE).parent
-    cache = Path('/run/media/cane/CACHE')
-    if cache.is_mount() and build.resolve().is_relative_to(cache.resolve()) and build.is_dir():
+    build = lane_files.build_drives_file().parent
+    cache = next((parent for parent in (build, *build.parents) if parent.name == 'CACHE' and parent.is_mount()), None)
+    if cache is not None and build.resolve().is_relative_to(cache.resolve()) and build.is_dir():
         for relative in ('parent-user-admin', 'parent-user-personal'):
             if (build / relative).is_symlink():
                 raise VaultError('parent vault staging is redirected')
         return str(build / 'parent-user-admin/vault'), str(build / 'parent-user-personal/vault')
-    # No write fallback to an unmounted USER_ADMIN directory.
-    raise VaultError('USER_ADMIN is not mounted and parent staging on CACHE is unavailable')
+    # The UI may still report the expected partition roots while detached;
+    # callers must check root_available() before any write.
+    return ADMIN_VAULT, PERSONAL_VAULT
+
+
+def root_available(root) -> bool:
+    """True only when a role partition or the mounted build CACHE owns this path."""
+    path = Path(root).absolute()
+    if ADMIN_VAULT != '/mnt/USER_ADMIN/vault' and path.is_relative_to(Path(ADMIN_VAULT).absolute().parent):
+        return True  # explicit embedding/test root supplied by the caller
+    if PERSONAL_VAULT != '/mnt/USER_PERSONAL/vault' and path.is_relative_to(Path(PERSONAL_VAULT).absolute().parent):
+        return True
+    if path == Path(ADMIN_VAULT).absolute() or path.is_relative_to(Path(ADMIN_VAULT).parent):
+        return os.path.ismount('/mnt/USER_ADMIN')
+    if path == Path(PERSONAL_VAULT).absolute() or path.is_relative_to(Path(PERSONAL_VAULT).parent):
+        return os.path.ismount('/mnt/USER_PERSONAL')
+    return any(parent != Path('/') and parent.is_mount() for parent in path.parents)

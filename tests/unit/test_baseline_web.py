@@ -1497,6 +1497,91 @@ def test_vault_page_lists_adds_shows_and_deletes_secrets(tmp_path):
         case.close()
 
 
+def test_deleting_a_secret_works_after_the_vault_is_unlocked(tmp_path):
+    import vault
+    root = tmp_path / "admin"
+    store = vault.Vault(root)
+    store.set_passphrase("synthetic vault passphrase")
+    store.put("GOOGLE_LOGIN", "synthetic-login-value", passphrase="synthetic vault passphrase")
+    case = _RealServerCase(_base_deps(vault_roots=(("USER_ADMIN", "admin", str(root)),),
+                                      vault_passphrase="synthetic vault passphrase"))
+    try:
+        status, result = case.post_json("/vault/delete", {"scope": "admin", "name": "GOOGLE_LOGIN"})
+        assert status == 200 and result["ok"]
+        assert "GOOGLE_LOGIN" not in store.names()
+    finally:
+        case.close()
+
+
+def test_sensitive_credential_and_file_routes_are_unavailable_to_limited_roles(tmp_path):
+    case = _RealServerCase(_base_deps())
+    try:
+        case.token = case.server.deps["sessions"].create("viewer", now=1700000000, role="viewer").token
+        for path, payload in (
+            ("/vault/reveal", {"scope": "admin", "name": "OPENAI_API_KEY"}),
+            ("/vault/grant", {"target": "kasm", "name": "OPENAI_API_KEY"}),
+            ("/files/op", {"op": "mkdir", "path": "/tmp", "name": "nope"}),
+            ("/signins/apply", {}),
+            ("/turnkey/run", {}),
+        ):
+            assert case.post_json(path, payload)[0] == 403
+    finally:
+        case.close()
+
+
+def test_vault_page_reports_detached_partitions_and_refuses_writes(tmp_path, monkeypatch):
+    import vault
+    monkeypatch.setattr(vault, "build_aware_roots", lambda: (_ for _ in ()).throw(vault.VaultError("detached")))
+    monkeypatch.setattr(vault, "root_available", lambda _root: False)
+    case = _RealServerCase(_base_deps())
+    try:
+        status, page = case.get("/vault")
+        assert status == 200 and b"Not mounted" in page
+        status, result = case.post_json("/vault/put", {"scope": "admin", "name": "OPENAI_API_KEY", "value": "synthetic-api-key"})
+        assert status == 409 and not result["ok"]
+        assert not Path("/mnt/USER_ADMIN/vault/OPENAI_API_KEY").exists()
+    finally:
+        case.close()
+
+
+def test_vault_grant_route_refuses_to_write_when_user_admin_is_detached(monkeypatch):
+    import vault
+    monkeypatch.setattr(vault, "root_available", lambda _root: False)
+    case = _RealServerCase(_base_deps())
+    try:
+        status, result = case.post_json("/vault/grant", {"target": "kasm", "name": "OPENAI_API_KEY"})
+        assert status == 409 and not result["ok"]
+    finally:
+        case.close()
+
+
+def test_turnkey_waits_for_user_admin_before_creating_machines_or_marker(monkeypatch, tmp_path):
+    import baseline_web as web
+    monkeypatch.setattr(web.Path, "is_mount", lambda _path: False)
+    marker = tmp_path / "turnkey.json"
+    deps = {"turnkey_marker": None, "turnkey_state": {"running": False}}
+    monkeypatch.setattr(web, "_turnkey_marker", lambda _deps: marker)
+    monkeypatch.setattr(web, "_turnkey_job", lambda *_args: (_ for _ in ()).throw(AssertionError("must wait")))
+    assert not web._turnkey_start(deps, "operator")
+    assert not web._turnkey_marker(deps).exists()
+    assert "USER_ADMIN" in deps["turnkey_state"]["error"]
+
+
+def test_file_upload_origin_is_checked_before_any_bytes_are_written(tmp_path):
+    root = tmp_path / "files"
+    root.mkdir()
+    case = _RealServerCase(_base_deps(fs_roots=(str(root),)))
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{case.port}/files/upload?path={root}&name=bad.bin",
+                                     data=b"must-not-write", method="POST",
+                                     headers={"Content-Type": "application/octet-stream", "Cookie": f"session={case.token}"})
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=5)
+        assert exc.value.code == 403 and not (root / "bad.bin").exists()
+    finally:
+        case.close()
+
+
 def test_vault_grants_and_delivery_reach_a_guest_through_stdin_only(tmp_path):
     roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
     sent = []
@@ -1519,7 +1604,7 @@ def test_setup_runs_for_the_signed_in_user_and_says_what_was_done(tmp_path, monk
     import turnkey
     seen = []
     monkeypatch.setattr(turnkey, "run", lambda host, user, entries, carried, bases, **kw: seen.append((user, kw["vault_names"])) or
-                        {"created": ["debian"], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": ["kasm", "vm:debian"]})
+                            {"created": ["debian"], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": [], "vault_grants": "unchanged"})
     roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
     case = _RealServerCase(_base_deps(vault_roots=roots, vault_grants_path=str(tmp_path / "g.json"), turnkey_marker=str(tmp_path / "turnkey.json"), turnkey_inline=True))
     try:
@@ -1533,9 +1618,9 @@ def test_setup_runs_for_the_signed_in_user_and_says_what_was_done(tmp_path, monk
             urllib.request.build_opener(NoRedirect).open(req, timeout=5)
         except urllib.error.HTTPError as exc:
             assert exc.code == 303 or exc.code == 302
-        assert seen and seen[0][1] == ["GOOGLE_LOGIN"]
+        assert seen and seen[0][1] == ()
         page = case.get("/turnkey")[1]
-        assert b"debian" in page and b"kasm" in page
+        assert b"debian" in page and b"Credential Vault" in page
         assert (tmp_path / "turnkey.json").exists()
     finally:
         case.close()

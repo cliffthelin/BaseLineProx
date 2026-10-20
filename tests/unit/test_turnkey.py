@@ -59,12 +59,12 @@ def test_one_failing_system_does_not_stop_the_others(tmp_path):
     assert report["created"] == ["ubuntu"] and "debian" in report["failed"]
 
 
-def test_every_secret_is_granted_to_every_machine_and_kasm(tmp_path):
+def test_turnkey_never_grants_vault_secrets_automatically(tmp_path):
     grants = tmp_path / "g.json"
     tk.run(Host(), "cliff", ENTRIES, {"debian"}, "/bases", vault_names=["GOOGLE_LOGIN", "CLAUDE_CODE_OAUTH_TOKEN"], grants_path=grants,
            create=make([]), plan_for=plan, install_base=lambda *a: None, owner_for=lambda h, u: u)
-    assert vg.granted(grants, "vm:debian") == ["CLAUDE_CODE_OAUTH_TOKEN", "GOOGLE_LOGIN"]
-    assert vg.granted(grants, "kasm") == ["CLAUDE_CODE_OAUTH_TOKEN", "GOOGLE_LOGIN"]
+    assert vg.granted(grants, "vm:debian") == []
+    assert vg.granted(grants, "kasm") == []
 
 
 def test_running_it_again_changes_nothing(tmp_path):
@@ -72,9 +72,8 @@ def test_running_it_again_changes_nothing(tmp_path):
     args = dict(vault_names=["GOOGLE_LOGIN"], grants_path=grants, create=make([]), plan_for=plan, install_base=lambda *a: None, owner_for=lambda h, u: u)
     host = Host()
     tk.run(host, "cliff", ENTRIES, {"debian"}, "/bases", **args)
-    before = grants.stat().st_mtime_ns
     second = tk.run(host, "cliff", ENTRIES, {"debian"}, "/bases", **args)
-    assert second["created"] == [] and grants.stat().st_mtime_ns == before
+    assert second["created"] == [] and not grants.exists()
 
 
 def test_the_five_default_applications_are_all_in_the_catalogue_and_chrome_resolves_on_debian():

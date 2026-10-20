@@ -6,15 +6,37 @@ first. Nothing is overridden when the operator has set a location.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-BUILD_DRIVES_FILE = "/run/media/cane/CACHE/baseline-build/drives.json"       # the build volume (everything of Baseline's lives on CACHE)
+BUILD_DRIVES_FILE = "/var/lib/baseline/build/drives.json"  # generic fallback; mounted CACHE discovery is preferred on build hosts
+
+
+def _cache_mounts():
+    """Mounted volumes named CACHE, independent of the desktop login's mount path."""
+    candidates = [Path("/mnt/CACHE"), *Path("/run/media").glob("*/CACHE")]
+    return tuple(path for path in candidates if path.is_mount())
+
+
+def build_drives_file(environ=None) -> Path:
+    env = os.environ if environ is None else environ
+    if env.get("BASELINE_DRIVES_FILE"):
+        return Path(env["BASELINE_DRIVES_FILE"])
+    # Keep explicit test/embedding overrides stable; production uses the
+    # mounted volume rather than an operator-specific absolute pathname.
+    if BUILD_DRIVES_FILE != "/var/lib/baseline/build/drives.json":
+        return Path(BUILD_DRIVES_FILE)
+    for cache in _cache_mounts():
+        folder = cache / "baseline-build"
+        if folder.is_dir():
+            return folder / "drives.json"
+    return Path(BUILD_DRIVES_FILE)
 
 
 def apply_defaults(environ) -> None:
     """Only on a build host: when the operator set a location, or the build volume's lane files exist. An installed system has neither, and keeps
     its own `/etc/baseline/own-drives` (drive_guard's default)."""
-    drives = environ.get("BASELINE_DRIVES_FILE") or BUILD_DRIVES_FILE
+    drives = str(build_drives_file(environ))
     own = Path(drives).with_name("own-drives")
     if "BASELINE_DRIVES_FILE" in environ or own.exists():
         environ.setdefault("BASELINE_DRIVES_FILE", drives)

@@ -22,7 +22,7 @@ TOOLS = {
         "health": {"label": "Health verdict of a drive", "argv": ["smartctl", "-H", "{}"], "pick": "smart"},
         "all": {"label": "Full report of a drive", "argv": ["smartctl", "-a", "{}"], "pick": "smart"}}},
     "iperf3": {"title": "Network speed test", "about": "Throughput between this host and another.", "actions": {
-        "test": {"label": "Test against a server", "argv": ["iperf3", "-c", "{}", "-t", "5"], "pick": "host"},
+        "test": {"label": "Test against a server", "argv": ["iperf3", "-c", "{}", "-t", "5"], "pick": "host", "post": True},
         "serve": {"label": "Listen for one test (60 s)", "argv": ["timeout", "60", "iperf3", "-s", "-1"], "post": True}}},
     "ethtool": {"title": "Network card link", "about": "Link speed, driver and offloads of a network card.", "actions": {
         "link": {"label": "Link and speed", "argv": ["ethtool", "{}"], "pick": "nic"},

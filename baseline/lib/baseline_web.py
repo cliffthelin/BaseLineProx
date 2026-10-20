@@ -1720,20 +1720,33 @@ def _vault_roots(deps=None):
     import vault
     if deps and deps.get("vault_roots"):
         return tuple(deps["vault_roots"])
-    admin, personal = vault.build_aware_roots()
+    try:
+        admin, personal = vault.build_aware_roots()
+    except vault.VaultError:
+        admin, personal = vault.ADMIN_VAULT, vault.PERSONAL_VAULT
     return (("USER_ADMIN", "admin", admin), ("USER_PERSONAL", "personal", personal))
+
+
+def _vault_root_available(deps: dict, root: str) -> bool:
+    if deps.get("vault_roots"):
+        return True
+    import vault
+    return vault.root_available(root)
 
 
 def _vault_states(deps: dict) -> list:
     import vault
     out = []
     for label, _scope, root in _vault_roots(deps):
+        if not _vault_root_available(deps, root):
+            out.append({"label": label, "available": False, "has_passphrase": False, "count": 0, "unlocked": False})
+            continue
         store = vault.Vault(root)
         try:
-            out.append({"label": label, "has_passphrase": store.has_passphrase(), "count": len(store.names()),
+            out.append({"label": label, "available": True, "has_passphrase": store.has_passphrase(), "count": len(store.names()),
                         "unlocked": bool(deps.get("vault_passphrase")) and store.has_passphrase()})
         except (vault.VaultError, OSError):
-            out.append({"label": label, "has_passphrase": False, "count": 0, "unlocked": False})
+            out.append({"label": label, "available": False, "has_passphrase": False, "count": 0, "unlocked": False})
     return out
 
 
@@ -1742,6 +1755,8 @@ def _vault_secrets(deps: dict) -> list:
     import vault
     out = []
     for label, scope, root in _vault_roots(deps):
+        if not _vault_root_available(deps, root):
+            continue
         try:
             out += [dict(item, scope=scope, label=label) for item in vault.Vault(root).status()]
         except (vault.VaultError, OSError):
@@ -1753,6 +1768,8 @@ def _vault_store(deps: dict, scope: str):
     import vault
     for _label, key, root in _vault_roots(deps):
         if key == scope:
+            if not _vault_root_available(deps, root):
+                raise vault.VaultError(f"{key.upper()} storage is not mounted")
             return _vault_for(deps, root) if deps.get("vault_passphrase") else vault.Vault(root)
     raise ValueError("unknown vault")
 
@@ -1881,15 +1898,13 @@ def _turnkey_marker(deps: dict) -> Path:
 
 
 def _turnkey_job(deps: dict, username: str) -> dict:
-    """Everything set up for the signed-in user (turnkey.py): a machine per carried system with the owner and applications, every vault secret granted. Adds only; safe to repeat."""
+    """Create the signed-in user's carried systems and apps. Credential grants remain a separate explicit operator action."""
     import os_list
     import turnkey
-    import vault
     host = _vm_host_for(deps)
     entries = os_list.load() or os_list.derive_from_cache(deps.get("installer_cache_root") or "/mnt/INSTALLER_CACHE")
-    names = sorted({n for _label, _scope, root in _vault_roots(deps) for n in _safe_vault_names(vault, root)})
     return turnkey.run(host, username, entries, _carried_bases(deps), str(deps.get("os_bases_dir") or DEFAULT_OS_BASES_DIR),
-                       vault_names=names, grants_path=_vault_grants_path(deps))
+                       vault_names=(), grants_path=_vault_grants_path(deps))
 
 
 def _safe_vault_names(vault, root):
@@ -1905,6 +1920,9 @@ def _turnkey_start(deps: dict, username: str, *, force: bool = False) -> bool:
     state = deps.setdefault("turnkey_state", {"running": False})
     lock = deps.setdefault("turnkey_lock", threading.Lock())
     marker = _turnkey_marker(deps)
+    if deps.get("turnkey_marker") is None and not Path("/mnt/USER_ADMIN").is_mount():
+        state.update(running=False, report=None, error="Waiting for USER_ADMIN to be mounted before turnkey setup")
+        return False
     with lock:
         if state["running"] or (marker.exists() and not force):
             return False
@@ -2712,11 +2730,13 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             elif state.get("error"):
                 status = f"<p class='bad'>Setup stopped: {_h.escape(state['error'])}</p>"
             else:
-                status = "<p>Everything below is set up for you. Nothing is left to configure.</p>" if report else "<p>Not run yet.</p>"
+                status = "<p>Machines and applications below are set up. Review credential access separately.</p>" if report else "<p>Not run yet.</p>"
             rows = ""
-            for key, label in (("created", "Machines made"), ("already_there", "Already there"), ("granted_to", "Vault secrets available to"), ("not_carried", "Not on this build")):
+            for key, label in (("created", "Machines made"), ("already_there", "Already there"), ("granted_to", "Secrets explicitly granted to"), ("not_carried", "Not on this build")):
                 items = (report or {}).get(key) or []
                 rows += f"<tr><td>{label}</td><td>{_h.escape(', '.join(items)) or '-'}</td></tr>"
+            if (report or {}).get("vault_grants"):
+                rows += f"<tr><td>Credential access</td><td>{_h.escape(report['vault_grants'])}</td></tr>"
             for key, label in (("failed", "Could not make"), ("apps_skipped", "Applications not available")):
                 for name, why in ((report or {}).get(key) or {}).items():
                     rows += f"<tr><td>{label}: {_h.escape(name)}</td><td>{_h.escape(str(why))}</td></tr>"
@@ -2726,7 +2746,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                           "<form method='post' action='/turnkey/owner'><input name='name' pattern='[a-z_][a-z0-9_-]{0,31}' placeholder='your name, lowercase' required> "
                           "<button type='submit'>Use this name and set everything up</button></form></section>")
             page = ("<!doctype html><html><head><meta charset='utf-8'><title>Set up</title></head><body><h1>Set up for you</h1>" + status +
-                    f"<table><tbody>{rows}</tbody></table><form method='post' action='/turnkey/run'><button type='submit'>Run the setup again</button></form></body></html>")
+                    f"<table><tbody>{rows}</tbody></table><p><a href='/vault'>Choose credentials for each machine in Credential Vault</a></p>"
+                    "<form method='post' action='/turnkey/run'><button type='submit'>Run the setup again</button></form></body></html>")
             return self._html_response(200, _with_nav(page.encode(), path))
 
         if path == "/signins":
@@ -3613,8 +3634,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
 
         if path in ("/vault/grant", "/vault/revoke", "/vault/deliver"):
             import vault_grants
+            import vault
             try:
                 target, name = str(body.get("target", "")), str(body.get("name", ""))
+                if "vault_grants_path" not in deps and not vault.root_available("/mnt/USER_ADMIN/vault"):
+                    return self._json(409, {"ok": False, "message": "USER_ADMIN is not mounted; credential grants were not changed"})
                 grants = _vault_grants_path(deps)
                 if path == "/vault/grant":
                     vault_grants.grant(grants, target, name)
@@ -3622,7 +3646,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 if path == "/vault/revoke":
                     vault_grants.revoke(grants, target, name)
                     return self._json(200, {"ok": True, "message": f"{name} no longer granted to {target}"})
-                report = vault_grants.deliver(grants, target, _vault_reader(deps), _vault_push_for(deps, target))
+                owner_uid = 1100 if target.startswith("vm:") else 0
+                report = vault_grants.deliver(grants, target, _vault_reader(deps), _vault_push_for(deps, target), owner_uid=owner_uid)
                 if deps.get("audit"):
                     deps["audit"]({"event": "vault_delivered", "target": target, "delivered": report["delivered"], "skipped": sorted(report["skipped"])})
                 return self._json(200, {"ok": not report["skipped"], "message": f"Sent {len(report['delivered'])}; skipped {len(report['skipped'])}", **report})
@@ -3656,9 +3681,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path in ("/vault/set", "/vault/unlock", "/vault/lock"):
             import vault
             notice = ""
+            roots = _vault_roots(deps)
+            if path != "/vault/lock" and any(not _vault_root_available(deps, root) for _label, _scope, root in roots):
+                return self._json(409, {"ok": False, "message": "Vault storage is not mounted; no files were changed."})
             try:
                 if path == "/vault/lock":
-                    for _label, _scope, root in _vault_roots(deps):
+                    for _label, _scope, root in roots:
                         vault.Vault(root).lock(vault.RUNTIME_DIR)
                     deps.pop("vault_passphrase", None)
                     import shutil
@@ -3669,12 +3697,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     if path == "/vault/set":
                         if passphrase != str(body.get("again", "")):
                             raise ValueError("the two passphrases differ")
-                        for _label, _scope, root in _vault_roots(deps):
+                        for _label, _scope, root in roots:
                             store = vault.Vault(root)
                             if not store.has_passphrase():
                                 store.set_passphrase(passphrase)
                     names = []
-                    for _label, _scope, root in _vault_roots(deps):
+                    for _label, _scope, root in roots:
                         store = vault.Vault(root)
                         if store.has_passphrase():
                             names += store.unlock(passphrase, vault.RUNTIME_DIR)

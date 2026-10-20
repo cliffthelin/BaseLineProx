@@ -63,8 +63,13 @@ def granted(path, target) -> list:
     return _load(path).get(target, [])
 
 
-def deliver(path, target, read_secret, push) -> dict:
+def deliver(path, target, read_secret, push, *, owner_uid=0, owner_gid=None) -> dict:
     """read_secret(name) -> value | None (may raise Unavailable); push(argv, stdin_bytes) runs a command in the guest. Returns {"delivered": [...], "skipped": {name: reason}}."""
+    if isinstance(owner_uid, bool) or not isinstance(owner_uid, int) or owner_uid < 0:
+        raise GrantError("the recipient uid must be a non-negative integer")
+    owner_gid = owner_uid if owner_gid is None else owner_gid
+    if isinstance(owner_gid, bool) or not isinstance(owner_gid, int) or owner_gid < 0:
+        raise GrantError("the recipient gid must be a non-negative integer")
     report = {"delivered": [], "skipped": {}}
     for name in granted(path, target):
         try:
@@ -75,7 +80,15 @@ def deliver(path, target, read_secret, push) -> dict:
         if not value:
             report["skipped"][name] = "no such secret in the vault"
             continue
-        script = f'umask 077; mkdir -p -m 700 {GUEST_DIR}; cat > {GUEST_DIR}/{name}.new && mv -f {GUEST_DIR}/{name}.new {GUEST_DIR}/{name}'
+        directory = f"{GUEST_DIR}/{owner_uid}"
+        script = (f'set -eu; base={GUEST_DIR}; dir={directory}; '
+                 'test ! -L "$base"; test ! -L "$dir"; '
+                 'install -d -o 0 -g 0 -m 0755 "$base"; '
+                 f'install -d -o {owner_uid} -g {owner_gid} -m 0700 "$dir"; '
+                 'tmp=$(mktemp "$dir/.secret.XXXXXX"); trap \'rm -f "$tmp"\' EXIT; '
+                 'umask 077; cat > "$tmp"; '
+                 f'chown {owner_uid}:{owner_gid} "$tmp"; chmod 0600 "$tmp"; '
+                 f'mv -f "$tmp" "$dir/{name}"')
         try:
             push(["sh", "-c", script], value.encode())
         except (OSError, RuntimeError, ValueError) as exc:
@@ -89,7 +102,8 @@ def deliver(path, target, read_secret, push) -> dict:
 # `baseline-vault NAME` to print one. Both only read /run/baseline-vault, which exists only while the guest runs.
 GUEST_FILES = [
     {"path": "/etc/profile.d/baseline-vault.sh", "permissions": "0644", "content":
-     f'for f in {GUEST_DIR}/*; do [ -f "$f" ] && [ -r "$f" ] && export "$(basename "$f")=$(cat "$f")"; done 2>/dev/null\n'},
+     f'BASELINE_VAULT_DIR="{GUEST_DIR}/$(id -u)"; export BASELINE_VAULT_DIR\n'
+     'for f in "$BASELINE_VAULT_DIR"/*; do [ -f "$f" ] && [ -r "$f" ] && export "$(basename "$f")=$(cat "$f")"; done 2>/dev/null\n'},
     {"path": "/usr/local/bin/baseline-vault", "permissions": "0755", "content":
-     f'#!/bin/sh\n# prints one secret delivered to this machine by the Baseline vault\ncase "$1" in ""|*/*|.*) echo "usage: baseline-vault NAME" >&2; exit 2;; esac\ncat "{GUEST_DIR}/$1"\n'},
+     f'#!/bin/sh\n# prints one secret delivered to this machine by the Baseline vault\ncase "$1" in ""|*/*|.*) echo "usage: baseline-vault NAME" >&2; exit 2;; esac\ncat "{GUEST_DIR}/$(id -u)/$1"\n'},
 ]

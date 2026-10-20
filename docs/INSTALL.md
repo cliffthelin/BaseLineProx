@@ -1,5 +1,20 @@
 # Installing BaselineOS on real hardware
 
+## Turnkey credential and detached-volume safeguards — 2026-10-20 (DR315)
+
+Turnkey creates carried systems without granting vault entries. Secret access is
+an explicit per-secret/per-target action in Credential Vault. Sensitive routes
+are restricted to admin sessions, upload origin checks run before reading file
+bodies, and file-manager rename/delete preserve symlink targets. Vault writes
+and grants stop when USER_ADMIN is detached; turnkey waits for USER_ADMIN
+before creating systems or writing its completion marker. AI host sync uses the
+provisioned read-only launcher. Build-vault staging is discovered from a mounted
+CACHE rather than a developer-specific mount path.
+
+Source and route tests pass; this corrective pass was not deployed to or booted
+on PC601. FydeOS native Proxmox boot/onboarding remains open under DR314 and
+queue72/78. See [DR315](design/decision-records/315-turnkey-vault-safety-and-deployment-fixes.md).
+
 ## FydeOS setup screen working in QEMU — 2026-10-19 (DR314)
 
 A clean FydeOS appliance now renders its setup screen with responsive input in

@@ -29,6 +29,21 @@ def test_a_replaced_secret_is_replaced_whole_and_a_deleted_one_is_gone(tmp_path)
     assert vault.get("OPENAI_API_KEY") is None and vault.names() == []
 
 
+def test_build_roots_use_the_mounted_cache_ancestor_and_fall_back_to_partition_names(tmp_path, monkeypatch):
+    import lane_files
+    cache = tmp_path / "CACHE"
+    build = cache / "baseline-build"
+    build.mkdir(parents=True)
+    monkeypatch.delenv("BASELINE_DRIVES_FILE", raising=False)
+    monkeypatch.setattr(lane_files, "BUILD_DRIVES_FILE", str(build / "drives.json"))
+    monkeypatch.setattr(os.path, "ismount", lambda path: str(path) == str(cache))
+    assert v.build_aware_roots() == (str(build / "parent-user-admin/vault"), str(build / "parent-user-personal/vault"))
+
+    monkeypatch.setattr(os.path, "ismount", lambda _path: False)
+    assert v.build_aware_roots() == (v.ADMIN_VAULT, v.PERSONAL_VAULT)
+    assert "/run/media/cane/CACHE" not in open(v.__file__).read()
+
+
 @pytest.mark.parametrize("bad", ["", "lower", "A", "../ETC", "A/B", "A B", "X" * 80, "1ABC"])
 def test_only_plain_upper_case_names_are_accepted(tmp_path, bad):
     with pytest.raises(v.VaultError):

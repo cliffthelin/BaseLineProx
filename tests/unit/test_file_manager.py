@@ -80,6 +80,17 @@ def test_a_drive_itself_cannot_be_renamed_or_deleted(area):
         fm.rename(str(root), "x", allowed)
 
 
+def test_renaming_or_deleting_a_symlink_does_not_change_its_target(area):
+    root, outside, allowed = area
+    link = root / "link-to-secret"
+    link.symlink_to(outside / "secret")
+    fm.rename(str(link), "renamed-link", allowed)
+    assert not link.is_symlink() and (root / "renamed-link").is_symlink()
+    assert (outside / "secret").read_text() == "x"
+    fm.delete(str(root / "renamed-link"), allowed)
+    assert not (root / "renamed-link").exists() and (outside / "secret").read_text() == "x"
+
+
 def test_upload_never_overwrites_and_writes_what_it_was_sent(area):
     root, _, allowed = area
     import io

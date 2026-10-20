@@ -35,6 +35,19 @@ def _resolve(path, allowed) -> str:
     return real
 
 
+def _entry_path(path, allowed) -> str:
+    """Resolve and contain the parent, while preserving a leaf symlink as the entry to rename/delete."""
+    if not isinstance(path, str) or not path.startswith("/") or "\0" in path:
+        raise FileManagerError("That place cannot be used.")
+    entry = os.path.abspath(path)
+    parent = os.path.realpath(os.path.dirname(entry))
+    if not path_picker._inside(parent, _allowed(allowed)):
+        raise FileManagerError("That place is not on a connected drive.")
+    if not os.path.islink(entry) and not path_picker._inside(os.path.realpath(entry), _allowed(allowed)):
+        raise FileManagerError("That place is not on a connected drive.")
+    return entry
+
+
 def _name(name) -> str:
     if not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\0" in name or len(name.encode()) > 255:
         raise FileManagerError("A name is plain text without slashes.")
@@ -93,7 +106,7 @@ def make_folder(parent, name, allowed=None) -> str:
 
 
 def rename(path, new_name, allowed=None) -> str:
-    real = _resolve(path, allowed)
+    real = _entry_path(path, allowed)
     if _protected(real, allowed):
         raise FileManagerError("A drive cannot be renamed here.")
     target = os.path.join(os.path.dirname(real), _name(new_name))
@@ -107,7 +120,7 @@ def rename(path, new_name, allowed=None) -> str:
 
 
 def delete(path, allowed=None) -> None:
-    real = _resolve(path, allowed)
+    real = _entry_path(path, allowed)
     if _protected(real, allowed):
         raise FileManagerError("A drive cannot be deleted here.")
     try:

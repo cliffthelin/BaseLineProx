@@ -47,3 +47,14 @@ def test_the_rebuild_tool_applies_the_defaults_before_anything_else():
     source = (Path(__file__).resolve().parents[2] / "baseline/bin/baseline-rebuild-drive").read_text()
     assert "lane_files.apply_defaults(os.environ)" in source
     assert source.index("lane_files.apply_defaults") < source.index("import managed_mode")
+
+
+def test_build_volume_discovery_uses_a_mounted_cache_without_a_user_specific_path(tmp_path, monkeypatch):
+    cache = tmp_path / "operator" / "CACHE"
+    (cache / "baseline-build").mkdir(parents=True)
+    drives = cache / "baseline-build" / "drives.json"
+    drives.write_text("{}")
+    monkeypatch.setattr(lane_files, "BUILD_DRIVES_FILE", "/var/lib/baseline/build/drives.json")
+    monkeypatch.setattr(lane_files, "_cache_mounts", lambda: (cache,))
+    assert lane_files.build_drives_file({}) == drives
+    assert "/run/media/cane/" not in open(lane_files.__file__).read()

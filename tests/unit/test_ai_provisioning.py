@@ -1,5 +1,6 @@
 """AI provisioning uses synthetic credentials and real encrypted temporary files."""
 import json
+from pathlib import Path
 import pytest
 
 
@@ -73,6 +74,26 @@ def test_container_delivery_uses_managed_identity_and_stdin(monkeypatch, tmp_pat
     host.run_input = lambda argv, data: seen.append((argv, data)) or (0, '', '')
     host.guest_exec('synthetic', ['python3', '-c', 'pass'], b'synthetic-input')
     assert seen == [(['pct', 'exec', '901', '--', 'python3', '-c', 'pass'], b'synthetic-input')]
+
+
+def test_ai_sync_uses_the_provisioned_read_only_host_launcher(monkeypatch, tmp_path):
+    import ai_provisioning as ai
+    import ai_runtime
+    import ai_sync
+    config = {'mode': 'custom', 'providers': ['openai'], 'targets': ['substrate'], 'profile': ai.PROFILE}
+    config_path = tmp_path / 'ai-setup.json'
+    config_path.write_text(json.dumps(config))
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / ai.PROFILE).write_text(json.dumps({'providers': {'openai': {'env': {'OPENAI_API_KEY': 'synthetic-api-key'}, 'files': {}}}, 'mcp': {}}))
+    (runtime / ai.PROFILE).chmod(0o600)
+    calls = []
+    monkeypatch.setattr(ai_runtime, 'install', lambda *args, **kwargs: calls.append((args, kwargs)) or {'installed': True})
+    report = ai_sync.run(config_path=config_path, runtime=runtime)
+    assert report['state'] == 'delivered'
+    assert calls and 'source' not in calls[0][1] and 'launcher' not in calls[0][1]
+    unit = (Path(__file__).resolve().parents[2] / 'boot/baseline-ai-sync.service').read_text()
+    assert 'ReadOnlyPaths=/opt/baseline' in unit
 
 
 def test_http_custom_setup_saves_only_references_in_draft_and_can_activate_host(tmp_path):
