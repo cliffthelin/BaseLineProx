@@ -1171,7 +1171,7 @@ The cache contents were not verified, so no artifacts are marked present or miss
                 f"<br><span class='prov-meta'>v{entry.version} &middot; pinned {entry.observed_at}"
                 f" &middot; registry publishes {', '.join(entry.attachments)}</span>")
 
-    for kind in (ic.KIND_ISO, ic.KIND_IMAGE, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT):
+    for kind in (ic.KIND_ISO, ic.KIND_BASE, ic.KIND_KASM, ic.KIND_APP, ic.KIND_IMAGE, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT):
         rows = [r for r in report.rows if r.entry.kind == kind]
         if not rows:
             continue
@@ -1820,12 +1820,14 @@ def _launcher_available(deps: dict, host, vms: list) -> tuple:
         listing = os_list.load(deps.get("os_list_path")) if deps.get("os_list_path") is not None else os_list.load()
     except (os_list.OsListError, OSError) as exc:
         return [], [f"The supported-OS list could not be used: {exc}"]
-    if not any(e["kind"] != "kasm" for e in listing):
-        return [], []
     try:
         isos = [i["name"] if isinstance(i, dict) else str(i) for i in vm_page.available_isos(host, deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)]
     except (vh.VmError, OSError, ValueError):
         isos = []
+    if not any(e["kind"] != "kasm" for e in listing):
+        listing = listing + os_list.derived(_carried_bases(deps), isos)      # nobody has to write a list: what the machine carries is what it offers
+        if not any(e["kind"] != "kasm" for e in listing):
+            return [], []
     import os_profiles
     host_mb = deps["host_memory_mb"]() if deps.get("host_memory_mb") else os_profiles.host_memory_mb()
     return launcher_model.available_to_create(listing, isos, [{"name": v.get("name")} for v in vms], host_mb, bases=_carried_bases(deps)), []

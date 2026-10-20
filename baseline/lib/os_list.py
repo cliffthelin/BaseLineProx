@@ -105,3 +105,62 @@ def load(path=None) -> list:
     """The checked entries; an empty list when no list exists yet (nothing is assumed about which systems the operator wants)."""
     path = Path(path) if path is not None else locate()
     return parse(path.read_text()) if path is not None else []
+
+
+NAMES = {"debian": "Debian", "ubuntu": "Ubuntu", "nixos": "NixOS", "cachyos": "CachyOS", "bazzite": "Bazzite", "omarchy": "Omarchy", "fydeos": "FydeOS",
+         "qubes": "Qubes OS", "mx": "MX Linux"}
+NOT_GUESTS = ("proxmox",)            # the host's own installer source is not a system to run as a guest
+
+
+def _token(filename: str) -> str:
+    """The system an image file is for, from its name: `Qubes-R4.3.2-x86_64.iso` -> `qubes`, `proxmox-ve-source.iso` -> `proxmox`."""
+    stem = re.split(r"[-_.\d]", filename.rsplit("/", 1)[-1], maxsplit=1)[0].lower()
+    return re.sub(r"[^a-z0-9]", "", stem)
+
+
+def derived(base_ids=(), image_names=()) -> list:
+    """The systems this machine can offer, worked out from what it carries, with nobody having to write a list: one entry per ready-made base and one per image file whose system has no base. The
+    entries are the same checked shape as a written list (all five guest applications by default), and a list the operator does write, if any, takes the place of this one."""
+    entries, seen = [], set()
+    images = list(image_names)
+    for ident in sorted(base_ids):
+        if not _ID.fullmatch(ident):
+            continue
+        iso = next((n for n in images if _token(n) == ident and _ISO.fullmatch(n)), None)
+        entries.append(_entry({"id": ident, "name": NAMES.get(ident, ident.title()), "kind": "vm", **({"iso": iso} if iso else {})}, len(entries)))
+        seen.add(ident)
+    for name in sorted(images):
+        ident = _token(name)
+        if not ident or ident in seen or ident in NOT_GUESTS or not _ID.fullmatch(ident) or not _ISO.fullmatch(name):
+            continue
+        entries.append(_entry({"id": ident, "name": NAMES.get(ident, ident.title()), "kind": "vm", "iso": name}, len(entries)))
+        seen.add(ident)
+    return entries
+
+
+def render(entries) -> str:
+    """The list as the file USER_ADMIN keeps (the shape `parse` reads)."""
+    rows = [{k: v for k, v in e.items() if v not in (None, "", [], {})} | {"apps": e["apps"]} for e in entries]
+    return json.dumps({"os": rows}, indent=1) + "\n"
+
+
+def derive_from_cache(cache_root) -> list:
+    """The list of systems for a drive, worked out from what its INSTALLER_CACHE carries (ready-made bases and OS images). Each entry presets the five guest applications."""
+    root = Path(cache_root)
+    bases_dir = root / "installer/expanded/baseline-cache/os-bases"
+    bases = set()
+    try:
+        for manifest in sorted(bases_dir.glob("*-base.json")):
+            try:
+                if (bases_dir / json.loads(manifest.read_text())["base"]).is_file():
+                    bases.add(manifest.name[:-len("-base.json")])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    except OSError:
+        pass
+    images = []
+    try:
+        images = sorted(p.name for p in (root / "isos").iterdir() if p.is_file())
+    except OSError:
+        pass
+    return derived(bases, images)

@@ -495,11 +495,12 @@ def _escape_target(target: str) -> str:
 def _skip_substrate_and_drivers(entry) -> bool:
     """Drivers are excluded by the instruction; the Proxmox source ISO is
     the substrate itself, not an application running on it. VM and LXC
-    installers are excluded as well: VMs and LXCs live on INSTALLER_CACHE (Proxmox
+    installers are excluded as well (and the ready-made OS bases, the Kasm base and the guest applications, which
+    carry their own data): VMs and LXCs live on INSTALLER_CACHE (Proxmox
     only needs to reach them, operator decision 2026-09-30), not in per-persona
     AppData."""
     import installer_cache as ic
-    return entry.kind in (ic.KIND_FIRMWARE, ic.KIND_ISO, ic.KIND_SCRIPT)
+    return entry.kind in (ic.KIND_FIRMWARE, ic.KIND_ISO, ic.KIND_SCRIPT, ic.KIND_BASE, ic.KIND_KASM, ic.KIND_APP)
 
 
 class DataTargetPolicyError(ValueError):

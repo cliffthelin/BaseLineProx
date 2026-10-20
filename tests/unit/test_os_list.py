@@ -98,3 +98,20 @@ def test_a_kasm_entry_may_name_its_workspaces_and_others_may_not():
 def test_bad_workspace_definitions_are_refused(bad):
     with pytest.raises(os_list.OsListError):
         os_list.parse(listing({"id": "k", "name": "K", "kind": "kasm", "workspaces": bad}))
+
+
+def test_the_systems_a_machine_offers_are_worked_out_from_what_it_carries_with_no_list_written():
+    import os_list as ol
+    entries = ol.derived({"ubuntu", "debian"}, ["ubuntu-26.04.1-desktop-amd64.iso", "Qubes-R4.3.2-x86_64.iso", "proxmox-ve-source.iso", "debian-13.7.0-amd64-DVD-1.iso"])
+    by_id = {e["id"]: e for e in entries}
+    assert set(by_id) == {"ubuntu", "debian", "qubes"}                                   # the host's own installer source is not a guest
+    assert by_id["ubuntu"]["iso"] == "ubuntu-26.04.1-desktop-amd64.iso" and by_id["qubes"]["name"] == "Qubes OS" and by_id["debian"]["name"] == "Debian"
+    assert all(e["kind"] == "vm" and len(e["apps"]) == 5 for e in entries)             # the five guest applications by default, like a written list
+    assert ol.derived() == []
+
+
+def test_a_derived_list_has_the_same_checked_shape_as_a_written_one():
+    import os_list as ol
+    written = ol.parse('{"os": [{"id": "ubuntu", "name": "Ubuntu"}]}')[0]
+    derived = ol.derived({"ubuntu"})[0]
+    assert set(written) == set(derived)

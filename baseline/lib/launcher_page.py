@@ -123,8 +123,10 @@ function draw(){
   $('notices').replaceChildren(...(S.notices || []).map(n => el('p', {className:'banner', role:'status'}, n)));
   const home = $('home'); home.replaceChildren();
   if (!S.tiles.length){
+    const choices = (S.available || []).length;
     home.append(el('div', {className:'empty'}, el('h2', {}, 'No virtual machines yet'),
-      el('p', {}, 'Create one from '), el('a', {href:'/vms'}, 'Virtual machines'), '. Each one appears here as a tile with its own menu.'));
+      el('p', {}, choices ? 'Choose a system below to create one, or create one from ' : 'Create one from '), el('a', {href:'/vms'}, 'Virtual machines'), '. Each one appears here as a tile with its own menu.'));
+    drawAvailable(home);                                   // the systems you can create are shown even before the first machine exists
     return;
   }
   const grid = el('ul', {className:'grid'});

@@ -1439,3 +1439,11 @@ def test_folder_browser_and_paste_check_routes_stay_inside_the_allowed_places(tm
         assert json.loads(case.get("/fs/validate?path=relative")[1])["ok"] is False
     finally:
         case.close()
+
+
+def test_the_launcher_offers_the_systems_the_machine_carries_when_no_list_was_written(tmp_path):
+    import launcher_model
+    import os_list
+    entries = os_list.derived({"ubuntu", "nixos"}, ["ubuntu-26.04.1-desktop-amd64.iso"])
+    out = launcher_model.available_to_create(entries, ["ubuntu-26.04.1-desktop-amd64.iso"], [], 16384, bases={"ubuntu", "nixos"})
+    assert {e["id"] for e in out} == {"ubuntu", "nixos"} and all(e["plan"]["prebuilt"] for e in out)

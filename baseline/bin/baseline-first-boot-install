@@ -503,19 +503,24 @@ def step_os_list(source=None, dest=None, guard=lambda: __import__('user_admin').
         log(f"os-list: the host already has {dest}; leaving it as it is")
         mark("os-list", result="kept the host's own")
         return
-    if not source.is_file():
-        log("os-list: this installer carries no supported-OS list")
-        mark("os-list", result="none carried")
-        return
     try:
-        entries = os_list.parse(source.read_text())
+        if source.is_file():
+            text = source.read_text()
+            entries = os_list.parse(text)
+        else:                                                     # no list is carried: the build makes it from the systems the drive carries, with the guest applications preset
+            entries = os_list.derive_from_cache(os.environ.get("BASELINE_CACHE_ROOT", "/mnt/INSTALLER_CACHE"))
+            text = os_list.render(entries) if entries else None
     except (OSError, ValueError) as exc:
         log(f"os-list: not carried, the list does not check out: {exc}")
         mark("os-list", result=f"refused: {exc}"[:200])
         return
+    if text is None:
+        log("os-list: nothing carried to build a list from yet")
+        mark("os-list", result="none carried")
+        return
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
-    tmp.write_text(source.read_text())
+    tmp.write_text(text)
     os.replace(tmp, dest)
     log(f"os-list: {len(entries)} entries carried to {dest}")
     mark("os-list", result="carried", entries=len(entries))

@@ -25,6 +25,8 @@ def _state(status: dict) -> tuple:
         return "Stopped", "Kasm is installed but its VM is not running."
     if not status.get("url"):
         return "Starting", "The VM is running; Kasm will be reachable as soon as it has an address."
+    if not status.get("ready", True):
+        return "Starting", "The VM is running but Kasm's own services are not answering yet. The first start takes several minutes. The link appears as soon as Kasm answers, and this page refreshes itself."
     return "Running", "Kasm is ready."
 
 
@@ -72,7 +74,7 @@ def _sources(carried) -> str:
 def render(status: dict, notice: str = "", report=None) -> bytes:
     label, detail = _state(status)
     note = f"<p role='alert'>{html.escape(notice)}</p>" if notice else ""
-    url = status.get("url")
+    url = status.get("url") if status.get("ready", True) else None                # the link is offered only when Kasm answers
     opener = f'<p><a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">Open Kasm</a> (sign in as the admin or the user; the passwords are in the Vault)</p>' if url else ""
     rebuild = bool(status.get("dehydrated") and not status.get("present"))
     build = ('<form method="post" action="/workspaces/setup"><button type="submit">' + ("Rebuild the VM" if rebuild else "Set up Kasm now") + "</button></form>"
@@ -106,7 +108,8 @@ def render(status: dict, notice: str = "", report=None) -> bytes:
         plugins = "".join(f"<li><b>{html.escape(str(p.get('id', '')))}</b> plugin ({html.escape(label_of.get(p.get('state'), str(p.get('state'))))})</li>" for p in recipe.get("plugins", []))
         parts = f"<h2>What this Kasm is built from</h2><ul>{rows}{plugins}</ul>"
     others = _sources(status.get("registry_sources"))
-    return ("<!doctype html><html><head><meta charset='utf-8'><title>Workspaces</title></head><body><h1>Workspaces (Kasm)</h1>" + note
+    refresh = "<meta http-equiv='refresh' content='20'>" if label in ("Setting up", "Starting") else ""
+    return ("<!doctype html><html><head><meta charset='utf-8'>" + refresh + "<title>Workspaces</title></head><body><h1>Workspaces (Kasm)</h1>" + note
             + f"<p>State: <b>{html.escape(label)}</b>. {html.escape(detail)}</p>{opener}{build}"
             + ("<p><a href='/workspaces/settings'>Kasm settings</a> (everyday choices, or all of them) | <a href='/workspaces/suggestions'>Suggestions</a> (what the history says, and what an AI proposes)</p>" if status.get("running") else "") + controls
             + f"<h2>What you can open</h2><ul>{items}</ul>" + others + parts + _report(report)

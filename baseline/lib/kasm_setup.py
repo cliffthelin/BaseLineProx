@@ -329,6 +329,16 @@ class KasmSetup:
                     return f"https://{ip}"
         return None
 
+    def reachable(self, url, timeout=3) -> bool:
+        """Whether Kasm's web port answers at `url`. A VM can be running and have an address long before Kasm's own services are up."""
+        import socket
+        host = str(url).split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+        try:
+            with socket.create_connection((host, 443), timeout=timeout):
+                return True
+        except OSError:
+            return False
+
     # ---- credentials -------------------------------------------------------------------------------------------------
     def credentials(self, passphrase=None) -> dict:
         """The four credentials, from the vault when it already has them (a rebuild must use the ones the database was made with), otherwise
@@ -747,8 +757,9 @@ class KasmSetup:
                     "recorded_vmid": self.recorded_vmid(), "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe(),
                     "registry_sources": self.carried_sources()}
         running = self.vm_status(vmid) == "running"
+        url = self.address(vmid) if running else None
         return {"present": True, "vmid": vmid, "running": running, "installed": bool(record.get("installed")), "mode": mode,
-                "dehydrated": False, "url": self.address(vmid) if running else None, "memory_mb": record.get("memory_mb"), "cpus": record.get("cpus"),
+                "dehydrated": False, "url": url, "ready": bool(url) and self.reachable(url), "memory_mb": record.get("memory_mb"), "cpus": record.get("cpus"),
                 "workspaces": self.carried_workspaces(), "recipe": self.carried_recipe(), "registry_sources": self.carried_sources()}
 
     def _stopped(self, vmid):

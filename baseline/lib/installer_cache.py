@@ -39,15 +39,25 @@ KIND_PACKAGE = "apt package"
 KIND_FIRMWARE = "driver / firmware"
 KIND_SCRIPT = "VM / LXC script"
 KIND_IMAGE = "container image"
+KIND_BASE = "ready-made OS base"
+KIND_KASM = "Kasm base"
+KIND_APP = "guest application"
+
+# What the build actually carries lives under one folder of the volume (the offline cache the installer expands): the apt packages (diagnostic tools, startup packages, firmware and microcode), the
+# five guest applications, the Kasm base and the ready-made OS bases. The OS images themselves sit in `isos`.
+BUILT = "installer/expanded/baseline-cache"
 
 # Subdirectory on the volume per kind. A self-replicating build reads
 # these by name, so they are part of the on-disk contract.
 SUBDIR = {
     KIND_ISO: "isos",
-    KIND_PACKAGE: "packages",
-    KIND_FIRMWARE: "firmware",
+    KIND_PACKAGE: f"{BUILT}/apt",
+    KIND_FIRMWARE: f"{BUILT}/apt",
     KIND_SCRIPT: "vm-scripts",
     KIND_IMAGE: "images",
+    KIND_BASE: f"{BUILT}/os-bases",
+    KIND_KASM: f"{BUILT}/kasm",
+    KIND_APP: f"{BUILT}/apps",
 }
 
 # Provenance states, weakest to strongest. Kept as distinct words because
@@ -309,6 +319,29 @@ def catalog() -> list:
     for image in _IMAGES:
         entries.append(image)
 
+    import os_list
+    import prebuilt_environment as pe
+    import kasm_setup
+    for system in sorted(pe.SYSTEMS):
+        entries.append(CatalogEntry(
+            f"{system}-base", f"{os_list.NAMES.get(system, system.title())} (ready-made base)", KIND_BASE,
+            origin="built by baseline-build-os-base (an unattended install of the vendor image, checked free of secrets)",
+            install_helper="prebuilt_environment.install_base / create (a VM made from it, owner set from the signed-in user)",
+            config_section="Environments / Launcher", filename=f"{system}-base.qcow2",
+            notes="Carried with its manifest; a VM made from it is ready with its owner and applications preset."))
+    entries.append(CatalogEntry(
+        "kasm-base", "Kasm Workspaces base", KIND_KASM,
+        origin="built by baseline-build-kasm-base (Debian + Docker + Kasm, the vendor's own installer)",
+        install_helper="kasm_setup.KasmSetup (the VM is built on an overlay of this read-only base)",
+        config_section="Workspaces", filename=kasm_setup.BASE_FILE, notes="Read-only; the persisted layers hold all configuration and data."))
+    for app in os_list.APPS:
+        entries.append(CatalogEntry(
+            app, f"{app} (guest application)", KIND_APP,
+            origin="the application's own vendor download, pinned and checked when the cache was built",
+            install_helper="application_bundle / the guest first-boot installer",
+            config_section="Installer Plan / guest applications", filename=f"{app}/source",
+            notes="Preset on every system's list of applications."))
+
     origin = _script_origin()
     for script_id, description, path in _curated_scripts():
         entries.append(CatalogEntry(
@@ -391,6 +424,10 @@ def scan_cache(runner, root: str = DEFAULT_CACHE_ROOT) -> dict:
     found = {}
     for kind, subdir in SUBDIR.items():
         found[subdir] = _listdir_with_sizes(runner, f"{root}/{subdir}")
+    import os_list
+    apps = SUBDIR[KIND_APP]
+    for app in os_list.APPS:                                   # each application keeps its files in a folder of its own
+        found[apps] = found.get(apps, []) + [(f"{app}/{name}", size) for name, size in _listdir_with_sizes(runner, f"{root}/{apps}/{app}")]
     return found
 
 
@@ -430,6 +467,12 @@ def reconcile(runner, root: str = DEFAULT_CACHE_ROOT) -> CacheReport:
         raise CacheScanError(f"declared cache catalog unavailable: {exc}",
                              mounted=mounted, mount_detail=mount_detail) from exc
 
+    # An OS image on the volume is cataloged by being there: it was carried with the build on purpose (the operating systems the machine offers), not an unexplained file.
+    known = {e.filename for e in catalog_entries if e.kind == KIND_ISO}
+    for name, _size in found.get(SUBDIR[KIND_ISO], []):
+        if name not in known:
+            catalog_entries.append(CatalogEntry(name, name, KIND_ISO, origin="carried with this build as an operating system image",
+                                                install_helper="the virtual machine creator (from this image)", config_section="Launcher / Environments", filename=name))
     claimed: set = set()
     for entry in catalog_entries:
         subdir = SUBDIR[entry.kind]

@@ -190,3 +190,13 @@ def test_a_machine_with_no_history_shows_no_report_section():
         assert "What the history suggests" not in req(case, "GET", "/workspaces")[2]
     finally:
         case.close()
+
+
+def test_the_open_link_appears_only_when_kasm_itself_answers():
+    import kasm_page
+    base = {"present": True, "installed": True, "running": True, "url": "https://10.0.0.9", "mode": "persist"}
+    starting = kasm_page.render(dict(base, ready=False)).decode()
+    assert "Open Kasm" not in starting and "not answering yet" in starting and "http-equiv='refresh'" in starting
+    ready = kasm_page.render(dict(base, ready=True)).decode()
+    assert 'href="https://10.0.0.9"' in ready and "Kasm is ready" in ready and "http-equiv='refresh'" not in ready
+    assert "Open Kasm" in kasm_page.render(base).decode()                    # a status that does not say keeps the earlier behaviour

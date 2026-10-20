@@ -21,6 +21,7 @@ PACKAGES_LS = (
     "total 400\n"
     "-rw-rw-r-- 1 cane cane 204800 ethtool_6.10-1_amd64.deb\n"
     "-rw-rw-r-- 1 cane cane 102400 nvme-cli_2.8-1_amd64.deb\n"
+    "-rw-rw-r-- 1 cane cane 999999 stray-tool_1.0_amd64.deb\n"
 )
 
 
@@ -29,7 +30,7 @@ def _runner(*, mounted=True, isos=ISOS_LS, packages=PACKAGES_LS):
     return FakeRunner(command_responses=[
         (lambda a: a[:1] == ["findmnt"], findmnt),
         (lambda a: a[:1] == ["ls"] and a[-1].endswith("/isos"), FakeProc(0, isos)),
-        (lambda a: a[:1] == ["ls"] and a[-1].endswith("/packages"), FakeProc(0, packages)),
+        (lambda a: a[:1] == ["ls"] and a[-1].endswith("/apt"), FakeProc(0, packages)),
         (lambda a: a[:1] == ["ls"], FakeProc(0, "total 0\n")),
     ])
 
@@ -38,7 +39,8 @@ def _runner(*, mounted=True, isos=ISOS_LS, packages=PACKAGES_LS):
 
 def test_catalog_covers_every_kind_the_instruction_named():
     kinds = {e.kind for e in ic.catalog()}
-    assert kinds == {ic.KIND_ISO, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT, ic.KIND_IMAGE}
+    assert kinds == {ic.KIND_ISO, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT, ic.KIND_IMAGE,
+                     ic.KIND_BASE, ic.KIND_KASM, ic.KIND_APP}
 
 
 def test_every_catalog_entry_names_a_real_origin_helper_and_config():
@@ -111,7 +113,7 @@ def test_catalog_includes_both_cpu_microcode_vendors_and_both_wifi_vendors():
 def test_cache_path_is_grouped_by_kind():
     by_id = {e.entry_id: e for e in ic.catalog()}
     assert by_id["proxmox-ve-source"].cache_path == "isos/proxmox-ve-source.iso"
-    assert by_id["ethtool"].cache_path == "packages/ethtool.deb"
+    assert by_id["ethtool"].cache_path == "installer/expanded/baseline-cache/apt/ethtool.deb"
 
 
 # -- Mount status ------------------------------------------------------
@@ -188,7 +190,7 @@ def test_reconcile_matches_a_versioned_deb_by_package_stem():
     report = ic.reconcile(_runner())
     row = next(r for r in report.rows if r.entry.entry_id == "ethtool")
     assert row.present is True
-    assert row.actual_path == "packages/ethtool_6.10-1_amd64.deb"
+    assert row.actual_path == "installer/expanded/baseline-cache/apt/ethtool_6.10-1_amd64.deb"
 
 
 def test_reconcile_lists_a_missing_artifact_rather_than_omitting_it():
@@ -200,7 +202,10 @@ def test_reconcile_lists_a_missing_artifact_rather_than_omitting_it():
 
 def test_every_catalog_entry_appears_in_the_report_exactly_once():
     report = ic.reconcile(_runner())
-    assert len(report.rows) == len(ic.catalog())
+    declared = {e.entry_id for e in ic.catalog()}
+    ids = [r.entry.entry_id for r in report.rows]
+    assert len(ids) == len(set(ids))
+    assert declared <= set(ids)                      # an OS image found on the volume adds its own row
     assert report.present_count + report.missing_count == len(report.rows)
 
 
@@ -209,7 +214,14 @@ def test_reconcile_surfaces_an_uncatalogued_file_instead_of_hiding_it():
     before trusting a self-replicating build."""
     report = ic.reconcile(_runner())
     extras = {e.path for e in report.extras}
-    assert "isos/omarchy-4.0.4.iso" in extras
+    assert "installer/expanded/baseline-cache/apt/stray-tool_1.0_amd64.deb" in extras
+
+
+def test_an_os_image_on_the_volume_is_carried_not_uncatalogued():
+    report = ic.reconcile(_runner())
+    row = next(r for r in report.rows if r.entry.entry_id == "omarchy-4.0.4.iso")
+    assert row.present is True
+    assert not any(e.path.endswith("omarchy-4.0.4.iso") for e in report.extras)
 
 
 def test_extras_are_ordered_largest_first():

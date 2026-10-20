@@ -26,6 +26,41 @@ class RebuildError(RuntimeError):
     pass
 
 
+SEEDS = (("config/local/supported-os.json", "USER_ADMIN", "config/supported-os.json"),)      # (file on the build machine, role, place inside that volume)
+
+
+def seed_missing(mounts: dict, repo) -> list:
+    """Build the configuration this build expects that an older install never received. Only ever ADDS: a file the drive already has (the operator may have edited it) is left exactly as it is.
+    The supported-OS list is built here: the list this machine carries if there is one, otherwise worked out from the systems the drive's own INSTALLER_CACHE carries (each with the five guest
+    applications preset), so nobody has to write it. A list that does not check out is not copied. Returns what was done."""
+    import os_list
+    done = []
+    if "USER_ADMIN" not in mounts:
+        return done
+    dest = Path(mounts["USER_ADMIN"]) / "config/supported-os.json"
+    if dest.exists():
+        return [{"file": "config/supported-os.json", "result": "kept the drive's own"}]
+    text, origin = None, ""
+    source = Path(repo) / "config/local/supported-os.json"
+    try:
+        if source.is_file():
+            os_list.parse(source.read_text())
+            text, origin = source.read_text(), "carried by this build machine"
+        elif "INSTALLER_CACHE" in mounts:
+            entries = os_list.derive_from_cache(mounts["INSTALLER_CACHE"])
+            if entries:
+                text, origin = os_list.render(entries), "built from the systems the drive carries"
+    except (OSError, ValueError) as exc:
+        return [{"file": "config/supported-os.json", "result": f"not written, it does not check out: {exc}"[:200]}]
+    if text is None:
+        return [{"file": "config/supported-os.json", "result": "nothing to build it from yet"}]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    tmp.write_text(text)
+    tmp.replace(dest)
+    return [{"file": "config/supported-os.json", "result": "added", "origin": origin, "entries": len(os_list.parse(text))}]
+
+
 def volumes_to_add(mounted: dict) -> list:
     """The role volumes this build expects that the drive does not have yet. They are added in place from the group's free space; a missing volume is never a reason to wipe."""
     import drive_installer as di
@@ -48,6 +83,7 @@ def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, s
         volumes = {role: mounts[role] for role in data_history.DATA_ROLES if role in mounts}
         backups = data_history.backup_all(runner, volumes, Path(mounts["INSTALLER_CACHE"]) / "backups" / f"rebuild-{stamp}", message=f"rebuild {stamp}: backup before update", tag=f"rebuild-{stamp}")
         cache = cache_sync.sync(runner, mount=mounts["INSTALLER_CACHE"], vg_uuid=attached["vg_uuid"], sources=list(cache_sources)) if cache_sources else None
+        seeded = seed_missing(mounts, Path(__file__).resolve().parents[2])
         filed = []
         if mirror_root:                                          # the mirror: each volume's version history, filed under the combination of drives it belongs to
             mirror_history.migrate_legacy(mirror_root)
@@ -56,7 +92,7 @@ def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, s
     finally:
         twin_sync.detach_twin(runner, attached, mount_base=mount_base)
     report = {"drive_child_id": child, "backups": backups, "formatted": False, "volumes_to_add_in_place": volumes_to_add(mounts),
-              "wipe_needed": False, "history": filed, "cache": cache}
+              "wipe_needed": False, "history": filed, "cache": cache, "seeded": seeded}
     if update is None:
         report["code_layer"] = "not changed: no reviewed update bundle was given"
     else:

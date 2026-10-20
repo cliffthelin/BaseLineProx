@@ -57,3 +57,52 @@ def test_histories_are_filed_on_the_parent_while_the_drive_is_attached(fakes, mo
     monkeypatch.setattr(rd.mirror, "refresh", lambda *a, **k: {"files_changed": 0})
     out = rd.rebuild(R(), serial="S", mirror_root="/parent")
     assert seen and seen[0][0][0] == "backup" and "detach" not in fakes[:-1] and out["history"] == [{"role": "USER_PERSONAL"}]
+
+
+def test_missing_configuration_is_added_and_the_drives_own_is_never_touched(tmp_path):
+    import json
+    repo, ua = tmp_path / "repo", tmp_path / "USER_ADMIN"
+    (repo / "config/local").mkdir(parents=True)
+    ua.mkdir()
+    entry = [{"name": "Ubuntu", "kind": "iso", "image": "ubuntu.iso"}]
+    (repo / "config/local/supported-os.json").write_text(json.dumps(entry))
+    try:
+        out = rd.seed_missing({"USER_ADMIN": str(ua)}, repo)
+    except Exception:                                   # the list's own format decides; a list that does not check out must not be copied
+        out = [{"result": "refused"}]
+    if out[0]["result"] == "added":
+        assert (ua / "config/supported-os.json").read_text() == (repo / "config/local/supported-os.json").read_text()
+        (ua / "config/supported-os.json").write_text("the operator's own edit")
+        again = rd.seed_missing({"USER_ADMIN": str(ua)}, repo)
+        assert again[0]["result"] == "kept the drive's own" and (ua / "config/supported-os.json").read_text() == "the operator's own edit"
+    assert rd.seed_missing({}, repo) == []                                     # no such volume: nothing done
+
+
+def test_a_list_that_does_not_check_out_is_not_copied(tmp_path):
+    repo, ua = tmp_path / "repo", tmp_path / "USER_ADMIN"
+    (repo / "config/local").mkdir(parents=True)
+    ua.mkdir()
+    (repo / "config/local/supported-os.json").write_text("not json at all")
+    out = rd.seed_missing({"USER_ADMIN": str(ua)}, repo)
+    assert out[0]["result"].startswith("not written") and not (ua / "config/supported-os.json").exists()
+
+
+def test_the_list_of_systems_is_built_from_what_the_drive_carries_with_the_applications_preset(tmp_path):
+    import json
+    import os_list
+    ua, ic, repo = tmp_path / "USER_ADMIN", tmp_path / "INSTALLER_CACHE", tmp_path / "repo"
+    bases = ic / "installer/expanded/baseline-cache/os-bases"
+    bases.mkdir(parents=True)
+    (ic / "isos").mkdir()
+    ua.mkdir()
+    repo.mkdir()
+    (bases / "ubuntu-base.qcow2").write_bytes(b"q")
+    (bases / "ubuntu-base.json").write_text(json.dumps({"base": "ubuntu-base.qcow2"}))
+    (bases / "nixos-base.json").write_text(json.dumps({"base": "missing.qcow2"}))             # a manifest without its image is not offered
+    (ic / "isos" / "Qubes-R4.3.2-x86_64.iso").write_bytes(b"i")
+    out = rd.seed_missing({"USER_ADMIN": str(ua), "INSTALLER_CACHE": str(ic)}, repo)
+    assert out[0]["result"] == "added" and out[0]["origin"] == "built from the systems the drive carries"
+    entries = os_list.parse((ua / "config/supported-os.json").read_text())
+    assert {e["id"] for e in entries} == {"ubuntu", "qubes"} and all(e["apps"] == list(os_list.APPS) for e in entries)
+    (ua / "config/supported-os.json").write_text('{"os": []}')
+    assert rd.seed_missing({"USER_ADMIN": str(ua), "INSTALLER_CACHE": str(ic)}, repo)[0]["result"] == "kept the drive's own"
