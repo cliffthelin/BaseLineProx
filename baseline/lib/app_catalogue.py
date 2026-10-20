@@ -107,8 +107,15 @@ FLATHUB = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 # `apt-get update` exits non-zero when ANY source cannot be read (a leftover installer-medium line, a third-party repository that is down), though the lists that matter were fetched; the install that
 # follows is what must succeed, so an update error is reported and not fatal.
 _APT_UPDATE = 'apt-get update || echo "apt-get update reported errors; going on to the install" >&2'
-_FLATPAK_FIRST = {"debian": _APT_UPDATE + "\napt-get install -y flatpak", "ubuntu": _APT_UPDATE + "\napt-get install -y flatpak", "cachyos": "pacman -Syu --noconfirm --needed flatpak", "omarchy": "pacman -Syu --noconfirm --needed flatpak",
+_FLATPAK_FIRST = {"debian": _APT_UPDATE + "\napt-get install -y flatpak", "ubuntu": _APT_UPDATE + "\napt-get install -y flatpak", "cachyos": "pacman -Syu --noconfirm --needed flatpak", "omarchy": "OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm --needed flatpak",
                   "bazzite": "command -v flatpak >/dev/null"}
+
+
+# A first boot can start installing before the network is up (the seed runs ahead of the login screen on the systems without cloud-init): wait for name lookup, up to three minutes, then go on and let the
+# install report its own error if there is still none.
+_WAIT_NETWORK = "n=0; until getent hosts example.com >/dev/null 2>&1 || [ $n -ge 60 ]; do n=$((n+1)); sleep 3; done"
+# Omarchy refuses a full upgrade done directly with pacman unless told it is intended.
+_PACMAN = {"omarchy": "OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman"}
 
 
 def install_script(entry: dict, os_id: str, resolved: dict = None):
@@ -119,10 +126,12 @@ def install_script(entry: dict, os_id: str, resolved: dict = None):
     if route is None:
         raise CatalogueError(params)
     head = ["#!/bin/sh", "set -eu", "export DEBIAN_FRONTEND=noninteractive"]
+    if route in ("apt", "pacman", "flatpak", "deb", "appimage", "service"):
+        head.append(_WAIT_NETWORK)
     if route == "apt":
         return "\n".join(head + [_APT_UPDATE, f"apt-get install -y {params['package']}"]) + "\n"
     if route == "pacman":
-        return "\n".join(head + [f"pacman -Syu --noconfirm --needed {params['package']}"]) + "\n"
+        return "\n".join(head + [f"{_PACMAN.get(os_id, 'pacman')} -Syu --noconfirm --needed {params['package']}"]) + "\n"
     if route == "flatpak":
         prerequisite = _FLATPAK_FIRST.get(os_id)
         return "\n".join(head + ([prerequisite] if prerequisite else []) + [f"flatpak remote-add --if-not-exists --system flathub {FLATHUB}", f"flatpak install -y --system --noninteractive flathub {params['id']}"]) + "\n"

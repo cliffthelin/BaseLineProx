@@ -99,3 +99,12 @@ def test_a_web_route_takes_only_a_plain_https_address():
     for bad in ("http://x.com", "https://x.com/a b", "https://x.com/'; rm", "https://localhost", "javascript:x"):
         with pytest.raises(ac.CatalogueError):
             ac.validate_entry({"id": "x", "name": "X", "category": "ai-tools", "routes": {"web": {"url": bad}}})
+
+
+def test_downloading_scripts_wait_for_the_network_and_omarchy_is_told_the_upgrade_is_intended(cat):
+    for app, system in (("chrome", "bazzite"), ("spotify", "debian"), ("vscode", "cachyos")):
+        script = ac.install_script(cat[app], system, resolved={"url": "https://x.example/a.deb", "sha256": "a" * 64})
+        assert "getent hosts example.com" in script, (app, system)
+    assert "OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu" in ac.install_script(cat["chrome"], "omarchy")
+    assert "OMARCHY_ALLOW_DIRECT_PACMAN" not in ac.install_script(cat["vscode"], "cachyos")
+    assert "getent" not in ac.install_script(cat["claude"], "bazzite")                         # the website route downloads nothing

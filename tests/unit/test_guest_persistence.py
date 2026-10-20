@@ -21,11 +21,10 @@ def test_only_plain_absolute_folders_are_accepted():
         raise AssertionError(bad)
 
 
-def test_the_unit_waits_for_the_home_and_runs_before_the_services_that_use_the_folders():
-    files = {f["path"]: f for f in gp.guest_files()}
-    unit = files["/etc/systemd/system/baseline-persist-monitored.service"]["content"]
-    assert "ConditionPathExists=/run/baseline-home-ready" in unit and "Before=" in unit and "bluetooth.service" in unit
-    assert files["/usr/local/sbin/baseline-persist-monitored"]["permissions"] == "0755"
+def test_it_runs_from_bootcmd_with_the_script_inline_and_writes_nothing_to_etc():
+    entry = gp.bootcmd_entry()
+    assert entry[:2] == ["/bin/sh", "-c"] and "baseline-home-ready" in entry[2] and "/etc/systemd" not in entry[2]
+    assert gp.script(["/etc/ssh"]) in entry[2] or "/etc/ssh" in gp.bootcmd_entry(["/etc/ssh"])[2]
 
 
 def _run(script, tmp_path, paths):
@@ -73,11 +72,21 @@ def test_every_prebuilt_seed_keeps_the_monitored_folders_on_the_retained_disk():
     import json
     import prebuilt_environment as pe
     config = json.loads(pe.cloud_config("ubuntu", owner="cliff", initialize_home=True, hostname="u1").split("\n", 1)[1])
-    assert "/usr/local/sbin/baseline-persist-monitored" in {f["path"] for f in config["write_files"]}
-    assert ["systemctl", "enable", "--now", "baseline-persist-monitored.service"] in config["runcmd"]
+    assert any("baseline-home-ready" in c[2] and "keep /var/lib/bluetooth" in c[2] for c in config["bootcmd"] if isinstance(c, list))
+    assert not any("baseline-persist" in f["path"] for f in config["write_files"])
 
 
 def test_folder_names_follow_the_hosts_own_scheme():
     import persist_bind_mounts as pbm
     assert gp.subdir_for("/etc/baseline") == pbm.REDIRECT_PATHS["/etc/baseline"] == "etc-baseline"
     assert gp.subdir_for("/etc/ssh") == "etc-ssh"
+
+
+def test_nixos_gets_no_file_in_its_read_only_etc():
+    import json
+    import prebuilt_environment as pe
+    nix = json.loads(pe.cloud_config("nixos", owner="cliff", initialize_home=True, hostname="n").split("\n", 1)[1])
+    assert not [f["path"] for f in nix["write_files"] if f["path"].startswith(("/etc/systemd", "/etc/profile.d", "/etc/xdg"))]
+    assert "/usr/local/bin/baseline-vault" in {f["path"] for f in nix["write_files"]}
+    debian = json.loads(pe.cloud_config("debian", owner="cliff", initialize_home=True, hostname="d").split("\n", 1)[1])
+    assert "/etc/profile.d/baseline-vault.sh" in {f["path"] for f in debian["write_files"]}

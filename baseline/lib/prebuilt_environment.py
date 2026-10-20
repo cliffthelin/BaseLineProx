@@ -133,9 +133,9 @@ touch /run/baseline-home-ready
     }
     import guest_persistence
     import vault_grants
-    config["write_files"].extend(dict(item) for item in guest_persistence.guest_files())     # monitored folders live on the retained disk: changes made while running are kept
-    config["runcmd"].append(["systemctl", "enable", "--now", "baseline-persist-monitored.service"])
-    config["write_files"].extend(dict(item) for item in vault_grants.GUEST_FILES)      # the vault's secrets, once delivered, are usable from this system
+    config["bootcmd"].append(guest_persistence.bootcmd_entry())          # monitored folders live on the retained disk: changes made while running are kept
+    shared = [dict(item) for item in vault_grants.GUEST_FILES]
+    config["write_files"].extend(item for item in shared if os_id != "nixos" or not item["path"].startswith("/etc/"))      # NixOS's /etc is read-only: a file there fails the first-boot job
     for unit in spec["greeter"]:                         # the login screen must not appear before the retained home is mounted
         config["write_files"].append({"path": f"/etc/systemd/system/{unit}.service.d/baseline-home.conf", "permissions": "0644",
                                       "content": "[Unit]\nRequiresMountsFor=/home\nConditionPathExists=/run/baseline-home-ready\n"})

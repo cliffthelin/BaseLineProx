@@ -46,7 +46,7 @@ def subdir_for(path: str) -> str:
 
 def script(paths=MONITORED) -> str:
     """The boot script: for each folder, seed the retained copy once, then bind it over the usual place. Idempotent; stops without touching anything when the home is not mounted."""
-    lines = ["#!/bin/sh", "set -u", f'[ -e {READY} ] || {{ echo "retained home is not ready; nothing changed" >&2; exit 1; }}', f"mkdir -p {STORE}", "keep() {",
+    lines = ["#!/bin/sh", "set -u", f'[ -e {READY} ] || {{ echo "retained home is not ready; nothing changed" >&2; exit 0; }}', f"mkdir -p {STORE}", "keep() {",
              '    place="$1"; kept="$2"',
              '    mkdir -p "$kept" "$place"',
              '    if [ ! -e "$kept/.seeded" ]; then',
@@ -58,15 +58,11 @@ def script(paths=MONITORED) -> str:
     for raw in paths:
         path = check_path(raw)
         lines.append(f"keep {path} {STORE}/{subdir_for(path)}")
+    lines.append("exit 0                                  # a folder that could not be bound is left as it was; it never stops the first boot")
     return "\n".join(lines) + "\n"
 
 
-def unit(paths=MONITORED) -> str:
-    return ("[Unit]\nDescription=Keep monitored folders on the retained disk\nAfter=local-fs.target\nConditionPathExists=" + READY + "\nBefore=" + " ".join(BEFORE) +
-            "\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/local/sbin/baseline-persist-monitored\n\n[Install]\nWantedBy=multi-user.target\n")
-
-
-def guest_files(paths=MONITORED) -> list:
-    """cloud-init write_files entries (the unit is enabled by the seed's runcmd)."""
-    return [{"path": "/usr/local/sbin/baseline-persist-monitored", "permissions": "0755", "content": script(paths)},
-            {"path": "/etc/systemd/system/baseline-persist-monitored.service", "permissions": "0644", "content": unit(paths)}]
+def bootcmd_entry(paths=MONITORED) -> list:
+    """The cloud-init `bootcmd` entry that does it (every boot, straight after the retained home is mounted, before the services that use the folders). It carries the script itself, so no file in
+    /etc is needed: NixOS's /etc is a read-only link into its store, and a file written there stops the whole first-boot job."""
+    return ["/bin/sh", "-c", script(paths)]

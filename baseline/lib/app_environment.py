@@ -88,9 +88,14 @@ def seed_extra(plan_: dict, *, tag: str = "") -> dict:
     if plan_.get("route") in ("deb", "apt"):          # started with the password store every machine shares, so a sign-in carried from another machine opens (signin_share.py)
         import signin_share
         files += signin_share.wrapper_files(plan_["app"])
-    path = "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; " if plan_.get("os") == "nixos" else ""      # NixOS's first-boot PATH has nothing in it
-    run = ["sh", "-c", f"{path}mkdir -p /var/lib/baseline && sh /var/lib/baseline/install-app{dash}.sh > /var/log/baseline-install-app{dash}.log 2>&1; rc=$?; "
-                       f"printf '{{\"app\": \"{plan_['app']}\", \"exit\": %s}}\\n' \"$rc\" > /var/lib/baseline/app-ready{dash}.json"]
+    paths = "export PATH=/run/wrappers/bin:/run/current-system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    files.append({"path": f"/var/lib/baseline/run-app{dash}.sh", "permissions": "0700", "content": "\n".join([
+        "#!/bin/sh", paths, "mkdir -p /var/lib/baseline",
+        f"/bin/sh /var/lib/baseline/install-app{dash}.sh > /var/log/baseline-install-app{dash}.log 2>&1; rc=$?",
+        f"printf '{{\"app\": \"{plan_['app']}\", \"exit\": %s}}\\n' \"$rc\" > /var/lib/baseline/app-ready{dash}.json", ""])})
+    # Detached, after the network is up, and one install at a time (the package managers lock): the first boot is not held up by downloads, and the installs do not fight over a lock.
+    run = ["sh", "-c", f"{paths}; systemd-run --no-block --unit=baseline-app-install{dash} --property=After=network-online.target --property=Wants=network-online.target "
+                       f"flock /run/baseline-app-install.lock /bin/sh /var/lib/baseline/run-app{dash}.sh"]
     return {"write_files": files, "runcmd": [run], "mounts": plan_["mounts"]}
 
 

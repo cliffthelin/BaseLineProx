@@ -48,7 +48,9 @@ def test_the_seed_runs_the_install_marks_when_it_finished_and_starts_the_applica
     paths = {f["path"]: f for f in extra["write_files"]}
     assert paths["/var/lib/baseline/install-app.sh"]["permissions"] == "0700" and "Exec=chatgpt" in paths["/etc/xdg/autostart/baseline-app.desktop"]["content"]
     assert "/etc/gdm3/daemon.conf" not in paths                                                            # signing the owner in is the base's seed's job, once
-    assert "app-ready.json" in extra["runcmd"][0][2] and '"app": "chatgpt"' in extra["runcmd"][0][2]
+    runner = paths["/var/lib/baseline/run-app.sh"]["content"]
+    assert "app-ready.json" in runner and '"app": "chatgpt"' in runner                                  # the marker is written by the runner that was started
+    assert "systemd-run --no-block" in extra["runcmd"][0][2] and "flock /run/baseline-app-install.lock" in extra["runcmd"][0][2]      # detached, one install at a time
     server = ae.seed_extra(ae.plan("ollama", "debian", resolved={"url": "https://x/o.tar.zst", "sha256": "b" * 64}, catalogue=cat))
     assert not any(f["path"].startswith("/etc/xdg/autostart") for f in server["write_files"])               # a server has no desktop to start into
 
