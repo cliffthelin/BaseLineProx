@@ -1,5 +1,18 @@
 # Installing BaselineOS on real hardware
 
+## PC601 parent Bluetooth configuration — 2026-10-19 (DR310)
+
+Physically copied seven parent BlueZ device records to PC601 USER_ADMIN and its
+existing BASELINE_MIRROR copy, enabled BlueZ and added persistent mount/startup
+wiring on both. Independent read-only remount checks verified every copied file,
+private permissions and configuration. All repair mounts were unmounted.
+93 focused source/unit tests passed; native boot and actual Bluetooth connections
+remain unverified under queue72/78. Controller identities are preserved, not
+converted for another adapter. Future explicit transfer is available through
+`baseline-rebuild-drive --bluetooth-from-parent`; conflicting child state is
+refused. This copies pairing/device state, not global `/etc/bluetooth` policy.
+See [DR310](design/decision-records/310-parent-bluetooth-pairings-pc601-mirror.md).
+
 ## PC401 → PC601 selective port review — 2026-10-17 (DR309)
 
 This is an isolated review checkout based on PC601 `b4e41ec`, branch

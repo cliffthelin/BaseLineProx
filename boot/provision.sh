@@ -461,6 +461,7 @@ cp "$SRC/baseline/lib/tool_runner.py" /opt/baseline/lib/tool_runner.py
 cp "$SRC/baseline/lib/file_manager.py" /opt/baseline/lib/file_manager.py
 cp "$SRC/baseline/lib/vault_grants.py" /opt/baseline/lib/vault_grants.py
 cp "$SRC/baseline/lib/guest_persistence.py" /opt/baseline/lib/guest_persistence.py
+cp "$SRC/baseline/lib/turnkey.py" /opt/baseline/lib/turnkey.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
 cp "$SRC/baseline/lib/drive_names.py" /opt/baseline/lib/drive_names.py
 cp "$SRC/baseline/lib/mounted_places.py" /opt/baseline/lib/mounted_places.py
@@ -489,6 +490,10 @@ cp "$SRC/baseline/lib/kasm_registry.py" /opt/baseline/lib/kasm_registry.py
 cp "$SRC/baseline/lib/kasm_settings_ui.py" /opt/baseline/lib/kasm_settings_ui.py
 cp "$SRC/baseline/lib/kasm_settings.py" /opt/baseline/lib/kasm_settings.py
 cp "$SRC/baseline/lib/prebuilt_environment.py" /opt/baseline/lib/prebuilt_environment.py
+cp "$SRC/baseline/lib/app_environment.py" /opt/baseline/lib/app_environment.py
+cp "$SRC/baseline/lib/app_catalogue.py" /opt/baseline/lib/app_catalogue.py
+install -d /opt/baseline/config
+cmp -s "$SRC/config/app-catalogue.json" /opt/baseline/config/app-catalogue.json || cp "$SRC/config/app-catalogue.json" /opt/baseline/config/app-catalogue.json
 cp "$SRC/baseline/lib/os_build.py" /opt/baseline/lib/os_build.py
 cp "$SRC/baseline/lib/kasm_wiki.py" /opt/baseline/lib/kasm_wiki.py
 cp "$SRC/baseline/lib/kasm_proposals.py" /opt/baseline/lib/kasm_proposals.py

@@ -47,6 +47,7 @@ TREE = (
         P("/ceph", "Ceph"))),
     Group("Tools", "Help and tools", (
         P("/chat", "Chat", "Ask for help", "Ask the assistant."),
+        P("/turnkey", "Set up for you", "Everything set up", "What was set up for you, and run it again."),
         P("/files", "Files", "Files", "Browse, upload and download files on the connected drives."),
         P("/tools", "Diagnostic tools", "Checkups", "Run a check on a part of this computer."),
         P("/ai-setup", "AI providers", "AI assistants"),

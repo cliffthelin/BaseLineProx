@@ -92,6 +92,7 @@ def user_mountpoint_for(persona: str | None = None) -> str:
 
 # absolute path -> subdirectory name on the persistence partition
 REDIRECT_PATHS = {
+    "/var/lib/bluetooth": "var-lib-bluetooth",
     "/etc/baseline": "etc-baseline",
     "/var/lib/baseline": "var-lib-baseline",
     "/var/log/baseline": "var-log-baseline",
@@ -117,6 +118,7 @@ REDIRECT_PATHS = {
 # pveproxy restart pulled this service in mid-boot. The move is therefore refused while any of these runs, and an unreadable state counts as
 # running. At the next boot it happens before they start (boot/proxmox-overlay.conf orders them after this service).
 QUIESCE_BEFORE_MOVE = {
+    "/var/lib/bluetooth": ("bluetooth",),
     "/var/lib/pve-cluster": ("pve-cluster",),
     "/var/lib/pve-firewall": ("pve-firewall",),
     "/var/lib/pve-manager": ("pvedaemon", "pveproxy", "pvestatd"),

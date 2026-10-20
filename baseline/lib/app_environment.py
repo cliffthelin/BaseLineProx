@@ -73,18 +73,20 @@ def plan(app_id: str, os_id: str, *, shares=(), resolved=None, catalogue=None) -
             "mounts": [mount_entry(s) for s in shares], "data": entry.get("data", [])}
 
 
-def seed_extra(plan_: dict) -> dict:
-    """The additions to the base's first-boot seed: run the install script (logged, with a marker when it finished), start the application at login, and add the mounts."""
+def seed_extra(plan_: dict, *, tag: str = "") -> dict:
+    """The additions to the base's first-boot seed: run the install script (logged, with a marker when it finished), start the application at login, and add the mounts. With `tag` (the
+    application's name) every file is named for the application, so several applications can share one machine's seed."""
     script = plan_["script"]
     if "BASELINE_END_OF_SCRIPT" in script:
         raise AppEnvError("the install script contains the end marker")
-    files = [{"path": "/var/lib/baseline/install-app.sh", "permissions": "0700", "content": script}]
+    dash = f"-{tag}" if tag else ""
+    files = [{"path": f"/var/lib/baseline/install-app{dash}.sh", "permissions": "0700", "content": script}]
     if plan_["launch"]:
-        files.append({"path": "/etc/xdg/autostart/baseline-app.desktop", "permissions": "0644",
+        files.append({"path": f"/etc/xdg/autostart/baseline-app{dash}.desktop", "permissions": "0644",
                       "content": f"[Desktop Entry]\nType=Application\nName={plan_['name']}\nExec={plan_['launch']}\nX-GNOME-Autostart-enabled=true\n"})
         # (the base's seed already signs the owner straight in at the console, so the application starts on its own)
-    run = ["sh", "-c", "mkdir -p /var/lib/baseline && sh /var/lib/baseline/install-app.sh > /var/log/baseline-install-app.log 2>&1; rc=$?; "
-                       f"printf '{{\"app\": \"{plan_['app']}\", \"exit\": %s}}\\n' \"$rc\" > /var/lib/baseline/app-ready.json"]
+    run = ["sh", "-c", f"mkdir -p /var/lib/baseline && sh /var/lib/baseline/install-app{dash}.sh > /var/log/baseline-install-app{dash}.log 2>&1; rc=$?; "
+                       f"printf '{{\"app\": \"{plan_['app']}\", \"exit\": %s}}\\n' \"$rc\" > /var/lib/baseline/app-ready{dash}.json"]
     return {"write_files": files, "runcmd": [run], "mounts": plan_["mounts"]}
 
 

@@ -1513,3 +1513,29 @@ def test_vault_grants_and_delivery_reach_a_guest_through_stdin_only(tmp_path):
         assert case.post_json("/vault/revoke", {"target": "kasm", "name": "GOOGLE_LOGIN"})[1]["ok"]
     finally:
         case.close()
+
+
+def test_setup_runs_for_the_signed_in_user_and_says_what_was_done(tmp_path, monkeypatch):
+    import turnkey
+    seen = []
+    monkeypatch.setattr(turnkey, "run", lambda host, user, entries, carried, bases, **kw: seen.append((user, kw["vault_names"])) or
+                        {"created": ["debian"], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": ["kasm", "vm:debian"]})
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    case = _RealServerCase(_base_deps(vault_roots=roots, vault_grants_path=str(tmp_path / "g.json"), turnkey_marker=str(tmp_path / "turnkey.json"), turnkey_inline=True))
+    try:
+        case.post_json("/vault/put", {"scope": "personal", "name": "GOOGLE_LOGIN", "value": "hunter2hunter2"})
+        req = urllib.request.Request(f"http://127.0.0.1:{case.port}/turnkey/run", data=b"", method="POST",
+                                     headers={"Cookie": f"session={case.token}", "Origin": f"http://127.0.0.1:{case.port}"})
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        try:
+            urllib.request.build_opener(NoRedirect).open(req, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 303 or exc.code == 302
+        assert seen and seen[0][1] == ["GOOGLE_LOGIN"]
+        page = case.get("/turnkey")[1]
+        assert b"debian" in page and b"kasm" in page
+        assert (tmp_path / "turnkey.json").exists()
+    finally:
+        case.close()

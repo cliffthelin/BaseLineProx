@@ -1814,6 +1814,60 @@ def _vault_reader(deps: dict):
     return read
 
 
+def _turnkey_marker(deps: dict) -> Path:
+    return Path(deps.get("turnkey_marker") or "/mnt/USER_ADMIN/turnkey.json")
+
+
+def _turnkey_job(deps: dict, username: str) -> dict:
+    """Everything set up for the signed-in user (turnkey.py): a machine per carried system with the owner and applications, every vault secret granted. Adds only; safe to repeat."""
+    import os_list
+    import turnkey
+    import vault
+    host = _vm_host_for(deps)
+    entries = os_list.load() or os_list.derive_from_cache(deps.get("installer_cache_root") or "/mnt/INSTALLER_CACHE")
+    names = sorted({n for _label, _scope, root in _vault_roots(deps) for n in _safe_vault_names(vault, root)})
+    return turnkey.run(host, username, entries, _carried_bases(deps), str(deps.get("os_bases_dir") or DEFAULT_OS_BASES_DIR),
+                       vault_names=names, grants_path=_vault_grants_path(deps))
+
+
+def _safe_vault_names(vault, root):
+    try:
+        return vault.Vault(root).names()
+    except (vault.VaultError, OSError):
+        return []
+
+
+def _turnkey_start(deps: dict, username: str, *, force: bool = False) -> bool:
+    """Starts the setup in the background unless it already ran for this machine (or is running); the result is kept beside the other administration data."""
+    import threading
+    state = deps.setdefault("turnkey_state", {"running": False})
+    lock = deps.setdefault("turnkey_lock", threading.Lock())
+    marker = _turnkey_marker(deps)
+    with lock:
+        if state["running"] or (marker.exists() and not force):
+            return False
+        state.update(running=True, report=None, error=None, user=username)
+
+    def work():
+        try:
+            report = _turnkey_job(deps, username)
+            state["report"] = report
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({"user": username, "report": report}, indent=1))
+            except OSError:
+                pass
+        except Exception as exc:                                   # shown on the page, never fatal to the console
+            state["error"] = str(exc)[:300]
+        finally:
+            state["running"] = False
+    if deps.get("turnkey_inline"):
+        work()
+    else:
+        threading.Thread(target=work, daemon=True).start()
+    return True
+
+
 def _vault_for(deps: dict, root: str):
     """The vault bound to the passphrase held in this server's memory, or the plain vault when none is set."""
     import vault
@@ -2536,6 +2590,33 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import sensors_collect
             history = sensors_view.hottest_history(rows, db_path=deps.get("sensors_db") or sensors_collect.DB_PATH, window_s=3600)
             return self._html_response(200, _with_nav(sensors_view.render(rows, history), path))
+
+        if path == "/turnkey":
+            import html as _h
+            state = deps.get("turnkey_state") or {}
+            marker = _turnkey_marker(deps)
+            report = state.get("report")
+            if report is None and marker.exists():
+                try:
+                    report = json.loads(marker.read_text()).get("report")
+                except (OSError, ValueError):
+                    report = None
+            if state.get("running"):
+                status = "<p role='status'>Setting everything up for you…</p><meta http-equiv='refresh' content='10'>"
+            elif state.get("error"):
+                status = f"<p class='bad'>Setup stopped: {_h.escape(state['error'])}</p>"
+            else:
+                status = "<p>Everything below is set up for you. Nothing is left to configure.</p>" if report else "<p>Not run yet.</p>"
+            rows = ""
+            for key, label in (("created", "Machines made"), ("already_there", "Already there"), ("granted_to", "Vault secrets available to"), ("not_carried", "Not on this build")):
+                items = (report or {}).get(key) or []
+                rows += f"<tr><td>{label}</td><td>{_h.escape(', '.join(items)) or '-'}</td></tr>"
+            for key, label in (("failed", "Could not make"), ("apps_skipped", "Applications not available")):
+                for name, why in ((report or {}).get(key) or {}).items():
+                    rows += f"<tr><td>{label}: {_h.escape(name)}</td><td>{_h.escape(str(why))}</td></tr>"
+            page = ("<!doctype html><html><head><meta charset='utf-8'><title>Set up</title></head><body><h1>Set up for you</h1>" + status +
+                    f"<table><tbody>{rows}</tbody></table><form method='post' action='/turnkey/run'><button type='submit'>Run the setup again</button></form></body></html>")
+            return self._html_response(200, _with_nav(page.encode(), path))
 
         if path == "/files":
             import file_manager
@@ -3340,6 +3421,11 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             result = tool_runner.run(name, action, str(body.get("value", ""))) if spec and spec.get("post") else None
             return self._html_response(200, _with_nav(tool_runner.render(name, result), "/tools"))
 
+        if path == "/turnkey/run":
+            who = deps["sessions"].get(self._cookie_token(), now)
+            _turnkey_start(deps, who.username if who else "owner", force=True)
+            return self._redirect("/turnkey")
+
         if path in ("/vault/grant", "/vault/revoke", "/vault/deliver"):
             import vault_grants
             try:
@@ -3489,6 +3575,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 session.ttl_s = _operator_session_seconds(deps)
                 deps["sessions"].persist(session)
                 self._record_attempt("login", now, ok=True)
+                _turnkey_start(deps, body["username"])
                 return self._redirect("/operations" if session.role == "operator" else "/home", set_cookie=ws.session_cookie(session.token))
             result = sw.handle_login(deps["verifier"], deps["sessions"],
                                       body.get("username", ""), body.get("password", ""), now,
@@ -3501,6 +3588,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             self._record_attempt("login", now, ok=result.outcome == "applied")
             if result.outcome == "applied":
                 role = deps["sessions"].sessions[result.body["token"]].role
+                _turnkey_start(deps, body.get("username", ""))
                 return self._redirect("/operations" if role == "operator" else "/home",
                                       set_cookie=ws.session_cookie(result.body["token"]))
             return self._html_response(401, _with_nav(sw.render_login_page("Invalid username or password."), "/login"))

@@ -448,3 +448,17 @@ def test_application_shortcut_settings_survive_validated_compilation():
     assert ip.validate(plan,found)==[]
     compiled=ip.compile_plan(plan,found)
     assert compiled['applications']['configurations']['chrome']['scale']==1.25
+
+
+def test_bluetooth_transfer_is_opt_in_validated_and_compiled_for_any_build():
+    found = discover(disk('sda', PVE))
+    plan = ip.autofill_single_drive(found, PVE)
+    assert plan['host_configuration']['bluetooth_from_parent'] is False
+    assert ip.compile_plan(plan, found)['host_configuration']['bluetooth_from_parent'] is False
+    plan['host_configuration']['bluetooth_from_parent'] = True
+    assert ip.validate(plan, found) == []
+    assert ip.compile_plan(plan, found)['host_configuration']['bluetooth_from_parent'] is True
+    plan['host_configuration']['bluetooth_from_parent'] = 'false'
+    assert any('Bluetooth' in e for e in ip.validate(plan, found))
+    del plan['host_configuration']
+    assert ip.validate(plan, found) == []  # existing saved plans remain opt-out

@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--mirror", default=None, help="where the mirror lives; by default the one managed mode names, and none when managed mode is off")
     parser.add_argument("--with", dest="peers", action="append", default=[], metavar="SERIAL", help="another drive of this drive's combination (repeatable); without it the drive is a combination of one")
     parser.add_argument("--cache-from", default=None, help="the built offline cache and OS images to bring the drive's INSTALLER_CACHE up to date with (only missing or changed files are written); default: the build volume's own")
+    parser.add_argument("--bluetooth-from-parent", action="store_true", help="copy parent BlueZ pairings to child USER_ADMIN; refuses conflicting child settings; original controller required")
     parser.add_argument("--input-bundle")
     parser.add_argument("--recovery-folder")
     args = parser.parse_args()
@@ -52,7 +53,7 @@ def main():
             with __import__("tempfile").TemporaryDirectory(prefix="baseline-drive-update-") as root:
                 return iu.update(runner, serial=args.serial, input_bundle=args.input_bundle, recovery_folder=args.recovery_folder, root=root)
     try:
-        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update, peer_serials=args.peers, mirror_root=args.mirror, allowed_serials=[args.serial], cache_sources=cache_sources(args.cache_from)), indent=1))
+        print(json.dumps(rebuild_drive.rebuild(runner, serial=args.serial, update=update, peer_serials=args.peers, mirror_root=args.mirror, allowed_serials=[args.serial], cache_sources=cache_sources(args.cache_from), bluetooth_from_parent=args.bluetooth_from_parent), indent=1))
     except Exception as exc:                                                # noqa: BLE001 - reported, nonzero exit
         print(f"rebuild refused: {exc}", file=sys.stderr)
         return 1

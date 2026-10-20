@@ -106,3 +106,23 @@ def test_the_list_of_systems_is_built_from_what_the_drive_carries_with_the_appli
     assert {e["id"] for e in entries} == {"ubuntu", "qubes"} and all(e["apps"] == list(os_list.APPS) for e in entries)
     (ua / "config/supported-os.json").write_text('{"os": []}')
     assert rd.seed_missing({"USER_ADMIN": str(ua), "INSTALLER_CACHE": str(ic)}, repo)[0]["result"] == "kept the drive's own"
+
+
+def test_explicit_parent_bluetooth_transfer_requires_user_admin_and_always_detaches(fakes):
+    with pytest.raises(rd.RebuildError, match='USER_ADMIN'):
+        rd.rebuild(R(), serial='S', bluetooth_from_parent=True)
+    assert fakes[-1] == 'detach'
+
+
+def test_parent_bluetooth_transfer_runs_after_backup_before_mirror_history(fakes, monkeypatch, tmp_path):
+    import bluetooth_transfer
+    admin = tmp_path / 'admin'
+    admin.mkdir()
+    monkeypatch.setattr(twin_sync, 'attach_twin', lambda *a, **k: {'vg_uuid': 'v', 'mounts': {'USER_ADMIN': str(admin), 'INSTALLER_CACHE': str(tmp_path / 'ic')}})
+    def transfer(source, dest):
+        assert fakes[-1][0] == 'backup'
+        assert source == '/var/lib/bluetooth' and dest == str(admin)
+        return {'state': 'copied'}
+    monkeypatch.setattr(bluetooth_transfer, 'seed', transfer)
+    out = rd.rebuild(R(), serial='S', bluetooth_from_parent=True)
+    assert out['bluetooth'] == {'state': 'copied'} and fakes[-1] == 'detach'
