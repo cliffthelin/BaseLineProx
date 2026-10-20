@@ -79,6 +79,28 @@
    "launch": "chromium"
   },
   {
+   "id": "chrome",
+   "name": "Google Chrome",
+   "category": "browsers",
+   "routes": {
+    "deb": {
+     "publisher": "chrome",
+     "only": [
+      "debian",
+      "ubuntu"
+     ]
+    },
+    "flatpak": {
+     "id": "com.google.Chrome"
+    }
+   },
+   "data": [
+    "~/.config/google-chrome",
+    "~/.var/app/com.google.Chrome"
+   ],
+   "launch": "google-chrome-stable"
+  },
+  {
    "id": "brave",
    "name": "Brave",
    "category": "browsers",

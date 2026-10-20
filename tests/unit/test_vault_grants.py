@@ -84,3 +84,11 @@ def test_every_guest_seed_carries_the_helpers():
 def test_the_helper_refuses_a_path_instead_of_a_name():
     script = next(f for f in vg.GUEST_FILES if f["path"].endswith("baseline-vault"))["content"]
     assert '*/*' in script and "/run/baseline-vault" in script
+
+
+def test_the_guest_agent_reaches_ready_made_systems_made_with_a_seed():
+    import proxmox_vm_host as pvh
+    assert pvh.guest_agent_recipe({"recipe": "prebuilt-debian", "seed": True})
+    assert pvh.guest_agent_recipe({"recipe": "ubuntu-desktop"})
+    assert not pvh.guest_agent_recipe({"recipe": "prebuilt-fydeos"})            # no seed, so no guest agent was turned on
+    assert not pvh.guest_agent_recipe({"recipe": "iso"}) and not pvh.guest_agent_recipe({})

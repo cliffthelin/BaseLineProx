@@ -112,6 +112,12 @@ def _parse_qm_config(output):
     return config
 
 
+def guest_agent_recipe(spec) -> bool:
+    """The machines Baseline made itself whose seed turns the guest agent on: the managed Ubuntu recipes and every ready-made system made with a seed (prebuilt-<system>)."""
+    recipe = str(spec.get('recipe') or '')
+    return recipe in ('ubuntu-desktop', 'ubuntu-server') or (recipe.startswith('prebuilt-') and spec.get('seed') is True)
+
+
 class ProxmoxVmHost(vh.VmHost):
     backend = "Proxmox"
 
@@ -126,7 +132,7 @@ class ProxmoxVmHost(vh.VmHost):
         spec, record = self._spec(name), self._record(name)
         if not record['registered'] or not self.status(name)['running']:
             raise vh.VmError('guest operation requires a running registered environment')
-        if (spec.get('recipe') not in ('ubuntu-desktop','ubuntu-server')
+        if (not guest_agent_recipe(spec)
                 or Path(spec.get('persistence_disk','')) != self.persistence_path(name)
                 or not self.persistence_path(name).is_file() or self.persistence_path(name).is_symlink()):
             raise vh.VmError('guest operation requires the managed Ubuntu retained-home recipe')

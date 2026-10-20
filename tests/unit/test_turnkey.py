@@ -75,3 +75,35 @@ def test_running_it_again_changes_nothing(tmp_path):
     before = grants.stat().st_mtime_ns
     second = tk.run(host, "cliff", ENTRIES, {"debian"}, "/bases", **args)
     assert second["created"] == [] and grants.stat().st_mtime_ns == before
+
+
+def test_the_five_default_applications_are_all_in_the_catalogue_and_chrome_resolves_on_debian():
+    import app_catalogue as ac
+    import os_list
+    catalogue = ac.load()
+    assert set(os_list.APPS) <= set(catalogue)
+    found = {"url": "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_1_amd64.deb", "sha256": "a" * 64}
+    plan_ = tk.resolved_plan("chrome", "debian", resolve=lambda entry, os_id: found)
+    assert plan_["route"] == "deb" and "google-chrome-stable" in plan_["script"] and "a" * 64 in plan_["script"]
+
+
+def test_a_package_that_cannot_be_found_is_reported_not_installed_unchecked():
+    import app_catalogue as ac
+    def resolve(entry, os_id):
+        raise ac.CatalogueError("could not read the index")
+    try:
+        tk.resolved_plan("claude", "debian", resolve=resolve)
+    except tk.AppEnvError as exc:
+        assert "could not be found" in str(exc)
+    else:
+        raise AssertionError("expected a refusal")
+
+
+def test_without_a_name_for_the_person_no_machine_is_made_and_the_person_is_asked(tmp_path):
+    import prebuilt_environment as pe
+    created = []
+    def owner_for(host, user):
+        raise pe.OwnerUnknown("unknown")
+    report = tk.run(Host(), "root@pam", ENTRIES, {"debian"}, "/bases", vault_names=["GOOGLE_LOGIN"], grants_path=tmp_path / "g.json",
+                    create=make(created), plan_for=plan, install_base=lambda *a: None, owner_for=owner_for)
+    assert created == [] and report["needs_owner"] is True and report["created"] == []

@@ -64,12 +64,45 @@ def test_a_reserved_or_odd_account_name_is_refused_and_a_system_without_a_displa
 
 def test_the_owners_name_is_the_signed_in_proxmox_user_kept_once_so_it_persists(tmp_path):
     f = FakeHost(tmp_path / "os")
-    assert pe.owner_account(f.host, "Cliff") == "cliff"
-    assert pe.owner_account(f.host, "someone-else") == "cliff"                                         # kept: the same user in every VM until more users are made
+    assert pe.owner_account(f.host, "Cliff", users=[]) == "cliff"
+    assert pe.owner_account(f.host, "someone-else", users=[]) == "cliff"                               # kept: the same user in every VM until more users are made
     assert json.loads((f.host.persistence_store / "owner.json").read_text()) == {"username": "cliff"}
+
+
+def test_the_realm_is_taken_off_the_proxmox_user_id():
+    assert pe.owner_name("cliff@pam") == "cliff" and pe.owner_name("Cliff@pve") == "cliff"
+
+
+def test_root_is_not_the_persons_account_but_the_one_other_proxmox_user_is(tmp_path):
+    assert pe.owner_name("root@pam", ["root@pam", "cliff@pam"]) == "cliff"
+    assert pe.owner_name("root@pam", ["root@pam"]) is None                                            # nothing is guessed
+    assert pe.owner_name("root@pam", ["root@pam", "a@pam", "b@pam"]) is None                          # two people: not chosen for them
+
+
+def test_a_root_sign_in_is_the_person_who_installed_it(tmp_path):
+    import operator_identity as oi
+    oi.record(tmp_path / "admin", "cane")
+    f = FakeHost(tmp_path / "os")
+    assert pe.owner_account(f.host, "root@pam", users=["root@pam"], operator_file=tmp_path / "admin" / oi.FILE) == "cane"
+    assert pe.owner_name("root@pam", [], "cane") == "cane" and pe.owner_name("alex@pam", [], "cane") == "alex"
+
+
+def test_there_is_no_generic_account_when_the_name_cannot_be_worked_out(tmp_path):
     g = FakeHost(tmp_path / "os2")
-    assert pe.owner_account(g.host, "root") == "owner"                                                 # root cannot be the VM's account: a plain name is used and kept
-    assert pe.owner_account(g.host, "cliff") == "owner"
+    with pytest.raises(pe.OwnerUnknown):
+        pe.owner_account(g.host, "root@pam", users=["root@pam"], operator_file=tmp_path / "none.json")
+    assert not (g.host.persistence_store / "owner.json").exists()
+    assert pe.set_owner(g.host, "Cliff") == "cliff" and pe.owner_account(g.host, "root@pam", users=[]) == "cliff"
+    for bad in ("owner", "guest", "root", "Bad Name", ""):
+        with pytest.raises(pe.PrebuiltError):
+            pe.set_owner(g.host, bad)
+
+
+def test_a_generic_name_recorded_by_an_earlier_version_is_not_kept(tmp_path):
+    f = FakeHost(tmp_path / "os")
+    f.host.persistence_store.mkdir(parents=True, exist_ok=True)
+    (f.host.persistence_store / "owner.json").write_text(json.dumps({"username": "owner"}))
+    assert pe.owner_account(f.host, "cliff@pam", users=[]) == "cliff"
 
 
 def test_creating_a_vm_makes_an_overlay_a_seed_and_a_retained_disk_and_no_password_exists_anywhere(tmp_path):

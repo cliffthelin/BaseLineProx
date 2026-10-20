@@ -6,6 +6,7 @@ It only adds: a machine that exists is left alone, a grant that exists is not re
 """
 from __future__ import annotations
 
+import app_catalogue
 import app_environment
 import prebuilt_environment as pe
 import vault_grants
@@ -20,11 +21,31 @@ def _merge(extras) -> dict:
     return merged
 
 
-def run(host, owner_user, entries, carried, os_bases_dir, *, vault_names, grants_path, create=pe.create, plan_for=app_environment.plan, install_base=pe.install_base,
+def resolved_plan(app, os_id, *, catalogue=None, resolve=app_catalogue.resolve) -> dict:
+    """The application's plan on this system with its package found first (the publisher's own index, its SHA-256 checked before install). When the package cannot be found now (no network
+    on this host, the publisher unreachable) the application is reported as not made ready, never installed unchecked."""
+    catalogue = catalogue or app_catalogue.load()
+    entry = catalogue.get(app)
+    if entry is None:
+        raise AppEnvError(f"{app} is not in the application catalogue")
+    try:
+        found = resolve(entry, os_id)
+    except (app_catalogue.CatalogueError, OSError) as exc:
+        raise AppEnvError(f"{entry['name']}: its package could not be found now ({exc})") from None
+    return app_environment.plan(app, os_id, resolved=found or None, catalogue=catalogue)
+
+
+def run(host, owner_user, entries, carried, os_bases_dir, *, vault_names, grants_path, create=pe.create, plan_for=resolved_plan, install_base=pe.install_base,
         owner_for=pe.owner_account) -> dict:
-    report = {"created": [], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": []}
+    report = {"created": [], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": [], "needs_owner": False}
+    vault_names = [name for name in vault_names if name != "AI_SETUP_DEFAULT"]  # AI profiles use their own explicit target grants
     have = {vm["name"] for vm in host.list_vms()}
-    for entry in entries:
+    try:
+        owner = owner_for(host, owner_user)
+    except pe.OwnerUnknown:                      # the person's own account name is not known: no machine is made with a generic one; the person is asked (turnkey page)
+        owner = None
+        report["needs_owner"] = True
+    for entry in entries if owner else []:
         ident = entry["id"]
         if entry.get("kind") == "kasm" or ident not in pe.SYSTEMS:
             continue
@@ -43,7 +64,7 @@ def run(host, owner_user, entries, carried, os_bases_dir, *, vault_names, grants
                     except AppEnvError as exc:
                         skipped[app] = str(exc)[:160]
             install_base(host, ident, os_bases_dir)
-            create(host, ident, ident, owner=owner_for(host, owner_user), extra=_merge(extras) if extras else None)
+            create(host, ident, ident, owner=owner, extra=_merge(extras) if extras else None)
             report["created"].append(ident)
             if skipped:
                 report["apps_skipped"][ident] = skipped

@@ -14,9 +14,9 @@ def cat():
 
 
 def test_the_shipped_catalogue_is_valid_and_has_the_browsers_and_the_six_proxmox_apps(cat):
-    assert {"firefox", "chromium", "brave", "librewolf", "vivaldi", "vscode", "spotify", "claude", "chatgpt", "lm-studio", "ollama"} <= set(cat)
+    assert {"firefox", "chromium", "chrome", "brave", "librewolf", "vivaldi", "vscode", "spotify", "claude", "chatgpt", "lm-studio", "ollama"} <= set(cat)
     browsers = [e for e in cat.values() if e["category"] == "browsers"]
-    assert len(browsers) == 5 and all("flatpak" in e["routes"] for e in browsers)                  # every browser has a route that fits an immutable system
+    assert len(browsers) == 6 and all("flatpak" in e["routes"] for e in browsers)                  # every browser has a route that fits an immutable system
     images = [e["routes"]["container"]["image"] for e in cat.values() if "container" in e["routes"]]
     assert images and all(i.endswith(":latest") for i in images)                                     # never LinuxServer's deprecated kasm tags
 

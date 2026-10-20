@@ -54,6 +54,7 @@ TREE = (
         P("/shell", "Console"))),
     Group("Security and access", "Safety and access", (
         P("/vault", "Vault", "Passwords and keys"),
+        P("/signins", "Sign-ins", "Sign in once", "Carry your Google and Claude sign-ins to every machine."),
         P("/security", "Two-factor", "Two-step sign-in"),
         P("/operators", "Operators", "People who can sign in"),
         P("/approvals", "Approvals", "Waiting for your approval", "Things that need a yes from you."),

@@ -1720,7 +1720,8 @@ def _vault_roots(deps=None):
     import vault
     if deps and deps.get("vault_roots"):
         return tuple(deps["vault_roots"])
-    return (("USER_ADMIN", "admin", vault.ADMIN_VAULT), ("USER_PERSONAL", "personal", vault.PERSONAL_VAULT))
+    admin, personal = vault.build_aware_roots()
+    return (("USER_ADMIN", "admin", admin), ("USER_PERSONAL", "personal", personal))
 
 
 def _vault_states(deps: dict) -> list:
@@ -1783,6 +1784,20 @@ def _vault_push_for(deps: dict, target: str):
     if target.startswith("vm:"):
         host = _vm_host_for(deps)
         return lambda argv, data: host.guest_exec(target[3:], argv, data)
+    if target.startswith("ct:"):
+        host = _container_host_for(deps)
+        if host is None:
+            raise OSError("native container management is unavailable")
+        return lambda argv, data: host.guest_exec(target[3:], argv, data)
+    if target.startswith("kasm:"):
+        workspace = target[5:]
+        if not __import__("re").fullmatch(r"[a-f0-9]{12,64}", workspace):
+            raise ValueError("Kasm workspace target requires its Docker container ID")
+        server_push = _vault_push_for(deps, "kasm")
+        def workspace_push(argv, data):
+            server_push(["docker", "exec", workspace, "test", "-d", "/dockerstartup"], b"")
+            return server_push(["docker", "exec", "-i", "--user", "0", workspace, *argv], data)
+        return workspace_push
     if target == "kasm":
         import kasm_setup
         import proxmox_vm_host
@@ -1790,9 +1805,14 @@ def _vault_push_for(deps: dict, target: str):
         if vmid is None:
             raise OSError("the Kasm machine does not exist yet")
         def push(argv, data):
-            rc, _out, _err = proxmox_vm_host._input(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", "60", "--", *argv], data)
-            if rc:
+            rc, out, _err = proxmox_vm_host._input(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", "60", "--", *argv], data)
+            try:
+                result = json.loads(out)
+            except (ValueError, TypeError):
+                result = {}
+            if rc or not isinstance(result, dict) or result.get("exited") not in (True, 1) or result.get("exitcode") != 0:
                 raise OSError("the Kasm machine's guest agent did not accept the secret (is it running?)")
+            return result
         return push
     raise OSError("that place cannot receive secrets")
 
@@ -1853,6 +1873,8 @@ def _turnkey_start(deps: dict, username: str, *, force: bool = False) -> bool:
             report = _turnkey_job(deps, username)
             state["report"] = report
             try:
+                if report.get("needs_owner"):                      # not finished: it asks for the account name and runs again, so nothing is recorded as done
+                    return
                 marker.parent.mkdir(parents=True, exist_ok=True)
                 marker.write_text(json.dumps({"user": username, "report": report}, indent=1))
             except OSError:
@@ -1866,6 +1888,21 @@ def _turnkey_start(deps: dict, username: str, *, force: bool = False) -> bool:
     else:
         threading.Thread(target=work, daemon=True).start()
     return True
+
+
+def _signin_store(deps: dict):
+    import signin_share
+    import vault
+    sealed = any(_safe_has_passphrase(vault, root) for _label, _scope, root in _vault_roots(deps))
+    passphrase = deps.get("vault_passphrase") or None
+    return signin_share.Store(deps.get("signins_dir") or "/mnt/USER_PERSONAL/signins", passphrase=passphrase, must_seal=sealed)
+
+
+def _safe_has_passphrase(vault, root) -> bool:
+    try:
+        return vault.Vault(root).has_passphrase()
+    except (vault.VaultError, OSError):
+        return False
 
 
 def _vault_for(deps: dict, root: str):
@@ -2614,8 +2651,52 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             for key, label in (("failed", "Could not make"), ("apps_skipped", "Applications not available")):
                 for name, why in ((report or {}).get(key) or {}).items():
                     rows += f"<tr><td>{label}: {_h.escape(name)}</td><td>{_h.escape(str(why))}</td></tr>"
+            if (report or {}).get("needs_owner"):
+                status = ("<section><h2>What should your account be called?</h2><p>Your sign-in name (root) cannot be a person's account on the machines, and Baseline will not make a "
+                          "generic one. Choose your own name; every machine gets your account with it, no password.</p>"
+                          "<form method='post' action='/turnkey/owner'><input name='name' pattern='[a-z_][a-z0-9_-]{0,31}' placeholder='your name, lowercase' required> "
+                          "<button type='submit'>Use this name and set everything up</button></form></section>")
             page = ("<!doctype html><html><head><meta charset='utf-8'><title>Set up</title></head><body><h1>Set up for you</h1>" + status +
                     f"<table><tbody>{rows}</tbody></table><form method='post' action='/turnkey/run'><button type='submit'>Run the setup again</button></form></body></html>")
+            return self._html_response(200, _with_nav(page.encode(), path))
+
+        if path == "/signins":
+            import html as _h
+            import signin_share
+            store = _signin_store(deps)
+            try:
+                saved = {}
+                for app in store.apps():
+                    try:
+                        bundle = store.load(app)
+                        saved[app] = f"saved from {bundle['from']} on {bundle['at'][:10]}"
+                    except signin_share.SigninError:
+                        saved[app] = "saved (sealed: unlock the vault to see more)"
+            except OSError:
+                saved = {}
+            try:
+                running = [vm["name"] for vm in _vm_host_for(deps).list_vms() if vm.get("running")]
+            except (vh.VmError, OSError, ValueError, AttributeError):
+                running = []
+            options = "".join(f"<option>{_h.escape(n)}</option>" for n in running) or "<option value=''>No machine is running</option>"
+            rows = "".join(
+                f"<tr><td>{_h.escape(label)}</td><td>{_h.escape(saved.get(app, 'not saved yet'))}</td><td><form data-capture='{app}'><select name='vm'>{options}</select> "
+                f"<button type='submit'>Save sign-in from this machine</button></form></td>"
+                f"<td>{'<button type=button data-forget=' + app + '>Forget</button>' if app in saved else ''}</td></tr>" for app, label in signin_share.LABELS.items())
+            note = qs.get("notice", [""])[0][:300]
+            page = ("<!doctype html><html><head><meta charset='utf-8'><title>Sign-ins</title></head><body><h1>Sign in once, signed in everywhere</h1>"
+                    "<p>Sign in to Chrome or Claude on one machine, save it here, and every other machine you run gets it without asking you again. They are kept with your other secrets "
+                    "(sealed when the vault has a passphrase) and never overwrite a machine that is already signed in. Websites such as Google can still ask for their own check on a new machine; "
+                    "only you can answer that.</p>" + (f"<p role='status'>{_h.escape(note)}</p>" if note else "") +
+                    f"<table><thead><tr><th>Application</th><th>State</th><th>Save</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
+                    "<p><button type='button' id='send'>Send to every running machine now</button> <span id='out' role='status'></span></p><script>"
+                    "async function call(p,b){const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json();}"
+                    "document.addEventListener('submit',async e=>{const f=e.target.closest('form[data-capture]');if(!f)return;e.preventDefault();"
+                    "const j=await call('/signins/capture',{app:f.dataset.capture,vm:f.vm.value});alert(j.message);if(j.ok)location.reload();});"
+                    "document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;"
+                    "if(b.dataset.forget){if(confirm('Forget the saved sign-in?')){await call('/signins/forget',{app:b.dataset.forget});location.reload();}}"
+                    "if(b.id==='send'){document.getElementById('out').textContent='Sending…';const j=await call('/signins/apply',{});document.getElementById('out').textContent=j.message;}});"
+                    "</script></body></html>")
             return self._html_response(200, _with_nav(page.encode(), path))
 
         if path == "/files":
@@ -3421,9 +3502,44 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             result = tool_runner.run(name, action, str(body.get("value", ""))) if spec and spec.get("post") else None
             return self._html_response(200, _with_nav(tool_runner.render(name, result), "/tools"))
 
+        if path in ("/signins/capture", "/signins/apply", "/signins/forget"):
+            import signin_share
+            import prebuilt_environment as _pe
+            try:
+                host = _vm_host_for(deps)
+                who = deps["sessions"].get(self._cookie_token(), now)
+                owner = _pe.owner_account(host, who.username if who else "")
+                store = _signin_store(deps)
+                if path == "/signins/capture":
+                    done = signin_share.capture_from(host, store, owner, str(body.get("app", "")), str(body.get("vm", "")))
+                    message = f"Saved the {signin_share.LABELS.get(done['app'], done['app'])} sign-in from {done['from']}."
+                elif path == "/signins/forget":
+                    store.forget(str(body.get("app", "")))
+                    message = "Forgotten."
+                else:
+                    report = signin_share.apply_to_running(host, store, owner)
+                    placed = sum(1 for apps in report.values() for r in apps.values() if r.get("applied"))
+                    problems = [f"{vm}: {app}: {r['error']}" for vm, apps in report.items() for app, r in apps.items() if r.get("error")]
+                    message = f"Placed {placed} sign-in(s) on {len(report)} running machine(s)." + (" Problems: " + "; ".join(problems) if problems else "")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "signin_" + path.rsplit("/", 1)[1], "app": str(body.get("app", ""))})
+                return self._json(200, {"ok": True, "message": message})
+            except (signin_share.SigninError, vh.VmError, OSError, ValueError, RuntimeError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)[:240]})
+
+        if path == "/turnkey/owner":
+            import prebuilt_environment as _pe
+            try:
+                _pe.set_owner(_vm_host_for(deps), str(body.get("name", "")))
+            except (_pe.PrebuiltError, OSError) as exc:
+                return self._redirect("/turnkey?notice=" + html.escape(str(exc)[:160]).replace(" ", "+"))
+            who = deps["sessions"].get(self._cookie_token(), now)
+            _turnkey_start(deps, who.username if who else "", force=True)
+            return self._redirect("/turnkey")
+
         if path == "/turnkey/run":
             who = deps["sessions"].get(self._cookie_token(), now)
-            _turnkey_start(deps, who.username if who else "owner", force=True)
+            _turnkey_start(deps, who.username if who else "", force=True)
             return self._redirect("/turnkey")
 
         if path in ("/vault/grant", "/vault/revoke", "/vault/deliver"):
@@ -3505,7 +3621,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             import ai_setup_page
             import provider_setup
             import vault
-            roots = {"admin": vault.ADMIN_VAULT, "personal": vault.PERSONAL_VAULT}
+            roots = {scope: root for _label, scope, root in _vault_roots(deps)}
             try:
                 if path == "/ai-setup/claude/start":
                     old = deps.get("claude_setup")

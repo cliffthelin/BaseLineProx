@@ -17,6 +17,9 @@ def elevation_argv(argv, environ, *, which=shutil.which, euid=None, python=sys.e
     if (os.geteuid() if euid is None else euid) == 0:
         return None
     carried = [f"{k}={v}" for k, v in sorted(environ.items()) if k.startswith(CARRIED_PREFIX) or k == "PATH"]
+    person = str(environ.get("USER") or environ.get("LOGNAME") or "")
+    if person and person != "root" and not any(c.startswith("BASELINE_OPERATOR=") for c in carried):
+        carried.append(f"BASELINE_OPERATOR={person}")              # who is asking for root is the person the machines are for (operator_identity.py)
     graphical = bool(environ.get("DISPLAY") or environ.get("WAYLAND_DISPLAY"))
     if graphical and which("pkexec"):
         return ["pkexec", "env", f"HOME={environ.get('HOME', '/root')}", *carried, python, *argv]

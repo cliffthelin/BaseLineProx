@@ -1539,3 +1539,46 @@ def test_setup_runs_for_the_signed_in_user_and_says_what_was_done(tmp_path, monk
         assert (tmp_path / "turnkey.json").exists()
     finally:
         case.close()
+
+
+def test_signins_page_saves_from_one_machine_and_sends_to_the_others(tmp_path):
+    import base64 as b64
+    files = {"/home/cane/.config/google-chrome/Default/Cookies": b"c", "/home/cane/.config/google-chrome/Local State": b"{}"}
+    placed = {}
+
+    class Host:
+        persistence_store = str(tmp_path / "pers")
+        def __init__(self):
+            (tmp_path / "pers").mkdir(exist_ok=True)
+            (tmp_path / "pers" / "owner.json").write_text('{"username": "cane"}')
+        def list_vms(self):
+            return [{"name": "src", "running": True}, {"name": "other", "running": True}]
+        def guest_exec(self, name, argv, data=b""):
+            if argv[:2] == ["test", "-e"]:
+                if name == "src" and argv[2] in files:
+                    return {"out-data": ""}
+                if name == "other" and argv[2] in placed:
+                    return {"out-data": ""}
+                raise RuntimeError("missing")
+            if argv[:2] == ["base64", "-w0"]:
+                if name == "src" and argv[3] in files:
+                    return {"out-data": b64.b64encode(files[argv[3]]).decode()}
+                raise RuntimeError("missing")
+            if argv[0] == "sh":
+                return {"out-data": "deb\n"}
+            if argv[0] == "runuser":
+                placed[argv[8]] = data
+                return {"out-data": ""}
+            raise AssertionError(argv)
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    case = _RealServerCase(_base_deps(vm_host=Host(), vault_roots=roots, signins_dir=str(tmp_path / "signins")))
+    try:
+        assert b"Sign in once" in case.get("/signins")[1]
+        assert case.post_json("/signins/capture", {"app": "chrome", "vm": "src"})[1]["ok"]
+        assert b"saved from src" in case.get("/signins")[1]
+        sent = case.post_json("/signins/apply", {})[1]
+        assert sent["ok"] and "1 sign-in" in sent["message"]
+        assert placed["/home/cane/.config/google-chrome/Default/Cookies"] == b"c"
+        assert not case.post_json("/signins/capture", {"app": "nothing", "vm": "src"})[1]["ok"]
+    finally:
+        case.close()

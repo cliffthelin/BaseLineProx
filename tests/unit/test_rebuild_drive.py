@@ -70,7 +70,7 @@ def test_missing_configuration_is_added_and_the_drives_own_is_never_touched(tmp_
         out = rd.seed_missing({"USER_ADMIN": str(ua)}, repo)
     except Exception:                                   # the list's own format decides; a list that does not check out must not be copied
         out = [{"result": "refused"}]
-    if out[0]["result"] == "added":
+    if out[-1]["result"] == "added":
         assert (ua / "config/supported-os.json").read_text() == (repo / "config/local/supported-os.json").read_text()
         (ua / "config/supported-os.json").write_text("the operator's own edit")
         again = rd.seed_missing({"USER_ADMIN": str(ua)}, repo)
@@ -84,7 +84,7 @@ def test_a_list_that_does_not_check_out_is_not_copied(tmp_path):
     ua.mkdir()
     (repo / "config/local/supported-os.json").write_text("not json at all")
     out = rd.seed_missing({"USER_ADMIN": str(ua)}, repo)
-    assert out[0]["result"].startswith("not written") and not (ua / "config/supported-os.json").exists()
+    assert out[-1]["result"].startswith("not written") and not (ua / "config/supported-os.json").exists()
 
 
 def test_the_list_of_systems_is_built_from_what_the_drive_carries_with_the_applications_preset(tmp_path):
@@ -101,11 +101,11 @@ def test_the_list_of_systems_is_built_from_what_the_drive_carries_with_the_appli
     (bases / "nixos-base.json").write_text(json.dumps({"base": "missing.qcow2"}))             # a manifest without its image is not offered
     (ic / "isos" / "Qubes-R4.3.2-x86_64.iso").write_bytes(b"i")
     out = rd.seed_missing({"USER_ADMIN": str(ua), "INSTALLER_CACHE": str(ic)}, repo)
-    assert out[0]["result"] == "added" and out[0]["origin"] == "built from the systems the drive carries"
+    assert out[-1]["result"] == "added" and out[-1]["origin"] == "built from the systems the drive carries"
     entries = os_list.parse((ua / "config/supported-os.json").read_text())
     assert {e["id"] for e in entries} == {"ubuntu", "qubes"} and all(e["apps"] == list(os_list.APPS) for e in entries)
     (ua / "config/supported-os.json").write_text('{"os": []}')
-    assert rd.seed_missing({"USER_ADMIN": str(ua), "INSTALLER_CACHE": str(ic)}, repo)[0]["result"] == "kept the drive's own"
+    assert rd.seed_missing({"USER_ADMIN": str(ua), "INSTALLER_CACHE": str(ic)}, repo)[-1]["result"] == "kept the drive's own"
 
 
 def test_explicit_parent_bluetooth_transfer_requires_user_admin_and_always_detaches(fakes):
@@ -126,3 +126,12 @@ def test_parent_bluetooth_transfer_runs_after_backup_before_mirror_history(fakes
     monkeypatch.setattr(bluetooth_transfer, 'seed', transfer)
     out = rd.rebuild(R(), serial='S', bluetooth_from_parent=True)
     assert out['bluetooth'] == {'state': 'copied'} and fakes[-1] == 'detach'
+
+
+def test_the_person_who_runs_the_update_is_recorded_as_the_owner_once(tmp_path, monkeypatch):
+    import operator_identity as oi
+    ua = tmp_path / "ua"
+    ua.mkdir()
+    monkeypatch.setenv("SUDO_USER", "cane")
+    out = rd.seed_missing({"USER_ADMIN": str(ua)}, tmp_path)
+    assert out[0] == {"file": oi.FILE, "result": "added", "username": "cane"} and oi.read(ua / oi.FILE) == "cane"

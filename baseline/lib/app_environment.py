@@ -85,6 +85,9 @@ def seed_extra(plan_: dict, *, tag: str = "") -> dict:
         files.append({"path": f"/etc/xdg/autostart/baseline-app{dash}.desktop", "permissions": "0644",
                       "content": f"[Desktop Entry]\nType=Application\nName={plan_['name']}\nExec={plan_['launch']}\nX-GNOME-Autostart-enabled=true\n"})
         # (the base's seed already signs the owner straight in at the console, so the application starts on its own)
+    if plan_.get("route") in ("deb", "apt"):          # started with the password store every machine shares, so a sign-in carried from another machine opens (signin_share.py)
+        import signin_share
+        files += signin_share.wrapper_files(plan_["app"])
     run = ["sh", "-c", f"mkdir -p /var/lib/baseline && sh /var/lib/baseline/install-app{dash}.sh > /var/log/baseline-install-app{dash}.log 2>&1; rc=$?; "
                        f"printf '{{\"app\": \"{plan_['app']}\", \"exit\": %s}}\\n' \"$rc\" > /var/lib/baseline/app-ready{dash}.json"]
     return {"write_files": files, "runcmd": [run], "mounts": plan_["mounts"]}

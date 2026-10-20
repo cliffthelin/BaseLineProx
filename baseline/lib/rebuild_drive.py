@@ -33,13 +33,15 @@ def seed_missing(mounts: dict, repo) -> list:
     """Build the configuration this build expects that an older install never received. Only ever ADDS: a file the drive already has (the operator may have edited it) is left exactly as it is.
     The supported-OS list is built here: the list this machine carries if there is one, otherwise worked out from the systems the drive's own INSTALLER_CACHE carries (each with the five guest
     applications preset), so nobody has to write it. A list that does not check out is not copied. Returns what was done."""
+    import operator_identity
     import os_list
     done = []
     if "USER_ADMIN" not in mounts:
         return done
+    done.append(operator_identity.record(mounts["USER_ADMIN"], operator_identity.invoking_user()))        # who the person is: the one running this
     dest = Path(mounts["USER_ADMIN"]) / "config/supported-os.json"
     if dest.exists():
-        return [{"file": "config/supported-os.json", "result": "kept the drive's own"}]
+        return done + [{"file": "config/supported-os.json", "result": "kept the drive's own"}]
     text, origin = None, ""
     source = Path(repo) / "config/local/supported-os.json"
     try:
@@ -51,14 +53,14 @@ def seed_missing(mounts: dict, repo) -> list:
             if entries:
                 text, origin = os_list.render(entries), "built from the systems the drive carries"
     except (OSError, ValueError) as exc:
-        return [{"file": "config/supported-os.json", "result": f"not written, it does not check out: {exc}"[:200]}]
+        return done + [{"file": "config/supported-os.json", "result": f"not written, it does not check out: {exc}"[:200]}]
     if text is None:
-        return [{"file": "config/supported-os.json", "result": "nothing to build it from yet"}]
+        return done + [{"file": "config/supported-os.json", "result": "nothing to build it from yet"}]
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
     tmp.write_text(text)
     tmp.replace(dest)
-    return [{"file": "config/supported-os.json", "result": "added", "origin": origin, "entries": len(os_list.parse(text))}]
+    return done + [{"file": "config/supported-os.json", "result": "added", "origin": origin, "entries": len(os_list.parse(text))}]
 
 
 def volumes_to_add(mounted: dict) -> list:

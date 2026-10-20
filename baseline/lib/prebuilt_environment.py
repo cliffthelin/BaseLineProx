@@ -147,20 +147,67 @@ touch /run/baseline-home-ready
     return "#cloud-config\n" + json.dumps(config, indent=2) + "\n"
 
 
-def owner_account(host, session_user: str) -> str:
-    """The account name every VM gives its owner: kept in owner.json the first time (so it persists until more Proxmox users are made), taken from the Proxmox user who is signed in, and when
-    that name cannot be a Linux account name (root, or something odd) the plain name `owner`."""
+class OwnerUnknown(PrebuiltError):
+    """No account name for the person could be worked out; setup asks them for it (set_owner) instead of making a generic account."""
+
+
+_GENERIC = frozenset({"owner", "guest", "user", "admin", "root"})        # names that belong to nobody: never the person's account
+
+
+def owner_name(session_user, proxmox_users=(), operator=None):
+    """The person's own account name: the Proxmox user who is signed in with the realm taken off (`cliff@pam` -> `cliff`); when that is root or otherwise not a name for a person, the one other
+    Proxmox user there is, if there is exactly one. None when neither gives a name (nothing is guessed)."""
+    def plain(user):
+        name = str(user or "").split("@", 1)[0].strip().lower()
+        return name if _NAME.match(name) and name not in _RESERVED and name not in _GENERIC else None
+    direct = plain(session_user)
+    if direct:
+        return direct
+    person = plain(operator)                      # a sign-in as root is the person who installed it (operator_identity.py)
+    if person:
+        return person
+    others = sorted({plain(u) for u in proxmox_users} - {None})
+    return others[0] if len(others) == 1 else None
+
+
+def proxmox_users(host) -> list:
+    """The Proxmox user ids on this host (`pveum user list`); empty when they cannot be read."""
+    try:
+        rc, out, _err = host.run(["pveum", "user", "list", "--output-format", "json"])
+        return [str(u.get("userid", "")) for u in json.loads(out)] if rc == 0 else []
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+
+
+OPERATOR_FILE = "/mnt/USER_ADMIN/config/operator.json"
+
+
+def owner_account(host, session_user: str, users=None, operator_file=None) -> str:
+    """The account name every VM gives its owner: kept in owner.json (so it persists until more Proxmox users are made), else the signed-in Proxmox user (see owner_name). There is no
+    fallback name: when the person's own name cannot be worked out this raises OwnerUnknown, and a name recorded by an earlier version as `owner` is not trusted."""
     store = Path(host.persistence_store)
     record = store / OWNER_FILE
     try:
         kept = json.loads(record.read_text()).get("username")
-        if isinstance(kept, str) and _NAME.match(kept) and kept not in _RESERVED:
+        if isinstance(kept, str) and _NAME.match(kept) and kept not in _RESERVED and kept not in _GENERIC:
             return kept
     except (OSError, ValueError, AttributeError):
         pass
-    name = str(session_user or "").strip().lower()
-    name = name if _NAME.match(name) and name not in _RESERVED else "owner"
+    import operator_identity
+    name = owner_name(session_user, proxmox_users(host) if users is None else users, operator_identity.read(operator_file or OPERATOR_FILE))
+    if name is None:
+        raise OwnerUnknown("your account name could not be worked out from your sign-in; say what it should be called")
+    return set_owner(host, name)
+
+
+def set_owner(host, name: str) -> str:
+    """Record the person's account name (what they chose, or what was worked out)."""
+    name = str(name or "").strip().lower()
+    if not _NAME.match(name) or name in _RESERVED or name in _GENERIC:
+        raise PrebuiltError("an account name is lowercase letters, digits, - and _, starting with a letter, and not a name like root, admin or owner")
+    store = Path(host.persistence_store)
     store.mkdir(parents=True, exist_ok=True)
+    record = store / OWNER_FILE
     record.write_text(json.dumps({"username": name}))
     os.chmod(record, 0o644)
     return name

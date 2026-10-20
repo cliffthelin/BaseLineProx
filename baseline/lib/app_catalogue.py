@@ -23,6 +23,7 @@ PREFERENCE = {
 PUBLISHERS = {
     "spotify": {"base": "https://repository.spotify.com/", "index": "dists/stable/non-free/binary-amd64/Packages", "package": "spotify-client"},
     "claude": {"base": "https://downloads.claude.ai/claude-desktop/apt/stable/", "index": "dists/stable/main/binary-amd64/Packages", "package": "claude-desktop"},
+    "chrome": {"base": "https://dl.google.com/linux/chrome/deb/", "index": "dists/stable/main/binary-amd64/Packages", "package": "google-chrome-stable"},
     "chatgpt": {"url": "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb"},          # no index: its hash is recorded when first fetched
 }
 _APPIMAGE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,40}$")

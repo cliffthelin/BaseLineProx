@@ -462,6 +462,8 @@ cp "$SRC/baseline/lib/file_manager.py" /opt/baseline/lib/file_manager.py
 cp "$SRC/baseline/lib/vault_grants.py" /opt/baseline/lib/vault_grants.py
 cp "$SRC/baseline/lib/guest_persistence.py" /opt/baseline/lib/guest_persistence.py
 cp "$SRC/baseline/lib/turnkey.py" /opt/baseline/lib/turnkey.py
+cp "$SRC/baseline/lib/signin_share.py" /opt/baseline/lib/signin_share.py
+cp "$SRC/baseline/lib/operator_identity.py" /opt/baseline/lib/operator_identity.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
 cp "$SRC/baseline/lib/drive_names.py" /opt/baseline/lib/drive_names.py
 cp "$SRC/baseline/lib/mounted_places.py" /opt/baseline/lib/mounted_places.py
