@@ -186,6 +186,8 @@ cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
 # before baseline-firstboot.service or baseline.service ever touch
 # those paths; see boot/baseline-persist-bind-mounts.service's own
 # ordering. Not yet run against real hardware.
+mkdir -p /etc/systemd/system/bluetooth.service.d
+cp "$SRC/boot/bluetooth-persistence.conf" /etc/systemd/system/bluetooth.service.d/baseline-persistence.conf
 cp "$SRC/baseline/lib/persist_bind_mounts.py" /opt/baseline/lib/persist_bind_mounts.py
 cp "$SRC/baseline/bin/baseline-persist-bind-mounts" /opt/baseline/bin/baseline-persist-bind-mounts
 # Physical Phase P0: read-only current-drive inventory collector, ported
@@ -458,6 +460,7 @@ cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/tool_runner.py" /opt/baseline/lib/tool_runner.py
 cp "$SRC/baseline/lib/file_manager.py" /opt/baseline/lib/file_manager.py
 cp "$SRC/baseline/lib/vault_grants.py" /opt/baseline/lib/vault_grants.py
+cp "$SRC/baseline/lib/guest_persistence.py" /opt/baseline/lib/guest_persistence.py
 cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
 cp "$SRC/baseline/lib/drive_names.py" /opt/baseline/lib/drive_names.py
 cp "$SRC/baseline/lib/mounted_places.py" /opt/baseline/lib/mounted_places.py
