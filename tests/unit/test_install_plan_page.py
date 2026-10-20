@@ -235,3 +235,12 @@ def test_authenticated_web_catalog_writes_and_reads_configured_state_without_com
         assert (catalog/'web-editor.json').stat().st_mode&0o777==0o600
     finally:
         server.shutdown();server.server_close();thread.join(timeout=5)
+
+
+def test_installer_offers_saved_parent_bluetooth_choice_outside_advanced_controls():
+    import install_plan_page as page
+    html = page.render().decode()
+    assert 'id="bluetooth-from-parent"' in html
+    assert 'Copy parent Bluetooth devices and pairings' in html
+    assert html.index('id="bluetooth-from-parent"') < html.index('id="advanced-installer"')
+    assert 'plan.host_configuration.bluetooth_from_parent' in html

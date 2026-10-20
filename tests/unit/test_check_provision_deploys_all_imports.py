@@ -116,3 +116,12 @@ def test_provision_stages_native_builder_tasker_and_registered_components():
         assert f'chmod 755 /opt/baseline/bin/{name}' in text
     assert '"$SRC/automation"' in text and '/opt/baseline/automation' in text
     assert '"$SRC/docs"' in text and '/opt/baseline/docs' in text
+
+
+def test_a_shell_script_among_the_copied_bin_files_is_not_parsed_as_python(tmp_path):
+    (tmp_path / "baseline/lib").mkdir(parents=True)
+    (tmp_path / "baseline/bin").mkdir(parents=True)
+    (tmp_path / "boot").mkdir()
+    (tmp_path / "baseline/bin/baseline-tool").write_text("#!/bin/sh\nworkspace=/mnt/x\nexec echo hi\n")
+    (tmp_path / "boot/provision.sh").write_text('cp "$SRC/baseline/bin/baseline-tool" /opt/baseline/bin/baseline-tool\n')
+    assert cpd.find_missing_lib_dependencies(tmp_path) == []

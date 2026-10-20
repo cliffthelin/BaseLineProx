@@ -70,7 +70,7 @@ def volumes_to_add(mounted: dict) -> list:
     return sorted(wanted - set(mounted))
 
 
-def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, stamp: str | None = None, peer_serials=(), mirror_root=None, allowed_serials=(), cache_sources=(), bluetooth_from_parent=False) -> dict:
+def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, stamp: str | None = None, peer_serials=(), mirror_root=None, allowed_serials=(), cache_sources=(), bluetooth_from_parent=False, ai_plan=None) -> dict:
     stamp = stamp or time.strftime("%Y%m%dT%H%M%S")
     try:
         child = twin_sync.peer_by_serial(runner, serial)
@@ -92,6 +92,8 @@ def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, s
             if "USER_ADMIN" not in mounts:
                 raise RebuildError("Bluetooth transfer requires the child USER_ADMIN volume")
             bluetooth = bluetooth_transfer.seed("/var/lib/bluetooth", mounts["USER_ADMIN"])
+        import ai_provisioning
+        ai_result = ai_provisioning.apply_plan(ai_plan or {}, mounts.get("USER_ADMIN", "/nonexistent"))
         filed = []
         if mirror_root:                                          # the mirror: each volume's version history, filed under the combination of drives it belongs to
             mirror_history.migrate_legacy(mirror_root)
@@ -100,7 +102,7 @@ def rebuild(runner, *, serial: str, mount_base: str = MOUNT_BASE, update=None, s
     finally:
         twin_sync.detach_twin(runner, attached, mount_base=mount_base)
     report = {"drive_child_id": child, "backups": backups, "formatted": False, "volumes_to_add_in_place": volumes_to_add(mounts),
-              "wipe_needed": False, "history": filed, "cache": cache, "seeded": seeded, "bluetooth": bluetooth}
+              "wipe_needed": False, "history": filed, "cache": cache, "seeded": seeded, "bluetooth": bluetooth, "ai_setup": ai_result}
     if update is None:
         report["code_layer"] = "not changed: no reviewed update bundle was given"
     else:

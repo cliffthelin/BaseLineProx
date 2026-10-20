@@ -1,0 +1,11 @@
+#!/bin/sh
+# Interactive native Claude Code: its normal permission prompts still apply.
+set -eu
+workspace=/mnt/APPDATA_ADMIN/workspaces/BaselineOS
+[ -d "$workspace/.git" ] || { echo 'The editable APPDATA_ADMIN build checkout has not been prepared.' >&2; exit 1; }
+command -v claude >/dev/null || { echo 'Claude Code is not installed; install it before resuming conversations.' >&2; exit 1; }
+cd "$workspace"
+if [ -f /run/baseline-ai/0/profile.json ]; then
+    exec /opt/baseline/bin/baseline-ai-run claude-code -- claude --resume "$@"
+fi
+exec claude --resume "$@"

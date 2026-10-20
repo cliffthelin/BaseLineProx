@@ -392,6 +392,27 @@ def latest_verified_recovery(folders, verify):
     return None
 
 
+def parent_bluetooth_selected():
+    return journal()['stages'].get('parent-configuration-choice', {}).get('bluetooth_from_parent', False) is True
+
+
+def saved_ai_plan():
+    return {"host_configuration": {"ai_setup": journal()["stages"].get("ai-configuration-choice", {}).get("selection", {"mode": "none", "providers": [], "targets": [], "profile": "AI_SETUP_DEFAULT"})}}
+
+
+def transfer_parent_configuration(r):
+    """After the new install VM exits, use the same guarded backup/transfer/mirror path as a rebuild."""
+    import ai_provisioning
+    ai_plan = saved_ai_plan()
+    if not parent_bluetooth_selected() and ai_provisioning.choice(ai_plan)["mode"] == "none":
+        return
+    import rebuild_drive, managed_mode
+    extra = {"ai_plan": ai_plan} if ai_provisioning.choice(ai_plan)["mode"] != "none" else {}
+    result = rebuild_drive.rebuild(r, serial=SERIAL, bluetooth_from_parent=parent_bluetooth_selected(),
+                                   mirror_root=managed_mode.mirror_root(), allowed_serials=[SERIAL], **extra)
+    record('parent-configuration', result=result.get('bluetooth'), ai_setup=result.get('ai_setup'))
+
+
 def stage_update(r):
     """Bring an existing build up to date in place: nothing is erased, only what differs is written (code, the cache and OS images, the mirror). Asks the system for root itself (the installer's own elevation)."""
     import drive_recovery
@@ -406,7 +427,9 @@ def stage_update(r):
         recovery = Path(journal()["stages"]["recovery"]["folder"])
     bundle = update_bundle.prepare_update_bundle(r, REPO, BUILD / "update-bundles", TARGET_NAME, known_targets=set(DRIVES))
     say("updating", TARGET_NAME, "in place from", bundle.name, "with recovery snapshot", Path(recovery).name)
-    done = subprocess.run([sys.executable, str(REPO / "baseline/bin/baseline-rebuild-drive"), "--serial", SERIAL, "--input-bundle", str(bundle), "--recovery-folder", str(recovery)],
+    ai_plan_path = WORK / "ai-installer-plan.json"
+    ai_plan_path.write_text(json.dumps(saved_ai_plan()))
+    done = subprocess.run([sys.executable, str(REPO / "baseline/bin/baseline-rebuild-drive"), "--serial", SERIAL, "--input-bundle", str(bundle), "--recovery-folder", str(recovery), *(["--bluetooth-from-parent"] if parent_bluetooth_selected() else []), "--plan", str(ai_plan_path)],
                           capture_output=True, text=True)
     sys.stdout.write(done.stdout)
     if done.returncode:
@@ -852,6 +875,10 @@ def stage_session_kiosk(r):
     say(f"{TARGET_NAME or 'the rehearsal VM'} shut down cleanly after the kiosk was shown; QEMU exit", code)
     withdraw_os_offer()
     record("kiosk", screenshot=str(WORK / "kiosk.png"), qemu_exit=code)
+    if code != 0:
+        raise RuntimeError("install VM did not exit cleanly; parent configuration was not transferred")
+    if TARGET_NAME:
+        transfer_parent_configuration(r)
 
 
 REQUIRED_EXPORTS = {"identifiers": ("host_id", "child_id", "mint", "IdentifierError"), "installer_identity": ("child_uuid", "installer_id"),
@@ -887,6 +914,8 @@ def main():
                         help="the folder baseline-build-os-base wrote; the cache then carries each ready-made VM base that passes its checks, so the listed systems can be created already set up")
     parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
                         help="authorize erasing the target (after its verified recovery image); its exact serial")
+    parser.add_argument("--plan", type=Path, help="saved installer plan, including optional parent Bluetooth transfer")
+    parser.add_argument("--bluetooth-from-parent", action=argparse.BooleanOptionalAction, default=None, help="copy parent Bluetooth pairings after a fresh build, or during update/rebuild (opt-in; choice saved per target)")
     args = parser.parse_args()
     global CONFIRMED_WIPE, WORK, KASM_BASE, OS_BASES, CURRENT_BUILD
     CONFIRMED_WIPE = args.confirm_wipe
@@ -897,7 +926,19 @@ def main():
     WORK = work_dir(TARGET_NAME, stages)
     if TARGET_NAME:
         say(f"target {TARGET_NAME} ({SERIAL}); protected for this run: {PROTECTED}; work folder {WORK}")
+    import bluetooth_transfer
+    selected = None
+    import ai_provisioning
+    ai_selection = None
+    if args.plan:
+        requested_plan = json.loads(args.plan.read_text())
+        selected = bluetooth_transfer.requested(requested_plan)
+        ai_selection = ai_provisioning.choice(requested_plan)
+    if args.bluetooth_from_parent is not None:
+        selected = args.bluetooth_from_parent
     needs_root = root_required(stages)
+    if TARGET_NAME and 'kiosk' in stages and ((selected if selected is not None else parent_bluetooth_selected()) or (ai_selection or ai_provisioning.choice(saved_ai_plan()))['mode'] != 'none'):
+        needs_root.append('parent Bluetooth transfer')
     if needs_root and os.geteuid() != 0:
         import elevate
         say("these stages need root; asking the system for it (a password prompt will appear)")
@@ -905,6 +946,10 @@ def main():
         raise RuntimeError(f"stages {', '.join(needs_root)} need root: run with sudo")
     WORK.mkdir(mode=0o750, parents=True, exist_ok=True)
     _give_to_operator(WORK)
+    if selected is not None:
+        record('parent-configuration-choice', bluetooth_from_parent=selected)
+    if ai_selection is not None:
+        record('ai-configuration-choice', selection=ai_selection)
     if {"install", "rehearse"} & set(stages):
         available = [p.name for p in OS_ISOS.iterdir() if p.is_file()] if OS_ISOS.is_dir() else []
         sizes = {n: (OS_ISOS / n).stat().st_size for n in available}

@@ -99,3 +99,12 @@ def test_the_ollama_container_has_its_models_on_a_constant_volume_the_firewall_o
     for bad in ({"models_host_path": "/etc/shadow"}, {"allow_from": "everyone"}, {"port": 0}):
         with pytest.raises(ae.AppEnvError):
             ae.ollama_container(120, **{"template": "t", "models_host_path": "/mnt/x", "allow_from": "10.0.0.0/8", **bad})
+
+
+def test_nixos_gets_no_file_in_its_read_only_etc_xdg_and_a_path_for_its_first_boot(cat):
+    plan_ = ae.plan("claude", "nixos", catalogue=cat)
+    extra = ae.seed_extra(plan_, tag="claude")
+    assert not any(f["path"].startswith("/etc/xdg") for f in extra["write_files"])
+    assert "/run/current-system/sw/bin" in extra["runcmd"][0][2]
+    other = ae.seed_extra(ae.plan("claude", "cachyos", catalogue=cat), tag="claude")
+    assert any(f["path"].startswith("/etc/xdg/autostart") for f in other["write_files"])

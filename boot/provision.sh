@@ -423,6 +423,7 @@ cp "$SRC/baseline/lib/installer_desktop.py" /opt/baseline/lib/installer_desktop.
 cp "$SRC/baseline/lib/installation_readiness.py" /opt/baseline/lib/installation_readiness.py
 cp "$SRC/baseline/lib/installer_inputs.py" /opt/baseline/lib/installer_inputs.py
 cp "$SRC/baseline/lib/installer_sources.py" /opt/baseline/lib/installer_sources.py
+cp "$SRC/baseline/lib/bluetooth_transfer.py" /opt/baseline/lib/bluetooth_transfer.py
 cp "$SRC/baseline/lib/installed_drive_update.py" /opt/baseline/lib/installed_drive_update.py
 cp "$SRC/baseline/bin/baseline-drive-update" /opt/baseline/bin/baseline-drive-update
 chmod 755 /opt/baseline/bin/baseline-drive-update
@@ -459,6 +460,20 @@ cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
 cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
 cp "$SRC/baseline/lib/tool_runner.py" /opt/baseline/lib/tool_runner.py
 cp "$SRC/baseline/lib/file_manager.py" /opt/baseline/lib/file_manager.py
+# AI profiles remain on USER_ADMIN; clients and guest receivers use RAM only.
+cp "$SRC/baseline/lib/ai_provisioning.py" /opt/baseline/lib/ai_provisioning.py
+cp "$SRC/baseline/lib/ai_runtime.py" /opt/baseline/lib/ai_runtime.py
+cp "$SRC/baseline/lib/ai_installer_page.py" /opt/baseline/lib/ai_installer_page.py
+cp "$SRC/baseline/lib/ai_sync.py" /opt/baseline/lib/ai_sync.py
+cp "$SRC/baseline/lib/claude_history.py" /opt/baseline/lib/claude_history.py
+cp "$SRC/baseline/bin/baseline-maintain" /opt/baseline/bin/baseline-maintain
+chmod 0755 /opt/baseline/bin/baseline-maintain
+cp "$SRC/baseline/bin/baseline-ai-run" /opt/baseline/bin/baseline-ai-run
+cp "$SRC/baseline/bin/baseline-ai-sync" /opt/baseline/bin/baseline-ai-sync
+chmod 0755 /opt/baseline/bin/baseline-ai-run /opt/baseline/bin/baseline-ai-sync
+cp "$SRC/boot/baseline-ai-sync.service" /etc/systemd/system/baseline-ai-sync.service
+cp "$SRC/boot/baseline-ai-sync.timer" /etc/systemd/system/baseline-ai-sync.timer
+systemctl enable baseline-ai-sync.timer
 cp "$SRC/baseline/lib/vault_grants.py" /opt/baseline/lib/vault_grants.py
 cp "$SRC/baseline/lib/guest_persistence.py" /opt/baseline/lib/guest_persistence.py
 cp "$SRC/baseline/lib/turnkey.py" /opt/baseline/lib/turnkey.py

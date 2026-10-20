@@ -43,19 +43,32 @@ def base_name(os_id: str) -> str:
     return f"{os_id}-base"
 
 
+FYDEOS_BASES_DIR = Path('/mnt/APPDATA_ADMIN/os-bases')
+DEFAULT_CARRIED_DIR = Path('/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/os-bases')
+
+
+def source_for(os_id, source_dir):
+    source = Path(source_dir)
+    if os_id == 'fydeos' and source == DEFAULT_CARRIED_DIR and (FYDEOS_BASES_DIR / 'fydeos-base.json').is_file():
+        return FYDEOS_BASES_DIR
+    return source
+
+
 def read_manifest(source_dir, os_id: str) -> dict:
     try:
-        manifest = json.loads((Path(source_dir) / f"{os_id}-base.json").read_text())
+        manifest = json.loads((source_for(os_id, source_dir) / f"{os_id}-base.json").read_text())
     except (OSError, ValueError) as exc:
         raise PrebuiltError(f"no readable manifest for the {os_id} base: {exc}") from None
     if manifest.get("holds_install_state_or_secrets") is not False:
         raise PrebuiltError(f"the {os_id} base does not say it is free of install state and secrets")
+    if os_id == 'fydeos' and manifest.get('virtualization', {}).get('recipe') != 'fydeos-virtio-gl-v1':
+        raise PrebuiltError('FydeOS requires the prepared VirtIO 3D base; legacy headless appliance refused')
     return manifest
 
 
 def install_base(host, os_id: str, source_dir) -> Path:
     """Make the carried base available to the host as a base image: checked against its own manifest first, then linked (not copied) so the carried file stays the one copy. Never replaces a base."""
-    source_dir = Path(source_dir)
+    source_dir = source_for(os_id, source_dir)
     manifest = read_manifest(source_dir, os_id)
     image = source_dir / manifest["base"]
     if image.is_symlink() or not image.is_file():
@@ -69,6 +82,8 @@ def install_base(host, os_id: str, source_dir) -> Path:
     host.bases_dir.mkdir(parents=True, exist_ok=True)
     target = host.base_path(base_name(os_id))
     if target.exists() or target.is_symlink():
+        if os_id == 'fydeos' and target.resolve() != image.resolve():
+            raise PrebuiltError('a different FydeOS base is already installed; explicit migration is required')
         return target
     target.symlink_to(image.resolve())
     return target
@@ -259,7 +274,10 @@ def create(host, name: str, os_id: str, *, owner: str, memory_mb=4096, cpus=2, d
         raise PrebuiltError(f"the {os_id} base is not installed on this host")
     if disk_gb:
         _need_disk_at_least_the_systems_own(host, base, int(disk_gb))
-    spec = host.create_overlay(name, base=base, memory_mb=memory_mb, cpus=cpus, persistence_gb=persistence_gb)
+    if os_id == 'fydeos':
+        spec = host.create_retained_base(name, base=base, memory_mb=memory_mb, cpus=cpus, graphics='virgl')
+    else:
+        spec = host.create_overlay(name, base=base, memory_mb=memory_mb, cpus=cpus, persistence_gb=persistence_gb)
     if disk_gb:
         _run(host, ["qemu-img", "resize", str(host.disk_path(name)), f"{int(disk_gb)}G"])
     result = {"name": name, "os": os_id}

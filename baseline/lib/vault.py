@@ -5,8 +5,9 @@ token the substrate uses) and USER_PERSONAL's (`/mnt/USER_PERSONAL/vault`: a per
 (`CLAUDE_CODE_OAUTH_TOKEN`), in a folder only its owner can enter. Nothing here ever puts a value in a log line, an exception message or a
 status listing; the listing carries the name, the length and a short fingerprint.
 
-Honest scope: v1 protects by file mode and by living on the role volume, not by encryption at rest. Encryption needs the key source DR257
-leaves open (the admin passphrase verifier); until then the vault is as private as the volume's own access control.
+A configured passphrase seals values at rest through vault_crypto (DR258). Unlocking
+materializes plaintext only under /run/baseline/vault for this boot. Legacy plain
+entries remain readable for compatibility; installer AI profiles always require sealing.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from pathlib import Path
 import vault_crypto
 from vault_crypto import SealError, WrongPassphrase  # noqa: F401  (re-exported: callers catch v.WrongPassphrase)
 
-RUNTIME_DIR = "/run/baseline/vault"      # RAM-backed: plaintext of an unlocked vault lives here and nowhere on the drive
+RUNTIME_DIR = "/run/baseline/vault" if os.geteuid() == 0 else f"/run/user/{os.getuid()}/baseline/vault"      # RAM-backed: plaintext of an unlocked vault lives here and nowhere on the drive
 VERIFIER = ".verifier"
 ADMIN_VAULT = "/mnt/USER_ADMIN/vault"
 PERSONAL_VAULT = "/mnt/USER_PERSONAL/vault"
@@ -223,3 +224,21 @@ class Unlocked:
 
     def names(self):
         return self._vault.names()
+
+
+def build_aware_roots():
+    """Installed role volumes, or encrypted parent staging on CACHE for preboot builds."""
+    if ADMIN_VAULT != '/mnt/USER_ADMIN/vault' or PERSONAL_VAULT != '/mnt/USER_PERSONAL/vault':
+        return ADMIN_VAULT, PERSONAL_VAULT  # explicit embedding/test overrides
+    if os.path.ismount('/mnt/USER_ADMIN'):
+        return ADMIN_VAULT, PERSONAL_VAULT
+    import lane_files
+    build = Path(os.environ.get('BASELINE_DRIVES_FILE') or lane_files.BUILD_DRIVES_FILE).parent
+    cache = Path('/run/media/cane/CACHE')
+    if cache.is_mount() and build.resolve().is_relative_to(cache.resolve()) and build.is_dir():
+        for relative in ('parent-user-admin', 'parent-user-personal'):
+            if (build / relative).is_symlink():
+                raise VaultError('parent vault staging is redirected')
+        return str(build / 'parent-user-admin/vault'), str(build / 'parent-user-personal/vault')
+    # No write fallback to an unmounted USER_ADMIN directory.
+    raise VaultError('USER_ADMIN is not mounted and parent staging on CACHE is unavailable')

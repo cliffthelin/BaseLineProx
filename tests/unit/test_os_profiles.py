@@ -21,10 +21,11 @@ def test_qubes_is_refused_with_the_reason_even_when_its_image_is_carried():
     assert "plan" not in got and "Xen" in got["blocked"]
 
 
-def test_fydeos_is_refused_because_its_desktop_needs_an_intel_gpu_even_when_its_base_is_carried():
-    for kwargs in ({"image_carried": True}, {"image_carried": True, "base_carried": True}):
-        got = op.plan_for(entry("fydeos", "FydeOS-VMWare-v23.0-Preview2-x86_64-io.ova"), **kwargs)
-        assert "Intel GPU" in got["blocked"] and "plan" not in got
+def test_fydeos_requires_a_prepared_base_and_has_room_for_the_appliance_disk():
+    got = op.plan_for(entry("fydeos", "fydeos.ova"), image_carried=True)
+    assert 'blocked' in got
+    got = op.plan_for(entry("fydeos", "fydeos.ova"), image_carried=True, base_carried=True)
+    assert got['plan']['prebuilt'] and got['plan']['disk_gb'] >= 50
 
 
 def test_an_ova_for_any_other_system_is_still_refused_because_importing_appliances_is_not_built():

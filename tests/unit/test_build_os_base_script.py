@@ -63,3 +63,11 @@ def test_a_run_that_stops_growing_its_disk_is_stopped_with_the_reason(builder, t
     with pytest.raises(os_build.BuildError, match="stopped making progress"):
         builder.run_until_exit(["qemu"], tmp_path, disk, timeout=10 ** 9)
     assert killed == ["4242"]
+
+
+def test_fydeos_change_keeps_bazzite_builder_dependencies():
+    import runpy
+    from pathlib import Path
+    namespace=runpy.run_path(str(Path(__file__).resolve().parents[2]/'baseline/bin/baseline-build-os-base'))
+    assert namespace['BAZZITE_CHECKS']
+    assert namespace['OSTREE_TIDY']

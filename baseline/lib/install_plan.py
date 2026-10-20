@@ -49,7 +49,7 @@ DEFAULT_APPLICATIONS = {"run_as": "baseline-admin", "cache": "/var/lib/baseline-
                         "generation_root": "/var/lib/baseline-apps/generations",
                         "data": "/home/baseline-admin/baseline-managed-apps"}
 
-_KEYS = {"format", "storage", "environment", "applications", "notes"}
+_KEYS = {"format", "storage", "environment", "applications", "notes", "host_configuration"}
 _SUBSTRATE_KEYS = {"serial", "action"}
 _BASELINE_KEYS = {"serial", "action", "personas", "volumes", "erase_existing"}
 _PERSONA_RE = re.compile(r"^[a-z][a-z0-9]{0,7}$")     # APPDATA_<PERSONA> must fit an ext4 label (16 characters)
@@ -192,6 +192,7 @@ def autofill(discovery: dict, *, personas=di.DEFAULT_PERSONAS) -> dict:
     retain = base is not None and base["state"] == "baseline"
     return {
         "format": FORMAT,
+        "host_configuration": {"bluetooth_from_parent": False, "ai_setup": {"mode": "none", "providers": [], "targets": [], "profile": "AI_SETUP_DEFAULT"}},
         "storage": {
             "substrate": {"serial": pve and pve["serial"],
                           "action": pve and ("keep" if pve["state"] == "proxmox" else "install")},
@@ -471,6 +472,16 @@ def validate(plan, discovery: dict) -> list:
             if (isinstance(storage["baseline"], dict) and storage["baseline"].get("action") == "provision_lvm"
                     and isinstance(storage["substrate"], dict) and storage["substrate"].get("action") != "install"):
                 errors.append("single-drive provisioning requires a fresh substrate install")
+    import bluetooth_transfer
+    try:
+        bluetooth_transfer.requested(plan)
+    except bluetooth_transfer.TransferError as exc:
+        errors.append(str(exc))
+    import ai_provisioning
+    try:
+        ai_provisioning.choice(plan)
+    except ai_provisioning.SetupError as exc:
+        errors.append(str(exc))
     _check_environment(plan["environment"], errors)
     _check_applications(plan["applications"], errors)
     return errors
@@ -527,6 +538,8 @@ def compile_plan(plan, discovery: dict) -> dict:
         baseline_stage = {"action": "retain", "expected_serial": baseline["serial"], "mounts": mounts}
     return {
         "format": STAGES_FORMAT,
+        "host_configuration": {"bluetooth_from_parent": __import__("bluetooth_transfer").requested(plan),
+                               "ai_setup": __import__("ai_provisioning").choice(plan)},
         "executed": False,
         "substrate": substrate_stage,
         "baseline_drive": baseline_stage,

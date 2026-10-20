@@ -92,6 +92,11 @@ def inspect(root, plan, settings, *, artifact_locks, which=shutil.which, source_
 
 def prepare(root,destination,*,plan,settings,recipe,artifact_locks,which=shutil.which,source_errors=()):
     root=Path(root);destination=Path(destination)
+    import ai_provisioning
+    try:
+        ai_provisioning.choice(plan)
+    except (ai_provisioning.SetupError, AttributeError, TypeError) as exc:
+        raise InputError("AI setup plan must reference the vault, never contain credentials") from exc
     for value in (plan,settings,recipe or {}):
         try:_validate(value)
         except DraftError as exc:raise InputError(str(exc)) from exc

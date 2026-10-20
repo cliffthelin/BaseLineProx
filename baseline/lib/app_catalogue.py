@@ -143,7 +143,7 @@ def _web_lines(entry: dict, params: dict) -> list:
     command = web_command(key)
     run = (f'if command -v google-chrome-stable >/dev/null 2>&1; then exec google-chrome-stable --password-store=basic --app={url} "$@"; '
            f'else exec flatpak run com.google.Chrome --password-store=basic --app={url} "$@"; fi')
-    return [f"cat > /usr/local/bin/{command} <<'WRAPPER'", "#!/bin/sh", run, "WRAPPER", f"chmod 0755 /usr/local/bin/{command}", "mkdir -p /usr/local/share/applications",
+    return ["mkdir -p /usr/local/bin", f"cat > /usr/local/bin/{command} <<'WRAPPER'", "#!/bin/sh", run, "WRAPPER", f"chmod 0755 /usr/local/bin/{command}", "mkdir -p /usr/local/share/applications",
             f"cat > /usr/local/share/applications/{command}.desktop <<'ENTRY'", "[Desktop Entry]", "Type=Application", f"Name={entry['name']}", f"Exec=/usr/local/bin/{command}", "Categories=Network;", "ENTRY"]
 
 

@@ -1,5 +1,58 @@
 # Installing BaselineOS on real hardware
 
+## FydeOS setup screen working in QEMU — 2026-10-19 (DR314)
+
+A clean FydeOS appliance now renders its setup screen with responsive input in
+real QEMU/KVM using early VirtIO GPU loading and VirtIO 3D acceleration. Its
+complete writable system disk is retained in user data; disposable rollback is
+refused. The prepared image lives outside vanilla INSTALLER_CACHE, on APPDATA.
+Native PC601 Proxmox execution, account setup/retention and application integration
+remain unverified. The prior claim that Intel GPU passthrough is required was
+incorrect; DR314 supersedes that conclusion in DR267. See
+[DR314](design/decision-records/314-fydeos-virtio-display-and-retained-disk.md) and
+[visible verification](verification/314/README.md).
+
+## Claude history storage — 2026-10-19 (DR313)
+
+Conversation files and the editable build checkout belong on APPDATA_ADMIN.
+See [DR313](design/decision-records/313-claude-history-appdata.md) for migration
+evidence and the distinction between physical copy and native execution proof.
+
+## Optional preboot AI setup — 2026-10-19 (DR312)
+
+Installer **Parent settings → AI providers, credentials and MCP setup** offers
+parent import or custom settings for the named provider/client catalog. Profiles
+are sealed in USER_ADMIN (encrypted parent staging on CACHE for preboot builds);
+saved plans contain only selections, grants and a vault reference/fingerprint.
+The choice is consumed by installed-drive updates, `--plan` rebuilds and fresh
+allscript builds. General web new-install execution remains unfinished.
+
+Host tools and granted VMs/LXC/Kasm workspaces receive private RAM profiles after
+vault unlock; unavailable prerequisites remain pending/errors. Chromium,
+real-file encryption, HTTP and launcher checks use synthetic credentials. No
+real provider account sign-in or native guest/workspace delivery has been
+verified. Physical installer-code deployment completed on PC601 and its mirror; native
+boot/provider execution remains unverified. Claude history and the editable
+maintenance checkout use APPDATA_ADMIN (DR313), with no USER_ADMIN fallback.
+Run `baseline-maintain` and use Ctrl+A in the session picker to show all projects. See [DR312](design/decision-records/312-optional-sealed-ai-provisioning.md)
+and [final verification status](verification/312/README.md).
+
+## Optional parent Bluetooth transfer in the installer — 2026-10-19 (DR311)
+
+**Parent settings → Copy parent Bluetooth devices and pairings** is now an
+opt-in saved installer choice, available in desktop and workspace layouts.
+The immutable saved plan controls web installed-drive updates; `--plan FILE`
+passes the same choice to new allscript builds and rebuilds. Fresh builds copy
+only after their install VM shuts down cleanly. Existing different child state
+is preserved and reported for review. General new-install execution from the
+web page remains unfinished; its exported plan works with the allscript path.
+
+The feature's installer/source files were physically deployed and byte-checked
+on PC601 and its BASELINE_MIRROR ROOT copy; pairings were untouched and all
+mounts were unmounted. Chromium verified saving, reload and opt-out with
+synthetic drives. No new physical build/update or Bluetooth connection was
+executed. See [DR311](design/decision-records/311-optional-parent-bluetooth-installer-feature.md).
+
 ## PC601 parent Bluetooth configuration — 2026-10-19 (DR310)
 
 Physically copied seven parent BlueZ device records to PC601 USER_ADMIN and its
@@ -8,9 +61,9 @@ wiring on both. Independent read-only remount checks verified every copied file,
 private permissions and configuration. All repair mounts were unmounted.
 93 focused source/unit tests passed; native boot and actual Bluetooth connections
 remain unverified under queue72/78. Controller identities are preserved, not
-converted for another adapter. Future explicit transfer is available through
-`baseline-rebuild-drive --bluetooth-from-parent`; conflicting child state is
-refused. This copies pairing/device state, not global `/etc/bluetooth` policy.
+converted for another adapter. Transfer is now offered in the installer through Parent settings (DR311), as
+well as `baseline-rebuild-drive --bluetooth-from-parent`; conflicting child state
+is refused. This copies pairing/device state, not global `/etc/bluetooth` policy.
 See [DR310](design/decision-records/310-parent-bluetooth-pairings-pc601-mirror.md).
 
 ## PC401 → PC601 selective port review — 2026-10-17 (DR309)

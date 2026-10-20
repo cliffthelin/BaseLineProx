@@ -81,14 +81,15 @@ def seed_extra(plan_: dict, *, tag: str = "") -> dict:
         raise AppEnvError("the install script contains the end marker")
     dash = f"-{tag}" if tag else ""
     files = [{"path": f"/var/lib/baseline/install-app{dash}.sh", "permissions": "0700", "content": script}]
-    if plan_["launch"]:
+    if plan_["launch"] and plan_.get("os") != "nixos":                  # NixOS's /etc/xdg is a link into the read-only store: a file written there fails and takes the whole first-boot job with it
         files.append({"path": f"/etc/xdg/autostart/baseline-app{dash}.desktop", "permissions": "0644",
                       "content": f"[Desktop Entry]\nType=Application\nName={plan_['name']}\nExec={plan_['launch']}\nX-GNOME-Autostart-enabled=true\n"})
         # (the base's seed already signs the owner straight in at the console, so the application starts on its own)
     if plan_.get("route") in ("deb", "apt"):          # started with the password store every machine shares, so a sign-in carried from another machine opens (signin_share.py)
         import signin_share
         files += signin_share.wrapper_files(plan_["app"])
-    run = ["sh", "-c", f"mkdir -p /var/lib/baseline && sh /var/lib/baseline/install-app{dash}.sh > /var/log/baseline-install-app{dash}.log 2>&1; rc=$?; "
+    path = "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; " if plan_.get("os") == "nixos" else ""      # NixOS's first-boot PATH has nothing in it
+    run = ["sh", "-c", f"{path}mkdir -p /var/lib/baseline && sh /var/lib/baseline/install-app{dash}.sh > /var/log/baseline-install-app{dash}.log 2>&1; rc=$?; "
                        f"printf '{{\"app\": \"{plan_['app']}\", \"exit\": %s}}\\n' \"$rc\" > /var/lib/baseline/app-ready{dash}.json"]
     return {"write_files": files, "runcmd": [run], "mounts": plan_["mounts"]}
 

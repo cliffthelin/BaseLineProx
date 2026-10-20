@@ -486,8 +486,7 @@ def build_omarchy(args, work: Path, out: Path):
 
 
 def build_fydeos(args, work: Path, out: Path):
-    """FydeOS ships as a VMware appliance: no installer to run. Its manifest is checked, the disk converted, and the result booted headless to see how far it gets (the kernel it ships has no
-    driver for QEMU's virtual displays, only the Intel one, so its desktop cannot start in a plain VM; that is recorded, not hidden)."""
+    """Prepare a pristine appliance with its shipped VirtIO modules loaded before splash."""
     import tarfile
     ova = next(args.images.glob("FydeOS-*.ova"))
     shutil.rmtree(work / "ova", ignore_errors=True)
@@ -499,31 +498,26 @@ def build_fydeos(args, work: Path, out: Path):
     expected = next(l.split("= ")[1].strip() for l in manifest_file.read_text().splitlines() if vmdk.name in l)
     if sha256(vmdk) != expected:
         raise ob.BuildError("the disk in the appliance does not match its own manifest")
-    disk = work / "disk.qcow2"
-    subprocess.run(["qemu-img", "convert", "-O", "qcow2", str(vmdk), str(disk)], check=True)
-    vars_file, serial = work / "vars.fd", work / "serial.log"
-    shutil.copy(OVMF_VARS, vars_file)
-    serial.unlink(missing_ok=True)
-    pidfile = work / "vm.pid"
-    subprocess.run(["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", "4", "-m", "4096", "-machine", "q35", "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
-                    "-drive", f"if=pflash,format=raw,file={vars_file}", "-drive", f"file={disk},if=none,id=hd0,format=qcow2", "-device", "ich9-ahci,id=ahci", "-device", "ide-hd,drive=hd0,bus=ahci.0",
-                    "-nic", "user,model=e1000", "-display", "none", "-serial", f"file:{serial}", "-daemonize", "-pidfile", str(pidfile)], check=True)
-    time.sleep(90)
-    subprocess.run(["kill", pidfile.read_text().strip()])
-    log = serial.read_bytes().decode(errors="replace")
-    reached_userland = "chromeos_startup" in log and "init:" in log
-    no_display = "No suitable drm driver found" in log
-    if not reached_userland:
-        raise ob.BuildError("FydeOS did not reach its userland in a VM")
-    manifest = {"os": "fydeos-23.0-preview2", "source_image": ova.name, "source_sha256": sha256(ova), "install": "none: the appliance disk converted to qcow2 (its own checksum verified)",
-                "boots_in_a_vm": "to userland, headless (UEFI, SATA, e1000)", "desktop_in_a_plain_vm": not no_display,
-                "needs": "an Intel GPU passed through (its kernel has no driver for QEMU's virtual displays: frecon reports no suitable drm driver) or a different FydeOS image",
-                "first_boot": "FydeOS's own setup creates the account; the base has none"}
+    import fydeos_vm
+    raw = work / "fydeos.raw"
+    subprocess.run(["qemu-img", "convert", "-O", "raw", str(vmdk), str(raw)], check=True)
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="fydeos-patch-", dir=work) as scratch:
+        compatibility = fydeos_vm.patch_raw(raw, Path(scratch))
     final = out / "fydeos-base.qcow2"
-    shutil.copy(disk, final)
-    manifest.update(base=final.name, bytes=final.stat().st_size, sha256=sha256(final), built=time.strftime("%Y-%m-%dT%H:%M:%S"), holds_install_state_or_secrets=False)
+    if final.exists():
+        raise ob.BuildError("FydeOS output already exists; use a new output directory")
+    subprocess.run(["qemu-img", "convert", "-c", "-O", "qcow2", str(raw), str(final)], check=True)
+    manifest = {"os": "fydeos-23.0-preview2", "source_image": ova.name,
+                "source_sha256": sha256(ova), "install": "vendor appliance with early shipped VirtIO GPU/network modules",
+                "virtualization": compatibility, "native_proxmox_verified": False,
+                "desktop_runtime_verified": False,
+                "needs": "host EGL render node and VirtIO 3D (virgl); owner completes FydeOS setup",
+                "first_boot": "FydeOS's own setup; entire writable disk is retained",
+                "base": final.name, "bytes": final.stat().st_size, "sha256": sha256(final),
+                "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "holds_install_state_or_secrets": False}
     (out / "fydeos-base.json").write_text(json.dumps(manifest, indent=1))
-    say(f"done: {final}; desktop works in a plain VM: {not no_display}")
+    say(f"prepared: {final}; runtime display verification is still required")
 
 
 BAZZITE_CHECKS = [

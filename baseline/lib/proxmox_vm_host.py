@@ -38,7 +38,8 @@ def retirement_volumes(name, spec, record, config):
     vmid = record['vmid']
     if config.get('name') != name or config.get('lock'):
         raise vh.VmError('VM identity or lock changed; retirement refused')
-    if config.get('virtio0', '').split(',')[0] != volumes[0]:
+    root_slot = 'sata0' if spec.get('source_base') == 'fydeos-base' else 'virtio0'
+    if config.get(root_slot, '').split(',')[0] != volumes[0]:
         raise vh.VmError('managed root-disk attachment changed; retirement refused')
     home_expected = volumes[1] if spec.get('persistence_disk') else None
     if home_expected:
@@ -47,7 +48,7 @@ def retirement_volumes(name, spec, record, config):
             raise vh.VmError('retained-home attachment changed; retirement refused')
     elif config.get('virtio1'):
         raise vh.VmError('unexpected secondary VM disk; retirement refused')
-    allowed_devices = {'virtio0'} | ({'virtio1'} if home_expected else set())
+    allowed_devices = {root_slot} | ({'virtio1'} if home_expected else set())
     efi_expected = next((volume for volume in volumes if volume.endswith(f'vm-{vmid}-disk-1.raw')), None)
     for key, value in config.items():
         if key == 'ide2' and value.startswith(f'{OS_STORAGE}:iso/') and 'media=cdrom' in value.split(','):
@@ -302,6 +303,17 @@ class ProxmoxVmHost(vh.VmHost):
                     argv += ["--is_mountpoint", str(Path("/mnt") / path.resolve().parts[2])]
                 self._command(argv)
 
+    def create_retained_base(self, name, **kwargs):
+        pre_existing = self._record_path(name).exists()
+        try:
+            spec = super().create_retained_base(name, **kwargs)
+            self._register(name, spec)
+            return spec
+        except Exception:
+            if not pre_existing:
+                self._discard_unregistered(name)
+            raise
+
     def create_overlay(self, name, **kwargs):
         pre_existing = self._record_path(name).exists()
         try:
@@ -351,9 +363,14 @@ class ProxmoxVmHost(vh.VmHost):
         vmid = record["vmid"]
         argv = ["qm", "create", str(vmid), "--name", name, "--memory", str(spec["memory_mb"]),
                 "--cores", str(spec["cpus"]), "--machine", "q35", "--cpu", "host",
-                "--vga", "virtio", "--net0", "virtio,bridge=vmbr0", "--agent", "enabled=1",
+                "--vga", "virtio-gl" if spec.get("graphics") == "virgl" else "virtio", "--net0", "virtio,bridge=vmbr0", "--agent", "enabled=1",
                 "--virtio0", f"{USER_STORAGE if spec.get('root_disk') else OS_STORAGE}:{vmid}/{self.disk_path(name).name}",
                 "--boot", "order=virtio0"]
+        if spec.get('source_base') == 'fydeos-base':
+            argv[argv.index('--virtio0')] = '--sata0'
+            argv[argv.index('order=virtio0')] = 'order=sata0'
+            argv[argv.index('--net0') + 1] = 'e1000,bridge=vmbr0'
+            argv[argv.index('--agent') + 1] = 'enabled=0'
         if spec.get("persistence_disk"):
             argv += ["--virtio1", f"{USER_STORAGE}:{vmid}/{self.persistence_path(name).name},serial=baseline-home"]
         if spec.get("iso"):
@@ -381,7 +398,7 @@ class ProxmoxVmHost(vh.VmHost):
                 shutil.copyfile(self.vm_dir(name) / "seed.iso", target)
                 argv += ["--ide2", f"{OS_STORAGE}:iso/{target.name},media=cdrom"]
             elif spec.get("iso_done"):
-                argv += ["--delete", "ide2", "--boot", "order=virtio0"]
+                argv += ["--delete", "ide2", "--boot", "order=sata0" if spec.get('source_base') == 'fydeos-base' else "order=virtio0"]
             self._command(argv)
             if spec.get("disk_gb"):
                 self._command(["qm", "disk", "rescan", "--vmid", str(record["vmid"])])

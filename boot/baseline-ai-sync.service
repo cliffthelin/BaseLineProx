@@ -1,0 +1,11 @@
+[Unit]
+Description=Deliver opted-in AI setup from unlocked USER_ADMIN vault
+After=baseline-persist-bind-mounts.service baseline-web.service
+ConditionPathExists=/mnt/USER_ADMIN/ai-setup.json
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-ai-sync
+UMask=0077
+# The installed code is mounted read-only for the service (deploy hardening).
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1

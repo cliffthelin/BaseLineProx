@@ -84,6 +84,12 @@ class DraftStore:
         if type(expected_revision) is not int or expected_revision < 0:
             raise DraftError('A nonnegative draft revision is required')
         encoded = _validate(document)
+        if kind == "installer":
+            import ai_provisioning
+            try:
+                ai_provisioning.choice(document)
+            except (ai_provisioning.SetupError, AttributeError, TypeError) as exc:
+                raise DraftError("AI installer choices must contain metadata and a vault reference only") from exc
         if kind == 'installer-display':
             import installer_desktop
             try:

@@ -29,6 +29,7 @@ _STYLE = ("<style>:root{color-scheme:dark}body{font-family:system-ui,sans-serif;
 
 
 def _page(title, body):
+    body = "<p><a href='/ai-setup/installer'>Installer AI setup and target access</a></p>" + body
     return (f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>{_STYLE}</head><body>"
             f"<h1>{html.escape(title)}</h1>{body}</body></html>").encode()
 
@@ -130,7 +131,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button[dat
     out.textContent=j.value;b.textContent='Hide';setTimeout(()=>{out.textContent='';b.textContent='Show';},30000);}});
 </script>"""
     return _page("Credential vault", f"{note}<table><thead><tr><th>Secret</th><th>Vault</th><th>Size</th><th>Fingerprint</th><th></th></tr></thead><tbody>{held}</tbody></table>"
-                 f"{add}{use}<h2>Protection</h2><table><thead><tr><th>Vault</th><th>State</th><th>Secrets</th></tr></thead><tbody>{rows}"
+                 f"{add}{use}<p><a href='/ai-setup/installer'>Installer AI profiles and guest access</a></p><h2>Protection</h2><table><thead><tr><th>Vault</th><th>State</th><th>Secrets</th></tr></thead><tbody>{rows}"
                  f"</tbody></table>{forms}<p><a href='/ai-setup'>AI providers</a></p>{script}")
 
 

@@ -15,13 +15,13 @@ SIZES = {
     "nixos": (40, 4096, 2),
     "bazzite": (80, 8192, 4),      # a Fedora Atomic image, large on disk
     "ubuntu": (40, 4096, 2),
+    "fydeos": (50, 4096, 4),
 }
 DEFAULT = (32, 4096, 2)
 BLOCKED = {
     "qubes": "Qubes OS runs its own Xen hypervisor and wants the hardware to itself; it is not created as a plain VM here.",
-    "fydeos": "FydeOS's disk converts and boots to its userland in a VM, but its desktop cannot start without an Intel GPU passed through (its kernel has no driver for virtual displays), so it is not created as a plain VM here.",
 }
-PREBUILT = ("debian", "ubuntu", "nixos", "cachyos", "omarchy", "bazzite")        # systems with a ready-made base that can be used as a plain VM (DR267)
+PREBUILT = ("debian", "ubuntu", "nixos", "cachyos", "omarchy", "bazzite", "fydeos")        # systems with a ready-made base that can be used as a plain VM (DR267)
 OVA_REASON = "this image is an appliance (OVA), not an installer ISO, and importing appliances is not built yet."
 HOST_SHARE = 2         # a VM may be given at most half of the host's memory
 

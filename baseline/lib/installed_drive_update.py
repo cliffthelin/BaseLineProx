@@ -150,6 +150,11 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
     _require_update_serial(serial)
     bundle = Path(input_bundle)
     installer_inputs.verify(bundle)  # Validate captured code before any device probe.
+    import bluetooth_transfer
+    plan = bluetooth_transfer.bundle_plan(bundle)
+    bluetooth_transfer.requested(plan)  # reject malformed choices before hardware probes
+    import ai_provisioning
+    ai_provisioning.choice(plan)
     payload = bundle / 'payload'
     uid = runner.run(['id','-u'],timeout=10)
     if uid.returncode or uid.stdout.strip() != '0':
@@ -314,6 +319,10 @@ def update(runner, *, serial, input_bundle, recovery_folder, root, pds_runner=No
             if not dest.is_dir() or dest.is_symlink():
                 raise UpdateError('Installed role mountpoint missing: '+label)
             run(['mount','-o',di.mount_options_for(label),device,dest]);mounted.append(dest)
+        guard()
+        state['bluetooth'] = bluetooth_transfer.apply_plan(plan, _target_path(root, 'mnt/USER_ADMIN'))
+        state['ai_setup'] = ai_provisioning.apply_plan(plan, _target_path(root, 'mnt/USER_ADMIN'))
+        record('parent_configuration_applied')
         for tree in installer_inputs.PAYLOAD_TREES:
             guard()
             destination = _target_path(root,'opt/baseline-src/'+tree)

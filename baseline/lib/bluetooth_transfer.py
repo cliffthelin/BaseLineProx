@@ -38,7 +38,8 @@ def seed(source, user_admin):
     if dest.exists() or dest.is_symlink():
         if _files(dest) == files and all(filecmp.cmp(source / p, dest / p, shallow=False) for p in files):
             return {'state': 'already present'}
-        raise TransferError('child has different Bluetooth state; existing settings were preserved')
+        if any(dest.iterdir()):
+            raise TransferError('child has different Bluetooth state; existing settings were preserved')
     with tempfile.TemporaryDirectory(prefix='.bluetooth-transfer-', dir=admin) as work:
         staged = Path(work) / 'state'
         shutil.copytree(source, staged, symlinks=True)
@@ -50,6 +51,29 @@ def seed(source, user_admin):
                 os.chmod(Path(base) / name, 0o600)
         # Refuse a concurrently created destination, including an empty directory.
         if dest.exists() or dest.is_symlink():
-            raise TransferError('child Bluetooth state appeared during transfer; retry')
+            if dest.is_symlink() or not dest.is_dir() or any(dest.iterdir()):
+                raise TransferError('child Bluetooth state appeared during transfer; retry')
+            dest.rmdir()  # only an empty first-boot directory, never device state
         staged.rename(dest)
     return {'state': 'copied', 'controller_identity_preserved': True}
+
+
+def requested(plan):
+    """Strict opt-in; older plans mean no parent transfer."""
+    config = plan.get('host_configuration', {})
+    if (not isinstance(config, dict) or set(config) - {'bluetooth_from_parent', 'ai_setup'}
+            or type(config.get('bluetooth_from_parent', False)) is not bool):
+        raise TransferError('Bluetooth transfer choice must be a boolean in host_configuration.bluetooth_from_parent')
+    return config.get('bluetooth_from_parent', False)
+
+
+def apply_plan(plan, user_admin, *, source='/var/lib/bluetooth'):
+    """Called only after the executor validates and mounts the child USER_ADMIN."""
+    if not requested(plan):
+        return {'state': 'not requested'}
+    return seed(source, user_admin)
+
+
+def bundle_plan(bundle):
+    import json
+    return json.loads((Path(bundle) / 'configuration/plan.json').read_text())

@@ -1,0 +1,8 @@
+[Unit]
+Description=Retry AI setup for newly started guests and Kasm workspaces
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=30
+Unit=baseline-ai-sync.service
+[Install]
+WantedBy=timers.target

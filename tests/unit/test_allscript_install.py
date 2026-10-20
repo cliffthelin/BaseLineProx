@@ -386,3 +386,27 @@ def test_update_is_a_root_stage_that_touches_the_drive_but_never_erases_it():
     assert allscript.select_stages("update", None) == ["update"]
     text = _PATH.read_text()
     assert text.index("stages = [\"update\"]") < text.index('if "install" in stages and not wipe_authorized(CONFIRMED_WIPE)')      # the erase confirmation is only asked of a drive with no build
+
+
+def test_parent_bluetooth_choice_defaults_off_and_can_be_saved_or_disabled(tmp_path, monkeypatch):
+    monkeypatch.setattr(allscript, 'WORK', tmp_path)
+    assert allscript.parent_bluetooth_selected() is False
+    allscript.record('parent-configuration-choice', bluetooth_from_parent=True)
+    assert allscript.parent_bluetooth_selected() is True
+    allscript.record('parent-configuration-choice', bluetooth_from_parent=False)
+    assert allscript.parent_bluetooth_selected() is False
+
+
+def test_fresh_build_uses_guarded_rebuild_and_mirror_only_when_opted_in(tmp_path, monkeypatch):
+    import rebuild_drive, managed_mode
+    monkeypatch.setattr(allscript, 'WORK', tmp_path)
+    monkeypatch.setattr(allscript, 'SERIAL', 'SYNTHDRIVEA00001')
+    calls = []
+    monkeypatch.setattr(managed_mode, 'mirror_root', lambda: '/synthetic/mirror')
+    monkeypatch.setattr(rebuild_drive, 'rebuild', lambda runner, **kwargs: calls.append(kwargs) or {'bluetooth': {'state': 'copied'}})
+    allscript.transfer_parent_configuration(object())
+    assert not calls
+    allscript.record('parent-configuration-choice', bluetooth_from_parent=True)
+    allscript.transfer_parent_configuration(object())
+    assert calls == [{'serial': 'SYNTHDRIVEA00001', 'bluetooth_from_parent': True,
+                      'mirror_root': '/synthetic/mirror', 'allowed_serials': ['SYNTHDRIVEA00001']}]

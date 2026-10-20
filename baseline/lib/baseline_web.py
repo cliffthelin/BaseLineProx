@@ -1810,11 +1810,53 @@ def _vault_push_for(deps: dict, target: str):
                 result = json.loads(out)
             except (ValueError, TypeError):
                 result = {}
-            if rc or not isinstance(result, dict) or result.get("exited") not in (True, 1) or result.get("exitcode") != 0:
+            if rc or not isinstance(result, dict) or result.get("exited") not in (True, 1) or isinstance(result.get("exitcode"), bool) or result.get("exitcode") != 0:
                 raise OSError("the Kasm machine's guest agent did not accept the secret (is it running?)")
             return result
         return push
     raise OSError("that place cannot receive secrets")
+
+
+def _ai_draft(deps, owner):
+    drafts = deps.get('draft_store')
+    if drafts is None:
+        raise ValueError('Installer draft storage is unavailable')
+    return drafts, drafts.get(owner, 'installer')
+
+
+def _ai_config(deps, owner):
+    import ai_provisioning as ai
+    path = Path(deps.get('ai_config_path') or '/mnt/USER_ADMIN/ai-setup.json')
+    if path.is_file() and not path.is_symlink():
+        return ai.choice({'host_configuration': {'ai_setup': json.loads(path.read_text())}})
+    _drafts, draft = _ai_draft(deps, owner)
+    return ai.choice(draft['document'] if draft else {})
+
+
+def _ai_activate(deps, owner, target, account=None):
+    import ai_provisioning as ai
+    import ai_runtime
+    config = _ai_config(deps, owner)
+    if target == 'kasm':
+        grant_target = 'kasm:server'
+    else:
+        grant_target = target
+    if config['mode'] == 'none' or not ai._TARGET.fullmatch(grant_target) or not ai.permitted(config, grant_target):
+        raise ai.SetupError('AI setup was not granted to this target')
+    # Read only the admin profile, never an identically named personal secret.
+    store = _vault_store(deps, 'admin')
+    profile = ai.selected_profile(ai.load_profile(getattr(store, '_vault', store),
+        passphrase=deps.get('vault_passphrase')), config)
+    if target in ('substrate', 'baseline'):
+        result = ai_runtime.install(profile, account=account or 'root', source=Path(ai_runtime.__file__).read_text(),
+            runtime=deps.get('ai_runtime_root', ai_runtime.RUNTIME),
+            launcher=deps.get('ai_launcher_path', '/opt/baseline/bin/baseline-ai-run'),
+            history_root='/mnt/APPDATA_ADMIN/claude-code/.claude' if config.get('claude_history') else None)
+    else:
+        argv, data = ai.delivery(profile, account=account or ('root' if target == 'kasm' else None))
+        _vault_push_for(deps, target)(argv, data)
+        result = {'installed': True, 'providers': sorted(profile['providers']), 'authenticated': False}
+    return result
 
 
 def _vault_reader(deps: dict):
@@ -2022,6 +2064,16 @@ def _carried_bases(deps: dict) -> set:
                 found.add(manifest.name[:-len("-base.json")])
         except (OSError, ValueError, KeyError, TypeError):
             continue
+    if not deps.get('os_bases_dir'):
+        import prebuilt_environment as pe
+        source = pe.source_for('fydeos', folder)
+        if source != folder:
+            try:
+                manifest = pe.read_manifest(source, 'fydeos')
+                if (source / manifest['base']).is_file():
+                    found.add('fydeos')
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
     return found
 
 
@@ -2496,6 +2548,23 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(ai_setup_page.render_vault(
                 _vault_states(deps), qs.get("notice", [""])[0][:200].replace("+", " "), _vault_secrets(deps),
                 _vault_places(deps)), path))
+
+        if path == '/ai-setup/installer':
+            import ai_installer_page
+            return self._html_response(200, _with_nav(ai_installer_page.render(), '/ai-setup'))
+
+        if path == '/ai-setup/installer-state':
+            import ai_provisioning as ai
+            try:
+                owner = deps['sessions'].get(self._cookie_token(), now).username
+                _drafts, draft = _ai_draft(deps, owner)
+                store = _vault_store(deps, 'admin')
+                return self._json(200, {'ok': True, 'revision': draft['revision'] if draft else 0,
+                    'selection': ai.choice(draft['document'] if draft else {}),
+                    'parent': ai.discover(deps.get('ai_parent_home') or Path.home(), deps.get('ai_parent_environ')),
+                    'prepared': ai.PROFILE in store.names()})
+            except (ValueError, OSError, __import__('vault').VaultError):
+                return self._json(409, {'ok': False, 'message': 'AI setup state unavailable; check USER_ADMIN vault and installer draft storage'})
 
         if path in ("/ai-setup", "/ai-setup/claude"):
             import ai_setup_page
@@ -3592,6 +3661,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     for _label, _scope, root in _vault_roots(deps):
                         vault.Vault(root).lock(vault.RUNTIME_DIR)
                     deps.pop("vault_passphrase", None)
+                    import shutil
+                    shutil.rmtree(deps.get("ai_runtime_root") or "/run/baseline-ai", ignore_errors=True)
                     notice = "Vault locked"
                 else:
                     passphrase = str(body.get("passphrase", ""))
@@ -3616,6 +3687,45 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             except (vault.VaultError, vault.SealError, ValueError, OSError) as exc:
                 notice = str(exc)[:160]
             return self._redirect("/vault?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path in ('/ai-setup/installer-profile', '/ai-setup/activate'):
+            import ai_provisioning as ai
+            import vault
+            import configuration_drafts
+            me = deps['sessions'].get(self._cookie_token(), now)
+            if me.role not in ('admin', 'operator'):
+                return self._json(403, {'ok': False, 'message': 'AI setup requires an operator account'})
+            try:
+                if path == '/ai-setup/activate':
+                    if set(body) != {'target', 'account'}:
+                        raise ai.SetupError('select a target and optional guest account')
+                    result = _ai_activate(deps, me.username, str(body['target']), str(body['account']) or None)
+                    return self._json(200, {'ok': True, 'message': 'AI setup delivered to runtime; provider authentication was not tested.', **result})
+                if set(body) not in ({'selection', 'revision'}, {'selection', 'revision', 'profile'}):
+                    raise ai.SetupError('invalid AI setup request')
+                selected = ai.choice({'host_configuration': {'ai_setup': body['selection']}})
+                drafts, draft = _ai_draft(deps, me.username)
+                if (draft['revision'] if draft else 0) != body['revision']:
+                    raise configuration_drafts.DraftConflict('Installer draft changed; reload AI setup before saving')
+                if selected['mode'] != 'none':
+                    store = _vault_store(deps, 'admin')
+                    raw_store = getattr(store, '_vault', store)
+                    if not raw_store.has_passphrase() or not deps.get('vault_passphrase') or not raw_store.check_passphrase(deps['vault_passphrase']):
+                        raise ai.SetupError('unlock the encrypted USER_ADMIN vault before importing AI setup')
+                    profile = ai.import_parent(deps.get('ai_parent_home') or Path.home(), selected['providers'], deps.get('ai_parent_environ')) if selected['mode'] == 'parent' else body.get('profile')
+                    if not isinstance(profile, dict) or set(profile.get('providers', {})) != set(selected['providers']):
+                        raise ai.SetupError('enter configurations for exactly the selected providers')
+                    ai.save_profile(raw_store, ai.PROFILE, profile, deps.get('vault_passphrase'))
+                    selected = dict(selected, profile_sha256=hashlib.sha256((raw_store.root / ai.PROFILE).read_bytes()).hexdigest())
+                document = dict(draft['document']) if draft else __import__('install_plan').autofill(
+                    deps.get('install_plan_discovery', __import__('install_plan_page').discover_current)())
+                document.setdefault('host_configuration', {})['ai_setup'] = selected
+                saved = drafts.save(me.username, 'installer', document, expected_revision=body['revision'])
+                if deps.get('audit'):
+                    deps['audit']({'event': 'ai_setup_prepared', 'mode': selected['mode'], 'providers': selected['providers']})
+                return self._json(200, {'ok': True, 'revision': saved['revision'], 'message': 'AI setup saved: encrypted profile in USER_ADMIN vault; selection in installer plan. No provider sign-in was tested.'})
+            except (ai.SetupError, vault.VaultError, vault.SealError, configuration_drafts.DraftError, ValueError, OSError, KeyError, TypeError):
+                return self._json(409, {'ok': False, 'message': 'AI setup was not saved or delivered. Check draft revision, unlocked USER_ADMIN vault, provider configuration, target grant and guest availability.'})
 
         if path.startswith("/ai-setup/"):
             import ai_setup_page

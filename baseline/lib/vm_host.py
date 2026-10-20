@@ -312,6 +312,38 @@ class VmHost:
         self._write_spec(name, spec)
         return spec
 
+    def create_retained_base(self, name: str, *, base: str, memory_mb=4096, cpus=2, graphics=None):
+        """Import an appliance whose own disk contains its account state; never disposable."""
+        self._need_name(name)
+        if not (256 <= int(memory_mb) <= 1048576 and 1 <= int(cpus) <= 128):
+            raise VmError("memory or cpu count out of range")
+        if graphics not in (None, 'virgl'):
+            raise VmError("unsupported appliance graphics")
+        self._check_store(self.store)
+        self._check_store(self.persistence_store)
+        if self.persistence_store.resolve().is_relative_to(self.store.resolve()) or self.store.resolve().is_relative_to(self.persistence_store.resolve()):
+            raise VmError("protected disks must be outside the disposable VM store")
+        source = self.base_path(base)
+        if not source.is_file():
+            raise VmError("appliance base is missing")
+        self._ensure_room(self.persistence_store, FREE_HEADROOM + source.stat().st_size, "not enough space for retained appliance")
+        folder = self._new_dir(name, 0)
+        root = self.standalone_path(name)
+        if root.parent.exists():
+            shutil.rmtree(folder)
+            raise VmError("retained state already exists; refusing to replace it")
+        root.parent.mkdir(parents=True)
+        try:
+            self._create_disk(root.parent, ['qemu-img', 'convert', '-f', 'qcow2', '-O', 'qcow2', str(source), str(root)])
+            spec = dict(name=name, base=None, source_base=base, iso=None, iso_done=True,
+                        memory_mb=int(memory_mb), cpus=int(cpus), disk_gb=None,
+                        root_disk=str(root), graphics=graphics)
+            self._write_spec(name, spec)
+            return spec
+        except Exception:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
+
     def create_overlay(self, name: str, *, base: str, memory_mb: int = 4096, cpus: int = 2,
                        persistence_gb: int = 32) -> dict:
         self._need_name(name)
@@ -408,6 +440,17 @@ class VmHost:
                 "-device", "qemu-xhci", "-device", "usb-tablet", "-vga", "virtio",
                 "-display", "none" if display == "vnc" else display,
                 "-qmp", f"unix:{self.sock_path(name)},server=on,wait=off"]
+        if spec.get('source_base') == 'fydeos-base':
+            index = argv.index('-drive')
+            argv[index + 1] = f'file={self.disk_path(name)},if=none,id=fydeos-root,format=qcow2'
+            argv[index + 2:index + 2] = ['-device', 'ich9-ahci,id=fydeos-ahci',
+                                       '-device', 'ide-hd,drive=fydeos-root,bus=fydeos-ahci.0']
+            argv[argv.index('virtio-net-pci,netdev=n0')] = 'e1000,netdev=n0'
+        if spec.get('graphics') == 'virgl':
+            index = argv.index('-vga')
+            argv[index:index + 2] = ['-vga', 'none', '-device', 'virtio-vga-gl']
+            index = argv.index('-display')
+            argv[index + 1] = 'egl-headless,rendernode=/dev/dri/renderD128' if display in ('vnc', 'none') else display + ',gl=on'
         if display == "vnc":
             argv += ["-vnc", f"127.0.0.1:{self.vnc_display_number(name)}"]
         if spec.get("uefi"):

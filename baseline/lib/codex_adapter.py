@@ -8,6 +8,7 @@ protocol the way ACP is.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import subprocess
 
 import harness_events
@@ -33,9 +34,13 @@ def describe_session(session: CodexSession) -> str:
 
 def _run(prompt, binary):
     key = vault.lookup("OPENAI_API_KEY")
-    if not key:
+    import ai_provisioning
+    env = ai_provisioning.client_environment("codex")
+    key = key or env.get("OPENAI_API_KEY")
+    if not key and not (env.get("BASELINE_AI_PROFILE") == "codex" and (Path(env.get("CODEX_HOME", "/nonexistent")) / "auth.json").is_file()):
         return None, "[ask] no OPENAI_API_KEY found: add it on the AI providers page or the vault page (/vault), then ask again"
-    env = dict(os.environ, OPENAI_API_KEY=key)
+    if key:
+        env["OPENAI_API_KEY"] = key
     argv = [binary, "exec", "--skip-git-repo-check", "-s", "read-only", "-C", SCRATCH, prompt]
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT_S, env=env)

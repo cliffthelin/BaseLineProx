@@ -12,7 +12,7 @@ def carried(tmp_path, os_id="debian", data=b"base disk bytes", holds=False, sha=
     folder = tmp_path / "cache" / "os-bases"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{os_id}-base.qcow2").write_bytes(data)
-    (folder / f"{os_id}-base.json").write_text(json.dumps({"base": f"{os_id}-base.qcow2", "sha256": sha or hashlib.sha256(data).hexdigest(), "holds_install_state_or_secrets": holds}))
+    (folder / f"{os_id}-base.json").write_text(json.dumps({"base": f"{os_id}-base.qcow2", "sha256": sha or hashlib.sha256(data).hexdigest(), "holds_install_state_or_secrets": holds, "virtualization": {"recipe": "fydeos-virtio-gl-v1"} if os_id == "fydeos" else {}}))
     return folder
 
 
