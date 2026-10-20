@@ -16,11 +16,15 @@ of the key derivation.
 import json
 import os
 import shutil
+
+import write_once
 import subprocess
 import tarfile
 import tempfile
 import time
 from pathlib import Path
+
+import references
 
 MANIFEST_NAME = "handoff_manifest.json"
 _MAX_MANIFEST_BYTES = 1024 * 1024
@@ -98,7 +102,7 @@ def collect(staging_dir: Path, host_label: str) -> dict:
         src_path = Path(src)
         if src_path.is_dir():
             dest = staging_dir / rel
-            shutil.copytree(src_path, dest, dirs_exist_ok=True)
+            write_once.copy_changed(src_path, dest)
             included.append(rel)
 
     for src, rel in _FILE_SOURCES:
@@ -125,6 +129,9 @@ def collect(staging_dir: Path, host_label: str) -> dict:
         "has_interface_aliases": (staging_dir / "etc-baseline" / "interface_aliases.json").exists(),
         "files_included": sorted(included),
     }
+    host = references.current_host()
+    if host:
+        manifest["host_ref"] = host
     (staging_dir / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2))
     return manifest
 
@@ -225,5 +232,5 @@ def open_packet(encrypted_path: Path, passphrase: str, extract_to: Path) -> dict
         except tarfile.TarError as exc:
             raise HandoffError(f"unsafe or corrupt entry in packet: {exc}") from exc
         extract_to.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(staging, extract_to, symlinks=True, dirs_exist_ok=True)
+        write_once.copy_changed(staging, extract_to, symlinks=True)
     return manifest

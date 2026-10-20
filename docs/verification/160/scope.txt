@@ -1,0 +1,6 @@
+Full final unit suite: 3368 passed in 121.21s; no failures, skips or deselections.
+Focused authentication/settings/restart checks: 204 passed.
+Real temporary SQLite and HTTP: sessions survive reopen; expiry/revocation/tamper rejection pass; restarted-server session accepted by restart gate. Desktop confirmation runner is a test fixture, not a real restart.
+Real Chromium against fixtures: expired Restart host response offers visible same-origin Sign in link.
+Production reload PID1624321; login HTTP200 with Referrer-Policy same-origin.
+No operator credential or actual browser session token accessed. No host restart or physical drive action performed.

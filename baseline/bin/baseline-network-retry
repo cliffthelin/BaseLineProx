@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Thin installed entry point for the unattended retry of the network change confirmed at first boot."""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import network_retry  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(network_retry.main())

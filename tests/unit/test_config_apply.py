@@ -241,23 +241,30 @@ def test_handoff_archive_outside_the_backup_folder_is_refused_before_any_command
     assert runner.calls == []
 
 
-def test_handoff_restore_is_gated_on_a_fresh_backup_of_user_data():
-    runner = FakeRunner(files={ARCHIVE: ""})
-    config = {"restored_categories": ["network"], "archive_path": ARCHIVE, "restore_root": "/mnt"}
-    result = ca.apply_handoff_config(runner, config)
-    assert result.ok is False and "backup" in result.detail
-    assert not any(c[0] == "tar" and "-xzf" in c for c in runner.calls)   # tar never ran
-
-
-def test_handoff_restores_when_the_archive_is_valid_and_user_data_is_freshly_backed_up():
-    import backup_restore as br
-    runner = FakeRunner(files={ARCHIVE: ""})
-    for target in br.user_targets():
-        br.record_backup_manifest(runner, target=target, ts=runner.now())
-    config = {"restored_categories": ["network"], "archive_path": ARCHIVE, "restore_root": "/mnt"}
-    result = ca.apply_handoff_config(runner, config)
+def test_handoff_selectively_applies_and_persists_only_the_requested_config_section():
+    import json
+    archived = {"network": {"hostname": "restored-host", "dhcp": True},
+                "ssh": {"password_auth": True}}
+    runner = FakeRunner(files={ARCHIVE: "", "/etc/baseline/install-config.json":
+                               json.dumps({"ssh": {"password_auth": False}, "drivers": {}})},
+                        command_responses=[
+                            (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(0, "etc/baseline/install-config.json\n", "")),
+                            (lambda a: a[:2] == ["tar", "-xOzf"], FakeProc(0, json.dumps(archived), "")),
+                        ])
+    result = ca.apply_handoff_config(runner, {"restored_categories": ["network"], "archive_path": ARCHIVE})
     assert result.ok is True, result.detail
-    assert ["tar", "-xzf", ARCHIVE, "-C", "/mnt"] in runner.calls
+    assert ["tar", "-xOzf", ARCHIVE, "etc/baseline/install-config.json"] in runner.calls
+    saved = json.loads(runner.files["/etc/baseline/install-config.json"])
+    assert saved["network"] == archived["network"]
+    assert saved["ssh"] == {"password_auth": False}
+    assert "mnt/USER" not in " ".join(" ".join(c) for c in runner.calls)
+
+
+def test_handoff_refuses_unknown_category_before_reading_archive():
+    runner = FakeRunner(files={ARCHIVE: ""})
+    result = ca.apply_handoff_config(runner, {"restored_categories": ["user_files"], "archive_path": ARCHIVE})
+    assert not result.ok and "unsupported" in result.detail
+    assert runner.calls == []
 
 
 # -- iperf3 ------------------------------------------------------------------
@@ -300,12 +307,15 @@ def test_iperf_bad_port_is_refused():
     assert runner.calls == []
 
 
-def test_iperf_server_starts_a_single_bounded_transient_unit():
+def test_iperf_server_submission_is_bounded_but_readiness_is_unverified():
     runner = FakeRunner()
     result = ca.apply_iperf3_config(runner, {"role": "server", "peer_address": "", "port": 5201})
-    assert result.ok is True
-    assert ["systemd-run", "--unit=baseline-iperf3", "--collect", "--property=RuntimeMaxSec=600",
-            "iperf3", "-s", "-1", "-p", "5201"] in runner.calls
+    assert result.ok is False and "REAL-003" in result.detail
+    start = runner.calls[0]
+    assert start[0] == "systemd-run" and start[1].startswith("--unit=baseline-iperf3-")
+    assert start[2:4] == ["--collect", "--property=RuntimeMaxSec=600"]
+    assert start[4].startswith("--property=NetworkNamespacePath=/proc/") and start[4].endswith("/ns/net")
+    assert start[5:] == ["iperf3", "-s", "-1", "-p", "5201"]
 
 
 def test_iperf_without_a_peer_only_checks_the_tool_is_installed():

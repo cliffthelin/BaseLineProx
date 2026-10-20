@@ -10,6 +10,10 @@ from fake_runner import FakeRunner
 
 import settings_web as sw
 import web_security as ws
+
+
+def test_same_origin_forms_preserve_origin_evidence():
+    assert dict(ws.SECURITY_HEADERS)['Referrer-Policy'] == 'same-origin'
 from test_baseline_web import _RealServerCase, _base_deps
 
 
@@ -158,7 +162,7 @@ def _req(port, method, path, cookie=None, body=b"", headers=None):
 def _web_case(**over):
     sessions = sw.SessionStore()
     token = sessions.create("root", now=1700000000.0).token
-    c = _RealServerCase(_base_deps(sessions=sessions, runner=FakeRunner(), **over))
+    c = _RealServerCase(_base_deps(sessions=sessions, runner=FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"}), **over))
     c.cookie = token
     return c
 

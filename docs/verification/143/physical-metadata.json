@@ -1,0 +1,38 @@
+[
+  {
+    "argv": [
+      "lsblk",
+      "-b",
+      "-o",
+      "NAME,TYPE,SIZE,SERIAL,FSTYPE,LABEL,PARTUUID",
+      "/dev/sdc",
+      "/dev/sdd"
+    ],
+    "exit_code": 0,
+    "stdout": "NAME               TYPE         SIZE SERIAL            FSTYPE      LABEL           PARTUUID\nsdc                disk 512110190592 <PC601 drive serial>                             \n\u251c\u2500sdc1             part      1031168                                               e0e88786-56bd-4303-992f-6c2b299e0316\n\u251c\u2500sdc2             part   1073741824                   vfat                        c2924214-b442-4897-8083-908d7350e2f8\n\u2514\u2500sdc3             part 511035383296                   LVM2_member                 1ce00871-fab6-40d4-8e05-6a4a648f9a91\n  \u251c\u2500pve-swap       lvm    2147483648                   swap                        \n  \u251c\u2500pve-root       lvm    5368709120                   ext4                        \n  \u251c\u2500pve-data_tmeta lvm    1073741824                                               \n  \u2502 \u2514\u2500pve-data     lvm   30060576768                                               \n  \u2514\u2500pve-data_tdata lvm   30060576768                                               \n    \u2514\u2500pve-data     lvm   30060576768                                               \nsdd                disk 512110190592 <PC401 drive serial>                             \n\u251c\u2500sdd1             part  33285996544                   ext4        BASELINE        0ef00b0b-18a6-4e4e-b9bd-31d1c104a20e\n\u251c\u2500sdd2             part 146028888064                   ext4        INSTALLER_CACHE 4f897d71-e9b9-4b54-af6d-3b0c4a6a53d8\n\u251c\u2500sdd3             part  33285996544                   ext4        SESSION_TEMP    08022051-e994-4f9d-88ad-17bc1b26b4a8\n\u251c\u2500sdd4             part   1073741824                   ext4        SUBSTRATE       271ad088-6bd3-4704-996d-bb296ab0c661\n\u251c\u2500sdd5             part 146028888064                   ext4        USER_ADMIN      4f82708a-df0c-4c6a-a4ca-d18c5eacb694\n\u2514\u2500sdd6             part 146028888064                   ext4        USER_PERSONAL   f88ab289-6359-4c2c-b40b-c26dff908a8f\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "findmnt",
+      "-n",
+      "-o",
+      "SOURCE,TARGET,FSTYPE,OPTIONS",
+      "--source",
+      "/dev/mapper/pve-root"
+    ],
+    "exit_code": 0,
+    "stdout": "/dev/mapper/pve-root /run/media/cane/fa48739d-a429-4ac2-a2d5-7a6ab0883046 ext4 rw,nosuid,nodev,relatime,errors=remount-ro\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "df",
+      "-h",
+      "/run/media/cane/fa48739d-a429-4ac2-a2d5-7a6ab0883046"
+    ],
+    "exit_code": 0,
+    "stdout": "Filesystem            Size  Used Avail Use% Mounted on\n/dev/mapper/pve-root  4.9G  4.0G  626M  87% /run/media/cane/fa48739d-a429-4ac2-a2d5-7a6ab0883046\n",
+    "stderr": ""
+  }
+]

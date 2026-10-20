@@ -12,7 +12,7 @@ import pytest
 
 import hitl
 
-SERIAL = "MD89N41071210AP4E"
+SERIAL = "SYNTHDRIVEB00002"
 PARAMS = {"device_path": "/dev/sdb"}
 SECRET = "correct-secret"
 
@@ -87,7 +87,7 @@ def test_a_correct_confirmation_yields_an_authorization_for_exactly_that_request
 def test_an_authorization_does_not_cover_a_different_action_drive_or_parameters(store, clock):
     auth = _confirm(store, _challenge(store), clock=clock)
     assert auth.valid_for("mount_volume", PARAMS, SERIAL) is False
-    assert auth.valid_for("repair", PARAMS, "FD01N6557110C271B") is False
+    assert auth.valid_for("repair", PARAMS, "SYNTHDRIVEA00001") is False
     assert auth.valid_for("repair", {"device_path": "/dev/sdc"}, SERIAL) is False
     assert auth.valid_for("repair", {**PARAMS, "lv_name": "root"}, SERIAL) is False
 
@@ -217,7 +217,7 @@ def test_a_grant_covers_only_its_action_and_drive_and_counts_down(store):
     a1 = store.authorization_from_grant("sess-A", "mount_volume", PARAMS, SERIAL)
     assert a1 is not None and a1.valid_for("mount_volume", PARAMS, SERIAL)
     assert store.authorization_from_grant("sess-A", "repair", PARAMS, SERIAL) is None
-    assert store.authorization_from_grant("sess-A", "mount_volume", PARAMS, "FD01N6557110C271B") is None
+    assert store.authorization_from_grant("sess-A", "mount_volume", PARAMS, "SYNTHDRIVEA00001") is None
     assert store.authorization_from_grant("sess-A", "mount_volume", PARAMS, SERIAL) is not None   # second use
     assert store.authorization_from_grant("sess-A", "mount_volume", PARAMS, SERIAL) is None       # used up
 
@@ -290,7 +290,7 @@ def test_the_audit_file_is_append_only_and_private(tmp_path):
 
 
 @pytest.mark.parametrize("action,params,serial", [
-    ("mount_volume", PARAMS, SERIAL), ("repair", PARAMS, "FD01N6557110C271B"), ("repair", {"device_path": "/dev/sdc"}, SERIAL),
+    ("mount_volume", PARAMS, SERIAL), ("repair", PARAMS, "SYNTHDRIVEA00001"), ("repair", {"device_path": "/dev/sdc"}, SERIAL),
     ("repair", {**PARAMS, "lv_name": "root"}, SERIAL),
 ])
 def test_require_refuses_an_authorization_used_for_a_different_request_and_it_stays_usable_for_the_right_one(

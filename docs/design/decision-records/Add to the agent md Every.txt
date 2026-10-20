@@ -1,0 +1,138 @@
+ Add to the agent.md 
+- Every solution/action must be deterministic by default — typed, rule-based, re-derivable from the same inputs, no runtime AI or human decision required.
+- An "AI crutch" or "human crutch" is only allowed when explicitly called out at the point of use as a known deterministic gap, scoped as narrowly as possible, built behind a swappable typed interface, and tracked as an open item (ADR/Hardening Backlog/Roadmap) with a path to replacement — never silently accepted as finished.
+- Explicitly bars reaching for a model or a required human decision in a privileged code path just because it's easier, and distinguishes this from the existing fail-closed rule for genuinely ambiguous provider state.
+
+Also added a "Determinism" field to the mandatory completion report, so an agent must either confirm determinism or name the exact crutch and where it's tracked.
+
+
+
+Do you see the web application we made?
+
+Opened, captured page
+
+The nav bar on this page has no styling (missing .baseline-nav rules in the drive-admin-specific stylesheet). Let me fix that:
+
+
+Edited 2 files, ran 2 commands, read a file
++6
+-0
+All pass. Let's restart the demo and check Master Config too:
+
+running
+Restarting demo server with nav styling fixed on all pages
+All fixed and consistent now — real dark theme (light text on dark backgrounds) across every tab, no serial numbers on the drive cards, nav bar styled and highlighting the active tab everywhere, and the login form bug (it wasn't parsing form-encoded POSTs at all) is fixed. 1258/1258 tests still passing. It's live at http://127.0.0.1:8200/ in the Browser pane if you want to keep poking at it.
+
+Still outstanding before this is real production wiring: a bin script + systemd unit for the merged app, staging it in provision.sh, and a decision record. Want me to continue with that now, or hold while you look at what's running?
+
+
+Edited 2 files
++7
+-2
+
+baseline_web.py
++4
+-2
+
+control_panel_web.py
++3
+-0
+good start, give the drive type if its HDD,SSD,NVME,USB, or Other. Give the brand and model of the identified Drive. But before all of that first you need to actual be able to select the drive and if determined elsewhere the target then that is default but not locked to just that drive
+
+Checked real lsblk -P (pairs) output format for robust parsing
+What the ip address where I can reach this?
+
+Good catch on the classification challenge — real data shows the USB-NVMe bridge on our two target drives reports ROTA=1 (rotational) even though they're solid-state, so I can't trust that flag through USB at all. I'll classify from the model string first, only falling back to the rotational flag on a direct (non-USB) transport, and honestly reporting "USB" when the media type genuinely can't be determined through the bridge — matching exactly why you asked for "USB" as one of the categories.
+
+On reachability — this demo is running on this same machine (your dev machine), bound to localhost only, so:
+
+Got hostname and real LAN IP for reachability info
+I see the IP address
+
+If you're trying to reach it from another device, it's currently bound to localhost only — let me open it on the LAN too.
+
+Read
+run_baseline_web_demo.py
+I'll bind it to the LAN once the drive-picker work lands so you only need to reload once — building that now.
+
+
+Ran 2 commands, edited a file, read 2 files (1 failed)
++107
+-13
+Now let's replace resolve_target/rebuild_persistence_lvm to take an explicit selectable device_path:
+
+Edited
+drive_admin.py
++17
+-18
+Now let's update the ACTIONS registry to pass device_path through for rebuild_persistence_lvm:
+
+
+Ran a command, edited drive_admin.py
++5
+-3
+
+drive_admin.py
++129
+-34
+Are you making a fake root password or are you using my actual password?
+
+Real, honest answer: the SystemPasswordVerifier code is designed to check your actual /etc/shadow account — it reads the real hash, never a fake or hardcoded one. But re-checking how I wired it into the demo just now, I found two real problems, disclosing both:
+
+The demo runs as your normal user, not root, so it can't even read /etc/shadow — every password attempt is currently refused for lack of permission, not because of a fake check.
+Worse — I just noticed the actual wiring is broken: SystemPasswordVerifier exposes .verify(username, password), but the elevation/drive-admin code calls it as verify_fn(password) — a single argument. As wired right now, that would crash, not verify anything.
+Fixing that properly now rather than leaving it half-right.
+
+
+Read and edited settings_web.py, ran a command
++20
+-0
+Now let's write tests for both classes, and fix the demo script to wire this correctly:
+
+
+Ran 3 commands, read and edited test_settings_web.py
++20
+-0
+Now let's rewrite the affected tests to match the new device-path-based API:
+
+
+Read 2 files (1 failed), edited a file, ran a command
++38
+-13
+Now let's add tests for classify_drive_type and list_candidate_drives:
+
+
+Ran 3 commands, edited test_drive_admin.py
++95
+-1
+Now let's update baseline_web.py to use the new drive-picker instead of the hardcoded two-target list:
+
+
+Read and edited baseline_web.py
++10
+-6
+Now update the page shell text, CSS for the selectable card, and the modal JS to read the selected/target drive:
+
+Edited
+baseline_web.py
++1
+-1
+Now the CSS for the selectable radio-card style:
+
+
+Edited baseline_web.py, ran a command
++40
+-11
+Now let's replace real_drive_state (and its FRIENDLY_NAMES) with the new candidate-drive-list based version:
+
+
+Ran 2 commands, read and edited baseline_web.py
++9
+-20
+Let's rewrite these tests to match the new candidate-list shape:
+
+
+Ran 2 commands, read and edited test_baseline_web.py
++20
+-13
+

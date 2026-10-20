@@ -64,11 +64,11 @@ class Runner:
 class RealRunner(Runner):
     def run(self, argv, timeout=60):
         return subprocess.run(argv, capture_output=True, text=True,
-                               timeout=timeout, env={**os.environ})
+                               timeout=timeout, env=__import__("ai_provisioning").client_environment("claude-code"))
 
     def stream(self, argv, timeout=60):
         proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, env={**os.environ})
+                                 text=True, env=__import__("ai_provisioning").client_environment("claude-code"))
         try:
             for line in proc.stdout:
                 yield line
@@ -192,13 +192,19 @@ def _load_env():
     without ever writing or logging the value itself."""
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return True
+    import vault                      # the vault first (DR258); the legacy /etc/baseline/harness.env still works
+    token = vault.lookup("CLAUDE_CODE_OAUTH_TOKEN", environ={})
+    if token:
+        os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        return True
     if os.path.exists(ENV_FILE):
         for line in open(ENV_FILE):
             line = line.strip()
             if line.startswith("CLAUDE_CODE_OAUTH_TOKEN="):
                 os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = line.split("=", 1)[1].strip().strip('"')
                 return True
-    return False
+    env = __import__("ai_provisioning").client_environment("claude-code")
+    return bool(env.get("BASELINE_AI_PROFILE") == "claude-code" and (env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN") or (__import__("pathlib").Path(env.get("HOME", "/nonexistent")) / ".claude/.credentials.json").is_file()))
 
 
 def _context_blob() -> str:

@@ -85,3 +85,46 @@ def test_home_failure_cannot_start_the_desktop_or_write_a_ready_marker():
 def test_homepage_must_be_a_plain_proxmox_endpoint(url):
     with pytest.raises(ue.UbuntuError):
         ue.cloud_config(password_hash="$6$test$hash", homepage=url)
+
+
+def test_existing_ubuntu_base_without_verification_receipt_is_not_trusted(tmp_path):
+    f=FakeHost(tmp_path/'os')
+    target=f.host.base_path(ue.BASE_NAME);target.parent.mkdir(parents=True)
+    target.write_bytes(b'unknown image')
+    with pytest.raises(ue.UbuntuError,match='receipt'):
+        ue.acquire_base(f.host,cache_dir=tmp_path/'cache')
+
+
+def test_base_receipt_detects_changed_image_before_reuse(tmp_path):
+    import hashlib
+    f=FakeHost(tmp_path/'os')
+    source=tmp_path/'source.img';source.write_bytes(b'vanilla')
+    digest=hashlib.sha256(source.read_bytes()).hexdigest()
+    def convert(argv):
+        assert argv[:2]==['qemu-img','convert']
+        Path(argv[-1]).write_bytes(b'converted test image')
+        return 0,'',''
+    f.host.run=convert
+    target=ue.install_base(f.host,source=source,expected_sha256=digest)
+    assert ue.verify_base(f.host,target,expected_source_sha256=digest)==target
+    target.chmod(0o600);target.write_bytes(b'changed')
+    with pytest.raises(ue.UbuntuError,match='digest'):
+        ue.verify_base(f.host,target,expected_source_sha256=digest)
+
+
+def test_vm_base_preparation_uses_identified_vanilla_source_acquisition(tmp_path,monkeypatch):
+    import hashlib,installer_sources
+    f=FakeHost(tmp_path/'os');source=tmp_path/'pinned.img';source.write_bytes(b'vanilla')
+    digest=hashlib.sha256(source.read_bytes()).hexdigest();monkeypatch.setattr(ue,'IMAGE_SHA256',digest)
+    observed=[]
+    def acquire(runner,root):
+        observed.append(root)
+        return {'path':str(source),'sha256':digest}
+    monkeypatch.setattr(installer_sources,'acquire_ubuntu',acquire)
+    def convert(argv):
+        assert argv[:2]==['qemu-img','convert']
+        Path(argv[-1]).write_bytes(b'converted fixture')
+        return 0,'',''
+    f.host.run=convert
+    ue.acquire_base(f.host,cache_dir=tmp_path/'cache/images')
+    assert observed==[tmp_path/'cache']

@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Keep two Baseline drives the same whenever both are attached to one machine (DR272).
+
+  baseline-twin status                    this drive's pairing, whether the twin is attached, the versions and the last sync
+  baseline-twin pair --peer-serial S --yes   first-time pairing with the drive whose serial is S (marks the volumes on both drives)
+  baseline-twin sync [--deep]             one sync run; does nothing (successfully) when not paired or the twin is not attached
+  baseline-twin health-mark               record this version as healthy once its core services are active (the gate for offering it to the twin)
+  baseline-twin version-write             record the installed source version (run by provisioning)
+
+The pairing, the serials and the reports are runtime data on the persistent admin volume; nothing here is stored in the repository.
+"""
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+sys.path.insert(0, "/opt/baseline/lib")
+import twin_sync as ts  # noqa: E402
+
+REPORT = Path("/var/lib/baseline/twin-sync/last.json")
+
+
+def runner():
+    from repair import RealRunner
+    return RealRunner()
+
+
+def say(*parts):
+    print("baseline-twin:", *parts, flush=True)
+
+
+def cmd_status(args):
+    config = ts.load_twin_config()
+    mine = ts.read_installed()
+    out = {"paired": config is not None, "installed": mine, "healthy": bool(mine and ts.is_healthy(mine["digest"]))}
+    if config:
+        out["twin_attached"] = ts.peer_attached(runner(), config["peer"])
+    try:
+        out["last_sync"] = json.loads(REPORT.read_text())
+    except (OSError, ValueError):
+        out["last_sync"] = None
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def cmd_pair(args):
+    import drive_admin
+    if os.geteuid() != 0:
+        say("pairing changes both drives (it marks their volumes) and needs root")
+        return 2
+    if args.peer_serial not in drive_admin.allowed_target_serials():
+        say("the peer is not one of this lane's own or enrolled drives; enroll it first")
+        return 2
+    if not args.yes:
+        say("pairing makes the two drives exchange files from now on (newest wins, older versions kept); run again with --yes to proceed")
+        return 2
+    result = ts.pair_drives(runner(), args.peer_serial)
+    say("paired:", json.dumps(result))
+    return 0
+
+
+def cmd_sync(args):
+    config = ts.load_twin_config()
+    if config is None:
+        say("not paired; nothing to do")
+        return 0
+    if not ts.peer_attached(runner(), config["peer"]):
+        say("the twin is not attached; nothing to do")
+        return 0
+    try:
+        result = ts.sync_pair(runner(), deep=args.deep)
+    except ts.TwinError as exc:
+        say("STOPPED:", exc)
+        return 1
+    previous = {}
+    try:
+        previous = json.loads(REPORT.read_text())
+        previous.pop("at", None)
+    except (OSError, ValueError):
+        pass
+    if json.loads(json.dumps(result)) != previous:                      # an unchanged result is not written again every 30 seconds; `at` is when it last changed
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        REPORT.write_text(json.dumps(dict(result, at=time.strftime("%Y-%m-%dT%H:%M:%S"))) + "\n")
+    errors = {k: v for k, v in result["volumes"].items() if "error" in v}
+    say(json.dumps({k: {x: y for x, y in v.items() if x != "mode"} for k, v in result["volumes"].items()}))
+    return 1 if errors else 0
+
+
+def cmd_health(args):
+    result = ts.health_mark(runner())
+    say(json.dumps(result))
+    return 0 if result["healthy"] else 1
+
+
+def cmd_version(args):
+    say(json.dumps(ts.write_installed()))
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("status").set_defaults(run=cmd_status)
+    pair = sub.add_parser("pair")
+    pair.add_argument("--peer-serial", required=True)
+    pair.add_argument("--yes", action="store_true")
+    pair.set_defaults(run=cmd_pair)
+    sync = sub.add_parser("sync")
+    sync.add_argument("--deep", action="store_true", help="also compare file contents (slower)")
+    sync.set_defaults(run=cmd_sync)
+    sub.add_parser("health-mark").set_defaults(run=cmd_health)
+    sub.add_parser("version-write").set_defaults(run=cmd_version)
+    args = parser.parse_args(argv)
+    try:
+        return args.run(args)
+    except ts.TwinError as exc:
+        say("STOPPED:", exc)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -13,6 +13,16 @@ import drive_setup_install as di
 from drive_setup_install import InstallRunner, InstallProc, InstallProcess
 
 
+def test_monitor_driven_install_works_without_a_desktop_display(tmp_path):
+    invocation = di.build_sparse_install_invocation(
+        target_image=tmp_path / "disk.raw", prepared_iso=tmp_path / "installer.iso",
+        mac="52:54:00:ba:5e:41", smbios_product="baseline-self-installer",
+        serial_log=tmp_path / "serial.log", monitor_socket=tmp_path / "monitor.sock")
+    assert "-display" in invocation.argv
+    assert invocation.argv[invocation.argv.index("-display") + 1] == "none"
+    assert "-monitor" in invocation.argv
+
+
 class FakeInstallProcess(InstallProcess):
     def __init__(self, exit_code=None, raise_timeout_on_wait=False):
         self._exit_code = exit_code
@@ -165,7 +175,7 @@ def test_sparse_install_invocation_threads_target_serial_via_scsi_device_form():
         target_image=Path("/dev/sdd"), prepared_iso=Path("/ws/prepared.iso"),
         mac="52:54:00:ba:5e:11", smbios_product="baseline-test",
         serial_log=Path("/ws/serial.log"),
-        target_serial="FD01N6557110C271B",
+        target_serial="SYNTHDRIVEA00001",
     )
     drive_arg = next(a for a in inv.argv if a.startswith("file="))
     assert "serial=" not in drive_arg  # never on the -drive line itself
@@ -184,7 +194,7 @@ def test_sparse_install_invocation_threads_target_serial_via_scsi_device_form():
 
     boot_idx = inv.argv.index("-boot")
     assert inv.argv[boot_idx + 1] == "order=c,once=d"  # decision record 116
-    assert "serial=FD01N6557110C271B" in scsi_hd_arg
+    assert "serial=SYNTHDRIVEA00001" in scsi_hd_arg
 
 
 def test_sparse_install_invocation_network_is_slirp_restricted_by_default():
@@ -459,3 +469,59 @@ def test_capture_live_screendump_png_reads_the_real_written_file_and_cleans_up(t
     png_bytes = di.capture_live_screendump_png(monitor_socket, tmp_path=written_ppm, timeout=1.0)
     assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
     assert not written_ppm.exists()  # the temp PPM is cleaned up after conversion
+
+
+def test_an_offered_image_folder_is_a_read_only_share_not_a_drive(tmp_path):
+    base = dict(target_image=tmp_path / "t.img", prepared_iso=tmp_path / "i.iso", mac="52:54:00:00:00:01",
+                smbios_product="x", serial_log=tmp_path / "s.log")
+    plain = di.build_sparse_install_invocation(**base)
+    assert "-virtfs" not in plain.argv
+    shared = di.build_sparse_install_invocation(**base, share_dir=tmp_path / "offer")
+    spec = shared.argv[shared.argv.index("-virtfs") + 1]
+    assert spec == f"local,path={tmp_path / 'offer'},mount_tag=baseline-isos,security_model=none,readonly=on"
+    assert shared.device_inventory["no_other_drives"] is True
+    assert shared.device_inventory["shares"] == [f"{tmp_path / 'offer'} (read-only 9p share, tag baseline-isos)"]
+    assert "shares" not in plain.device_inventory
+
+
+# --- clearing stale signatures at the start and end of a target (real files; nothing opens a device) -----------
+
+def test_the_start_and_end_of_a_target_are_zeroed_and_the_middle_is_left_alone(tmp_path):
+    """A drive that held an earlier Proxmox install keeps its LVM label and metadata inside the old partitions even after
+    its partition table is cleared; the installer then finds the old volume group, activates it and cannot create its own
+    physical volume (seen on PC601, 2026-10-11)."""
+    size, head, tail = 10 * 2**20, 4 * 2**20, 1 * 2**20
+    path = tmp_path / "disk.img"
+    path.write_bytes(b"\xff" * size)
+    di.zero_head_and_tail(path, size_bytes=size, head_bytes=head, tail_bytes=tail)
+    data = path.read_bytes()
+    assert data[:head] == b"\0" * head and data[-tail:] == b"\0" * tail
+    assert data[head:-tail] == b"\xff" * (size - head - tail) and len(data) == size
+
+
+def test_a_target_whose_size_is_not_the_validated_size_is_never_touched(tmp_path):
+    path = tmp_path / "disk.img"
+    path.write_bytes(b"\xff" * 4096)
+    with pytest.raises(ValueError, match="size"):
+        di.zero_head_and_tail(path, size_bytes=8192, head_bytes=1024, tail_bytes=1024)
+    assert path.read_bytes() == b"\xff" * 4096
+
+
+def test_the_ranges_may_not_overlap_or_exceed_the_device(tmp_path):
+    path = tmp_path / "disk.img"
+    path.write_bytes(b"\xff" * 4096)
+    for head, tail in ((4096, 1), (3000, 3000), (0, 0)):
+        with pytest.raises(ValueError):
+            di.zero_head_and_tail(path, size_bytes=4096, head_bytes=head, tail_bytes=tail)
+    assert path.read_bytes() == b"\xff" * 4096
+
+
+def test_a_disk_only_boot_can_present_the_drive_with_its_real_serial_like_the_install_did(tmp_path):
+    """An installed system verifies its drive by serial; a virtio-blk disk never reports one (ID_SERIAL_SHORT), so a boot check
+    that must pass that verification attaches the disk as the install did: virtio-scsi + scsi-hd with the serial."""
+    base = dict(target_image=tmp_path / "t.img", mac="52:54:00:00:00:01", smbios_product="x", serial_log=tmp_path / "s.log")
+    plain = di.build_postinstall_boot_invocation(**base)
+    assert not any("scsi-hd" in a for a in plain.argv)
+    scsi = di.build_postinstall_boot_invocation(**base, target_serial="SYNTHDRIVEA00001")
+    assert "scsi-hd,drive=targetdisk,bus=targetscsi.0,serial=SYNTHDRIVEA00001" in scsi.argv
+    assert not any(a == "-cdrom" for a in scsi.argv)                    # still no installer media

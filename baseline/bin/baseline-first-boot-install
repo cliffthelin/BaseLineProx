@@ -1,0 +1,575 @@
+#!/usr/bin/env python3
+"""Finish a Baseline installation on the installed system itself, offline. Started once by the first-boot hook.
+
+  0. identity   set the GPT disk identifier to the identity the installer carried (installer_identity: derived from the installer UUID and
+                the drive's serial), before anything below records the drive; nothing happens when no identity was carried
+  1. storage    lay out Baseline's role volumes from this drive's free space (single_drive_storage first-boot mode)
+  2. installer  copy the exact installer ISO and its expanded environment (source + offline package cache) into
+                INSTALLER_CACHE/installer, verified by checksum, so this drive can rebuild itself with no other media
+  2b. os-isos   copy the OS install images the installer VM offers (read-only share) into INSTALLER_CACHE/isos,
+                verified against sums computed where they were offered; what does not fit is skipped by name
+  3. packages   point apt and npm only at the drive's own offline package cache - no internet is used
+  4. provision  boot/provision.sh from the carried source
+  5. complete   record completion and reboot into the first-boot authorization screen
+
+Each step is safe to repeat. Progress: /var/log/baseline-first-boot-install.log.
+"""
+import hashlib
+import json
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(SRC / "baseline/lib"))
+
+LOG = Path("/var/log/baseline-first-boot-install.log")
+STATE = Path("/var/lib/baseline-install")
+CACHE = Path("/mnt/INSTALLER_CACHE/installer")
+ISO_NAME = "baseline-installer.iso"
+EXPANDED = "expanded"
+MEDIA_SOURCE = "baseline-src"            # iso_builder.ISO_TARGET_DIR without the leading slash
+MEDIA_CACHE = "baseline-cache"           # offline packages carried on the installer ISO
+FIRST_BOOT_BYTES = {"BASELINE": 139264, "INSTALLER_CACHE": 4 * 1024**3, "SESSION_TEMP": 24576,
+                    "SUBSTRATE": 24576, "USER_ADMIN": 262144, "USER_PERSONAL": 24576, "APPDATA_ADMIN": 0,
+                    "APPDATA_PERSONAL": 0}
+
+
+# --- pure helpers (unit-tested with real files) ----------------------------------------------------
+
+def iso_length(stream):
+    """Exact ISO 9660 image length from its primary volume descriptor (sector 16)."""
+    stream.seek(16 * 2048)
+    pvd = stream.read(2048)
+    if len(pvd) < 136 or pvd[0] != 1 or pvd[1:6] != b"CD001":
+        raise RuntimeError("no ISO 9660 primary volume descriptor")
+    blocks = struct.unpack_from("<I", pvd, 80)[0]
+    block_size = struct.unpack_from("<H", pvd, 128)[0]
+    if blocks <= 0 or block_size not in (512, 1024, 2048):
+        raise RuntimeError("implausible ISO 9660 geometry")
+    return blocks * block_size
+
+
+def invoking_unit(cgroup_text):
+    """The systemd service this process runs under, from /proc/self/cgroup, or None when it was not started by
+    a service (e.g. run by hand). Read rather than hardcoded: Proxmox picks the unit from the answer's ordering
+    (proxmox-first-boot-network-online.service, -multi-user, ...)."""
+    for line in cgroup_text.splitlines():
+        path = line.rsplit(":", 1)[-1]
+        leaf = path.rstrip("/").rsplit("/", 1)[-1]
+        if leaf.endswith(".service"):
+            return leaf
+    return None
+
+
+def reboot_after_argv(unit):
+    """Queue a reboot that starts only after `unit`'s own start job has finished.
+
+    Proxmox's first-boot unit is Type=oneshot and removes its pending-first-boot-setup flag in ExecStartPost,
+    which runs only after this hook returns. Rebooting from inside the hook killed the unit before
+    ExecStartPost, the flag survived, and the hook ran again on every boot (3 reboot loops in the 2026-10-10
+    rehearsal). A oneshot unit's start job stays pending through ExecStartPost, so a job ordered After= it
+    cannot begin until the flag is gone - an ordering guarantee, not a sleep."""
+    return ["systemd-run", "--no-block", "--unit=baseline-first-boot-reboot", "--collect",
+            f"--property=After={unit}", "--description=Reboot after Baseline first-boot install",
+            "systemctl", "reboot"]
+
+
+from offline_cache import sha256 as _sha256, verify_carried, verify_manifest  # noqa: E402 - shared with the cache builder
+
+
+# --- steps ---------------------------------------------------------------------------------------
+
+def log(*parts):
+    line = time.strftime("%Y-%m-%dT%H:%M:%S ") + " ".join(str(p) for p in parts)
+    print(line, flush=True)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG, "a") as stream:
+        stream.write(line + "\n")
+
+
+def run(argv, **kwargs):
+    log("running:", " ".join(str(a) for a in argv))
+    kwargs.setdefault("check", True)
+    return subprocess.run([str(a) for a in argv], **kwargs)
+
+
+def done(step):
+    return (STATE / step).exists()
+
+
+def mark(step, **facts):
+    STATE.mkdir(parents=True, exist_ok=True)
+    (STATE / step).write_text(json.dumps(dict(facts, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n")
+
+
+def list_disks():
+    return subprocess.run(["lsblk", "-dnpo", "PATH,SERIAL"], capture_output=True, text=True, check=True).stdout
+
+
+def disks_with_serial(listing, serial):
+    """Device paths in `lsblk -dnpo PATH,SERIAL` output whose serial is exactly `serial`."""
+    return [fields[0] for fields in (line.split() for line in listing.splitlines()) if len(fields) == 2 and fields[1] == serial]
+
+
+def step_identity(ensure=None, host_id_path=None):
+    """Set the disk identifier before storage is laid out, so every record made from here on (storage bindings, the host install
+    record) already carries the final value and nothing has to change it afterwards."""
+    wanted, serial = os.environ.get("BASELINE_CHILD_UUID"), os.environ.get("BASELINE_CHILD_SERIAL")
+    if not wanted or not serial:
+        log("identity: no child identity was carried; the disk identifier is left as the installer made it")
+        mark("identity", carried=False)
+        return
+    if ensure is None:
+        import installer_identity
+        ensure = installer_identity.ensure_disk_guid
+    disks = disks_with_serial(list_disks(), serial)
+    if len(disks) != 1:
+        raise RuntimeError(f"expected exactly one disk with serial {serial} to carry the identity, found {len(disks)}")
+    ensure(disks[0], wanted)
+    import references
+    path = Path(host_id_path or references.HOST_ID_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(wanted + "\n")        # the backbone reference every component on this system reads (DR255)
+    log(f"identity: disk identifier of {disks[0]} (serial {serial}) is {wanted}")
+    mark("identity", carried=True, uuid=wanted, serial=serial, device=disks[0])
+
+
+def step_machine(host_id_path=None, read=None):
+    """Record the machine this install is first running on as the installer host, and give the storage roles their identifiers (DR256).
+    Nothing here may stop an install: a profile that cannot be written is logged and retried later by the machine-context check."""
+    import machine_context
+    import references
+    host = references.current_host(host_id_path)
+    if host is None:
+        log("machine: no host identifier yet; the machine profile is recorded at a later boot")
+        mark("machine", recorded=False)
+        return
+    result = machine_context.observe(host, machine_context.read_fingerprint(read or machine_context.file_reader()))
+    roles = references.link_roles(references.default_role_labels(), parent=host)
+    log(f"machine: {result['state']}; {len(roles)} storage roles carry identifiers")
+    mark("machine", recorded=True, state=result["state"], roles=len(roles))
+
+
+def step_dev_user(write_to=None, systemd=True, ssh_dir=None, sshd_dropin=None):
+    """Development-phase login (baseline-dev-user): store the carried 'name:hash' root-only, install the script and its boot unit, run it.
+    Nothing happens when no development user was carried."""
+    value = os.environ.get("BASELINE_DEV_USER")
+    if not value:
+        log("dev-user: none carried")
+        mark("dev-user", carried=False)
+        return
+    target = Path(write_to or "/etc/baseline-dev/dev-user.hash")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(value + "\n")
+    os.chmod(target, 0o600)
+    step_dev_ssh_keys(ssh_dir or target.parent, sshd_dropin or Path("/etc/ssh/sshd_config.d/baseline-dev.conf"), reload=systemd)
+    if systemd:
+        shutil.copy(SRC / "baseline/bin/baseline-dev-user", "/usr/local/sbin/baseline-dev-user")
+        os.chmod("/usr/local/sbin/baseline-dev-user", 0o755)
+        shutil.copy(SRC / "boot/baseline-dev-user.service", "/etc/systemd/system/baseline-dev-user.service")
+        run(["systemctl", "daemon-reload"])
+        run(["systemctl", "enable", "baseline-dev-user.service"])
+        run(["systemctl", "start", "--no-block", "baseline-dev-user.service"])
+    log(f"dev-user: {value.split(':', 1)[0]} will be a Linux user and a Proxmox Administrator")
+    mark("dev-user", carried=True, user=value.split(":", 1)[0])
+
+
+def step_dev_ssh_keys(directory, sshd_dropin, reload=True):
+    """Development keys carried with the development user go into a file of their own that sshd also reads. The install-time root key sits in
+    /root/.ssh, which moves onto USER_ADMIN (and Proxmox links it into its cluster store); the rehearsal found it unusable on the first boot."""
+    value = os.environ.get("BASELINE_DEV_SSH_KEYS")
+    if not value:
+        return
+    keys = Path(directory) / "authorized_keys"
+    keys.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(keys, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write("\n".join(value.split("|")) + "\n")
+    os.chmod(keys, 0o600)
+    sshd_dropin = Path(sshd_dropin)
+    sshd_dropin.parent.mkdir(parents=True, exist_ok=True)
+    sshd_dropin.write_text(f"AuthorizedKeysFile .ssh/authorized_keys {keys}\n")
+    if reload:
+        run(["systemctl", "reload", "ssh"])
+    log(f"dev-user: {len(value.split('|'))} development SSH key(s) authorized through {keys}")
+    mark("dev-ssh-keys", count=len(value.split("|")))
+
+
+def step_own_drive(read_serial=None, path=None):
+    """Record the drive this system runs from as one of this installer lane's own drives (runtime data on the persistent admin volume; the repository never holds a serial). The drive the system boots
+    from is by definition its own, so nothing needs to be typed or baked in."""
+    import drive_guard
+    if read_serial is None:
+        import repair
+        import single_drive_storage as storage
+
+        class Root(repair.RealRunner):
+            def run(self, argv, timeout=10):
+                if list(argv[:2]) == ["sudo", "-n"]:
+                    argv = argv[2:]
+                return super().run(argv, timeout=timeout)
+        serial = storage.running_target(Root())["serial"]
+    else:
+        serial = read_serial()
+    added = drive_guard.record_own_drive(serial, path=path)
+    log(f"own-drive: the boot drive is {'now recorded' if added else 'already recorded'} as this lane's own")
+    mark("own-drive", recorded=added)
+
+
+def step_volume_group():
+    """The host's volume group takes this drive's own name before any role volume is created or mounted: two Baseline drives attached to one
+    machine must never share the installer's name `pve`. Done first, so every volume mounted afterwards is mounted under its final name
+    (a filesystem mounted before the rename cannot be resized online: fsadm refuses renamed devices)."""
+    import repair
+    import single_drive_storage as storage
+    import host_layout
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    runner = Root()
+    target = storage.running_target(runner)
+    named = host_layout.name_the_volume_group_for_drive(runner, serial=target["serial"], vg=target["vg_name"], vg_uuid=target["vg_uuid"])
+    log("volume-group:", json.dumps(named))
+    mark("volume-group", renamed=named["renamed"], name=named["name"])
+
+
+def step_host_volumes():
+    """Express the host's own volumes in the agreed role names (DR257): swap lives in SESSION_TEMP, not in a volume of its own."""
+    import repair
+    import single_drive_storage as storage
+    import host_layout
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    runner = Root()
+    target = storage.running_target(runner)
+    done = host_layout.move_swap_to_session_temp(runner, target["vg_name"])
+    done.update(host_layout.name_the_pool_for_session_temp(runner, target["vg_name"]))
+    log("host-volumes:", json.dumps(done))
+    mark("host-volumes", **done)
+
+
+def step_storage():
+    import repair
+    import single_drive_storage as storage
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    result = storage.provision_first_boot(Root(), required_bytes=FIRST_BOOT_BYTES, grow_on_demand=True)
+    log("storage:", json.dumps({"created": result["created_roles"], "serial": result["serial"]}))
+    mark("storage", created=result["created_roles"])
+
+
+def installer_media():
+    """The attached ISO 9660 device that carries this installer's source tree."""
+    listing = json.loads(subprocess.run(["lsblk", "-J", "-p", "-o", "NAME,TYPE,FSTYPE"], check=True,
+                                        capture_output=True, text=True).stdout)
+    def walk(nodes):
+        for node in nodes or []:
+            yield node
+            yield from walk(node.get("children"))
+    candidates = [n["name"] for n in walk(listing.get("blockdevices")) if n.get("fstype") == "iso9660"]
+    found = []
+    for device in candidates:
+        with tempfile.TemporaryDirectory(prefix="baseline-media-") as mnt:
+            if subprocess.run(["mount", "-o", "ro", device, mnt], capture_output=True).returncode:
+                continue
+            try:
+                if (Path(mnt) / MEDIA_SOURCE / "boot/provision.sh").is_file():
+                    found.append(device)
+            finally:
+                subprocess.run(["umount", mnt], check=True)
+    if len(found) != 1:
+        raise RuntimeError(f"expected exactly one attached Baseline installer medium, found {found or 'none'}")
+    return found[0]
+
+
+def grow_for(needed_free_bytes, label="INSTALLER_CACHE"):
+    """Make sure `label` has this much free, extending the volume (and its filesystem) from the drive's unallocated space. Returns False,
+    and logs why, when it cannot: the caller then skips or stops what it was about to copy instead of running out of space."""
+    import repair
+    import volume_growth
+
+    class Root(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    try:
+        done = volume_growth.ensure_room(Root(), label, int(needed_free_bytes))
+    except volume_growth.GrowthError as exc:
+        log(f"growth: {label} cannot make {int(needed_free_bytes) / 1024**3:.1f} GiB of room:", exc)
+        return False
+    if done:
+        log(f"growth: {label} extended by {done['add_gib']} GiB for a copy that needs {int(needed_free_bytes) / 1024**3:.1f} GiB free")
+    return True
+
+
+def step_installer():
+    """Carry the installer onto this drive: the exact ISO and its expanded environment, both verified."""
+    device = installer_media()
+    CACHE.mkdir(parents=True, exist_ok=True)
+    iso = CACHE / ISO_NAME
+    with open(device, "rb") as source:
+        length = iso_length(source)
+        source.seek(0)
+        if not grow_for(length + 512 * 1024**2):
+            raise RuntimeError("the drive has no room for the installer ISO")
+        partial = iso.with_suffix(".partial")
+        digest = hashlib.sha256()
+        with open(partial, "wb") as out:
+            remaining = length
+            while remaining:
+                chunk = source.read(min(remaining, 8 * 1024**2))
+                if not chunk:
+                    raise RuntimeError("installer medium ended before the ISO's declared length")
+                out.write(chunk); digest.update(chunk); remaining -= len(chunk)
+            out.flush(); os.fsync(out.fileno())
+    if _sha256(partial) != digest.hexdigest():
+        raise RuntimeError("the copied installer ISO does not read back identically")
+    os.replace(partial, iso)
+    expanded = CACHE / EXPANDED
+    with tempfile.TemporaryDirectory(prefix="baseline-media-") as mnt:
+        run(["mount", "-o", "ro", device, mnt])
+        try:
+            carried = sum(f.stat().st_size for name in (MEDIA_SOURCE, MEDIA_CACHE) if (Path(mnt) / name).is_dir()
+                          for f in (Path(mnt) / name).rglob("*") if f.is_file())
+            if not grow_for(carried + 512 * 1024**2):
+                raise RuntimeError("the drive has no room for the installer's expanded environment")
+            for name in (MEDIA_SOURCE, MEDIA_CACHE):
+                if (Path(mnt) / name).is_dir():
+                    if (expanded / name).exists():
+                        shutil.rmtree(expanded / name)
+                    shutil.copytree(Path(mnt) / name, expanded / name)
+        finally:
+            run(["umount", mnt])
+    cache = expanded / MEDIA_CACHE
+    if not (cache / "MANIFEST.json").is_file():
+        raise RuntimeError("the installer carries no offline package cache; it cannot finish without internet")
+    count = verify_manifest(cache, json.loads((cache / "MANIFEST.json").read_text()))
+    apps = []
+    if (cache / "apps").is_dir():
+        import application_bundle
+        import offline_cache
+        apps = offline_cache.verify_app_bundle(cache, application_bundle.APPS)
+        log("applications carried and verified:", ", ".join(f"{a['app']} {a['version']}" for a in apps))
+    else:
+        log("this installer carries no applications (its cache was built without them)")
+    (CACHE / f"{ISO_NAME}.sha256").write_text(f"{digest.hexdigest()}  {ISO_NAME}\n")
+    log(f"installer carried: {iso} ({length} bytes, sha256 {digest.hexdigest()}), {count} cached packages verified")
+    mark("installer", iso_sha256=digest.hexdigest(), packages=count, apps=[a["app"] for a in apps])
+
+
+OS_ISOS = Path("/mnt/INSTALLER_CACHE/isos")
+OS_ISO_RESERVE = 2 * 1024**3               # always left free on INSTALLER_CACHE
+
+
+def register_iso_storage():
+    """Let the web app's Proxmox VM page list the carried images: INSTALLER_CACHE as an ISO storage."""
+    import os_isos
+    os_isos.link_iso_folder(OS_ISOS.parent)
+    listing = subprocess.run(["pvesh", "get", "/storage", "--output-format", "json"], capture_output=True, text=True,
+                             check=True).stdout
+    definitions = json.loads(listing)
+    legacy = next((d for d in definitions if d.get("storage") == os_isos.LEGACY_ISO_STORAGE), None)
+    if legacy is not None and Path(legacy.get("path", "")).resolve() == OS_ISOS.parent.resolve():
+        run(["pvesm", "remove", os_isos.LEGACY_ISO_STORAGE])      # the same folder under a name that is not a volume's
+        definitions = [d for d in definitions if d is not legacy]
+    argv = os_isos.storage_add_argv(definitions, OS_ISOS.parent)
+    if argv is not None:
+        run(argv)
+    log("os-isos: registered", OS_ISOS.parent, "as Proxmox ISO storage", os_isos.ISO_STORAGE)
+
+
+def step_os_isos():
+    """Carry the offered OS images. Never stops the installation: a missing offer or a bad image is logged and
+    recorded, and the drive simply carries fewer OS choices."""
+    import os_isos
+    run(["modprobe", "9pnet_virtio"], check=False)
+    with tempfile.TemporaryDirectory(prefix="baseline-offer-") as mnt:
+        mounted = subprocess.run(["mount", "-t", "9p", "-o", "trans=virtio,version=9p2000.L,ro",
+                                  os_isos.SHARE_TAG, mnt], capture_output=True, text=True)
+        if mounted.returncode != 0:
+            log("os-isos: no OS images are offered by this installer; the drive carries none:",
+                mounted.stderr.strip()[-120:])
+            mark("os-isos", offered=False)
+            return
+        try:
+            report = os_isos.carry(Path(mnt), OS_ISOS, reserve_bytes=OS_ISO_RESERVE, make_room=grow_for)
+        except (OSError, RuntimeError, ValueError) as exc:
+            log("os-isos: OS images NOT carried:", exc)
+            mark("os-isos", offered=True, error=str(exc))
+            return
+        finally:
+            run(["umount", mnt], check=False)
+    try:
+        register_iso_storage()
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        log("os-isos: images carried but NOT registered with Proxmox, so the VM page will not list them:", exc)
+        mark("os-isos", offered=True, registered=False, error=str(exc))
+        return
+    for kind in ("carried", "already", "skipped"):
+        for item in report[kind]:
+            log(f"os-isos: {kind}:", item["name"], item.get("reason", ""))
+    mark("os-isos", offered=True, **{kind: [i["name"] for i in report[kind]] for kind in report})
+
+
+def offline_environment():
+    """apt and npm configured to use only the drive's own offline cache for this run."""
+    cache = CACHE / EXPANDED / MEDIA_CACHE
+    apt_conf = STATE / "apt-offline.conf"
+    sources = STATE / "offline.list"
+    sources.write_text(f"deb [trusted=yes] file:{cache / 'apt'} ./\n")
+    apt_conf.write_text(f'Dir::Etc::SourceList "{sources}";\nDir::Etc::SourceParts "-";\n'
+                        'Acquire::Languages "none";\n')
+    return dict(os.environ, APT_CONFIG=str(apt_conf), BASELINE_PACKAGE_CACHE=str(cache),
+                DEBIAN_FRONTEND="noninteractive", npm_config_offline="true")
+
+
+def verify_carried_repository(cache):
+    """The carried repository is consumed read-only; anything that writes into it breaks the manifest that first
+    boot re-verifies before trusting it offline. Checked after provisioning so the writer is caught here, by name,
+    rather than surfacing later as an unexplained 'repository does not verify' at first-boot CONFIRM."""
+    try:
+        return verify_carried(cache)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"the carried package repository is unreadable after provisioning: {exc}") from exc
+    except RuntimeError as exc:
+        raise RuntimeError(f"provisioning modified the carried package repository ({exc}); it must stay "
+                           "exactly as built, or first boot cannot verify it offline") from exc
+
+
+def step_user_admin(root=None, host_id_path=None, is_mount=os.path.ismount):
+    """Set up this install's USER_ADMIN (user_admin.py): its folders and the record that ties the volume to this install. Nothing from the build machine is
+    carried into it. Refuses, and stops the installation, when it is not a mounted volume or belongs to another install: later steps and every credential
+    depend on it being the real, private one."""
+    import references
+    import user_admin
+    host = references.current_host(host_id_path) or ""
+    report = user_admin.setup(Path(root) if root is not None else user_admin.ROOT, host_id=host, is_mount=is_mount)
+    log(f"user-admin: {json.dumps(report)}")
+    mark("user-admin", **report)
+
+
+def step_data_history(mount_base="/mnt", is_mount=os.path.ismount):
+    """Give every data volume its version history from the first build (data_history.py), so a later rebuild can back it up and nothing in it is ever only in one state. A volume that is not mounted is reported, not skipped silently."""
+    import data_history
+    from repair import RealRunner
+    runner, report = RealRunner(), []
+    for role in data_history.DATA_ROLES:
+        path = Path(mount_base) / role
+        if not is_mount(path):
+            report.append({"role": role, "skipped": "not mounted"})
+            continue
+        report.append(data_history.snapshot(runner, path, role, message="build: first snapshot", tag="build"))
+    log(f"data-history: {json.dumps(report)}")
+    mark("data-history", volumes=[e.get("role") for e in report if "commit" in e])
+
+
+OS_LIST_ON_MEDIA = SRC / "config" / "supported-os.json"
+OS_LIST_ON_HOST = Path("/mnt/USER_ADMIN/config/supported-os.json")
+
+
+def step_os_list(source=None, dest=None, guard=lambda: __import__('user_admin').is_ready()):
+    """Carry the operator's supported-OS list (DR261/262) onto USER_ADMIN, where the host reads it. The list is private, so it is not in the repository: the
+    installer media carries it next to the source. Never overwrites a list the host already has (the operator may have edited it), never copies one that
+    does not check out, and never stops the installation: no list just means the host offers whatever images it carries."""
+    import os_list
+    import user_admin
+    source = Path(source) if source is not None else OS_LIST_ON_MEDIA
+    dest = Path(dest) if dest is not None else OS_LIST_ON_HOST
+    if guard is not None and not guard():
+        log("os-list: USER_ADMIN is not set up, so the list is not carried (it would not be on the private volume)")
+        mark("os-list", result="skipped: USER_ADMIN not set up")
+        return
+    if dest.exists():
+        log(f"os-list: the host already has {dest}; leaving it as it is")
+        mark("os-list", result="kept the host's own")
+        return
+    try:
+        if source.is_file():
+            text = source.read_text()
+            entries = os_list.parse(text)
+        else:                                                     # no list is carried: the build makes it from the systems the drive carries, with the guest applications preset
+            entries = os_list.derive_from_cache(os.environ.get("BASELINE_CACHE_ROOT", "/mnt/INSTALLER_CACHE"))
+            text = os_list.render(entries) if entries else None
+    except (OSError, ValueError) as exc:
+        log(f"os-list: not carried, the list does not check out: {exc}")
+        mark("os-list", result=f"refused: {exc}"[:200])
+        return
+    if text is None:
+        log("os-list: nothing carried to build a list from yet")
+        mark("os-list", result="none carried")
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    tmp.write_text(text)
+    os.replace(tmp, dest)
+    log(f"os-list: {len(entries)} entries carried to {dest}")
+    mark("os-list", result="carried", entries=len(entries))
+
+
+def step_provision():
+    env = offline_environment()
+    run(["/bin/bash", SRC / "boot/provision.sh"], env=env)
+    verify_carried_repository(CACHE / EXPANDED / MEDIA_CACHE)
+    # Keep the drive's own repository as a permanent apt source, indexed now, so later steps (first-boot
+    # authorization's diagnostic tools, any reinstall) work with no internet. Network sources still apply when
+    # a connection exists.
+    Path("/etc/apt/sources.list.d/baseline-installer-cache.list").write_text(
+        f"deb [trusted=yes] file:{CACHE / EXPANDED / MEDIA_CACHE / 'apt'} ./\n")
+    run(["apt-get", "update"], env=env)
+    mark("provision")
+
+
+STEPS = [("identity", step_identity), ("volume-group", step_volume_group), ("own-drive", step_own_drive), ("storage", step_storage), ("machine", step_machine), ("host-volumes", step_host_volumes), ("user-admin", step_user_admin), ("data-history", step_data_history), ("installer", step_installer),
+         ("os-isos", step_os_isos), ("os-list", step_os_list), ("provision", step_provision), ("dev-user", step_dev_user)]
+
+
+def main():
+    if os.geteuid() != 0:
+        raise SystemExit("run as root (the first-boot hook does)")
+    if done("complete"):
+        # Already finished on an earlier boot. Never reboot again: returning successfully is what lets the
+        # first-boot unit remove its pending flag, so this is how any leftover loop ends.
+        log("installation already complete on this drive; nothing to do, not rebooting")
+        return
+    for step, function in STEPS:
+        if done(step):
+            log(f"{step}: already complete")
+            continue
+        log(f"=== {step} ===")
+        function()
+    mark("complete")
+    unit = invoking_unit(Path("/proc/self/cgroup").read_text())
+    if unit is None:
+        log("Baseline installation finished on this drive. Not started by a service, so not rebooting; "
+            "reboot to reach first-boot authorization.")
+        return
+    run(reboot_after_argv(unit))
+    log(f"Baseline installation finished on this drive; reboot queued to start after {unit} completes.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        log("STOPPED, installation not complete:", exc)
+        sys.exit(1)

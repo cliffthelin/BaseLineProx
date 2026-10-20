@@ -24,20 +24,22 @@ import offdrive_backup as ob
 @pytest.fixture(autouse=True)
 def _asked_by_the_web_app(monkeypatch):
     """These tests exercise the backup itself; each call carries a genuinely signed web origin."""
+    monkeypatch.setattr(ob, "_boot_serial", lambda: "TestBootSerial")
     import web_origin_helper as woh
     gate = woh.configured_gate()
     for name in ("run_backup", "main"):
         real = getattr(ob, name)
 
         def wrapper(*a, _real=real, **kw):
+            kw.setdefault("boot_serial", ob._boot_serial())
             kw.setdefault("origin", woh.origin_for("backup_offdrive", {"dry_run": kw.get("dry_run", False),
                                                                         "force": kw.get("force", False)}, gate=gate))
             return _real(*a, **kw)
         monkeypatch.setattr(ob, name, wrapper)
 
 
-ALLOWED = frozenset({"MD89N41071210AP4E", "FD01N6557110C271B"})   # the two SK hynix drives
-MEDIA_SERIAL = "JEHBBVWM"
+ALLOWED = frozenset({"SYNTHDRIVEB00002", "SYNTHDRIVEA00001"})   # the two SK hynix drives
+MEDIA_SERIAL = "SYNTHH05"
 DEFAULT_CHAIN = (("sdj1", "part"), ("sdj", "disk"))
 
 
@@ -84,7 +86,8 @@ def sources(tmp_path):
 
 
 def _dest(dest_root, **kw):
-    return ob.resolve_destination(str(dest_root), run=ScriptedRun(dest_root, **kw), allowed_serials=ALLOWED)
+    return ob.resolve_destination(str(dest_root), run=ScriptedRun(dest_root, **kw), allowed_serials=ALLOWED,
+                                 boot_serial="TestBootSerial")
 
 
 def _snapshot(root, *, skip=("baseline-backups",)):
@@ -135,15 +138,27 @@ def test_a_destination_layered_on_an_sk_hynix_drive_is_refused(dest_root):
     """e.g. an LVM volume whose underlying disk is one of the SK hynix drives."""
     with pytest.raises(ob.BackupError, match="not separate"):
         _dest(dest_root, source="/dev/mapper/pve-data", chain=(("dm-3", "lvm"), ("sdc", "disk")),
-              serials={"sdc": "FD01N6557110C271B"})
+              serials={"sdc": "SYNTHDRIVEA00001"})
 
 
 def test_a_destination_on_an_enrolled_drive_is_refused_like_an_sk_hynix_drive(dest_root):
     """A drive enrolled for Baseline to manage (drive_enrollment.py) is never also its separate backup drive."""
     import drive_enrollment
-    drive_enrollment.enroll("S6WRNS0TA12638A", size_bytes=1, model="m", now=0.0)
+    drive_enrollment.enroll("SYNTHSATA000001", size_bytes=1, model="m", now=0.0)
     with pytest.raises(ob.BackupError, match="not separate"):
-        _dest(dest_root, serials={"sdj": "S6WRNS0TA12638A"})
+        _dest(dest_root, serials={"sdj": "SYNTHSATA000001"})
+
+
+def test_unreadable_enrollment_store_refuses_backup_destination(dest_root, monkeypatch):
+    import drive_enrollment
+    import registry
+
+    def broken(*_args, **_kwargs):
+        raise OSError("registry volume unavailable")
+
+    monkeypatch.setattr(registry, "list_entries", broken)
+    with pytest.raises(ob.BackupError, match="registry volume unavailable"):
+        _dest(dest_root)
 
 
 def test_a_drive_whose_identity_cannot_be_read_is_refused(dest_root):
@@ -160,6 +175,12 @@ def test_the_running_boot_drive_is_refused(dest_root):
     with pytest.raises(ob.BackupError, match="boot"):
         ob.resolve_destination(str(dest_root), run=ScriptedRun(dest_root), allowed_serials=ALLOWED,
                                boot_serial=MEDIA_SERIAL)
+
+
+def test_unknown_running_boot_drive_identity_is_refused(dest_root):
+    with pytest.raises(ob.BackupError, match="boot-drive identity"):
+        ob.resolve_destination(str(dest_root), run=ScriptedRun(dest_root), allowed_serials=ALLOWED,
+                              boot_serial=None)
 
 
 def test_a_network_or_non_block_source_is_refused(dest_root):
@@ -385,6 +406,28 @@ def test_list_sets_returns_only_complete_verified_sets_newest_first(dest_root, s
     assert names == [b.name, a.name]
 
 
+def test_list_sets_does_not_hide_a_corrupt_manifest_as_no_backup(dest_root, sources):
+    d = _dest(dest_root)
+    valid = _make(d, sources, now=1_800_000_000.0)
+    corrupt = d.backup_dir / "baseline-20300101T000000Z"
+    corrupt.mkdir()
+    (corrupt / ob.MANIFEST_NAME).write_text("not-json")
+
+    with pytest.raises(ob.BackupError, match="unreadable manifest"):
+        ob.list_sets(d)
+
+    assert valid.path.is_dir()
+
+
+def test_list_sets_does_not_treat_a_redirected_failure_marker_as_verified(dest_root, sources):
+    d = _dest(dest_root)
+    valid = _make(d, sources, now=1_800_000_000.0)
+    (valid.path / ob.FAILED_VERIFY_NAME).symlink_to("/dev/null")
+
+    with pytest.raises(ob.BackupError, match="invalid verification marker"):
+        ob.list_sets(d)
+
+
 def test_is_due_respects_the_minimum_interval_since_the_last_good_set(dest_root, sources):
     d = _dest(dest_root)
     _make(d, sources, now=1_800_000_000.0)
@@ -426,7 +469,7 @@ def test_the_job_skips_quietly_when_a_recent_backup_exists(dest_root, sources, m
 def test_the_job_creates_nothing_when_the_destination_is_refused(dest_root, sources):
     before = _snapshot(dest_root)
     with pytest.raises(ob.BackupError):
-        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "MD89N41071210AP4E"}),
+        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "SYNTHDRIVEB00002"}),
                       sources=sources, now=1.0, allowed_serials=ALLOWED)
     assert _snapshot(dest_root) == before and not (dest_root / "baseline-backups").exists()
 
@@ -462,7 +505,7 @@ def test_a_dry_run_validates_sizes_and_checks_space_but_writes_nothing(dest_root
 
 def test_a_dry_run_still_refuses_a_bad_destination(dest_root, sources):
     with pytest.raises(ob.BackupError, match="not separate"):
-        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "MD89N41071210AP4E"}),
+        ob.run_backup(destination=str(dest_root), run=ScriptedRun(dest_root, serials={"sdj": "SYNTHDRIVEB00002"}),
                       sources=sources, now=1.0, allowed_serials=ALLOWED, dry_run=True)
 
 
@@ -793,3 +836,53 @@ def test_deep_chain_verification_detects_a_changed_dependency(dest_root, cache):
     assert ob.verify_chain(d, second.name) is True                                        # shallow: size unchanged
     with pytest.raises(ob.BackupError, match="checksum"):
         ob.verify_chain(d, second.name, deep=True)
+
+
+# --- write budget: an image may use only real space, never the drive's 3% reserve ---------------
+
+def test_the_write_budget_is_free_space_minus_the_reserve():
+    total = 10 * 2**40
+    assert ob.budget_from(free=789 * 2**30, total=total) == 789 * 2**30 - int(total * ob.RESERVE_FRACTION)
+
+
+def test_no_budget_when_the_drive_is_already_at_or_near_its_reserve():
+    total = 10 * 2**40
+    with pytest.raises(ob.BackupError, match="3%"):
+        ob.budget_from(free=int(total * 0.03), total=total)
+    with pytest.raises(ob.BackupError, match="3%"):
+        ob.budget_from(free=int(total * 0.03) + 2**20, total=total)       # under the 1 GiB minimum
+
+
+def test_capped_commands_carry_the_kernel_file_size_limit():
+    assert ob.capped(["qemu-img", "convert", "a", "b"], 5 * 2**30) == [
+        "prlimit", f"--fsize={5 * 2**30}", "qemu-img", "convert", "a", "b"]
+    with pytest.raises(ValueError):
+        ob.capped(["x"], 0)
+
+
+def test_the_kernel_really_stops_a_capped_writer_at_the_budget(tmp_path):
+    """Real process, real kernel limit: the writer is stopped, the file never exceeds the cap."""
+    import subprocess
+    import sys
+    out = tmp_path / "image"
+    writer = [sys.executable, "-c", f"open({str(out)!r},'wb').write(b'x' * (4 * 2**20))"]
+    proc = subprocess.run(ob.capped(writer, 2**20), capture_output=True)
+    assert proc.returncode != 0
+    assert out.stat().st_size <= 2**20
+
+
+def test_an_image_budget_is_also_capped_to_a_fraction_of_the_source_drive():
+    """A backup of a drive that is about 5% used must never be allowed to approach the drive's own size."""
+    total = 10 * 1024**4
+    source = 512_110_190_592
+    free = 789 * 2**30
+    capped_budget = ob.budget_from(free=free, total=total, source_bytes=source)
+    assert capped_budget == int(source * ob.IMAGE_CAP_FRACTION) < free
+    assert capped_budget < source // 5                                    # far below the drive's size
+    # the destination's own free space still wins when it is the smaller limit
+    tight = 20 * 2**30 + int(total * ob.RESERVE_FRACTION)
+    assert ob.budget_from(free=tight, total=total, source_bytes=source) == 20 * 2**30
+    # without a source size the old behaviour is unchanged
+    assert ob.budget_from(free=free, total=total) == free - int(total * ob.RESERVE_FRACTION)
+    with pytest.raises(ValueError):
+        ob.budget_from(free=free, total=total, source_bytes=0)

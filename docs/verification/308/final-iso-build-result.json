@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "output_path": "/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/pc401-disposable-test-final.iso",
+  "postconditions": [
+    {
+      "name": "xorriso_remaster_exit_zero",
+      "ok": true,
+      "detail": "36s   19.1%   fifo  50%  buf  50%  676.6xD \nxorriso : UPDATE : Writing:     863408s   40.2%   fifo  28%  buf  50%  670.7xD \nxorriso : UPDATE : Writing:    1301295s   60.7%   fifo   0%  buf  50%  647.0xD \nxorriso : UPDATE : Writing:    1708168s   79.6%   fifo   0%  buf  50%  601.2xD \nISO image produced: 2145060 sectors\nWritten to medium : 2145216 sectors at LBA 32\nWriting to '/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/pc401-disposable-test-final.iso' completed successfully."
+    },
+    {
+      "name": "output_exists",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "output_not_smaller_than_source",
+      "ok": true,
+      "detail": "source=1706178560 output=4393467904"
+    },
+    {
+      "name": "provision_sh_present_in_output_iso",
+      "ok": true,
+      "detail": "'/baseline-src/boot/provision.sh'"
+    },
+    {
+      "name": "offline_cache_present_in_output_iso",
+      "ok": true,
+      "detail": "'/baseline-cache/MANIFEST.json'"
+    }
+  ],
+  "stdout": "",
+  "stderr": "xorriso 1.5.6 : RockRidge filesystem manipulator, libburnia project.\n\nxorriso : NOTE : Loading ISO image tree from LBA 0\nxorriso : UPDATE :    1572 nodes read in 1 seconds\nxorriso : NOTE : Detected El-Torito boot information which currently is set to be discarded\nDrive current: -indev '/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso'\nMedia current: stdio file, overwriteable\nMedia status : is written , is appendable\nBoot record  : El Torito , MBR protective-msdos-label grub2-mbr cyl-align-off GPT APM\nMedia summary: 1 session, 833095 data blocks, 1627m data,  329g free\nVolume id    : 'PVE'\nDrive current: -outdev '/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/pc401-disposable-test-final.iso'\nMedia current: stdio file, overwriteable\nMedia status : is blank\nMedia summary: 0 sessions, 0 data blocks, 0 data,  329g free\nxorriso : UPDATE :    1239 files added in 1 seconds\nAdded to ISO image: directory '/baseline-src'='/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/final-iso-build/staging'\nxorriso : UPDATE :     650 files added in 1 seconds\nAdded to ISO image: directory '/baseline-cache'='/run/media/cane/CACHE/baseline-build/offline-cache'\nxorriso : NOTE : Patching boot info table\nxorriso : UPDATE : Writing:      43205s    2.0%   fifo  99%  buf  50%\nxorriso : UPDATE : Writing:     409536s   19.1%   fifo  50%  buf  50%  676.6xD \nxorriso : UPDATE : Writing:     863408s   40.2%   fifo  28%  buf  50%  670.7xD \nxorriso : UPDATE : Writing:    1301295s   60.7%   fifo   0%  buf  50%  647.0xD \nxorriso : UPDATE : Writing:    1708168s   79.6%   fifo   0%  buf  50%  601.2xD \nISO image produced: 2145060 sectors\nWritten to medium : 2145216 sectors at LBA 32\nWriting to '/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/pc401-disposable-test-final.iso' completed successfully.\n\n",
+  "source_commit": "ea3a658ab9455e59d6fbfaec0e9146881314aa44",
+  "physical_deployment_performed": false
+}

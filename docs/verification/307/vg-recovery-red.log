@@ -1,0 +1,27 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ test_failed_boot_regeneration_is_pending_and_retry_finishes_after_vg_already_renamed _
+tests/unit/test_host_layout.py:230: in test_failed_boot_regeneration_is_pending_and_retry_finishes_after_vg_already_renamed
+    with pytest.raises(hl.LayoutError, match="pending"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE <class 'host_layout.LayoutError'>
+_________ test_unknown_destination_vg_ownership_refuses_before_rename __________
+tests/unit/test_host_layout.py:248: in test_unknown_destination_vg_ownership_refuses_before_rename
+    hl.name_the_volume_group_for_drive(runner, serial="<PC601 drive serial>", vg="pve", vg_uuid="U-1",
+baseline/lib/host_layout.py:178: in name_the_volume_group_for_drive
+    _run(runner, ["vgrename", vg_uuid, new])
+baseline/lib/host_layout.py:66: in _run
+    raise LayoutError(f"{' '.join(argv[:2])} failed: {(proc.stderr or proc.stdout or '').strip()[-160:]}")
+E   host_layout.LayoutError: vgrename U-1 failed: cannot read VGs
+
+During handling of the above exception, another exception occurred:
+tests/unit/test_host_layout.py:247: in test_unknown_destination_vg_ownership_refuses_before_rename
+    with pytest.raises(hl.LayoutError, match="ownership"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'ownership'
+E     Actual message: 'vgrename U-1 failed: cannot read VGs'
+=========================== short test summary info ============================
+FAILED tests/unit/test_host_layout.py::test_failed_boot_regeneration_is_pending_and_retry_finishes_after_vg_already_renamed
+FAILED tests/unit/test_host_layout.py::test_unknown_destination_vg_ownership_refuses_before_rename
+2 failed, 15 deselected in 0.12s

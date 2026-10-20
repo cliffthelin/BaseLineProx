@@ -25,7 +25,7 @@ def _int(params: dict, key: str, label: str) -> int:
         raise vh.VmError(f"{label} must be a whole number") from None
 
 
-def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir) -> dict:
+def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir, os_bases_dir=None, owner=None) -> dict:
     name = str(params.get("name", ""))
     try:
         if action in _NEEDS_CONFIRM and params.get("confirm") != "yes":
@@ -35,6 +35,8 @@ def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir) -> dict:
             return app_capture.inspect_vm(host,name,params.get("package"))
         if action == "reset_login":
             return ubuntu.reset_login(host,name)
+        if action == "verify_ubuntu":
+            return ubuntu.verify_configuration(host,name)
         if action == "prepare_ubuntu":
             path = ubuntu.acquire_base(host, cache_dir=Path(iso_dir).parent / "images")
             return _ok(f"Ubuntu base ready: {path.name}. Choose Desktop or Server below.")
@@ -43,10 +45,22 @@ def perform(host: vh.VmHost, action: str, params: dict, *, iso_dir) -> dict:
             if recipe not in ("ubuntu-desktop", "ubuntu-server"):
                 raise vh.VmError("choose Ubuntu Desktop or Ubuntu Server")
             created = ubuntu.create(host, name, desktop=recipe == "ubuntu-desktop",
-                                     homepage=str(params.get("homepage", "")),
+                                     homepage=str(params.get("homepage", "")), locale=params.get("locale","en_US.UTF-8"),
                                      memory_mb=_int(params, "memory_mb", "memory"), cpus=_int(params, "cpus", "cpus"),
                                      disk_gb=_int(params, "disk_gb", "OS disk size"),
                                      persistence_gb=_int(params, "persistence_gb", "user disk size"))
+            return dict(created, ok=True)
+        if action == "create_prebuilt":
+            import prebuilt_environment as pe
+            os_id = str(params.get("os", ""))
+            if os_id not in pe.SYSTEMS:
+                raise vh.VmError("choose one of the ready-made systems")
+            if os_bases_dir is None:
+                raise vh.VmError("no folder of ready-made bases is configured")
+            pe.install_base(host, os_id, os_bases_dir)
+            created = pe.create(host, name, os_id, owner=pe.owner_account(host, owner), memory_mb=_int(params, "memory_mb", "memory"), cpus=_int(params, "cpus", "cpus"),
+                                disk_gb=_int(params, "disk_gb", "disk size") if params.get("disk_gb") else None,
+                                **({"persistence_gb": _int(params, "persistence_gb", "user disk size")} if params.get("persistence_gb") else {}))
             return dict(created, ok=True)
         if action == "create_iso":
             iso = {i["name"]: i["path"] for i in available_isos(host, iso_dir)}.get(str(params.get("iso", "")))
@@ -124,12 +138,41 @@ def load_persistence_store(config_path, *, default: str) -> str:
     return _load_path(config_path, "persistence_store", default)
 
 
-def _load_path(config_path, key, default):
+def _valid_store_path(value):
+    if not isinstance(value, str) or not value.startswith("/"):
+        return False
+    path = Path(value)
+    if str(path) == "/" or ".." in path.parts:
+        return False
     try:
-        value = json.loads(Path(config_path).read_text()).get(key)
-    except (OSError, ValueError, AttributeError):
+        resolved = path.resolve()
+    except OSError:
+        return False
+    if any("INSTALLER_CACHE" in candidate.parts for candidate in (path, resolved)):
+        return False
+    return not any(str(candidate) == prefix or str(candidate).startswith(prefix + "/")
+                   for candidate in (path, resolved) for prefix in _FORBIDDEN_PREFIXES)
+
+
+def _load_path(config_path, key, default):
+    if not config_path:
         return default
-    return value if isinstance(value, str) and value.startswith("/") else default
+    try:
+        document = json.loads(Path(config_path).read_text())
+    except FileNotFoundError:
+        # A missing file is the first-run case; malformed or unreadable existing
+        # configuration must never redirect workload writes to a default volume.
+        return default
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise vh.VmError(f"VM storage configuration {config_path} could not be read: {exc}") from exc
+    if not isinstance(document, dict):
+        raise vh.VmError(f"VM storage configuration {config_path} must be a JSON object")
+    if key not in document:
+        return default
+    value = document[key]
+    if not _valid_store_path(value):
+        raise vh.VmError(f"VM storage configuration {config_path} has an invalid {key} path")
+    return value
 
 
 def save_store(config_path, store: str, *, persistence_store=None) -> dict:
@@ -137,20 +180,22 @@ def save_store(config_path, store: str, *, persistence_store=None) -> dict:
     if persistence_store is not None:
         changes["persistence_store"] = persistence_store
     for value in changes.values():
-        p = Path(value) if isinstance(value, str) else Path("")
-        if (not isinstance(value, str) or not value.startswith("/") or ".." in p.parts or str(p) == "/"
-                or "INSTALLER_CACHE" in p.parts
-                or any(str(p) == f or str(p).startswith(f + "/") for f in _FORBIDDEN_PREFIXES)):
+        if not _valid_store_path(value):
             return {"ok": False, "message": "VM disks need a plain absolute folder outside system paths and installer cache"}
     try:
         current = json.loads(Path(config_path).read_text())
-        if not isinstance(current, dict):
-            current = {}
-    except (OSError, ValueError):
+    except FileNotFoundError:
         current = {}
+    except (OSError, ValueError, UnicodeError) as exc:
+        return {"ok": False, "message": f"VM storage configuration {config_path} could not be read: {exc}"}
+    if not isinstance(current, dict):
+        return {"ok": False, "message": f"VM storage configuration {config_path} must be a JSON object"}
     current.update(changes)
-    Path(config_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(config_path).write_text(json.dumps(current))
+    try:
+        Path(config_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(config_path).write_text(json.dumps(current))
+    except OSError as exc:
+        return {"ok": False, "message": f"VM storage configuration {config_path} could not be saved: {exc}"}
     return {"ok": True, "message": "VM storage locations saved. Existing files were not moved."}
 
 
@@ -265,6 +310,7 @@ def _vm_card(v: dict, display_default: str, backend: str = "Local QEMU") -> str:
     if v.get("vnc"):
         meta += f' · VNC {_e(v["vnc"])}'
     btns = []
+    btns.append(f'<a class="btn" href="/hardware?vm={n}">Hardware and drivers</a>')
     if on:
         btns.append(f'<button onclick="act(\'request_stop\',{{name:\'{n}\'}})">Shut down</button>')
         btns.append(f'<button class="danger" onclick="act(\'force_stop\',{{name:\'{n}\'}},\'Force stop {n}? Recent writes can be lost and its filesystems can be damaged.\')">Force stop</button>')
@@ -278,8 +324,9 @@ def _vm_card(v: dict, display_default: str, backend: str = "Local QEMU") -> str:
             btns.append(f'<button class="danger" onclick="act(\'rollback\',{{name:\'{n}\'}},\'Rebuild the OS of {n}? OS changes are lost; the separate user disk is retained.\')">Rebuild OS</button>')
         elif not v.get("iso"):
             btns.append(f'<button onclick="var b=prompt(\'Name for the new read-only base image\');if(b)act(\'freeze\',{{name:\'{n}\',base_name:b}},\'Turn {n} into a base image? {n} is consumed; clone new VMs from the base.\')">Freeze as base</button>')
-        btns.append(f'<button class="danger" onclick="act(\'delete_vm\',{{name:\'{n}\'}},\'Delete {n} and its disk?\')">Delete</button>')
+        btns.append(f'<button class="danger" onclick="act(\'delete_vm\',{{name:\'{n}\'}},\'Permanently delete {n}, including its operating system and retained home data?\')">Delete</button>')
     if on and backend == "Proxmox" and v.get("recipe") in ("ubuntu-desktop","ubuntu-server"):
+        btns.append(f'<button onclick="act(\'verify_ubuntu\',{{name:\'{n}\'}})">Verify guest configuration</button>')
         btns.append(f'<button onclick="act(\'reset_login\',{{name:\'{n}\'}},\'Replace the Ubuntu login? The old password stops working; OS and home are kept.\')">Reset login</button>')
     cfg = ""
     if backend == "Proxmox":
@@ -297,13 +344,17 @@ def _vm_card(v: dict, display_default: str, backend: str = "Local QEMU") -> str:
 
 def render_vms_page(*, store: str, free_gb, kvm_ok: bool, isos: list, bases: list, vms: list, notice: str,
                     notice_ok, default_display: str, backend: str = "Local QEMU",
-                    persistence_store: str = str(vh.DEFAULT_PERSISTENCE_STORE), homepage: str = "") -> bytes:
+                    persistence_store: str = str(vh.DEFAULT_PERSISTENCE_STORE), homepage: str = "",
+                    inventory_error: str = "", homepage_error: str = "") -> bytes:
     iso_opts = "".join(f'<option value="{_e(i["name"])}">{_e(i["name"])} ({_gb(i["size"])})</option>' for i in isos)
     base_opts = "".join(f'<option value="{_e(b["name"])}">{_e(b["name"])}</option>' for b in bases)
     kvm = "" if kvm_ok else ('<div class="notice bad">KVM is not available to this account (check /dev/kvm and the kvm group), '
                              'so VMs cannot be started here.</div>')
     note = f'<div class="notice {"" if notice_ok in (True, None) else "bad"}">{_e(notice)}</div>' if notice else ""
-    vm_html = "".join(_vm_card(v, default_display, backend) for v in vms) or '<div class="empty">No VMs yet. Create one below.</div>'
+    vm_html = (f'<div class="notice bad">VM inventory unavailable: {_e(inventory_error)}</div>' if inventory_error else
+               "".join(_vm_card(v, default_display, backend) for v in vms) or '<div class="empty">No VMs yet. Create one below.</div>')
+    homepage_error_html = (f'<p class="notice bad">Proxmox address detection failed: {_e(homepage_error)}</p>'
+                           if homepage_error else "")
     base_html = "".join(
         f'<div class="card vm"><div><div class="name">{_e(b["name"])}<span class="tag">read-only base</span></div>'
         f'<div class="meta">{_gb(b["size"])} on disk · used by {_e(", ".join(b["used_by"]) or "nothing yet")}</div></div>'
@@ -328,7 +379,8 @@ def render_vms_page(*, store: str, free_gb, kvm_ok: bool, isos: list, bases: lis
 <form class="row" onsubmit="submitForm(event,'create_ubuntu')">
 <label>Name<input name="name" required pattern="[a-z0-9][a-z0-9-]{{0,31}}" placeholder="ubuntu"></label>
 <label>Environment<select name="recipe"><option value="ubuntu-desktop">Ubuntu Desktop + Firefox</option><option value="ubuntu-server">Ubuntu Server</option></select></label>
-<label>Proxmox homepage<input name="homepage" required type="url" value="{_e(homepage)}"></label>
+<label>Locale<select name="locale"><option value="en_US.UTF-8">English (US)</option><option value="en_GB.UTF-8">English (UK)</option><option value="C.UTF-8">C.UTF-8</option></select></label>
+<label>Proxmox homepage<input name="homepage" required type="url" value="{_e(homepage)}"></label>{homepage_error_html}
 <label>OS GB<input name="disk_gb" type="number" min="8" value="40"></label>
 <label>User GB<input name="persistence_gb" type="number" min="1" value="32"></label>
 <label>Memory MB<input name="memory_mb" type="number" min="2048" value="4096"></label>
@@ -383,3 +435,14 @@ def _requested_distros():
             'install using its console, shut down, eject the ISO, and freeze the clean installation as a base. '
             'New overlays get a separate blank retained disk; it is <strong>not automatically mounted</strong> by these distros. '
             'Configure and verify its filesystem and mount before trusting an OS reset. Ubuntu is the automated retained-home recipe.</p></div>')
+
+
+def with_usage(page: bytes, name: str, values, error: str = "") -> bytes:
+    """Add the usage graph (what the TUI's VMs tab shows) to the rendered VMs page, just above its closing tag."""
+    import console_charts
+    import html
+    chart = (f'<section class="vm-usage"><h2>Usage</h2><p class="chart-empty">{html.escape(error)}</p></section>' if error else
+             f'<section class="vm-usage"><h2>Usage</h2>{console_charts.sparkline_svg([v * 100 for v in values], label=(name or "Running machine") + " processor", unit="%")}</section>')
+    text = page.decode()
+    marker = "</body>"
+    return (text.replace(marker, chart + marker, 1) if marker in text else text + chart).encode()

@@ -1,0 +1,204 @@
+Read-only mount diagnosis; recovery image unchanged.
+{
+  "serial": "<PC401 drive serial>",
+  "recovery": "not_checked_read_only_diagnostic",
+  "installation": "present",
+  "previous_disk_boot": "QEMU login screen observed in DR146",
+  "vg_identity": {
+    "pv_name": "/dev/sdd3",
+    "pv_uuid": "PtJxk3-3YnM-AnWA-fsJQ-MbDy-TJOB-yiCyM8",
+    "vg_name": "baseline_1b75c1a556ee",
+    "vg_uuid": "Okyyas-6SZq-tSzV-trFO-K5RW-hmXQ-TWPyAE",
+    "pv_count": "1"
+  },
+  "actual_host_lvs": {
+    "report": [
+      {
+        "lv": [
+          {
+            "lv_name": "baseline_app_state",
+            "lv_size": "8589934592",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_appdata_admin",
+            "lv_size": "37580963840",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_appdata_personal",
+            "lv_size": "37580963840",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_installer_cache",
+            "lv_size": "66571993088",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_session_temp",
+            "lv_size": "8589934592",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_substrate",
+            "lv_size": "1073741824",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_user_admin",
+            "lv_size": "66571993088",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "baseline_user_personal",
+            "lv_size": "66571993088",
+            "lv_attr": "-wi-a-----"
+          },
+          {
+            "lv_name": "data",
+            "lv_size": "66567798784",
+            "lv_attr": "twi-a-tz--"
+          },
+          {
+            "lv_name": "root",
+            "lv_size": "34359738368",
+            "lv_attr": "-wi-ao----"
+          },
+          {
+            "lv_name": "swap",
+            "lv_size": "4294967296",
+            "lv_attr": "-wi-a-----"
+          }
+        ]
+      }
+    ],
+    "log": []
+  }
+}
+{
+  "device": "252:6",
+  "holder_namespace_count": 23,
+  "probes": [
+    {
+      "pid": "1224",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25063 6053 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6053 6108 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6108 30728 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n30728 32029 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32029 32085 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32085 32141 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32141 32197 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32197 32253 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32253 1253 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "process-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "1227",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25064 6054 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6054 6109 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6109 31161 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n31161 32030 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32030 32086 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32086 32142 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32142 32198 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32198 32254 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32254 1252 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "process-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5359",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25061 6051 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6051 6106 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6106 27357 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n27357 32027 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32027 32083 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32083 32139 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32139 32195 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32195 32251 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32251 2013 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "process-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5360",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25056 6047 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6047 6102 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6102 24115 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n24115 32023 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32023 32079 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32079 32135 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32135 32191 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32191 32247 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32247 6644 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "process-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5397",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25059 6049 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6049 6104 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6104 26259 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n26259 32025 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32025 32081 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32081 32137 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32137 32193 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32193 32249 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32249 4657 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "process-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5401",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25058 6048 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6048 6103 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6103 25835 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n25835 32024 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32024 32080 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32080 32136 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32136 32192 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32192 32248 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32248 5326 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "process-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5611",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25054 6045 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6045 6100 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6100 21711 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n21711 32021 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32021 32077 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32077 32133 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32133 32189 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32189 32245 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32245 3058 shared / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "process-root": "stat: cannot stat '/tmp/baseline-pc401-target': No such file or directory (os error 2)",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5733",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "25051 6039 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6039 6097 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6097 20733 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n20733 32018 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32018 32074 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32074 32130 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32130 32186 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32186 32242 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32242 3251 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "process-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5736",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "16771 2109 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n2109 6084 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6084 12979 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n12979 32006 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32006 32062 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32062 32118 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32118 32174 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32174 32230 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32230 9889 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "process-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5739",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "20703 2115 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n2115 6090 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6090 16788 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n16788 32012 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32012 32068 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32068 32124 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32124 32180 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32180 32236 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32236 7716 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "process-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5742",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "20698 2111 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n2111 6086 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6086 14384 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n14384 32008 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32008 32064 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32064 32120 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32120 32176 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32176 32232 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32232 9499 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "process-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    },
+    {
+      "pid": "5746",
+      "mountpoint": "/tmp/baseline-pc401-target",
+      "namespace_mounts": "20701 2113 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n2113 6088 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n6088 15259 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n15259 32010 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32010 32066 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32066 32122 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32122 32178 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32178 32234 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4\n32234 8801 private / 252:6 /tmp/baseline-pc401-target /dev/mapper/baseline_1b75c1a556ee-root ext4",
+      "path_checks": {
+        "caller-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "process-root": "/usr/bin/stat: cannot statx '/tmp/baseline-pc401-target': No such file or directory",
+        "host-root": "48:599341 /tmp/baseline-pc401-target"
+      }
+    }
+  ]
+}

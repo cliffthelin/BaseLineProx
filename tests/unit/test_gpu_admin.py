@@ -6,6 +6,7 @@ kind of gap that already caught one real regex bug (a greedy match
 leaving a trailing space in `pci_class`) before this file existed.
 conftest.py's autouse fixture isolates `registry.GLOBAL_DB_PATH` per
 test, same as every other registry-backed module."""
+import pytest
 import gpu_admin as ga
 
 
@@ -146,10 +147,18 @@ def test_detect_gpus_reports_none_driver_when_undriven():
     assert all(d.kernel_driver is None for d in devices)
 
 
-def test_detect_gpus_returns_empty_when_lspci_fails():
+def test_detect_gpus_raises_inventory_error_when_lspci_fails():
     runner = FakeGpuRunner()
     runner.run = lambda argv, timeout=10: ga.GpuProc(1, "", "lspci not found")
-    assert ga.detect_gpus(runner) == []
+    with pytest.raises(ga.GpuInventoryError, match="lspci not found"):
+        ga.detect_gpus(runner)
+
+
+def test_real_runner_preserves_list_directory_errors():
+    runner = ga.RealRunner()
+    assert runner.path_exists('/path/that/does/not/exist/baseline-gpu-test') is False
+    with pytest.raises(ga.GpuInventoryError, match='could not enumerate'):
+        runner.listdir('/path/that/does/not/exist/baseline-gpu-test')
 
 
 # -- available_modes: host_display ---------------------------------------
@@ -189,6 +198,15 @@ def test_mdev_split_active_now_when_sysfs_types_present():
     assert "active now" in modes[ga.VGPU_MDEV_SPLIT].evidence
 
 
+def test_mdev_directory_without_types_does_not_claim_active_support():
+    path = f"/sys/bus/pci/devices/{RTX_3070_ADDR}/mdev_supported_types"
+    runner = _real_machine_runner(paths={path}, dirs={path: []})
+    device = next(d for d in ga.detect_gpus(runner) if d.pci_address == RTX_3070_ADDR)
+    modes = {m.mode: m for m in ga.available_modes(runner, device)}
+    assert modes[ga.VGPU_MDEV_SPLIT].available is False
+    assert "no mediated-device types" in modes[ga.VGPU_MDEV_SPLIT].evidence
+
+
 def test_mdev_split_hardware_capable_but_not_active_for_known_id_p40():
     """The real, current state of this session's own Tesla P40: no
     mdev_supported_types directory yet (the vGPU-enabled driver isn't
@@ -225,6 +243,25 @@ def test_sriov_unavailable_when_file_absent():
     device = next(d for d in ga.detect_gpus(runner) if d.pci_address == P40_ADDR)
     modes = {m.mode: m for m in ga.available_modes(runner, device)}
     assert modes[ga.SRIOV].available is False
+
+
+def test_sriov_read_failure_is_not_reported_as_zero_capability():
+    path = f"/sys/bus/pci/devices/{P40_ADDR}/sriov_totalvfs"
+    runner = _real_machine_runner(paths={path})
+    real_run = runner.run
+    runner.run = lambda argv, timeout=10: (
+        ga.GpuProc(1, "", "permission denied") if argv[0] == "cat" else real_run(argv, timeout))
+    device = next(d for d in ga.detect_gpus(runner) if d.pci_address == P40_ADDR)
+    with pytest.raises(ga.GpuInventoryError, match="permission denied"):
+        ga.available_modes(runner, device)
+
+
+def test_sriov_malformed_capacity_is_not_reported_as_zero():
+    path = f"/sys/bus/pci/devices/{P40_ADDR}/sriov_totalvfs"
+    runner = _real_machine_runner(paths={path}, cat_files={path: "unknown\n"})
+    device = next(d for d in ga.detect_gpus(runner) if d.pci_address == P40_ADDR)
+    with pytest.raises(ga.GpuInventoryError, match="malformed SR-IOV capability"):
+        ga.available_modes(runner, device)
 
 
 # -- available_modes: virtio_gpu_shared -----------------------------------

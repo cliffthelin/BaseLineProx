@@ -4,9 +4,15 @@ Reuses `df` rather than parsing /proc or lvs output a second way,
 matching diagnostics.py's own preference for real, standard tools.
 An unmounted/missing volume is skipped, never crashes - the same
 tolerance diagnostics.py's collectors already hold themselves to."""
+import json
+
 from fake_runner import FakeProc, FakeRunner
 
 import drive_installer as di
+
+
+def _findmnt(paths):
+    return json.dumps({"filesystems": [{"target": path} for path in paths]})
 
 
 def test_df_argv_shape():
@@ -37,6 +43,7 @@ def test_parse_df_output_returns_none_for_malformed_text():
 
 def test_collect_volume_usage_returns_one_entry_per_real_mounted_volume():
     runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, _findmnt([v[4] for v in di.BASELINE_VOLUMES]), "")),
         (lambda a: a[:1] == ["df"], FakeProc(
             0,
             "         1B-blocks         Used    Avail Use%\n"
@@ -56,7 +63,7 @@ def test_collect_volume_usage_returns_one_entry_per_real_mounted_volume():
 
 def test_collect_volume_usage_skips_a_volume_that_isnt_mounted():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["df"] and a[-1] == "/mnt/BASELINE", FakeProc(1, "", "df: /mnt/BASELINE: No such file or directory")),
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, _findmnt([v[4] for v in di.BASELINE_VOLUMES if v[4] != "/mnt/BASELINE"]), "")),
         (lambda a: a[:1] == ["df"], FakeProc(
             0,
             "         1B-blocks         Used    Avail Use%\n"
@@ -71,9 +78,19 @@ def test_collect_volume_usage_skips_a_volume_that_isnt_mounted():
 
 def test_collect_volume_usage_returns_empty_list_when_nothing_is_mounted():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["df"], FakeProc(1, "", "not mounted")),
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, _findmnt([]), "")),
     ])
     assert di.collect_volume_usage(runner) == []
+
+
+def test_collect_volume_usage_reports_df_failure_for_a_confirmed_mount():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, _findmnt(["/mnt/BASELINE"]), "")),
+        (lambda a: a[:1] == ["df"], FakeProc(1, "", "permission denied")),
+    ])
+    import pytest
+    with pytest.raises(di.VolumeObservationError, match="permission denied"):
+        di.collect_volume_usage(runner)
 
 
 # -- collect_volume_details (real LV name + real allocated size) -----------
@@ -84,6 +101,7 @@ def test_collect_volume_usage_returns_empty_list_when_nothing_is_mounted():
 
 def test_collect_volume_details_reports_lv_name_and_real_size_for_an_existing_volume():
     runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, _findmnt(["/mnt/BASELINE"]), "")),
         (lambda a: "lvs" in a and "-o" in a and a[a.index("-o") + 1] == "vg_name,lv_name",
          FakeProc(0, "  pve   baseline_app_state\n", "")),
         (lambda a: "lvs" in a and "-o" in a and a[a.index("-o") + 1] == "lv_name,lv_size",
@@ -105,7 +123,9 @@ def test_collect_volume_details_reports_lv_name_and_real_size_for_an_existing_vo
 
 def test_collect_volume_details_reports_a_volume_that_does_not_exist_yet_honestly():
     runner = FakeRunner(command_responses=[
-        (lambda a: "lvs" in a, FakeProc(0, "  pve   root\n", "")),  # none of the real volumes exist
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, _findmnt([]), "")),
+        (lambda a: "lvs" in a and a[a.index("-o") + 1] == "vg_name,lv_name", FakeProc(0, "  pve   root\n", "")),
+        (lambda a: "lvs" in a and a[a.index("-o") + 1] == "lv_name,lv_size", FakeProc(0, "", "")),
         (lambda a: a[:1] == ["df"], FakeProc(1, "", "not mounted")),
     ])
     details = di.collect_volume_details(runner, vg_name="pve", personas=())
@@ -119,7 +139,9 @@ def test_collect_volume_details_reports_a_volume_that_does_not_exist_yet_honestl
 
 def test_collect_volume_details_returns_one_entry_per_planned_volume_regardless_of_mount_state():
     runner = FakeRunner(command_responses=[
-        (lambda a: "lvs" in a, FakeProc(0, "", "")),
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, _findmnt([]), "")),
+        (lambda a: "lvs" in a and a[a.index("-o") + 1] == "vg_name,lv_name", FakeProc(0, "", "")),
+        (lambda a: "lvs" in a and a[a.index("-o") + 1] == "lv_name,lv_size", FakeProc(0, "", "")),
         (lambda a: a[:1] == ["df"], FakeProc(1, "", "not mounted")),
     ])
     details = di.collect_volume_details(runner, vg_name="pve")
@@ -132,6 +154,8 @@ def test_parse_logical_volume_sizes():
     assert sizes == {"baseline_app_state": 5368709120, "baseline_installer_cache": 53687091200}
 
 
-def test_parse_logical_volume_sizes_ignores_malformed_lines():
-    assert di.parse_logical_volume_sizes("garbage\n") == {}
+def test_parse_logical_volume_sizes_rejects_malformed_rows():
+    import pytest
+    with pytest.raises(di.VolumeInventoryParseError, match="malformed"):
+        di.parse_logical_volume_sizes("garbage\n")
     assert di.parse_logical_volume_sizes("") == {}

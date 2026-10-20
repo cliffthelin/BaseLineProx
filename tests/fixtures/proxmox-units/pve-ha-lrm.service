@@ -1,0 +1,26 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=PVE Local HA Resource Manager Daemon
+ConditionPathExists=/usr/sbin/pve-ha-lrm
+Wants=pve-cluster.service
+Wants=watchdog-mux.service
+Wants=pvedaemon.service
+Wants=pve-ha-crm.service
+Wants=lxc.service
+Wants=pve-storage.target
+After=corosync.service
+After=lxc.service
+After=pve-cluster.service
+After=pve-ha-crm.service
+After=pve-storage.target
+After=pvedaemon.service
+After=pveproxy.service
+After=ssh.service
+After=syslog.service
+After=watchdog-mux.service
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target

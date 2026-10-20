@@ -23,7 +23,8 @@ class FakeRunner:
 
     def __init__(self, *, udevadm_by_path=None, findmnt_root="/dev/nvme0n1p2",
                  pkname_of_root="nvme0n1", sizes=None, lstat_mode=None,
-                 realpath_map=None, is_symlink=False, drive_table="sdb disk  11111111-2222-3333-4444-555555555555 \n"):
+                 realpath_map=None, is_symlink=False, drive_table="sdb disk  11111111-2222-3333-4444-555555555555 \n",
+                 pkname_graph=None, root_parent_fallback=True):
         self.drive_table = drive_table
         self.udevadm_by_path = udevadm_by_path or {}
         self.findmnt_root = findmnt_root
@@ -32,6 +33,8 @@ class FakeRunner:
         self.lstat_mode = lstat_mode if lstat_mode is not None else 0o60000  # S_IFBLK
         self.realpath_map = realpath_map or {}
         self.is_symlink = is_symlink
+        self.pkname_graph = pkname_graph or {}
+        self.root_parent_fallback = root_parent_fallback
 
     def run(self, argv):
         if argv[0] == "udevadm":
@@ -46,7 +49,11 @@ class FakeRunner:
         if argv[0] == "lsblk" and "NAME,TYPE,FSTYPE,PTUUID,LABEL" in argv:
             return self.drive_table          # what is ON the drive: blank unless a test says otherwise
         if argv[0] == "lsblk":
-            return self.pkname_of_root + "\n"
+            device = argv[-1]
+            parents = self.pkname_graph.get(device)
+            if parents is None:
+                parents = ([self.pkname_of_root] if device == self.findmnt_root and self.root_parent_fallback else [])
+            return "".join(f"{parent}\n" for parent in parents)
         raise AssertionError(f"unexpected command: {argv}")
 
     def lstat(self, path):
@@ -89,6 +96,72 @@ def test_valid_target_passes_and_returns_expected_dict():
     assert result["path"] == "/dev/sdd"
     assert result["serial"] == TEST_TARGET_SERIAL
     assert result["size_bytes"] == GOOD_SIZE_SECTORS * 512
+
+
+def test_boot_identity_walks_nested_proxmox_lvm_device_parents():
+    runner = _good_runner(
+        findmnt_root="/dev/mapper/pve-root",
+        pkname_graph={"/dev/mapper/pve-root": ["dm-0"], "/dev/dm-0": ["nvme0n1p3"],
+                      "/dev/nvme0n1p3": ["nvme0n1"]},
+        udevadm_by_path={"/dev/sdd": TEST_TARGET_SERIAL, "/dev/nvme0n1": TEST_BOOT_SERIAL},
+    )
+    assert pds.get_boot_device_serial(runner) == TEST_BOOT_SERIAL
+    result = _validate_sdd(runner)
+    assert result["serial"] == TEST_TARGET_SERIAL
+
+
+def test_boot_identity_refuses_multiple_physical_ancestors():
+    runner = _good_runner(
+        findmnt_root="/dev/mapper/pve-root",
+        pkname_graph={"/dev/mapper/pve-root": ["dm-0"], "/dev/dm-0": ["sda", "sdb"]},
+        udevadm_by_path={"/dev/sda": "Boot-A", "/dev/sdb": "Boot-B"},
+    )
+    assert pds.get_boot_device_serial(runner) is None
+
+
+def test_boot_identity_uses_kernel_sysfs_when_the_root_device_node_is_not_mounted(monkeypatch):
+    class SysfsRunner:
+        def run(self, argv):
+            if argv[:3] == ["findmnt", "/", "-no"]:
+                return "/dev/nvme0n1p2\n"
+            if argv[0] == "lsblk":
+                return ""
+            if argv[0] == "udevadm" and "--name=" in " ".join(argv):
+                return ""
+            if argv[:3] == ["findmnt", "-no", "MAJ:MIN"]:
+                return "259:7\n"
+            if argv[0] == "udevadm" and "--path=" in " ".join(argv):
+                return "ID_SERIAL_SHORT=SysfsBootSerial\n"
+            raise AssertionError(f"unexpected command: {argv}")
+
+        def realpath(self, path):
+            if path == "/sys/dev/block/259:7":
+                return "/sys/devices/fake/nvme0n1/nvme0n1p2"
+            return path
+
+    monkeypatch.setattr(pds.os.path, "isfile", lambda path: path.endswith("/partition"))
+    assert pds.get_boot_device_serial(SysfsRunner()) == "SysfsBootSerial"
+
+
+def test_boot_identity_rejects_sysfs_resolution_outside_the_kernel_block_tree():
+    class EscapedSysfsRunner:
+        def run(self, argv):
+            if argv[0] == "findmnt" and "SOURCE" in argv:
+                return "/dev/nvme0n1p2\n"
+            if argv[0] == "lsblk":
+                return ""
+            if argv[0] == "udevadm" and "--name=" in " ".join(argv):
+                return ""
+            if argv[0] == "udevadm" and "--path=" in " ".join(argv):
+                return "ID_SERIAL_SHORT=UntrustedSerial\n"
+            if argv[0] == "findmnt":
+                return "259:7\n"
+            raise AssertionError(f"unexpected command: {argv}")
+
+        def realpath(self, path):
+            return "/tmp/sys/devices/attacker-controlled-device" if path.startswith("/sys/dev/block/") else path
+
+    assert pds.get_boot_device_serial(EscapedSysfsRunner()) is None
 
 
 def test_wrong_serial_is_refused():
@@ -345,7 +418,7 @@ class _UdevadmOnlyRunner:
 
 
 def test_get_usb_bridge_model_reads_a_real_nvme_bridge_chip():
-    output = "ID_BUS=usb\nID_SERIAL_SHORT=MD89N41071210AP4E\nID_USB_MODEL=RTL9220DP_PCIe0\nID_USB_VENDOR=Realtek\n"
+    output = "ID_BUS=usb\nID_SERIAL_SHORT=SYNTHDRIVEB00002\nID_USB_MODEL=RTL9220DP_PCIe0\nID_USB_VENDOR=Realtek\n"
     assert pds.get_usb_bridge_model(_UdevadmOnlyRunner(output), "/dev/sdb") == "RTL9220DP_PCIe0"
 
 
@@ -355,5 +428,5 @@ def test_get_usb_bridge_model_reads_a_real_consumer_enclosure_brand():
 
 
 def test_get_usb_bridge_model_none_when_the_device_is_not_behind_usb_at_all():
-    output = "ID_BUS=ata\nID_SERIAL_SHORT=WCV00YLT\n"
+    output = "ID_BUS=ata\nID_SERIAL_SHORT=SYNTHH01\n"
     assert pds.get_usb_bridge_model(_UdevadmOnlyRunner(output), "/dev/sda") is None

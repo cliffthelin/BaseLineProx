@@ -1,0 +1,97 @@
+................................F....F..FF...F.FF.                       [100%]
+=================================== FAILURES ===================================
+_______ test_prepare_refuses_a_data_drive_so_no_challenge_can_be_raised ________
+tests/unit/test_drive_data_protection.py:23: in test_prepare_refuses_a_data_drive_so_no_challenge_can_be_raised
+    da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(DATA))
+baseline/lib/drive_admin.py:1654: in prepare_action
+    spec, call_params, serial = _prepare(action_id, params, pds_runner)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1628: in _prepare
+    raise ValueError(str(exc)) from None
+E   ValueError: refused: /dev/sdb serial could not be read unambiguously; no override
+
+During handling of the above exception, another exception occurred:
+tests/unit/test_drive_data_protection.py:22: in test_prepare_refuses_a_data_drive_so_no_challenge_can_be_raised
+    with pytest.raises(ValueError, match="installer"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'installer'
+E     Actual message: 'refused: /dev/sdb serial could not be read unambiguously; no override'
+__________ test_a_human_confirmation_does_not_override_the_data_rule ___________
+tests/unit/test_drive_data_protection.py:38: in test_a_human_confirmation_does_not_override_the_data_rule
+    auth, store = authorize("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=ok_pds)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/hitl_helpers.py:26: in authorize
+    prepared = da.prepare_action(action_id, params, pds_runner=pds_runner)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1654: in prepare_action
+    spec, call_params, serial = _prepare(action_id, params, pds_runner)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1628: in _prepare
+    raise ValueError(str(exc)) from None
+E   ValueError: refused: /dev/sdb serial could not be read unambiguously; no override
+______________________ test_a_blank_drive_may_be_prepared ______________________
+tests/unit/test_drive_data_protection.py:62: in test_a_blank_drive_may_be_prepared
+    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(f"sdb disk  {GUID} \n"))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1654: in prepare_action
+    spec, call_params, serial = _prepare(action_id, params, pds_runner)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1628: in _prepare
+    raise ValueError(str(exc)) from None
+E   ValueError: refused: /dev/sdb serial could not be read unambiguously; no override
+____ test_a_data_drive_carrying_a_registered_installer_uuid_may_be_prepared ____
+tests/unit/test_drive_data_protection.py:67: in test_a_data_drive_carrying_a_registered_installer_uuid_may_be_prepared
+    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(DATA))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1654: in prepare_action
+    spec, call_params, serial = _prepare(action_id, params, pds_runner)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1628: in _prepare
+    raise ValueError(str(exc)) from None
+E   ValueError: refused: /dev/sdb serial could not be read unambiguously; no override
+______________ test_stamp_adopts_a_baseline_only_drive_end_to_end ______________
+tests/unit/test_drive_data_protection.py:114: in test_stamp_adopts_a_baseline_only_drive_end_to_end
+    dg.require_may_format("/dev/sdb")
+baseline/lib/drive_guard.py:214: in require_may_format
+    return _authorize_format(device_path, state, serial=serial, installer_uuid_registered=registered)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_guard.py:175: in _authorize_format
+    raise DataProtectionError(
+E   drive_guard.DataProtectionError: refused: /dev/sdb serial could not be read unambiguously; no override
+___ test_a_baseline_drive_with_data_is_not_formatted_without_a_recent_backup ___
+tests/unit/test_drive_data_protection.py:129: in test_a_baseline_drive_with_data_is_not_formatted_without_a_recent_backup
+    da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(OWN))
+baseline/lib/drive_admin.py:1654: in prepare_action
+    spec, call_params, serial = _prepare(action_id, params, pds_runner)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1628: in _prepare
+    raise ValueError(str(exc)) from None
+E   ValueError: refused: /dev/sdb serial could not be read unambiguously; no override
+
+During handling of the above exception, another exception occurred:
+tests/unit/test_drive_data_protection.py:128: in test_a_baseline_drive_with_data_is_not_formatted_without_a_recent_backup
+    with pytest.raises(ValueError, match="backup"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'backup'
+E     Actual message: 'refused: /dev/sdb serial could not be read unambiguously; no override'
+______________________ test_a_blank_drive_needs_no_backup ______________________
+tests/unit/test_drive_data_protection.py:136: in test_a_blank_drive_needs_no_backup
+    assert da.prepare_action("build_self_installer", {"device_path": "/dev/sdb"}, pds_runner=pds(f"sdb disk  {GUID} \n"))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1654: in prepare_action
+    spec, call_params, serial = _prepare(action_id, params, pds_runner)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/drive_admin.py:1628: in _prepare
+    raise ValueError(str(exc)) from None
+E   ValueError: refused: /dev/sdb serial could not be read unambiguously; no override
+=========================== short test summary info ============================
+FAILED tests/unit/test_drive_data_protection.py::test_prepare_refuses_a_data_drive_so_no_challenge_can_be_raised
+FAILED tests/unit/test_drive_data_protection.py::test_a_human_confirmation_does_not_override_the_data_rule
+FAILED tests/unit/test_drive_data_protection.py::test_a_blank_drive_may_be_prepared
+FAILED tests/unit/test_drive_data_protection.py::test_a_data_drive_carrying_a_registered_installer_uuid_may_be_prepared
+FAILED tests/unit/test_drive_data_protection.py::test_stamp_adopts_a_baseline_only_drive_end_to_end
+FAILED tests/unit/test_drive_data_protection.py::test_a_baseline_drive_with_data_is_not_formatted_without_a_recent_backup
+FAILED tests/unit/test_drive_data_protection.py::test_a_blank_drive_needs_no_backup
+7 failed, 43 passed in 0.47s

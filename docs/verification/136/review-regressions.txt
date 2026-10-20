@@ -3,7 +3,7 @@ FFFFFF                                                                   [100%]
 ______ test_review_autofill_requires_choice_between_multiple_empty_disks _______
 tests/unit/test_peer_review_main_readiness.py:18: in test_review_autofill_requires_choice_between_multiple_empty_disks
     assert plan["storage"]["baseline"]["serial"] is None
-E   AssertionError: assert 'S6WRNS0TA12638A' is None
+E   AssertionError: assert '<attached drive serial>' is None
 _ test_review_autofill_does_not_replace_ambiguous_existing_proxmox_with_empty_disk _
 tests/unit/test_peer_review_main_readiness.py:26: in test_review_autofill_does_not_replace_ambiguous_existing_proxmox_with_empty_disk
     assert plan["storage"]["substrate"]["serial"] is None

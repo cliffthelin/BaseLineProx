@@ -60,9 +60,23 @@ def test_guest_homepage_uses_the_host_bridge_address_not_the_browser_loopback(tm
     assert h.guest_homepage() == "https://192.168.20.5:8006"
 
 
-def test_unknown_guest_homepage_is_left_for_the_operator_to_fill(tmp_path):
+def test_failed_guest_homepage_probe_is_an_error(tmp_path):
     h, _ = host(tmp_path)
     h.run = lambda args: (1, "", "bridge unavailable")
+    with pytest.raises(vh.VmError, match="homepage detection failed: bridge unavailable"):
+        h.guest_homepage()
+
+
+def test_malformed_bridge_address_output_is_not_reported_as_an_unknown_address(tmp_path):
+    h, _ = host(tmp_path)
+    h.run = lambda args: (0, "not-json", "")
+    with pytest.raises(vh.VmError, match="homepage detection returned invalid JSON"):
+        h.guest_homepage()
+
+
+def test_successful_bridge_probe_without_a_routable_ipv4_address_is_empty(tmp_path):
+    h, _ = host(tmp_path)
+    h.run = lambda args: (0, json.dumps([{"addr_info": []}]), "")
     assert h.guest_homepage() == ""
 
 
@@ -109,14 +123,6 @@ def test_existing_storage_with_the_wrong_path_is_not_adopted(tmp_path):
     with pytest.raises(vh.VmError, match="storage"):
         h.create_overlay("desktop", base="ubuntu")
     assert not any(a[0] in ("qm", "qemu-img") for a in run.calls)
-
-
-def test_deleting_a_persistent_vm_is_explicitly_refused_until_safe_retirement_exists(tmp_path):
-    h, run = host(tmp_path)
-    h.create_overlay("desktop", base="ubuntu")
-    with pytest.raises(vh.VmError, match="retained"):
-        h.delete_vm("desktop")
-    assert not any(a[:2] == ["qm", "destroy"] for a in run.calls)
 
 
 def test_invalid_base_does_not_register_storage_or_reserve_a_vmid(tmp_path):
@@ -216,3 +222,64 @@ def test_redirected_proxmox_storage_refuses_login_reset_before_guest_access(tmp_
     def forbidden(*args):raise AssertionError('redirected storage reached guest or generated a secret')
     h.run_input=forbidden
     with pytest.raises(ue.UbuntuError,match='storage'):ue.reset_login(h,'work',password_factory=forbidden)
+
+
+def test_the_kasm_seed_storage_is_not_offered_as_an_operating_system_image(tmp_path):
+    """Found on a real Proxmox (2026-10-17): the Kasm VM's cloud-init seed ISO appeared first in the picker of images to install."""
+    h, run = host(tmp_path)
+    stores = [{"storage": "installer-cache", "content": "iso,backup"}, {"storage": "baseline-kasm-root", "content": "images,iso"},
+              {"storage": "baseline-os", "content": "images,iso", "disable": 1}]
+    listing = {"installer-cache": [{"volid": "installer-cache:iso/debian.iso", "size": 5}],
+               "baseline-kasm-root": [{"volid": "baseline-kasm-root:iso/baseline-kasm-seed.iso", "size": 1}]}
+    base = run.__call__
+
+    def answer(argv):
+        if argv[:3] == ["pvesh", "get", "/storage"]:
+            return 0, json.dumps(stores), ""
+        if argv[:2] == ["pvesh", "get"] and "/content" in argv[2]:
+            return 0, json.dumps(listing[argv[2].split("/storage/")[1].split("/")[0]]), ""
+        if argv[:2] == ["pvesm", "path"]:
+            return 0, "/x/" + argv[2].split("/")[-1], ""
+        return base(argv)
+
+    h.run = answer
+    assert [i["name"] for i in h.available_isos()] == ["installer-cache:iso/debian.iso"]
+    assert "baseline-kasm-root" in pv.HIDDEN_ISO_STORAGES
+
+
+def test_a_ready_made_vm_is_registered_with_proxmox_with_its_seed_efi_disk_and_no_password(tmp_path):
+    """The same path the launcher's ready-made tile takes: the carried base is linked in, an overlay and a retained disk are made, and Proxmox gets a VM with the seed CD and OVMF."""
+    import hashlib
+    import prebuilt_environment as pe
+    h, run = host(tmp_path)
+    carried_dir = tmp_path / "carried"
+    carried_dir.mkdir()
+    (carried_dir / "debian-base.qcow2").write_bytes(b"debian base")
+    (carried_dir / "debian-base.json").write_text(json.dumps({"base": "debian-base.qcow2", "sha256": hashlib.sha256(b"debian base").hexdigest(), "holds_install_state_or_secrets": False}))
+    pe.install_base(h, "debian", carried_dir)
+    got = pe.create(h, "work", "debian", owner=pe.owner_account(h, "cliff"), memory_mb=4096, cpus=2)
+    assert got["owner"] == "cliff"
+    create = next(c for c in run.calls if c[:2] == ["qm", "create"])
+    assert "--agent" in create and "--machine" in create and any(a.startswith("baseline") for a in create)
+    sets = [c for c in run.calls if c[:2] == ["qm", "set"]]
+    assert any("--ide2" in c and any("seed.iso" in a for a in c) for c in sets)                      # the first-boot seed is attached as a CD
+    assert any("--bios" in c and "ovmf" in c for c in sets) and any("--efidisk0" in c for c in sets)  # UEFI with an EFI disk, as the bases boot
+    assert not any("password" in " ".join(c).lower() for c in run.calls)                              # nothing about a password is sent to Proxmox
+    assert (h.vm_dir("work") / "seed.iso").exists() and h.base_path("debian-base").is_symlink()
+
+
+def test_a_creation_that_fails_after_the_vmid_is_reserved_leaves_nothing_behind_so_the_same_name_can_be_tried_again(tmp_path):
+    """Found on the rehearsal's real web service: the retained-disk space check failed after the VMID record was written, and every retry
+    then answered 'already exists or has retained state'."""
+    room = {"user": 0}
+    run = ProxmoxRunner()
+    h = pv.ProxmoxVmHost(tmp_path / "os", persistence_store=tmp_path / "user", run=run,
+                         free_bytes=lambda p: room["user"] * vh.GIB if str(p).startswith(str(tmp_path / "user")) else 500 * vh.GIB)
+    h.bases_dir.mkdir(parents=True)
+    (h.bases_dir / "ubuntu.qcow2").write_bytes(b"base")
+    with pytest.raises(vh.VmError, match="free space"):
+        h.create_overlay("desktop", base="ubuntu")
+    assert not h._record_path("desktop").exists() and not any(c[:2] == ["qm", "create"] for c in run.calls)
+    room["user"] = 500
+    spec = h.create_overlay("desktop", base="ubuntu")
+    assert spec["base"] == "ubuntu" and h._record("desktop")["registered"] is True

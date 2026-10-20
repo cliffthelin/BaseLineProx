@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import shutil
+import stat
 import tarfile
 import time
 import uuid
@@ -24,10 +25,12 @@ ID = re.compile(r'^[0-9a-f]{32}$')
 KINDS = ('home','root','data')
 
 
-def resolve_destination(path, run=None):
+def resolve_destination(path, run=None, *, boot_serial=None):
+    if boot_serial is None and run is None:
+        boot_serial=ob._boot_serial()
     return ob.resolve_destination(path,run=run or ob._default_run,
-                                  allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS,
-                                  boot_serial=ob._boot_serial() if run is None else None)
+                                  allowed_serials=drive_admin.allowed_target_serials(),
+                                  boot_serial=boot_serial)
 
 
 def _separate_source(host, dest, run=None):
@@ -137,18 +140,45 @@ def backup(host, *, name, destination: str, run=None, origin=None):
     return {'ok':True,'backup_id':backup_id,'message':f'Retained backup {backup_id} verified. OS/base excluded; original kept stopped.'}
 
 
+def _read_manifest(path, dest, backup_id):
+    manifest_path=path/'MANIFEST.json'
+    try:
+        info=manifest_path.lstat()
+    except FileNotFoundError:
+        raise vh.VmError('retained backup manifest is missing; set is incomplete') from None
+    except OSError as exc:
+        raise vh.VmError(f'retained backup manifest cannot be inspected: {exc}') from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise vh.VmError('retained backup manifest is redirected or not a regular file')
+    try:
+        manifest=json.loads(manifest_path.read_text())
+    except (OSError,UnicodeError,ValueError) as exc:
+        raise vh.VmError(f'retained backup manifest is unreadable: {exc}') from exc
+    if (not isinstance(manifest,dict) or manifest.get('kind')!='baseline-container-retained'
+            or manifest.get('version')!=1 or manifest.get('backup_id')!=backup_id
+            or manifest.get('destination_serial')!=dest.serial
+            or not isinstance(manifest.get('archive'),dict)
+            or manifest['archive'].get('name')!='retained.tar.gz'):
+        raise vh.VmError('retained backup identity or manifest changed')
+    return manifest
+
+
 def _read(dest, backup_id):
     if not isinstance(backup_id,str) or not ID.fullmatch(backup_id):raise vh.VmError('invalid retained backup ID')
     path=_root(dest)/backup_id
-    if path.is_symlink() or (path/'MANIFEST.json').is_symlink() or (path/'retained.tar.gz').is_symlink():
-        raise vh.VmError('backup set is redirected')
-    manifest=json.loads((path/'MANIFEST.json').read_text())
-    if (manifest.get('kind')!='baseline-container-retained' or manifest.get('version')!=1
-            or manifest.get('backup_id')!=backup_id or manifest.get('destination_serial')!=dest.serial
-            or manifest.get('archive',{}).get('name')!='retained.tar.gz'):
-        raise vh.VmError('retained backup identity or manifest changed')
+    if path.is_symlink():raise vh.VmError('backup set is redirected')
+    manifest=_read_manifest(path,dest,backup_id)
     archive=path/'retained.tar.gz'
-    if archive.stat().st_size!=manifest['archive']['bytes'] or _digest(archive)!=manifest['archive']['sha256']:
+    try:
+        archive_info=archive.lstat()
+    except OSError as exc:
+        raise vh.VmError(f'retained backup archive cannot be inspected: {exc}') from exc
+    if (not stat.S_ISREG(archive_info.st_mode)
+            or type(manifest['archive'].get('bytes')) is not int
+            or not isinstance(manifest['archive'].get('sha256'),str)
+            or not re.fullmatch('[0-9a-f]{64}',manifest['archive']['sha256'])
+            or archive_info.st_size!=manifest['archive']['bytes']
+            or _digest(archive)!=manifest['archive']['sha256']):
         raise vh.VmError('retained archive checksum mismatch')
     return manifest,archive
 
@@ -156,13 +186,38 @@ def _read(dest, backup_id):
 def listing(destination_path, run=None):
     dest=resolve_destination(destination_path,run)
     root=_root(dest)
+    try:
+        root_info=root.lstat()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise vh.VmError(f'retained backup directory cannot be inspected: {exc}') from exc
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise vh.VmError('retained backup path is not a regular directory')
+    try:
+        paths=sorted(root.iterdir(),reverse=True)
+    except OSError as exc:
+        raise vh.VmError(f'retained backup directory cannot be listed: {exc}') from exc
     result=[]
-    for path in sorted(root.iterdir(),reverse=True) if root.is_dir() else []:
-        if ID.fullmatch(path.name) and (path/'MANIFEST.json').is_file():
-            # Listing checks manifest; restore separately verifies archive bytes.
-            if path.is_symlink() or (path/'MANIFEST.json').is_symlink():continue
-            manifest=json.loads((path/'MANIFEST.json').read_text())
-            if manifest.get('kind')=='baseline-container-retained':result.append(manifest)
+    for path in paths:
+        if not ID.fullmatch(path.name):continue
+        try:
+            path_info=path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise vh.VmError(f'retained backup set {path.name} cannot be inspected: {exc}') from exc
+        if stat.S_ISLNK(path_info.st_mode):raise vh.VmError(f'retained backup set {path.name} is redirected')
+        if not stat.S_ISDIR(path_info.st_mode):raise vh.VmError(f'retained backup set {path.name} is not a directory')
+        try:
+            manifest_info=(path/'MANIFEST.json').lstat()
+        except FileNotFoundError:
+            continue  # manifests are published last; absence means the set is incomplete
+        except OSError as exc:
+            raise vh.VmError(f'retained backup set {path.name} manifest cannot be inspected: {exc}') from exc
+        if not stat.S_ISREG(manifest_info.st_mode):
+            raise vh.VmError(f'retained backup set {path.name} manifest is redirected or not a regular file')
+        result.append(_read_manifest(path,dest,path.name))
     return result
 
 

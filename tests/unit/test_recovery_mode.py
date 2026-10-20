@@ -36,8 +36,12 @@ def test_discover_reports_the_active_persona_when_something_is_found():
     assert report.active_persona == "admin"
 
 
+# A readable kernel mount table with nothing of ours in it. (An unreadable table is an observation error, never 'nothing mounted'.)
+NOTHING_OF_OURS = {"/proc/self/mounts": "proc /proc proc rw,nosuid 0 0\n"}
+
+
 def test_discover_active_persona_is_none_when_nothing_is_found():
-    runner = FakeRunner()
+    runner = FakeRunner(files=dict(NOTHING_OF_OURS))
     report = rm.discover(runner, personas=("admin", "personal"))
     assert report.personas_found == []
     assert report.personas_missing == ["admin", "personal"]
@@ -63,7 +67,7 @@ def test_can_exit_false_when_the_only_mounted_persona_is_read_only():
 
 
 def test_can_exit_false_when_nothing_is_mounted_at_all():
-    runner = FakeRunner()
+    runner = FakeRunner(files=dict(NOTHING_OF_OURS))
     ok, reason = rm.can_exit(runner, personas=("admin", "personal"))
     assert ok is False
 
@@ -100,7 +104,7 @@ def test_is_active_false_before_any_entry():
 # -- attempt_exit -------------------------------------------------------------
 
 def test_attempt_exit_refuses_and_never_clears_active_without_a_real_rw_persona():
-    runner = FakeRunner()
+    runner = FakeRunner(files=dict(NOTHING_OF_OURS))
     rm.record_entry(runner, now=1700000000.0, reason="cascade_failed")
     result = rm.attempt_exit(runner, personas=("admin",), now=1700000060.0)
     assert result.applied is False
@@ -120,6 +124,6 @@ def test_attempt_exit_succeeds_and_clears_active_once_a_persona_is_read_write():
 
 
 def test_attempt_exit_when_never_entered_still_refuses_cleanly_without_a_persona():
-    runner = FakeRunner()
+    runner = FakeRunner(files=dict(NOTHING_OF_OURS))
     result = rm.attempt_exit(runner, personas=("admin",), now=1700000000.0)
     assert result.applied is False

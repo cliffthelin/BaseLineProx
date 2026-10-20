@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Privileged implementation entry point for the confirmed installer web action."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+import lane_files
+lane_files.apply_defaults(__import__('os').environ)      # a build host's lane data, found as the installer finds it
+import installed_drive_update
+if __name__ == '__main__':
+    raise SystemExit(installed_drive_update.main())

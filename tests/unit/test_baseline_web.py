@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from fake_runner import FakeRunner
+from fake_runner import FakeProc, FakeRunner
 
 import baseline_web as bw
 import drive_admin as da
@@ -24,7 +24,7 @@ import drive_admin as da
 
 def test_render_nav_marks_the_active_tab():
     nav = bw.render_nav("/drive-admin")
-    assert 'class="active">Drive Administration' in nav
+    assert 'href="/drive-admin" class="active"' in nav and "Drive Administration" in nav
 
 
 def test_with_nav_inserts_right_after_body_tag():
@@ -45,7 +45,7 @@ class FakePdsRunner:
     def __init__(self, serials_by_path=None, drive_table="sdb disk  11111111-2222-3333-4444-555555555555 \n"):
         self.drive_table = drive_table
         self.serials_by_path = serials_by_path or {
-            "/dev/sdb": "MD89N41071210AP4E", "/dev/sdd": "FD01N6557110C271B",
+            "/dev/sdb": "SYNTHDRIVEA00001", "/dev/sdd": "SYNTHDRIVEA00001",
         }
 
     def run(self, argv):
@@ -59,7 +59,7 @@ class FakePdsRunner:
         if argv[0] == "lsblk" and "NAME,TYPE,FSTYPE,PTUUID,LABEL" in argv:
             return self.drive_table          # what is ON the drive: blank unless a test says otherwise
         if argv[0] == "lsblk":
-            return "nvme0n1\n"
+            return "nvme0n1\n" if argv[-1] == "/dev/nvme0n1p2" else ""
         raise AssertionError(f"unexpected: {argv}")
 
     def lstat(self, path):
@@ -76,7 +76,7 @@ class FakePdsRunner:
 
 _LSBLK_PAIRS = (
     'NAME="sdb" SIZE="476.9G" MODEL="PC401 NVMe SK hynix 512GB" TRAN="usb" ROTA="1" '
-    'SERIAL="MD89N41071210AP4E" TYPE="disk"\n'
+    'SERIAL="SYNTHDRIVEA00001" TYPE="disk"\n'
     'NAME="sdz" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" TRAN="sata" ROTA="1" '
     'SERIAL="OtherRealSerial-1" TYPE="disk"\n'
 )
@@ -93,8 +93,9 @@ def test_real_drive_state_lists_every_real_candidate_drive_via_drive_admin():
     assert by_path["/dev/sdb"]["drive_type"] == "NVMe"
 
 
-def test_real_drive_state_returns_empty_list_when_no_runner_is_configured():
-    assert bw.real_drive_state(None, pds_runner=FakePdsRunner()) == []
+def test_real_drive_state_reports_missing_runner_instead_of_empty_inventory():
+    with pytest.raises(bw.DriveInventoryError, match="runner unavailable"):
+        bw.real_drive_state(None, pds_runner=FakePdsRunner())
 
 
 def test_real_volume_state_returns_the_full_planned_volume_list_even_when_nothing_exists_yet():
@@ -102,20 +103,55 @@ def test_real_volume_state_returns_the_full_planned_volume_list_even_when_nothin
     volume, existing or not - a bare FakeRunner (nothing created, real
     lvs/df calls returning empty output) is a real, honest "not
     provisioned yet" state, not a failure."""
-    details = bw.real_volume_state(FakeRunner())
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, '{"filesystems": []}', "")),
+    ])
+    details = bw.real_volume_state(runner)
     assert len(details) == 8
     assert all(d["lv_exists"] is False for d in details)
 
 
-def test_real_volume_state_returns_empty_list_when_no_runner_is_configured():
-    assert bw.real_volume_state(None) == []
+def test_real_volume_state_reports_missing_runner_instead_of_empty_inventory():
+    with pytest.raises(bw.VolumeInventoryError, match="runner unavailable"):
+        bw.real_volume_state(None)
 
 
-def test_real_volume_state_returns_empty_list_on_a_real_exception_rather_than_crashing():
+def test_real_volume_state_preserves_real_probe_error_instead_of_empty_inventory():
     class ExplodingRunner:
         def run(self, *a, **k):
             raise RuntimeError("real subprocess failure")
-    assert bw.real_volume_state(ExplodingRunner()) == []
+    with pytest.raises(bw.VolumeInventoryError, match="real subprocess failure"):
+        bw.real_volume_state(ExplodingRunner())
+
+
+def test_drive_admin_page_displays_volume_inventory_error():
+    page = bw.render_drive_admin_page(drives=[], volumes=[], volume_error="lvs permission denied",
+                                      actions=[], daily_ok=True)
+    assert b"Volume inventory failed" in page
+    assert b"lvs permission denied" in page
+
+
+def test_drive_admin_page_displays_drive_inventory_error():
+    page = bw.render_drive_admin_page(drives=[], volumes=[], drive_error="lsblk permission denied",
+                                      actions=[], daily_ok=True)
+    assert b"Drive inventory failed" in page
+    assert b"lsblk permission denied" in page
+    assert b"No eligible drives were found" not in page
+
+
+def test_drive_admin_route_shows_failed_drive_probe_as_unknown_inventory():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lsblk"], FakeProc(1, "", "lsblk permission denied")),
+    ])
+    case = _RealServerCase(_base_deps(runner=runner))
+    try:
+        status, body = case.get("/drive-admin")
+        assert status == 200
+        assert b"Drive inventory failed" in body
+        assert b"lsblk permission denied" in body
+        assert b"No eligible drives were found" not in body
+    finally:
+        case.close()
 
 
 # -- render_drive_admin_page ---------------------------------------------------
@@ -190,6 +226,15 @@ def test_render_drive_admin_page_lists_real_drives_volumes_and_actions():
     assert "driveAdminModalPassword" not in body  # no password field - real pkexec native dialog instead
 
 
+def test_render_drive_admin_page_offers_the_serial_checked_partition_unmount_action():
+    body = bw.render_drive_admin_page(drives=[], volumes=[], actions=da.describe_actions()).decode()
+    assert 'data-action-card-id="unmount_partition"' in body
+    assert 'function partitionUnmountParamsHtml()' in body
+    assert 'params.partition_mountpoint' in body
+    assert 'function askForNativePolicyKit(challenge)' in body
+    assert '"/drive-admin/execute-native"' in body
+
+
 def test_render_drive_admin_page_exposes_a_collapsed_overrides_section_for_technicians():
     """Direct instruction: technical fields (serial, source ISO path,
     cert/key paths, server host, MAC/DMI override) "should not be
@@ -235,14 +280,10 @@ def test_render_drive_admin_page_shows_a_dash_when_partition_count_is_unknown():
 
 def test_render_drive_admin_page_handles_an_empty_drive_or_volume_list_without_crashing():
     body = bw.render_drive_admin_page(drives=[], volumes=[], actions=[]).decode()
-    assert "No volumes planned" in body
+    assert "No volume records were returned" in body
 
 
-def test_render_drive_admin_page_shows_a_checkbox_per_volume_for_the_update_action():
-    """Direct feedback: Update should let the operator select
-    partitions/volumes from the drive tree, then choose which types of
-    update to apply - the mounted-volumes table needs a real checkbox
-    per row, not just a read-only listing."""
+def test_render_drive_admin_page_only_allows_the_volume_that_holds_updateable_packages():
     body = bw.render_drive_admin_page(
         drives=[], actions=[],
         volumes=[{"label": "BASELINE", "mountpoint": "/mnt/BASELINE", "lv_name": "baseline_app_state",
@@ -252,8 +293,11 @@ def test_render_drive_admin_page_shows_a_checkbox_per_volume_for_the_update_acti
                   "lv_name": "baseline_installer_cache", "lv_exists": False, "lv_size_bytes": None,
                   "total_bytes": None, "used_bytes": None, "percent_used": None}],
     ).decode()
-    assert '<input type="checkbox" class="volume-select" value="BASELINE">' in body
+    assert '<input type="checkbox" class="volume-select" value="BASELINE" disabled' in body
     assert '<input type="checkbox" class="volume-select" value="INSTALLER_CACHE">' in body
+    assert 'querySelectorAll(".volume-select:not(:disabled)")' in body
+    assert "Only INSTALLER_CACHE stores updateable Debian package artifacts" in body
+    assert "host&#x27;s configured repository trust policy" in body or "host's configured repository trust policy" in body
 
 
 def test_render_drive_admin_page_shows_real_lv_name_and_size_in_the_detail_row():
@@ -460,6 +504,32 @@ def _base_deps(**overrides):
     return deps
 
 
+def test_host_restart_route_requests_desktop_confirmation():
+    from test_host_restart import runner_for
+    runner = runner_for()
+    case = _RealServerCase(_base_deps(runner=runner))
+    try:
+        status, body = case.post_json('/host/restart', {})
+        assert status == 200
+        assert body['outcome'] == 'confirmation_requested'
+        assert runner.calls[-1][-2:] == ['gnome-session-quit', '--reboot']
+    finally:
+        case.close()
+
+
+def test_host_restart_route_requires_login():
+    from test_host_restart import runner_for
+    runner = runner_for()
+    case = _RealServerCase(_base_deps(runner=runner))
+    try:
+        case.token = 'not-a-session'
+        status, body = case.post_json('/host/restart', {})
+        assert status == 401
+        assert runner.calls == []
+    finally:
+        case.close()
+
+
 def test_drive_admin_page_reachable_over_a_real_socket():
     from fake_runner import FakeProc
     runner = FakeRunner(command_responses=[(lambda a: a[0] == "lsblk", FakeProc(0, _LSBLK_PAIRS, ""))])
@@ -609,9 +679,9 @@ def test_drive_admin_action_reaches_the_real_action_via_a_real_pkexec_runner():
     """Proves the server actually constructs a real `PkexecRunner` and
     dispatches to it - not any one action's specific business outcome.
     `repair` is used since it genuinely calls `runner.run()` (via
-    `find_vg_for_device`'s real `pvs` call); `update_selected` is a
-    pure honest placeholder that never touches the runner at all, so
-    it can't prove this on its own."""
+    `find_vg_for_device`'s real `pvs` call). The cache update action
+    also reaches the runner now, but this test isolates the drive-action
+    dispatch path from APT/cache behavior."""
     executor = FakeSudoExecutor(returncode=0, stdout="")
     case = _RealServerCase(_base_deps(pkexec_executor=executor))
     try:
@@ -769,10 +839,34 @@ def test_admin_settings_save_route_applies_a_real_value_once_elevated():
 # -- Hardware tab (direct instruction, 2026-09-29: health check moves out of ---
 # -- Drive Administration into its own tab that just shows current state) -----
 
-def test_real_hardware_state_returns_empty_shape_when_no_runner_is_configured():
+def test_real_hardware_state_uses_the_real_runner_when_none_is_injected(monkeypatch):
+    import repair
+    runner = FakeRunner()
+    monkeypatch.setattr(repair, "RealRunner", lambda: runner)
     state = bw.real_hardware_state(None)
-    assert state == {"dependency_results": [], "sensors": None, "nvme": None,
-                     "smart": None, "sysinfo": {}, "inventory": {}}
+    assert "errors" in state
+    assert state["sysinfo"].get("kernel") is None
+    assert any(item["source"] == "kernel" for item in state["errors"])
+    assert any(call[0] == "uname" for call in runner.calls)
+
+
+def test_real_hardware_state_preserves_collector_failures_and_renders_them(monkeypatch):
+    import dependencies
+    import diagnostics
+    import hardware_inventory
+    monkeypatch.setattr(dependencies, "run_checks", lambda **kw: (_ for _ in ()).throw(OSError("dependency probe")))
+    monkeypatch.setattr(diagnostics, "collect_sensors", lambda runner: (_ for _ in ()).throw(OSError("sensor probe")))
+    monkeypatch.setattr(diagnostics, "collect_nvme", lambda runner: (_ for _ in ()).throw(OSError("nvme probe")))
+    monkeypatch.setattr(diagnostics, "collect_smart", lambda runner: (_ for _ in ()).throw(OSError("smart probe")))
+    monkeypatch.setattr(hardware_inventory, "collect_all", lambda runner: (_ for _ in ()).throw(OSError("inventory probe")))
+    state = bw.real_hardware_state(FakeRunner())
+    sources = {item["source"] for item in state["errors"]}
+    assert {"dependencies", "sensors", "nvme", "smart", "hardware inventory"} <= sources
+    assert state["sensors"] is None and state["nvme"] is None and state["smart"] is None
+    body = bw.render_hardware_page(**state).decode()
+    for name in sources:
+        assert name in body
+    assert "probe failed" in body
 
 
 def test_real_hardware_state_reports_real_dependency_results():
@@ -859,6 +953,18 @@ def test_installer_cache_page_warns_loudly_when_the_volume_is_not_mounted():
     assert "ic-banner warn" in body
 
 
+def test_installer_cache_page_shows_scan_failure_without_claiming_everything_missing():
+    import installer_cache as ic
+    report = ic.CacheReport(root="/mnt/INSTALLER_CACHE", mounted=True,
+                            mount_detail="mounted from /dev/cache", scanned_ok=False,
+                            scan_detail="permission denied while listing packages")
+    body = bw.render_installer_cache_page(report).decode()
+    assert "Cache inventory failed" in body
+    assert "permission denied while listing packages" in body
+    assert "required for a build" not in body
+    assert "not on the volume" not in body
+
+
 def test_installer_cache_page_confirms_a_real_mount():
     body = bw.render_installer_cache_page(_cache_report(mounted=True)).decode()
     assert "ic-banner ok" in body
@@ -887,6 +993,22 @@ def test_installer_cache_route_renders_without_a_runner_instead_of_crashing():
         status, body = case.get("/installer-cache")
         assert status == 200
         assert b"Installer Cache" in body
+    finally:
+        case.close()
+
+
+def test_installer_cache_route_renders_failed_scan_as_unknown_inventory():
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["findmnt"], FakeProc(0, "/dev/cache ext4\n", "")),
+        (lambda a: a[:1] == ["ls"] and a[-1].endswith("/isos"), FakeProc(2, "", "Permission denied")),
+    ])
+    case = _RealServerCase(_base_deps(runner=runner))
+    try:
+        status, body = case.get("/installer-cache")
+        assert status == 200
+        assert b"Cache inventory failed" in body
+        assert b"no artifacts are marked present or missing" in body
+        assert b"required for a build" not in body
     finally:
         case.close()
 
@@ -958,6 +1080,37 @@ def test_app_isolation_page_shows_the_package_format_matrix():
     assert "~/.var/app/{app}" in body
 
 
+def test_app_isolation_page_verifies_live_persona_volume_identity():
+    import appdata
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:2] == ["blkid", "-L"], FakeProc(0, "/dev/mapper/baseline_appdata_personal\n", "")),
+        (lambda a: a[:2] == ["findmnt", "--noheadings"], FakeProc(0, "/dev/mapper/baseline_appdata_personal ext4\n", "")),
+        (lambda a: a[:2] == ["readlink", "-e"], FakeProc(0, "/dev/mapper/baseline_appdata_personal\n", "")),
+    ])
+    body = bw.render_app_isolation_page(
+        "personal", appdata.plan_all("personal"), leaks=[], conflicts=[],
+        formats=appdata.supported_formats(), runner=runner).decode()
+    assert "APPDATA_PERSONAL mount verified" in body
+    assert "/mnt/APPDATA_PERSONAL is backed by APPDATA_PERSONAL" in body
+
+
+def test_app_isolation_page_shows_wrong_mounted_volume_as_an_error():
+    import appdata
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:2] == ["blkid", "-L"], FakeProc(0, "/dev/mapper/baseline_appdata_personal\n", "")),
+        (lambda a: a[:2] == ["findmnt", "--noheadings"], FakeProc(0, "/dev/nvme0n1p2 ext4\n", "")),
+        (lambda a: a[:2] == ["readlink", "-e"] and a[-1] == "/dev/mapper/baseline_appdata_personal",
+         FakeProc(0, "/dev/mapper/baseline_appdata_personal\n", "")),
+        (lambda a: a[:2] == ["readlink", "-e"], FakeProc(0, "/dev/nvme0n1p2\n", "")),
+    ])
+    body = bw.render_app_isolation_page(
+        "personal", appdata.plan_all("personal"), leaks=[], conflicts=[],
+        formats=appdata.supported_formats(), runner=runner).decode()
+    assert 'role="alert"' in body
+    assert "does not match labeled volume" in body
+    assert "APPDATA_PERSONAL mount verified" not in body
+
+
 def test_app_isolation_page_reports_a_violation_loudly():
     import appdata
     plans = appdata.plan_all("personal")
@@ -975,6 +1128,10 @@ def test_app_isolation_page_states_an_app_with_no_overlay_rather_than_blanking_i
         "personal", plans, leaks=[], conflicts=[],
         formats=appdata.supported_formats()).decode()
     assert "no overlay (stated, not assumed)" in body
+    assert 'id="isolation-search"' in body
+    assert 'role="tablist"' in body
+    assert 'id="application-tree"' in body
+    assert 'pageSize=50' in body
 
 
 def test_a_drive_action_on_a_drive_outside_the_allowlist_never_reaches_pkexec():
@@ -998,3 +1155,515 @@ def test_app_isolation_preview_never_claims_runtime_confinement():
     assert 'Runtime isolation has not been applied or verified' in body
     assert 'Isolation holds' not in body
     assert 'Unlisted data paths are not audited' in body
+
+
+def test_master_config_aggregates_current_values_through_authenticated_http(tmp_path):
+    import admin_elevation
+    class Source:
+        def current_settings(self):
+            return {'diagnostics': {'ethtool_duplex': 'half'}}
+    class Host:
+        store = '/mnt/SUBSTRATE/vms'
+        persistence_store = '/mnt/USER_PERSONAL/vms'
+        def list_vms(self):
+            return [{'name': 'actual-test-vm', 'cpus': 2, 'password': 'must-not-be-rendered'}]
+    case = _RealServerCase(_base_deps(source=Source(), vm_host=Host(),
+        elevation_store=admin_elevation.ElevationStore(), vm_config_path=tmp_path / 'vm.json'))
+    try:
+        status, body = case.get('/master-config')
+        assert status == 200
+        assert b'config-search' in body and b'actual-test-vm' in body
+        assert b'must-not-be-rendered' not in body
+        assert b'/settings/diagnostics' in body
+        assert b'Installer Cache / declared sources' in body
+    finally:
+        case.close()
+
+
+def test_draft_http_routes_save_reload_and_master_aggregate(tmp_path):
+    import admin_elevation
+    from configuration_drafts import DraftStore
+    class Source:
+        def current_settings(self): return {}
+    case = _RealServerCase(_base_deps(source=Source(), draft_store=DraftStore(tmp_path / 'drafts.sqlite'),
+                                     elevation_store=admin_elevation.ElevationStore()))
+    try:
+        status, payload = case.post_json('/install-plan/draft', {'document': {'environment': {'name': 'persisted-example'}}, 'revision': 0})
+        assert status == 200 and payload['draft']['applied'] is False
+        status, raw = case.get('/install-plan/draft')
+        assert json.loads(raw)['draft']['revision'] == 1
+        status, payload = case.post_json('/install-plan/draft', {'document': {'environment': {}}, 'revision': 0})
+        assert status == 409
+        status, raw = case.get('/master-config')
+        assert status == 200 and b'persisted-example' in raw
+        assert b'no saved draft source' not in raw
+        status, payload = case.post_json('/recipes/draft', {'document': {'document': {'id': 'unfinished-recipe'}, 'app_document': None}, 'revision': 0})
+        assert status == 200
+        assert json.loads(case.get('/recipes/draft')[1])['draft']['document']['document']['id'] == 'unfinished-recipe'
+    finally:
+        case.close()
+
+
+def test_draft_routes_enforce_user_ownership_and_existing_role_gate(tmp_path):
+    from configuration_drafts import DraftStore
+    store = DraftStore(tmp_path / 'drafts.sqlite')
+    case = _RealServerCase(_base_deps(draft_store=store))
+    try:
+        assert case.post_json('/install-plan/draft', {'document': {'name': 'root-only'}, 'revision': 0})[0] == 200
+        bob = case.server.deps['sessions'].create('other-admin', now=1700000000, role='admin')
+        case.token = bob.token
+        assert json.loads(case.get('/install-plan/draft')[1])['draft'] is None
+        assert case.post_json('/install-plan/draft', {'owner':'root', 'document': {}, 'revision':0})[0] == 400
+        assert store.get('root','installer')['document']['name'] == 'root-only'
+        case.token = case.server.deps['sessions'].create('limited-operator', now=1700000000, role='operator').token
+        assert case.post_json('/install-plan/draft', {'document': {}, 'revision':0})[0] == 403
+        assert case.get('/recipes/draft')[0] == 403
+    finally:
+        case.close()
+
+
+def test_hardware_drive_links_use_serial_and_escape_inventory():
+    from hardware_inventory import BlockDevice
+    page = bw._render_inventory({'block':[BlockDevice('sdd', serial='serial & one', model='<unsafe>') ]})
+    assert '/drive-admin?serial=serial%20%26%20one' in page
+    assert '&lt;unsafe&gt;' in page and '<unsafe>' not in page
+
+
+def test_drive_admin_serial_link_selects_only_fresh_matching_candidate():
+    drives = [{'path':'/dev/sdb','serial':'first','model':'one','is_default':True},
+              {'path':'/dev/sdc','serial':'second','model':'two'}]
+    page = bw.render_drive_admin_page(drives=drives, volumes=[], actions=[], selected_serial='second').decode()
+    assert 'value="/dev/sdc" checked' in page
+    assert 'value="/dev/sdb" checked' not in page
+    missing = bw.render_drive_admin_page(drives=drives, volumes=[], actions=[], selected_serial='disconnected').decode()
+    assert 'value="/dev/sdb" checked' not in missing
+    assert 'no longer available' in missing
+
+
+def test_installer_cache_provides_associated_package_anchors():
+    import installer_cache as ic
+    entry = next(item for item in ic.catalog() if item.entry_id == 'ethtool')
+    report = ic.CacheReport(root=ic.DEFAULT_CACHE_ROOT, mounted=False, mount_detail='not mounted', rows=[ic.Presence(entry,False)])
+    assert 'id="cache-entry-ethtool"' in bw.render_installer_cache_page(report).decode()
+
+
+def test_hardware_host_page_still_works_when_vm_backend_is_unavailable(monkeypatch):
+    class Host:
+        def list_vms(self):
+            raise bw.vh.VmError('VM store offline')
+    monkeypatch.setattr(bw,'real_hardware_state',lambda runner:{'dependency_results':[],'inventory':{}})
+    case = _RealServerCase(_base_deps(vm_host=Host()))
+    try:
+        status, page = case.get('/hardware')
+        assert status == 200
+        assert b'VM store offline' in page
+        assert b'hardware-tab-drives' in page
+    finally:
+        case.close()
+
+
+def test_installer_prepare_inputs_is_durable_and_uses_saved_owned_draft(tmp_path):
+    from configuration_drafts import DraftStore
+    import workload_jobs
+    from test_installer_inputs import repository
+    class Source:
+        def current_settings(self):return {'drivers':{'cpu_microcode':True}}
+    drafts=DraftStore(tmp_path/'drafts.sqlite')
+    drafts.save('root','installer',{'environment':{'name':'saved-plan'}},expected_revision=0)
+    jobs=workload_jobs.WorkloadJobs(tmp_path/'jobs.sqlite')
+    case=_RealServerCase(_base_deps(source=Source(),draft_store=drafts,workload_jobs=jobs,
+        installer_repo_root=repository(tmp_path/'repo'),installer_bundle_root=tmp_path/'bundles'))
+    try:
+        status,result=case.post_json('/install-plan/prepare-inputs',{'revision':0,'request_id':'stale-test'})
+        assert status==409
+        status,result=case.post_json('/install-plan/prepare-inputs',{'revision':1,'request_id':'prepare-test'})
+        assert status==202
+        job=jobs.wait(result['job_id'],5)
+        assert job['state']=='completed'
+        assert 'not ready' in job['result']['message'].lower()
+        status,body=case.get('/install-plan/input-bundle?job_id='+job['id'])
+        report=json.loads(body)
+        assert status==200 and report['prepared'] and report['ready'] is False
+        assert report['executed'] is False
+        repeated,retry=case.post_json('/install-plan/prepare-inputs',{'revision':1,'request_id':'prepare-test'})
+        assert repeated==202 and retry['job_id']==job['id']
+        from pathlib import Path
+        manifest=next((tmp_path/'bundles').rglob('MANIFEST.json'))
+        manifest.unlink()
+        status,result=case.post_json('/workloads/inspect',{'job_id':job['id']})
+        assert status==409  # completed jobs do not need recovery
+        import sqlite3
+        with sqlite3.connect(tmp_path/'jobs.sqlite') as db:
+            db.execute("UPDATE jobs SET state='interrupted' WHERE id=?",(job['id'],))
+        status,result=case.post_json('/workloads/inspect',{'job_id':job['id']})
+        assert status==200
+        assert 'source preparation' in str(result).lower()
+        status,result=case.post_json('/workloads/acknowledge',{'job_id':job['id'],'name':job['name']})
+        assert status==200 and result['state']=='reviewed'
+    finally:
+        case.close()
+
+
+def test_web_source_acquisition_publishes_verified_cache_and_feeds_preparation(tmp_path,monkeypatch):
+    import hashlib
+    import installer_sources as sources
+    import workload_jobs
+    from test_installer_sources import CacheRunner
+    from test_installer_inputs import repository
+    from configuration_drafts import DraftStore
+    monkeypatch.setattr(sources.ue,'IMAGE_SHA256',hashlib.sha256(b'vanilla').hexdigest())
+    root=tmp_path/'cache';root.mkdir()
+    runner=CacheRunner(root)
+    drafts=DraftStore(tmp_path/'drafts.sqlite')
+    drafts.save('root','installer',{'environment':{'name':'test-plan'}},expected_revision=0)
+    jobs=workload_jobs.WorkloadJobs(tmp_path/'jobs.sqlite')
+    case=_RealServerCase(_base_deps(runner=runner,draft_store=drafts,workload_jobs=jobs,installer_cache_root=root,
+        installer_repo_root=repository(tmp_path/'repo'),installer_bundle_root=tmp_path/'bundles'))
+    try:
+        status,body=case.post_json('/installer-cache/acquire',{'source':'ubuntu_base','request_id':'source-test'})
+        assert status==202
+        job=jobs.wait(body['job_id'],5);assert job['state']=='completed'
+        status,page=case.get('/installer-cache/source?source=ubuntu_base')
+        assert status==200 and page==b'vanilla'
+        status,body=case.post_json('/install-plan/prepare-inputs',{'revision':1,'request_id':'snapshot-test'})
+        assert status==202
+        prepared=jobs.wait(body['job_id'],5)
+        status,body=case.get('/install-plan/input-bundle?job_id='+prepared['id'])
+        checks=json.loads(body)
+        assert checks['artifacts'][2]['verified'] is True
+        assert checks['ready'] is False  # unrelated source/dependency gaps remain real
+        status,body=case.post_json('/installer-cache/acquire',{'source':'unsupported','request_id':'bad'})
+        assert status==400
+    finally:case.close()
+
+
+def test_cache_page_offers_typed_native_source_acquisition_and_actual_file_link():
+    import installer_cache as ic
+    report=ic.CacheReport(root=ic.DEFAULT_CACHE_ROOT,mounted=False,mount_detail='not mounted')
+    html=bw.render_installer_cache_page(report).decode()
+    assert '<select id="source-choice">' in html
+    assert '/installer-cache/acquire' in html
+    assert '/installer-cache/source?source=ubuntu_base' in html
+    assert 'crypto.randomUUID' not in html
+
+
+def test_managed_mode_page_defaults_to_standalone_and_saves_a_change(tmp_path):
+    f = tmp_path / "managed.json"
+    case = _RealServerCase(_base_deps(managed_file=f, fs_roots=[str(tmp_path)]))
+    try:
+        status, body = case.get('/managed-mode')
+        assert status == 200 and b"On its own" in body and b"nothing ever connects to a parent" in body
+        assert any(p == "/managed-mode" for p, _ in bw.NAV_TABS)
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'mirror_root': None, 'remote_rebuild': False})[0] == 400
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'mirror_root': '/etc/not-allowed', 'remote_rebuild': False})[0] == 400      # validated again on the server
+        assert case.post_json('/managed-mode', {'mode': 'managed', 'mirror_root': str(tmp_path / 'v'), 'remote_rebuild': False})[0] == 200
+        assert json.loads(f.read_text())["mode"] == "managed"
+        assert case.post_json('/managed-mode', {'mode': 'standalone', 'mirror_root': None})[0] == 200
+        assert json.loads(f.read_text())["mode"] == "standalone"
+    finally:
+        case.close()
+
+
+def test_managed_mode_needs_an_operator_account(tmp_path):
+    case = _RealServerCase(_base_deps(managed_file=tmp_path / "m.json"))
+    try:
+        case.token = case.server.deps['sessions'].create('viewer', now=1700000000, role='viewer').token
+        assert case.post_json('/managed-mode', {'mode': 'standalone', 'mirror_root': None})[0] == 403
+    finally:
+        case.close()
+
+
+def test_web_address_page_and_save(tmp_path):
+    f = tmp_path / "web.env"
+    case = _RealServerCase(_base_deps(web_env_file=f))
+    try:
+        status, body = case.get('/web-address')
+        assert status == 200 and b"Proxmox host itself" in body and b"0.0.0.0" in body
+        assert case.post_json('/web-address', {'bind_host': 'not-an-ip', 'port': 8100})[0] == 400
+        assert case.post_json('/web-address', {'bind_host': '0.0.0.0', 'port': 9100})[0] == 200
+        assert "BASELINE_WEB_PORT=9100" in f.read_text()
+    finally:
+        case.close()
+
+
+def test_network_connection_page_and_save_use_the_shared_logic(monkeypatch):
+    import network
+    import netpref
+    calls = []
+    monkeypatch.setattr(network, "list_interfaces", lambda: [{"name": "eth9", "friendly": "Ethernet"}])
+    monkeypatch.setattr(network, "device_details", lambda n: {"driver": "e1000"})
+    monkeypatch.setattr(network, "is_admin_up", lambda n: True)
+    monkeypatch.setattr(network, "load_aliases", lambda: {})
+    monkeypatch.setattr(network, "check_lifeline", lambda: [{"fact": "nic_detected", "ok": True, "detail": "other0"}])
+    monkeypatch.setattr(network, "save_alias", lambda n, a: calls.append(("alias", n, a)))
+    monkeypatch.setattr(network, "set_admin_state", lambda n, up: calls.append(("power", n, up)) or (True, "ok"))
+    monkeypatch.setattr(netpref, "load_preference", lambda: {})
+    monkeypatch.setattr(netpref, "apply_primary", lambda d: calls.append(("primary", d)) or (True, "primary set"))
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get('/network/connection?dev=eth9')
+        assert status == 200 and b'name="alias"' in body
+        assert case.get('/network/connection?dev=nope')[0] == 404
+        assert case.post_json('/network/connection', {'dev': 'nope', 'alias': '', 'power': True})[0] == 404
+        status, out = case.post_json('/network/connection', {'dev': 'eth9', 'alias': 'Office', 'power': False, 'role': 'primary'})
+        assert status == 200 and ("alias", "eth9", "Office") in calls and ("power", "eth9", False) in calls and ("primary", "eth9") in calls
+    finally:
+        case.close()
+
+
+def test_a_bare_fragment_page_still_gets_the_menu():
+    out = bw._with_nav(b"<h1>Installation readiness</h1><table></table>", "/installation-readiness").decode()
+    assert out.startswith("<!doctype html>") and 'class="baseline-nav"' in out and "<h1>Installation readiness</h1>" in out
+
+
+def test_memory_page_says_so_when_the_volume_group_cannot_be_read(monkeypatch):
+    import volume_growth
+    monkeypatch.setattr(bw, "_swap_runner", lambda deps: (_ for _ in ()).throw(volume_growth.GrowthError("lvs could not be read")))
+    case = _RealServerCase(_base_deps())
+    try:
+        status, body = case.get('/memory')
+        assert status == 200 and b"Swap could not be read" in body
+    finally:
+        case.close()
+
+
+def test_folder_browser_and_paste_check_routes_stay_inside_the_allowed_places(tmp_path):
+    (tmp_path / "drive" / "sub").mkdir(parents=True)
+    case = _RealServerCase(_base_deps(fs_roots=[str(tmp_path)]))
+    try:
+        status, body = case.get(f"/fs/browse?path={tmp_path}/drive")
+        assert status == 200 and [d["name"] for d in json.loads(body)["dirs"]] == ["sub"]
+        assert json.loads(case.get("/fs/browse?path=/etc")[1])["dirs"] == []
+        assert json.loads(case.get(f"/fs/validate?path={tmp_path}/drive")[1])["ok"] is True
+        assert json.loads(case.get("/fs/validate?path=/etc")[1])["ok"] is False
+        assert json.loads(case.get("/fs/validate?path=relative")[1])["ok"] is False
+    finally:
+        case.close()
+
+
+def test_the_launcher_offers_the_systems_the_machine_carries_when_no_list_was_written(tmp_path):
+    import launcher_model
+    import os_list
+    entries = os_list.derived({"ubuntu", "nixos"}, ["ubuntu-26.04.1-desktop-amd64.iso"])
+    out = launcher_model.available_to_create(entries, ["ubuntu-26.04.1-desktop-amd64.iso"], [], 16384, bases={"ubuntu", "nixos"})
+    assert {e["id"] for e in out} == {"ubuntu", "nixos"} and all(e["plan"]["prebuilt"] for e in out)
+
+
+def test_files_page_downloads_uploads_and_stays_inside_the_drives(tmp_path):
+    drive = tmp_path / "drive"; drive.mkdir(); (drive / "a.txt").write_text("hello")
+    case = _RealServerCase(_base_deps(fs_roots=[str(tmp_path)]))
+    try:
+        status, body = case.get(f"/files?path={drive}")
+        assert status == 200 and b"a.txt" in body
+        assert case.get(f"/files/download?path={drive}/a.txt") == (200, b"hello")
+        assert case.get("/files/download?path=/etc/hostname")[0] == 404
+        assert case.post_json("/files/op", {"op": "mkdir", "path": str(drive), "name": "new"})[1]["ok"]
+        assert (drive / "new").is_dir()
+        assert not case.post_json("/files/op", {"op": "delete", "path": "/etc/hostname"})[1]["ok"]
+        url = f"http://127.0.0.1:{case.port}/files/upload?path={drive}&name=up.bin"
+        req = urllib.request.Request(url, data=b"abc", method="POST", headers={"Content-Type": "application/octet-stream", "Cookie": f"session={case.token}",
+                                                                              "Origin": f"http://127.0.0.1:{case.port}"})
+        assert json.loads(urllib.request.urlopen(req, timeout=5).read())["ok"] and (drive / "up.bin").read_bytes() == b"abc"
+    finally:
+        case.close()
+
+
+def test_each_tool_has_its_own_address(tmp_path):
+    case = _RealServerCase(_base_deps())
+    try:
+        for name in ("lm-sensors", "nvme-cli", "smartmontools", "iperf3", "ethtool"):
+            status, body = case.get(f"/tools/{name}")
+            assert status == 200 and name.encode() in body
+        status, body = case.get("/tools/lm-sensors?action=readings")
+        assert status == 200 and b"Result" in body
+        assert case.get("/tools/nothing")[0] in (404,)
+    finally:
+        case.close()
+
+
+def test_vault_page_lists_adds_shows_and_deletes_secrets(tmp_path):
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    case = _RealServerCase(_base_deps(vault_roots=roots))
+    try:
+        assert case.post_json("/vault/put", {"scope": "personal", "name": "GOOGLE_LOGIN", "value": "hunter2hunter2"})[1]["ok"]
+        page = case.get("/vault")[1]
+        assert b"GOOGLE_LOGIN" in page and b"hunter2hunter2" not in page
+        shown = case.post_json("/vault/reveal", {"scope": "personal", "name": "GOOGLE_LOGIN"})[1]
+        assert shown["ok"] and shown["value"] == "hunter2hunter2"
+        assert not case.post_json("/vault/put", {"scope": "personal", "name": "bad name", "value": "hunter2hunter2"})[1]["ok"]
+        assert case.post_json("/vault/delete", {"scope": "personal", "name": "GOOGLE_LOGIN"})[1]["ok"]
+        assert b"GOOGLE_LOGIN" not in case.get("/vault")[1]
+    finally:
+        case.close()
+
+
+def test_deleting_a_secret_works_after_the_vault_is_unlocked(tmp_path):
+    import vault
+    root = tmp_path / "admin"
+    store = vault.Vault(root)
+    store.set_passphrase("synthetic vault passphrase")
+    store.put("GOOGLE_LOGIN", "synthetic-login-value", passphrase="synthetic vault passphrase")
+    case = _RealServerCase(_base_deps(vault_roots=(("USER_ADMIN", "admin", str(root)),),
+                                      vault_passphrase="synthetic vault passphrase"))
+    try:
+        status, result = case.post_json("/vault/delete", {"scope": "admin", "name": "GOOGLE_LOGIN"})
+        assert status == 200 and result["ok"]
+        assert "GOOGLE_LOGIN" not in store.names()
+    finally:
+        case.close()
+
+
+def test_sensitive_credential_and_file_routes_are_unavailable_to_limited_roles(tmp_path):
+    case = _RealServerCase(_base_deps())
+    try:
+        case.token = case.server.deps["sessions"].create("viewer", now=1700000000, role="viewer").token
+        for path, payload in (
+            ("/vault/reveal", {"scope": "admin", "name": "OPENAI_API_KEY"}),
+            ("/vault/grant", {"target": "kasm", "name": "OPENAI_API_KEY"}),
+            ("/files/op", {"op": "mkdir", "path": "/tmp", "name": "nope"}),
+            ("/signins/apply", {}),
+            ("/turnkey/run", {}),
+        ):
+            assert case.post_json(path, payload)[0] == 403
+    finally:
+        case.close()
+
+
+def test_vault_page_reports_detached_partitions_and_refuses_writes(tmp_path, monkeypatch):
+    import vault
+    monkeypatch.setattr(vault, "build_aware_roots", lambda: (_ for _ in ()).throw(vault.VaultError("detached")))
+    monkeypatch.setattr(vault, "root_available", lambda _root: False)
+    case = _RealServerCase(_base_deps())
+    try:
+        status, page = case.get("/vault")
+        assert status == 200 and b"Not mounted" in page
+        status, result = case.post_json("/vault/put", {"scope": "admin", "name": "OPENAI_API_KEY", "value": "synthetic-api-key"})
+        assert status == 409 and not result["ok"]
+        assert not Path("/mnt/USER_ADMIN/vault/OPENAI_API_KEY").exists()
+    finally:
+        case.close()
+
+
+def test_vault_grant_route_refuses_to_write_when_user_admin_is_detached(monkeypatch):
+    import vault
+    monkeypatch.setattr(vault, "root_available", lambda _root: False)
+    case = _RealServerCase(_base_deps())
+    try:
+        status, result = case.post_json("/vault/grant", {"target": "kasm", "name": "OPENAI_API_KEY"})
+        assert status == 409 and not result["ok"]
+    finally:
+        case.close()
+
+
+def test_turnkey_waits_for_user_admin_before_creating_machines_or_marker(monkeypatch, tmp_path):
+    import baseline_web as web
+    monkeypatch.setattr(web.Path, "is_mount", lambda _path: False)
+    marker = tmp_path / "turnkey.json"
+    deps = {"turnkey_marker": None, "turnkey_state": {"running": False}}
+    monkeypatch.setattr(web, "_turnkey_marker", lambda _deps: marker)
+    monkeypatch.setattr(web, "_turnkey_job", lambda *_args: (_ for _ in ()).throw(AssertionError("must wait")))
+    assert not web._turnkey_start(deps, "operator")
+    assert not web._turnkey_marker(deps).exists()
+    assert "USER_ADMIN" in deps["turnkey_state"]["error"]
+
+
+def test_file_upload_origin_is_checked_before_any_bytes_are_written(tmp_path):
+    root = tmp_path / "files"
+    root.mkdir()
+    case = _RealServerCase(_base_deps(fs_roots=(str(root),)))
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{case.port}/files/upload?path={root}&name=bad.bin",
+                                     data=b"must-not-write", method="POST",
+                                     headers={"Content-Type": "application/octet-stream", "Cookie": f"session={case.token}"})
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=5)
+        assert exc.value.code == 403 and not (root / "bad.bin").exists()
+    finally:
+        case.close()
+
+
+def test_vault_grants_and_delivery_reach_a_guest_through_stdin_only(tmp_path):
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    sent = []
+    case = _RealServerCase(_base_deps(vault_roots=roots, vault_grants_path=str(tmp_path / "grants.json"),
+                                      vault_push=lambda target, argv, data: sent.append((target, argv, data))))
+    try:
+        case.post_json("/vault/put", {"scope": "personal", "name": "GOOGLE_LOGIN", "value": "hunter2hunter2"})
+        assert case.post_json("/vault/grant", {"target": "kasm", "name": "GOOGLE_LOGIN"})[1]["ok"]
+        assert not case.post_json("/vault/grant", {"target": "../x", "name": "GOOGLE_LOGIN"})[1]["ok"]
+        report = case.post_json("/vault/deliver", {"target": "kasm"})[1]
+        assert report["delivered"] == ["GOOGLE_LOGIN"]
+        assert sent[0][0] == "kasm" and sent[0][2] == b"hunter2hunter2" and "hunter2" not in " ".join(sent[0][1])
+        assert b"data-send='kasm'" in case.get("/vault")[1]
+        assert case.post_json("/vault/revoke", {"target": "kasm", "name": "GOOGLE_LOGIN"})[1]["ok"]
+    finally:
+        case.close()
+
+
+def test_setup_runs_for_the_signed_in_user_and_says_what_was_done(tmp_path, monkeypatch):
+    import turnkey
+    seen = []
+    monkeypatch.setattr(turnkey, "run", lambda host, user, entries, carried, bases, **kw: seen.append((user, kw["vault_names"])) or
+                            {"created": ["debian"], "already_there": [], "failed": {}, "not_carried": [], "apps_skipped": {}, "granted_to": [], "vault_grants": "unchanged"})
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    case = _RealServerCase(_base_deps(vault_roots=roots, vault_grants_path=str(tmp_path / "g.json"), turnkey_marker=str(tmp_path / "turnkey.json"), turnkey_inline=True))
+    try:
+        case.post_json("/vault/put", {"scope": "personal", "name": "GOOGLE_LOGIN", "value": "hunter2hunter2"})
+        req = urllib.request.Request(f"http://127.0.0.1:{case.port}/turnkey/run", data=b"", method="POST",
+                                     headers={"Cookie": f"session={case.token}", "Origin": f"http://127.0.0.1:{case.port}"})
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        try:
+            urllib.request.build_opener(NoRedirect).open(req, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 303 or exc.code == 302
+        assert seen and seen[0][1] == ()
+        page = case.get("/turnkey")[1]
+        assert b"debian" in page and b"Credential Vault" in page
+        assert (tmp_path / "turnkey.json").exists()
+    finally:
+        case.close()
+
+
+def test_signins_page_saves_from_one_machine_and_sends_to_the_others(tmp_path):
+    import base64 as b64
+    files = {"/home/cane/.config/google-chrome/Default/Cookies": b"c", "/home/cane/.config/google-chrome/Local State": b"{}"}
+    placed = {}
+
+    class Host:
+        persistence_store = str(tmp_path / "pers")
+        def __init__(self):
+            (tmp_path / "pers").mkdir(exist_ok=True)
+            (tmp_path / "pers" / "owner.json").write_text('{"username": "cane"}')
+        def list_vms(self):
+            return [{"name": "src", "running": True}, {"name": "other", "running": True}]
+        def guest_exec(self, name, argv, data=b""):
+            if argv[:2] == ["test", "-e"]:
+                if name == "src" and argv[2] in files:
+                    return {"out-data": ""}
+                if name == "other" and argv[2] in placed:
+                    return {"out-data": ""}
+                raise RuntimeError("missing")
+            if argv[:2] == ["base64", "-w0"]:
+                if name == "src" and argv[3] in files:
+                    return {"out-data": b64.b64encode(files[argv[3]]).decode()}
+                raise RuntimeError("missing")
+            if argv[0] == "sh":
+                return {"out-data": "deb\n"}
+            if argv[0] == "runuser":
+                placed[argv[8]] = data
+                return {"out-data": ""}
+            raise AssertionError(argv)
+    roots = (("USER_ADMIN", "admin", str(tmp_path / "a")), ("USER_PERSONAL", "personal", str(tmp_path / "p")))
+    case = _RealServerCase(_base_deps(vm_host=Host(), vault_roots=roots, signins_dir=str(tmp_path / "signins")))
+    try:
+        assert b"Sign in once" in case.get("/signins")[1]
+        assert case.post_json("/signins/capture", {"app": "chrome", "vm": "src"})[1]["ok"]
+        assert b"saved from src" in case.get("/signins")[1]
+        sent = case.post_json("/signins/apply", {})[1]
+        assert sent["ok"] and "1 sign-in" in sent["message"]
+        assert placed["/home/cane/.config/google-chrome/Default/Cookies"] == b"c"
+        assert not case.post_json("/signins/capture", {"app": "nothing", "vm": "src"})[1]["ok"]
+    finally:
+        case.close()

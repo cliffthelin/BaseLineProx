@@ -12,6 +12,8 @@ read-back format is real, standard `ethtool(8)`/`ethtool -k`/
 `ethtool -a` output shape - the same one `man ethtool` and every real
 Linux system produce.
 """
+import pytest
+
 from fake_runner import FakeProc, FakeRunner
 
 import config_diff as cd
@@ -95,8 +97,8 @@ def test_read_current_ethtool_config_handles_a_real_command_failure():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:1] == ["ethtool"], FakeProc(1, "", "no such device")),
     ])
-    current = cd.read_current_ethtool_config(runner, "eth0")
-    assert current["ethtool_autoneg"] == ""
+    with pytest.raises(cd.ReadbackError, match="REAL-002"):
+        cd.read_current_ethtool_config(runner, "eth0")
 
 
 # -- package installed check -------------------------------------------------
@@ -151,7 +153,7 @@ def test_compute_full_diff_covers_all_four_real_subsystems():
         (lambda a: a[:1] == ["ethtool"] and len(a) == 2, FakeProc(0, ETHTOOL_SETTINGS_OUTPUT, "")),
         (lambda a: a[:2] == ["ethtool", "-k"], FakeProc(0, ETHTOOL_FEATURES_OUTPUT, "")),
         (lambda a: a[:2] == ["ethtool", "-a"], FakeProc(0, ETHTOOL_PAUSE_OUTPUT, "")),
-        (lambda a: a[:1] == ["dpkg-query"] and "amd64-microcode" in a, FakeProc(1, "", "not found")),
+        (lambda a: a[:1] == ["dpkg-query"] and "amd64-microcode" in a, FakeProc(1, "", "dpkg-query: no packages found matching amd64-microcode")),
         (lambda a: a[:1] == ["dpkg-query"] and "firmware-mediatek" in a, FakeProc(0, "install ok installed", "")),
     ])
     desired_config = {

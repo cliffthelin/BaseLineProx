@@ -61,6 +61,10 @@ class ApplyResult:
     detail: str
 
 
+class RecoveryStateObservationError(RuntimeError):
+    """Recovery state is present but cannot be trusted or inspected."""
+
+
 def should_enter(cascade_applied: bool) -> bool:
     """The real entry predicate for the automatic half: true exactly
     when the discovery+repair cascade did NOT succeed - never
@@ -68,7 +72,8 @@ def should_enter(cascade_applied: bool) -> bool:
     return not cascade_applied
 
 
-def discover(runner: Runner, *, personas: tuple) -> DiscoveryReport:
+def discover(runner: Runner, *, personas: tuple,
+             mount_table_path: str = "/proc/self/mounts") -> DiscoveryReport:
     """Reports which
     personas have a real, currently-mounted persistence volume and
     which don't, plus whichever persona is currently marked active
@@ -78,7 +83,7 @@ def discover(runner: Runner, *, personas: tuple) -> DiscoveryReport:
     missing = []
     for persona in personas:
         mountpoint = pbm.user_mountpoint_for(persona)
-        if pbm.is_mounted(runner, mountpoint):
+        if pbm.is_mounted(runner, mountpoint, mount_table_path=mount_table_path):
             found.append(persona)
         else:
             missing.append(persona)
@@ -86,7 +91,8 @@ def discover(runner: Runner, *, personas: tuple) -> DiscoveryReport:
     return DiscoveryReport(personas_found=found, personas_missing=missing, active_persona=active)
 
 
-def can_exit(runner: Runner, *, personas: tuple) -> tuple[bool, str]:
+def can_exit(runner: Runner, *, personas: tuple,
+             mount_table_path: str = "/proc/self/mounts") -> tuple[bool, str]:
     """The hard exit condition: at least one real persona volume
     confirmed mounted read-write. Checked directly against the kernel's
     own reported mount options, never inferred from "is it mounted at
@@ -95,18 +101,28 @@ def can_exit(runner: Runner, *, personas: tuple) -> tuple[bool, str]:
     import persist_bind_mounts as pbm
     for persona in personas:
         mountpoint = pbm.user_mountpoint_for(persona)
-        if pbm.is_mounted_read_write(runner, mountpoint):
+        if pbm.is_mounted_read_write(runner, mountpoint, mount_table_path=mount_table_path):
             return True, f"persona {persona!r} confirmed read-write at {mountpoint}"
     return False, "no persona volume is confirmed read-write yet - cannot leave recovery mode"
 
 
-def read_state(runner: Runner) -> dict | None:
-    if not runner.path_exists(STATE_PATH):
-        return None
+def read_state(runner: Runner, *, state_path: str = STATE_PATH) -> dict | None:
     try:
-        return json.loads(runner.read_text(STATE_PATH))
-    except ValueError:
+        content = runner.read_text(state_path)
+    except FileNotFoundError:
         return None
+    except Exception as exc:
+        raise RecoveryStateObservationError(
+            f"cannot inspect recovery state at {state_path}: {exc}") from exc
+    try:
+        state = json.loads(content)
+    except (TypeError, ValueError) as exc:
+        raise RecoveryStateObservationError(
+            f"recovery state at {state_path} is invalid JSON: {exc}") from exc
+    if not isinstance(state, dict) or type(state.get("active")) is not bool:
+        raise RecoveryStateObservationError(
+            f"recovery state at {state_path} must be an object with a boolean active field")
+    return state
 
 
 def _write_state(runner: Runner, state: dict) -> None:
@@ -122,21 +138,23 @@ def record_entry(runner: Runner, *, now: float, reason: str) -> None:
     _write_state(runner, {"active": True, "reason": reason, "entered_at": now, "exited_at": None})
 
 
-def is_active(runner: Runner) -> bool:
-    state = read_state(runner)
+def is_active(runner: Runner, *, state_path: str = STATE_PATH) -> bool:
+    state = read_state(runner, state_path=state_path)
     return bool(state and state.get("active"))
 
 
-def attempt_exit(runner: Runner, *, personas: tuple, now: float) -> ApplyResult:
+def attempt_exit(runner: Runner, *, personas: tuple, now: float,
+                 mount_table_path: str = "/proc/self/mounts",
+                 state_path: str = STATE_PATH) -> ApplyResult:
     """Refuses (never records an exit) unless `can_exit` is real-true
     right now. This is the only way `state.json`'s `active` flag is
     ever cleared - there is no other code path that exits recovery
     mode, so the hard exit condition holds by construction, not by
     every caller remembering to check it first."""
-    ok, reason = can_exit(runner, personas=personas)
+    ok, reason = can_exit(runner, personas=personas, mount_table_path=mount_table_path)
     if not ok:
         return ApplyResult(False, reason)
-    state = read_state(runner) or {"reason": "unknown", "entered_at": now}
+    state = read_state(runner, state_path=state_path) or {"reason": "unknown", "entered_at": now}
     state["active"] = False
     state["exited_at"] = now
     _write_state(runner, state)

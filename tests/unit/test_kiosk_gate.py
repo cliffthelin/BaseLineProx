@@ -14,7 +14,7 @@ def test_refuses_when_not_completed(tmp_path):
 def test_allows_when_completed(tmp_path):
     marker = tmp_path / "complete"
     marker.write_text("2026-01-01T00:00:00\n")
-    rc = kiosk_gate.check(state_dir=tmp_path)
+    rc = kiosk_gate.check(state_dir=tmp_path,storage_check=lambda:{"state":"storage_verified","roles":["APPDATA_ADMIN"]})
     assert rc == 0
 
 
@@ -39,3 +39,52 @@ def test_provision_installs_the_ubuntu_seed_builder_and_download_dependencies():
         if args[:2] == ["apt-get", "install"]:
             installed.update(arg for arg in args[2:] if not arg.startswith("-"))
     assert {"cage", "chromium", "xorriso", "curl"} <= installed
+
+
+def test_kiosk_browser_requires_retained_appdata_and_storage_gate():
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]
+    unit=(root/'boot/baseline-kiosk.service').read_text()
+    assert 'RequiresMountsFor=/mnt/USER_ADMIN' in unit
+    assert '--user-data-dir=/mnt/USER_ADMIN/chromium/kiosk' in unit
+    provision=(root/'boot/provision.sh').read_text()
+    gate_loop=provision.split('for storage_unit in ',1)[1].split('; do',1)[0]
+    assert 'baseline-kiosk.service' in gate_loop
+
+
+def test_committed_firstboot_cannot_launch_browser_without_verified_storage(tmp_path):
+    (tmp_path/'complete').write_text('completed\n')
+    def missing_storage():raise RuntimeError('AppData mount absent')
+    assert kiosk_gate.check(state_dir=tmp_path,storage_check=missing_storage)==1
+    assert kiosk_gate.check(state_dir=tmp_path,storage_check=lambda:{'state':'unknown'})==1
+
+
+def test_kiosk_waits_for_its_native_browser_homepage_service():
+    from pathlib import Path
+    unit=(Path(__file__).resolve().parents[2]/'boot/baseline-kiosk.service').read_text()
+    requires=next(line for line in unit.splitlines() if line.startswith('Requires='))
+    after=next(line for line in unit.splitlines() if line.startswith('After='))
+    assert 'pveproxy.service' in requires
+    assert 'pveproxy.service' in after
+
+
+def test_kiosk_activates_its_gui_terminal_after_the_readiness_gate():
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]
+    unit=(root/'boot/baseline-kiosk.service').read_text()
+    assert unit.index('ExecStartPre=/opt/baseline/bin/baseline-kiosk-gate') < unit.index('ExecStartPre=/usr/bin/chvt 3')
+    provision=(root/'boot/provision.sh').read_text()
+    import shlex
+    packages=set()
+    for line in provision.splitlines():
+        if line.strip().startswith('apt-get install '):
+            packages.update(shlex.split(line)[2:])
+    assert 'kbd' in packages
+
+
+def test_the_kiosk_unit_always_restarts_and_waits_for_storage_verification_and_the_persistence_redirects():
+    from pathlib import Path
+    unit = (Path(__file__).resolve().parents[2] / "boot/baseline-kiosk.service").read_text()
+    assert "Restart=always" in unit and "StartLimitIntervalSec=0" in unit and "Restart=on-failure" not in unit
+    after = next(line for line in unit.splitlines() if line.startswith("After="))
+    assert "baseline-storage-verify.service" in after and "baseline-persist-bind-mounts.service" in after

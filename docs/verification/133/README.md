@@ -40,7 +40,13 @@ CLI argument parsing and desktop entry generation. Current-source full suite:2,9
 An overlong AF_UNIX fixture path initially failed; binding the same real socket
 relative to its directory fixed the fixture without weakening socket/FIFO checks.
 No source packages, disk images, private profiles, credentials, cloud seeds or
-QR screenshots are included in publication. `.runtime-proof133` remains local.
+QR screenshots are included in publication. The old
+`.runtime-proof133/tests-full-suite` pytest scratch tree was removed after its
+results were recorded. The remaining `.runtime-proof133` directory was absent
+at a later workspace inventory on 2026-10-09; explicit cleanup commands did not
+target it. Its large guest/application data and local native-debian screenshots
+are not present in this checkout. The published screenshots and JSON evidence
+in `docs/verification/133` remain.
 
 Primary availability/install references reviewed for this implementation:
 

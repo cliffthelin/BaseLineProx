@@ -34,6 +34,7 @@ shrinking anything.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from repair import Runner
@@ -228,8 +229,15 @@ def vg_free_bytes_argv(vg_name: str) -> list:
     return ["sudo", "-n", "vgs", "--noheadings", "--units", "b", "--nosuffix", "-o", "vg_free", vg_name]
 
 
-def create_logical_volume_argv(vg_name: str, lv_name: str, size: str) -> list:
-    return ["lvcreate", "-n", lv_name, "-L", size, vg_name]
+def create_logical_volume_argv(vg_name: str, lv_name: str, size: str, *, wipe_stale_signatures: bool = False,
+                               thin_pool: str | None = None) -> list:
+    """`wipe_stale_signatures` makes lvcreate wipe a filesystem signature it finds where the new volume lands. That space is
+    unallocated in this volume group, so it belongs to no existing volume; it is only ever leftover from an earlier install
+    of the drive, which otherwise stops the reinstall (lvcreate cannot ask, and refuses). Off by default."""
+    wipe = ["--wipesignatures", "y", "--yes"] if wipe_stale_signatures else []
+    if thin_pool:             # a thin volume: `size` is its virtual size, space is taken from the pool only as it is written
+        return ["lvcreate", "-n", lv_name, "-V", size, "--thinpool", thin_pool, *wipe, vg_name]
+    return ["lvcreate", "-n", lv_name, "-L", size, *wipe, vg_name]
 
 
 def format_and_label_argv(lv_path: str, label: str) -> list:
@@ -254,12 +262,24 @@ def fstab_line(lv_path: str, mountpoint: str, options: str) -> str:
     return f"{lv_path} {mountpoint} ext4 {options} 0 2\n"
 
 
+class VolumeInventoryParseError(ValueError):
+    """Raised when a successful LVM command returned unusable inventory."""
+
+
 def parse_logical_volumes(text: str) -> list:
     groups = []
+    seen = set()
     for line in text.splitlines():
+        if not line.strip():
+            continue
         parts = line.split()
-        if len(parts) >= 2:
-            groups.append((parts[0], parts[1]))
+        if len(parts) != 2:
+            raise VolumeInventoryParseError(f"malformed LVM volume row: {line!r}")
+        pair = (parts[0], parts[1])
+        if pair in seen:
+            raise VolumeInventoryParseError(f"duplicate LVM volume row: {pair!r}")
+        seen.add(pair)
+        groups.append(pair)
     return groups
 
 
@@ -289,16 +309,18 @@ def ensure_fstab_entry(runner: Runner, lv_path: str, mountpoint: str, options: s
         runner.append_text(FSTAB_PATH, line)
 
 
-def ensure_mounted_with_options(runner: Runner, lv_path: str, mountpoint: str, options: str) -> None:
-    """Best-effort: mounts fresh with the real role options if not
-    already mounted; if already mounted (the plain mount attempt fails
-    for exactly that reason), remounts to apply/refresh the options on
-    a pre-existing mount instead of leaving it with stale or absent
-    ones. Never raises - matches this module's own existing tolerance
-    for "already mounted" being a normal, expected outcome."""
+def ensure_mounted_with_options(runner: Runner, lv_path: str, mountpoint: str, options: str) -> bool:
+    """Mount or refresh options; failures must reach the caller."""
     mount_proc = runner.run(mount_argv(lv_path, mountpoint, options=options), timeout=15)
     if mount_proc.returncode != 0:
-        runner.run(remount_argv(mountpoint, options), timeout=15)
+        desired = runner.run(["blkid", "-s", "UUID", "-o", "value", lv_path], timeout=15)
+        mounted = runner.run(["findmnt", "--mountpoint", mountpoint, "-n", "-o", "UUID"], timeout=15)
+        if (desired.returncode != 0 or mounted.returncode != 0
+                or not desired.stdout.strip() or len(desired.stdout.strip().splitlines()) != 1
+                or desired.stdout.strip() != mounted.stdout.strip()):
+            return False
+        return runner.run(remount_argv(mountpoint, options), timeout=15).returncode == 0
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +329,8 @@ def ensure_mounted_with_options(runner: Runner, lv_path: str, mountpoint: str, o
 
 # Names used before 2026-09-30, when "persistence" was dropped from every
 # volume name (direct instruction). Volumes already provisioned or laid
-# out under these names still exist on real disks - the Baseline drive with serial
-# MD89N41071210AP4E carries them as GPT partition names - so they must be
+# out under these names still exist on real disks (a drive installed before that carries them as GPT
+# partition names), so they must be
 # recognised, never silently treated as absent.
 _LEGACY_LABEL_PREFIX = "USER_PERSISTENCE_"
 _LEGACY_LV_PREFIX = "baseline_user_persistence_"
@@ -350,7 +372,8 @@ def is_legacy_name(name: str) -> bool:
 
 
 def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
-                   label: str, mountpoint: str) -> CommandResult:
+                   label: str, mountpoint: str, wipe_stale_signatures: bool = False,
+                   thin_pool: str | None = None) -> CommandResult:
     """Idempotent: creates+formats+mounts `lv_name` only if it doesn't
     already exist. An already-existing volume is never reformatted -
     only (re-)mounted if not already mounted, so this is safe to run
@@ -359,7 +382,10 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
     if proc.returncode != 0:
         return CommandResult(False, proc.stderr.strip() or f"lvs exited {proc.returncode}")
 
-    groups = parse_logical_volumes(proc.stdout)
+    try:
+        groups = parse_logical_volumes(proc.stdout)
+    except VolumeInventoryParseError as exc:
+        return CommandResult(False, str(exc))
     lv_path = f"/dev/{vg_name}/{lv_name}"
     options = mount_options_for(label)
 
@@ -367,7 +393,8 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
         # A pre-existing mount may predate this fix (mounted plain, no
         # restrictive options) - ensure_mounted_with_options remounts
         # to actually apply them, not just record them for next boot.
-        ensure_mounted_with_options(runner, lv_path, mountpoint, options)
+        if not ensure_mounted_with_options(runner, lv_path, mountpoint, options):
+            return CommandResult(False, f"mount failed on existing {lv_name}; not reformatted")
         ensure_fstab_entry(runner, lv_path, mountpoint, options)
         return CommandResult(True, f"{lv_name} already existed on {vg_name} - not reformatted", created=False)
 
@@ -381,7 +408,9 @@ def ensure_volume(runner: Runner, *, vg_name: str, lv_name: str, size: str,
                                     f"pre-rename name. Not creating a second volume - rename "
                                     f"it (lvrename + e2label) to adopt it.", created=False)
 
-    create_proc = runner.run(create_logical_volume_argv(vg_name, lv_name, size), timeout=30)
+    create_proc = runner.run(create_logical_volume_argv(vg_name, lv_name, size,
+                                                        wipe_stale_signatures=wipe_stale_signatures,
+                                                        thin_pool=thin_pool), timeout=30)
     if create_proc.returncode != 0:
         return CommandResult(False, f"lvcreate failed: {create_proc.stderr.strip()}")
 
@@ -416,7 +445,12 @@ def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_V
         return {"has_existing_install": False, "found_volumes": [], "missing_volumes": all_names,
                 "error": proc.stderr.strip() or f"lvs exited {proc.returncode}"}
 
-    groups = parse_logical_volumes(proc.stdout)
+    try:
+        groups = parse_logical_volumes(proc.stdout)
+    except VolumeInventoryParseError as exc:
+        all_names = [lv_name for lv_name, _, _, _, _ in volumes]
+        return {"has_existing_install": False, "found_volumes": [], "missing_volumes": all_names,
+                "error": str(exc)}
     found = [lv_name for lv_name, _, _, _, _ in volumes
              if lv_exists(groups, vg_name=vg_name, lv_name=lv_name)]
     # Present only under the pre-rename name: neither missing nor current.
@@ -429,6 +463,79 @@ def detect_existing_baseline_install(runner: Runner, *, vg_name: str = DEFAULT_V
 
 
 DEFAULT_SAFETY_MARGIN_BYTES = 1 * (1024 ** 3)  # never claim the last GiB of free space
+DEFAULT_GROWTH_PERCENT = 20
+
+
+def single_drive_plan(size_bytes: int, *, host_bytes: int,
+                      personas: tuple = DEFAULT_PERSONAS,
+                      growth_percent: int = DEFAULT_GROWTH_PERCENT,
+                      migration_bytes: int = 0,
+                      required_bytes: dict | None = None, baseline_min_gib: int = 5,
+                      grow_on_demand: bool = False) -> dict:
+    """Budget one complete installation, without reallocating existing contents.
+
+    `grow_on_demand` (operator, 2026-10-11: "1 GB each volume only grows if actually used and needed"): every role starts at its measured
+    need, never below 1 GiB, and the rest of the drive stays free in the volume group for volume_growth.py to hand out when a role fills.
+    The role minimums and the proportional split do not apply. Without it the behaviour is exactly the earlier fixed-minimum plan.
+
+    host_bytes includes EFI/boot, root/swap, OS pool and its metadata. Callers
+    must supply measured/reserved physical bytes, never thin logical capacity.
+    migration_bytes is extra concurrent staging, not the source data counted
+    in destination volume requirements. This function performs no I/O.
+    """
+    for name, value in (("size_bytes", size_bytes), ("host_bytes", host_bytes),
+                        ("migration_bytes", migration_bytes)):
+        if type(value) is not int or value < 0:
+            raise ValueError(f"{name} must be known nonnegative integer bytes")
+    if type(growth_percent) is not int or not 0 <= growth_percent <= 50:
+        raise ValueError("growth_percent must be an integer from 0 to 50")
+    growth_bytes = (size_bytes * growth_percent + 99) // 100
+    if grow_on_demand:
+        return _grow_on_demand_plan(size_bytes, host_bytes, growth_bytes, migration_bytes, personas, required_bytes)
+    available = size_bytes - host_bytes - growth_bytes - migration_bytes
+    if type(baseline_min_gib) is not int or not 5 <= baseline_min_gib <= 4096:
+        raise ValueError("BASELINE runtime reservation must be between 5 and 4096 GiB")
+    volumes = tuple((name, max(lo, baseline_min_gib) if label == "BASELINE" else lo,
+                     max(hi, baseline_min_gib) if label == "BASELINE" else hi, label, path)
+                    for name, lo, hi, label, path in baseline_volumes_for(personas))
+    if required_bytes is not None:
+        if not isinstance(required_bytes, dict) or set(required_bytes) != {v[3] for v in volumes}:
+            raise ValueError("required_bytes must measure every storage role exactly once")
+        for value in required_bytes.values():
+            if type(value) is not int or value < 0:
+                raise ValueError("required_bytes must contain known nonnegative integer bytes")
+        volumes = tuple((name, max(lo, (required_bytes[label] + 1024**3 - 1) // 1024**3),
+                         max(hi, (required_bytes[label] + 1024**3 - 1) // 1024**3), label, path)
+                        for name, lo, hi, label, path in volumes)
+    sizes = compute_adaptive_plan(max(available, 0), volumes)
+    if not sizes or not all(sizes.values()):
+        raise ValueError("one drive cannot fit host storage, every role's minimum, growth and migration staging; "
+                         "measure suitable slower storage for cold vanilla sources and infrequent templates first")
+    return {"volumes_gib": sizes, "host_bytes": host_bytes,
+            "growth_bytes": growth_bytes, "migration_bytes": migration_bytes,
+            "safety_bytes": DEFAULT_SAFETY_MARGIN_BYTES,
+            "unallocated_bytes": size_bytes - host_bytes - migration_bytes - sum(sizes.values()) * 1024**3,
+            "capacity_basis": "measured-workload" if required_bytes is not None else "role-minimums",
+            "executed": False}
+
+
+def _grow_on_demand_plan(size_bytes, host_bytes, growth_bytes, migration_bytes, personas, required_bytes):
+    labels = [v[3] for v in baseline_volumes_for(personas)]
+    if required_bytes is not None and (not isinstance(required_bytes, dict) or set(required_bytes) != set(labels)
+                                       or any(type(v) is not int or v < 0 for v in required_bytes.values())):
+        raise ValueError("required_bytes must measure every storage role exactly once")
+    gib = 1024 ** 3
+    sizes = {label: max(1, -(-(required_bytes or {}).get(label, 0) // gib)) for label in labels}
+    needed = host_bytes + growth_bytes + migration_bytes + DEFAULT_SAFETY_MARGIN_BYTES + sum(sizes.values()) * gib
+    if size_bytes < needed:
+        raise ValueError("one drive cannot fit host storage, every role's minimum, growth and migration staging; "
+                         "measure suitable slower storage for cold vanilla sources and infrequent templates first")
+    return {"volumes_gib": sizes, "host_bytes": host_bytes,
+            "growth_bytes": growth_bytes, "migration_bytes": migration_bytes,
+            "safety_bytes": DEFAULT_SAFETY_MARGIN_BYTES,
+            "unallocated_bytes": size_bytes - host_bytes - migration_bytes - sum(sizes.values()) * gib,
+            "capacity_basis": "grow-on-demand",
+            "executed": False}
 
 
 def adaptive_single_size_gb(free_bytes: int, desired_gb: int, *,
@@ -488,7 +595,10 @@ def compute_adaptive_plan(free_bytes: int, volumes=BASELINE_VOLUMES, *,
 
 
 def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
-                             personas: tuple = DEFAULT_PERSONAS) -> dict:
+                             personas: tuple = DEFAULT_PERSONAS,
+                             planned_sizes_gib: dict | None = None,
+                             reserve_bytes: int = 0, wipe_stale_signatures: bool = False,
+                             grow_on_demand: bool = False, thin_roles: dict | None = None) -> dict:
     """The top-level, idempotent entry point: ensures the three shared
     volumes plus one USER_<PERSONA> volume per `personas`
     all exist on `vg_name`, sizing them adaptively to whatever real
@@ -509,7 +619,34 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
         return {label: CommandResult(False, f"could not determine free space in VG {vg_name!r}")
                 for _, _, _, label, _ in volumes}
 
-    plan_gb = compute_adaptive_plan(free_bytes, volumes)
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        return {v[3]: CommandResult(False, "reserve_bytes must be known nonnegative integer bytes") for v in volumes}
+    if planned_sizes_gib is not None:
+        if (not isinstance(planned_sizes_gib, dict)
+                or set(planned_sizes_gib) != {v[3] for v in volumes}
+                or any(type(planned_sizes_gib[v[3]]) is not int or planned_sizes_gib[v[3]] < (1 if grow_on_demand else v[1])
+                       for v in volumes)):
+            return {v[3]: CommandResult(False, "single-drive sizes must cover every role at its minimum") for v in volumes}
+        inventory = runner.run(list_logical_volume_sizes_argv(vg_name), timeout=15)
+        if inventory.returncode != 0:
+            return {v[3]: CommandResult(False, "could not inspect existing LV capacity") for v in volumes}
+        rows = [row.split() for row in inventory.stdout.splitlines() if row.strip()]
+        if (any(len(row) != 2 or not row[1].isdigit() for row in rows)
+                or len({row[0] for row in rows}) != len(rows)):
+            return {v[3]: CommandResult(False, "malformed or ambiguous LV capacity inventory") for v in volumes}
+        existing = parse_logical_volume_sizes(inventory.stdout)
+        undersized = [v[3] for v in volumes if v[0] in existing
+                      and existing[v[0]] < planned_sizes_gib[v[3]] * 1024**3]
+        if undersized:
+            return {v[3]: CommandResult(False, "existing roles are smaller than the profile: " + ", ".join(undersized)) for v in volumes}
+        thin = thin_roles or {}
+        required = sum(planned_sizes_gib[v[3]] for v in volumes if v[0] not in existing and v[3] not in thin) * 1024**3 + reserve_bytes
+        if required > free_bytes:
+            return {v[3]: CommandResult(False, f"insufficient physical VG free space for the single-drive profile and reserve: "
+                                       f"{required} needed, {free_bytes} available") for v in volumes}
+        plan_gb = dict(planned_sizes_gib)
+    else:
+        plan_gb = compute_adaptive_plan(max(free_bytes - reserve_bytes, 0), volumes)
 
     results = {}
     for lv_name, _min_gb, _max_gb, label, mountpoint in volumes:
@@ -519,8 +656,13 @@ def ensure_baseline_volumes(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                 False, f"insufficient free space in VG {vg_name!r} for {label} - "
                        f"{free_bytes} bytes free, adaptive plan gave 0G real usable space")
             continue
-        results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name,
-                                        size=f"{size_gb}G", label=label, mountpoint=mountpoint)
+        thin = (thin_roles or {}).get(label)
+        if thin:      # a thin role: its size is the virtual size given for it, and it takes pool space only as it is written
+            results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name, size=f"{thin['virtual_gib']}G", label=label,
+                                           mountpoint=mountpoint, wipe_stale_signatures=wipe_stale_signatures, thin_pool=thin["pool"])
+        else:
+            results[label] = ensure_volume(runner, vg_name=vg_name, lv_name=lv_name, size=f"{size_gb}G", label=label,
+                                           mountpoint=mountpoint, wipe_stale_signatures=wipe_stale_signatures)
     return results
 
 
@@ -543,6 +685,31 @@ class VolumeUsage:
 
 def df_argv(mountpoint: str) -> list:
     return ["df", "-B1", "--output=size,used,avail,pcent", mountpoint]
+
+
+def parse_findmnt_targets(text: str) -> set[str]:
+    """Parse findmnt's JSON mount tree; a failed observation is never empty."""
+    try:
+        document = json.loads(text)
+    except (TypeError, ValueError) as exc:
+        raise VolumeObservationError("findmnt returned invalid JSON") from exc
+    if not isinstance(document, dict) or not isinstance(document.get("filesystems"), list):
+        raise VolumeObservationError("findmnt output has no filesystems list")
+    targets = set()
+    pending = list(document["filesystems"])
+    while pending:
+        item = pending.pop()
+        if not isinstance(item, dict):
+            raise VolumeObservationError("findmnt returned a malformed filesystem record")
+        target = item.get("target")
+        if not isinstance(target, str) or not target.startswith("/"):
+            raise VolumeObservationError("findmnt returned a filesystem without an absolute target")
+        targets.add(target)
+        children = item.get("children", [])
+        if not isinstance(children, list):
+            raise VolumeObservationError("findmnt returned malformed filesystem children")
+        pending.extend(children)
+    return targets
 
 
 def parse_df_output(text: str):
@@ -576,13 +743,20 @@ def parse_logical_volume_sizes(text: str) -> dict:
     request made *before* creation."""
     sizes = {}
     for line in text.splitlines():
+        if not line.strip():
+            continue
         parts = line.split()
-        if len(parts) < 2:
-            continue
+        if len(parts) != 2:
+            raise VolumeInventoryParseError(f"malformed LVM size row: {line!r}")
+        if parts[0] in sizes:
+            raise VolumeInventoryParseError(f"duplicate LVM size row for {parts[0]!r}")
         try:
-            sizes[parts[0]] = int(parts[1])
-        except ValueError:
-            continue
+            size = int(parts[1])
+        except ValueError as exc:
+            raise VolumeInventoryParseError(f"invalid LVM size for {parts[0]!r}: {parts[1]!r}") from exc
+        if size < 0:
+            raise VolumeInventoryParseError(f"negative LVM size for {parts[0]!r}")
+        sizes[parts[0]] = size
     return sizes
 
 
@@ -606,6 +780,25 @@ class VolumeDetail:
     percent_used: float | None
 
 
+class VolumeObservationError(RuntimeError):
+    """LVM inventory failed; it must not be rendered as an empty volume plan."""
+
+
+def _run_volume_query(runner: Runner, argv: list, *, label: str) -> str:
+    try:
+        proc = runner.run(argv, timeout=15)
+    except Exception as exc:
+        raise VolumeObservationError(f"{label} probe unavailable: {type(exc).__name__}: {exc}") from exc
+    code = getattr(proc, "returncode", 1)
+    if code != 0:
+        detail = getattr(proc, "stderr", "") or f"exit {code}"
+        raise VolumeObservationError(f"{label} probe failed: {detail.strip()}")
+    output = getattr(proc, "stdout", None)
+    if not isinstance(output, str):
+        raise VolumeObservationError(f"{label} output unavailable")
+    return output
+
+
 def collect_volume_details(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
                             personas: tuple = DEFAULT_PERSONAS) -> list:
     """One real row per volume this project would ever create for
@@ -615,11 +808,14 @@ def collect_volume_details(runner: Runner, *, vg_name: str = DEFAULT_VG_NAME,
     mounted right now (real gap `real_volume_state` had before this)."""
     volumes = baseline_volumes_for(personas)
 
-    lv_proc = runner.run(list_logical_volumes_argv(), timeout=15)
-    groups = parse_logical_volumes(lv_proc.stdout) if lv_proc.returncode == 0 else []
+    lvs_output = _run_volume_query(runner, list_logical_volumes_argv(), label="LVM volume list")
+    try:
+        groups = parse_logical_volumes(lvs_output)
+    except VolumeInventoryParseError as exc:
+        raise VolumeObservationError(f"LVM volume list is malformed: {exc}") from exc
 
-    size_proc = runner.run(list_logical_volume_sizes_argv(vg_name), timeout=15)
-    sizes = parse_logical_volume_sizes(size_proc.stdout) if size_proc.returncode == 0 else {}
+    sizes_output = _run_volume_query(runner, list_logical_volume_sizes_argv(vg_name), label="LVM volume sizes")
+    sizes = parse_logical_volume_sizes(sizes_output)
 
     usage_by_label = {u.label: u for u in collect_volume_usage(runner, personas=personas)}
 
@@ -641,17 +837,20 @@ def collect_volume_usage(runner: Runner, *, personas: tuple = DEFAULT_PERSONAS) 
     """Real per-volume usage for every shared volume plus one
     USER_<PERSONA> per `personas`, for whichever
     mountpoints are actually mounted right now - never assumes
-    ensure_baseline_volumes() has run; a volume that isn't mounted
-    (df fails) is skipped, not an error, matching diagnostics.py's own
-    tolerance for missing hardware/tools."""
+    ensure_baseline_volumes() has run. findmnt distinguishes a volume
+    that is not mounted from df failing on a confirmed mount; the latter
+    remains an observation error rather than disappearing from the page."""
+    mount_output = _run_volume_query(
+        runner, ["findmnt", "--json", "--output", "TARGET"], label="mount table")
+    mounted_targets = parse_findmnt_targets(mount_output)
     results = []
     for _, _, _, label, mountpoint in baseline_volumes_for(personas):
-        proc = runner.run(df_argv(mountpoint), timeout=10)
-        if proc.returncode != 0:
+        if mountpoint not in mounted_targets:
             continue
-        parsed = parse_df_output(proc.stdout)
+        output = _run_volume_query(runner, df_argv(mountpoint), label=f"df {mountpoint}")
+        parsed = parse_df_output(output)
         if parsed is None:
-            continue
+            raise VolumeObservationError(f"df {mountpoint} returned incomplete usage output")
         results.append(VolumeUsage(label=label, mountpoint=mountpoint, **parsed))
     return results
 

@@ -110,9 +110,9 @@ def test_apply_stops_at_the_first_failing_command():
 
 def test_agent_index_names_the_real_volume_and_its_baseline_rules():
     by = {p["label"]: p for p in cl.plan_partitions(SIZE)}
-    text = cl.agent_index(by["INSTALLER_CACHE"], serial="MD89N41071210AP4E")
+    text = cl.agent_index(by["INSTALLER_CACHE"], serial="SYNTHDRIVEB00002")
     assert "INSTALLER_CACHE" in text and "/mnt/INSTALLER_CACHE" in text
-    assert "noexec" in text and "MD89N41071210AP4E" in text
+    assert "noexec" in text and "SYNTHDRIVEB00002" in text
     assert "never by kernel letter" in text
 
 
@@ -184,7 +184,7 @@ def test_apply_refuses_a_drive_with_data_and_no_installer_uuid_and_runs_nothing(
 
 def test_apply_lays_out_a_drive_with_data_that_the_installer_created(monkeypatch):
     monkeypatch.setattr(dg, "_default_run", lambda argv: (0, f"sdd disk  {GUID} \nsdd1 part ext4  BASELINE\n"))
-    dg.register_installer_uuid(GUID, serial="MD89N41071210AP4E")
+    dg.register_installer_uuid(GUID, serial="SYNTHDRIVEB00002")
     cmd = Cmd()
     assert cl.apply(cmd, DEV, validate=ok_validator)
     assert cmd.calls and cmd.calls[0][0] == "wipefs"

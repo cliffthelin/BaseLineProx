@@ -122,7 +122,7 @@ def apply(cmd, path: str, *, validate=validate_target_device, expected_serial=No
     import drive_guard
     try:
         drive_guard.require_baseline_drive(validated["path"], run=read_drive)
-        drive_guard.require_may_format(validated["path"], run=read_drive)
+        drive_guard.require_may_format(validated["path"], run=read_drive, serial=validated["serial"])
     except drive_guard.DataProtectionError as exc:
         raise LayoutError(str(exc)) from None
     plan = plan_partitions(validated["size_bytes"], personas)

@@ -1,6 +1,6 @@
 """Drives deliberately added to the ones Baseline may act on (direct instruction 2026-10-03, extending v0.2 row 55).
 
-Row 55 limits every drive action to the SK hynix drives Baseline is set up with (`drive_admin.ALLOWED_TARGET_SERIALS`).
+Row 55 limits every drive action to the SK hynix drives Baseline is set up with (`drive_admin.allowed_target_serials()`).
 An installer has to work on whatever drives are in front of it, so another drive can be added, but only deliberately:
 `drive_admin.enroll_drive` requires the operator to type the serial, the drive itself to report that serial, and a
 person to confirm the request like every other drive action. This module only remembers the result.
@@ -15,10 +15,15 @@ from __future__ import annotations
 
 import re
 
+import references
 import registry
 
 REGISTRY_TYPE = "enrolled_drives"
 _SERIAL_RE = re.compile(r"^[A-Za-z0-9._-]{4,40}$")
+
+
+class DriveEnrollmentError(ValueError):
+    """Enrollment state could not be read; it is not an empty allowlist."""
 
 
 def check_serial(serial) -> str:
@@ -30,8 +35,8 @@ def check_serial(serial) -> str:
 def enrolled_serials() -> frozenset:
     try:
         return frozenset(registry.list_entries(REGISTRY_TYPE, scope=registry.GLOBAL, read_only=True))
-    except Exception:  # noqa: BLE001 - an unreadable store admits nothing
-        return frozenset()
+    except Exception as exc:  # noqa: BLE001 - preserve the store failure for every caller
+        raise DriveEnrollmentError(f"drive enrollment registry unavailable: {exc}") from exc
 
 
 def enroll(serial, *, size_bytes: int, model: str, now: float) -> None:
@@ -40,3 +45,4 @@ def enroll(serial, *, size_bytes: int, model: str, now: float) -> None:
                            "(drive_enrollment.py)", default_scope=registry.GLOBAL)
     registry.upsert_entry(REGISTRY_TYPE, serial, scope=registry.GLOBAL,
                           attributes={"size_bytes": int(size_bytes), "model": str(model), "enrolled_at": float(now)})
+    references.link(REGISTRY_TYPE, serial, kind="hardware")

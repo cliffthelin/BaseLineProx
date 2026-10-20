@@ -1,0 +1,10 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=Data caching daemon for rrdtool
+Documentation=man:rrdcached(1)
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target

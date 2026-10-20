@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Build the Kasm base image carried on INSTALLER_CACHE (operator 2026-10-16, DR260).
+
+Runs on the build machine, which has internet. Boots the pinned Debian 13 cloud image under QEMU/KVM, installs Docker, unpacks Kasm's installer and
+preloads Kasm's container images (the service images and a chosen set of workspaces), then makes the image generic and shuts it down. The result holds NO
+Kasm install state and no secrets: the installer runs at the target's first boot so every setup generates its own.
+
+    baseline-build-kasm-base --downloads /run/media/cane/CACHE/baseline-build/kasm/download --output /run/media/cane/CACHE/baseline-build/kasm/base
+"""
+import argparse
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+import tarfile
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "baseline/lib"))
+import kasm_build as kb  # noqa: E402
+
+BUILD_MEMORY_MB, BUILD_CPUS, BUILD_DISK_GB, BUILD_TIMEOUT_S = 6144, 4, 40, 3600
+
+
+def say(*parts):
+    print("[kasm-base]", *parts, flush=True)
+
+
+def digest(path: Path, algorithm: str) -> str:
+    h = hashlib.new(algorithm)
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(4 * 1024 ** 2), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify(path: Path, expected: str, algorithm: str) -> None:
+    say(f"checking {algorithm} of {path.name}")
+    if digest(path, algorithm) != expected:
+        raise kb.KasmBuildError(f"{path.name} does not match its published {algorithm}")
+
+
+def published_sum(downloads: Path, name: str) -> str:
+    return (downloads / f"{name}.sha256sum").read_text().split()[0]
+
+
+def debian_sum(downloads: Path, image: Path) -> str:
+    for line in (downloads / f"SHA512SUMS-{image.stem.split('amd64-')[1]}").read_text().splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == image.name:
+            return parts[0]
+    raise kb.KasmBuildError(f"{image.name} is not in the published SHA512SUMS")
+
+
+def bundle_seed_yaml(bundle: Path, name: str = "default_images_amd64.yaml") -> str:
+    """One of the release's own seed files (conf/database/seed_data/<name>), read out of the verified bundle."""
+    with tarfile.open(bundle, "r:gz") as tar:
+        for member in tar:
+            if member.name.lstrip("./").endswith(f"conf/database/seed_data/{name}"):
+                return tar.extractfile(member).read().decode()
+    raise kb.KasmBuildError(f"the release bundle has no {name}")
+
+
+def bundle_compose_text(bundle: Path) -> str:
+    """The release's own all-in-one compose file: what Kasm itself starts, which the recipe is checked against."""
+    with tarfile.open(bundle, "r:gz") as tar:
+        for member in tar:
+            if member.name.lstrip("./").endswith("docker/docker-compose-all.yaml"):
+                return tar.extractfile(member).read().decode()
+    raise kb.KasmBuildError("the release bundle has no docker-compose-all.yaml")
+
+
+def iso(label: str, files: dict, out: Path) -> None:
+    folder = out.with_suffix(".src")
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir()
+    for name, source in files.items():
+        if isinstance(source, Path):
+            (folder / name).symlink_to(source.resolve())
+        else:
+            (folder / name).write_text(source)
+    subprocess.run(["xorriso", "-as", "mkisofs", "-quiet", "-iso-level", "3", "-follow-links", "-V", label, "-J", "-r", "-o", str(out), str(folder)], check=True)
+    shutil.rmtree(folder)
+
+
+def add_sources(document, sources, kasm_version, registry_out, cache_dir):
+    """Offer the named workspaces of other registries beside Baseline's own (kasm_sources), and say plainly what was and was not taken."""
+    if not sources:
+        return []
+    import kasm_sources
+    rows = kasm_sources.merge_into(document, sources, kasm_version, registry_out, cache_dir)
+    for row in rows:
+        say(f"registry source {row['source']}: {row['name']}: " + ("included" + (" (UNVERIFIED for this Kasm version)" if row.get("unverified") else "") if row["status"] == "included" else "left out: " + row["reason"]))
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--downloads", required=True, type=Path, help="holds the release bundle, its .sha256sum, and the Debian image with its SHA512SUMS")
+    parser.add_argument("--debian-image", type=Path, help="default: the one in --downloads")
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--recipe", type=Path, help="the Kasm recipe (default: config/local/kasm-recipe.json if there is one, else the built-in one); see kasm_recipe.py")
+    parser.add_argument("--sources-cache", type=Path, help="where the lists and icons of other registries are kept between builds (default: beside the output), so a build with no internet can still use them")
+    parser.add_argument("--os-list", type=Path, help="the supported-OS list (default: the one on this machine, if any); its Kasm entry may name the workspaces to carry")
+    args = parser.parse_args()
+    downloads, out = args.downloads, args.output
+    debian = args.debian_image or next(downloads.glob("debian-13-genericcloud-amd64-*.qcow2"))
+    import os_list
+    import kasm_recipe
+    recipe = kb.recipe_for(os_list.load(args.os_list), args.recipe)
+    workspaces = tuple(recipe["workspaces"])
+    print("[kasm-base] workspaces:", ", ".join(w["friendly_name"] for w in workspaces), flush=True)
+    wanted = kb.carried_images(workspaces)
+    out.mkdir(parents=True, exist_ok=True)
+    work = out / "work"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+
+    verify(downloads / kb.BUNDLE, published_sum(downloads, kb.BUNDLE), "sha256")
+    verify(debian, debian_sum(downloads, debian), "sha512")
+
+    kasm_recipe.validate(recipe, kasm_recipe.compose_images(bundle_compose_text(downloads / kb.BUNDLE)))      # every image this release starts has a state; none is invented
+    print("[kasm-base] recipe:", ", ".join(f"{c['id']} ({c['state']})" for c in recipe["components"]), flush=True)
+    service_refs = [kb.image_ref(name) for name in kasm_recipe.service_images(recipe)]
+    seed = work / "default_images_amd64.yaml"
+    seed.write_text(kb.trim_seed_yaml(bundle_seed_yaml(downloads / kb.BUNDLE), workspaces))
+    payload = {kb.BUNDLE: downloads / kb.BUNDLE, "default_images_amd64.yaml": seed}
+    overrides = recipe.get("settings") or {}
+    if overrides:                       # slip-stream (documented by Kasm): our settings seed replaces the release's, and Kasm's own installer seeds and encrypts it
+        import kasm_settings
+        properties, changes = kasm_settings.apply_overrides(bundle_seed_yaml(downloads / kb.BUNDLE, "default_properties.yaml"), overrides)
+        (work / "default_properties.yaml").write_text(properties)
+        payload["default_properties.yaml"] = work / "default_properties.yaml"
+        print("[kasm-base] settings set:", ", ".join(f"{c['name']}={c['to']}" for c in changes), flush=True)
+    registry = recipe.get("registry") or {}
+    if registry.get("enabled"):
+        import kasm_registry
+        document = kasm_registry.build(workspaces, seed.read_text(), name=registry.get("name") or "Baseline", description=registry.get("description") or "Workspaces carried by this Baseline host.",
+                                       list_url=registry.get("list_url") or "http://baseline.invalid/kasm-registry/")     # the address a client sees is set when it is served
+        sources_report = add_sources(document, registry.get("sources") or [], recipe["kasm_version"], out / "registry", args.sources_cache or out / "sources-cache")
+        for relative, text in kasm_registry.files(document).items():
+            target = out / "registry" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+        print("[kasm-base] registry files:", ", ".join(sorted(kasm_registry.files(document))), flush=True)
+    iso("KASMPAYLOAD", payload, work / "payload.iso")
+    iso("cidata", {"user-data": kb.build_user_data(service_refs, wanted, recipe.get("plugins")), "meta-data": "instance-id: kasm-base-build\nlocal-hostname: kasm-base\n"}, work / "cidata.iso")
+
+    disk = work / "build.qcow2"
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(debian.resolve()), "-F", "qcow2", str(disk), f"{BUILD_DISK_GB}G"], check=True)
+    serial = work / "serial.log"
+    argv = ["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", str(BUILD_CPUS), "-m", str(BUILD_MEMORY_MB),
+            "-drive", f"file={disk},if=virtio,format=qcow2", "-drive", f"file={work / 'cidata.iso'},media=cdrom,readonly=on",
+            "-drive", f"file={work / 'payload.iso'},media=cdrom,readonly=on", "-nic", "user,model=virtio-net-pci", "-display", "none", "-serial", f"file:{serial}", "-no-reboot"]
+    say("booting the build VM (apt, Docker, then loading the images); this takes a while")
+    started = time.monotonic()
+    vm = subprocess.Popen(argv)
+    while vm.poll() is None:
+        if time.monotonic() - started > BUILD_TIMEOUT_S:
+            vm.kill()
+            raise kb.KasmBuildError("the build VM did not finish in time")
+        time.sleep(15)
+        if serial.exists() and "PREPARE-FAILED" in serial.read_text(errors="replace"):
+            time.sleep(10)
+            vm.kill()
+            break
+    log = serial.read_text(errors="replace") if serial.exists() else ""
+    if "PREPARE-FAILED" in log or "PREPARE-DONE" not in log:
+        raise kb.KasmBuildError("the build VM stopped before finishing; serial log tail:\n" + "\n".join(log.splitlines()[-25:]))
+    say(f"prepared in {(time.monotonic() - started) / 60:.1f} min; flattening and compressing")
+    base = out / f"kasm-base-{kb.KASM_VERSION}-debian13.qcow2"
+    subprocess.run(["qemu-img", "convert", "-O", "qcow2", "-c", str(disk), str(base)], check=True)
+    digests = dict(line.split()[1:3] for line in log.splitlines() if line.startswith("IMAGE-DIGEST "))
+    missing = [r for r in [*service_refs, *wanted] if r not in digests]
+    if missing:
+        raise kb.KasmBuildError("no digest was reported for: " + ", ".join(missing))
+    info = {"kasm_version": kb.KASM_VERSION, "os": "debian-13", "debian_image": debian.name, "base": base.name, "workspaces": [{k: w[k] for k in ("key", "friendly_name", "image", "persistent")} for w in workspaces], "recipe": kasm_recipe.summary(recipe), "images": digests,
+            "profile_path": kb.PROFILE_PATH, "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "sha256": digest(base, "sha256"),
+            "bytes": base.stat().st_size, "holds_install_state_or_secrets": False}
+    (out / "KASM.json").write_text(json.dumps(info, indent=1, sort_keys=True) + "\n")
+    shutil.copy(work / "serial.log", out / "build-serial.log")
+    shutil.rmtree(work)
+    say(f"done: {base} ({base.stat().st_size / 2**30:.2f} GiB)")
+
+
+if __name__ == "__main__":
+    main()

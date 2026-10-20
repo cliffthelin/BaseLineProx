@@ -1,0 +1,17 @@
+[Unit]
+Description=Baseline: point the bridge at a NIC that exists on this machine (ADR 0001)
+DefaultDependencies=no
+After=systemd-udev-settle.service local-fs.target
+Before=networking.service network-pre.target
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-bridge-port
+# The installed code is read-only for the service, as for the other network units; it writes only /etc/network and /var/log/baseline.
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

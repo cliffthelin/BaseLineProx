@@ -34,7 +34,9 @@ from repair import Runner
 
 
 DEFAULT_BRIDGE = "vmbr0"
-DEFAULT_STORAGE = "local-lvm"
+import host_layout  # noqa: E402
+
+DEFAULT_STORAGE = host_layout.GUEST_STORAGE        # the SESSION_TEMP thin pool (it was `local-lvm`)
 
 
 # ---------------------------------------------------------------------------

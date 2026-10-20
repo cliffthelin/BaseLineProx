@@ -1,0 +1,35 @@
+{
+  "id": "4c56591d3e264985b03340eb676bd21a",
+  "kind": "vm",
+  "action": "verify_ubuntu",
+  "name": "proof-ubuntu165b",
+  "state": "completed",
+  "created": 1791241096.2579987,
+  "updated": 1791241098.9980545,
+  "context": {
+    "store": "/mnt/BASELINE/vm-runtime",
+    "persistence_store": "/mnt/USER_ADMIN/vm-data",
+    "backend": "ProxmoxVmHost"
+  },
+  "result": {
+    "ok": true,
+    "name": "proof-ubuntu165b",
+    "configuration_report": {
+      "checks": {
+        "configuration": true,
+        "locale": true,
+        "home_bound": true,
+        "cloud_init_done": true,
+        "ready_marker": true,
+        "agent_active": true,
+        "display_manager_active": true,
+        "browser_available": true,
+        "browser_policy": true
+      },
+      "configuration_applied": true,
+      "desktop_session_verified": false,
+      "browser_page_loaded": false
+    },
+    "message": "Guest configuration and required services verified. Logged-in desktop and browser page rendering still require GUI verification."
+  }
+}

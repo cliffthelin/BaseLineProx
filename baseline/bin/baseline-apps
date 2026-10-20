@@ -5,6 +5,11 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'lib'))
 import application_bundle as ab
 import environment_recipes as er
+try:
+    ab.load_deployed_application_definitions(__file__)
+    ab.load_application_catalog(ab.application_catalog_directory())
+except (er.RecipeError,OSError) as exc:
+    print('Refused: '+str(exc),file=sys.stderr);sys.exit(1)
 parser=argparse.ArgumentParser(description=__doc__)
 commands=parser.add_subparsers(dest='action',required=True)
 for action in ('capture','prepare','verify','acquire','install','launch','preflight','backup','restore','runtime-plan','install-runtime','capture-installed','apply','compose','retarget','build-suite','desktop-launchers','verify-suite','inspect-suite'):

@@ -52,7 +52,9 @@ MANIFEST_KIND = "baseline-backup-set"
 SET_RE = re.compile(r"^baseline-\d{8}T\d{6}Z(-\d+)?$")
 
 RESERVE_FRACTION = 0.03        # never leave the drive with less than 3% free
+IMAGE_CAP_FRACTION = 0.10      # a recovery image may never exceed this fraction of the drive it images (about 5% is used)
 HEADROOM = 1.10                # and require 10% more than the estimated size
+MIN_BUDGET_BYTES = 2**30       # a write budget smaller than this is not worth starting
 DEFAULT_MIN_INTERVAL_HOURS = 168
 # Backed up changes-only: unchanged installers are never copied twice. The first backup copies everything once;
 # every later set stores only files that are new or changed (size or modification time differs) and the manifest
@@ -70,6 +72,10 @@ _INCOMPLETE_TEXT = (
 
 class BackupError(RuntimeError):
     """A backup that was refused or did not complete. Nothing is ever cleaned up."""
+
+
+class IncompleteBackupError(BackupError):
+    """A set folder exists but MANIFEST.json has not been published yet."""
 
 
 @dataclass(frozen=True)
@@ -150,12 +156,18 @@ def resolve_destination(path: str, *, run, allowed_serials, boot_serial: str | N
         if not serial:
             raise BackupError(f"cannot read the drive identity of /dev/{disk}, so it cannot be shown to be separate")
         serials[disk] = serial
-    managed = frozenset(allowed_serials) | drive_enrollment.enrolled_serials()   # enrolled drives are managed too
+    if not isinstance(boot_serial, str) or not boot_serial.strip():
+        raise BackupError("cannot establish the running boot-drive identity; refusing to use a backup destination")
+    try:
+        enrolled = drive_enrollment.enrolled_serials()
+    except drive_enrollment.DriveEnrollmentError as exc:
+        raise BackupError(f"cannot verify managed-drive enrollment before backup: {exc}") from exc
+    managed = frozenset(allowed_serials) | enrolled   # enrolled drives are managed too
     for disk, serial in serials.items():
         if serial in managed:
             raise BackupError(f"destination is on /dev/{disk}, one of the drives Baseline manages: "
                               "the destination is not separate from the data it protects")
-        if boot_serial is not None and serial == boot_serial:
+        if serial == boot_serial:
             raise BackupError(f"destination is on /dev/{disk}, the running boot drive")
     return Destination(path=path, backup_dir=Path(path) / BACKUP_DIR_NAME, source=source, fstype=fstype,
                        serial=next(iter(serials.values())), disks=tuple(disks))
@@ -164,6 +176,40 @@ def resolve_destination(path: str, *, run, allowed_serials, boot_serial: str | N
 def _free_and_total(path) -> tuple:
     st = os.statvfs(path)
     return st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
+
+
+def budget_from(*, free: int, total: int, source_bytes: int | None = None) -> int:
+    """Bytes a single write may use: the drive's real free space minus its 3% reserve. Never the reserve itself.
+
+    This replaces budgeting the worst case up front for writes whose real size is unknown until they finish - a
+    compressed qcow2 recovery image of a mostly-empty 512 GB drive is a few GB, yet was charged 512 GB plus 10%
+    headroom and refused. The budget is then enforced by the kernel (`capped`), so the reserve holds even if the
+    write turns out larger than hoped: it fails, it never fills the drive.
+
+    `source_bytes` (the size of the drive being imaged) adds a second, tighter limit: IMAGE_CAP_FRACTION of it. The
+    operator's rule (2026-10-11): a backup of a drive that is only about 5% used must not use anything like the full
+    drive size, so an image that would outgrow that stops instead of consuming the backup drive."""
+    if source_bytes is not None and (not isinstance(source_bytes, int) or source_bytes <= 0):
+        raise ValueError(f"source size must be a positive byte count, got {source_bytes!r}")
+    budget = free - int(total * RESERVE_FRACTION)
+    if budget < MIN_BUDGET_BYTES:
+        raise BackupError(f"the backup drive is at or near its 3% reserve ({free // 2**30} GiB free); "
+                          "free some up yourself first")
+    if source_bytes is not None:
+        budget = min(budget, int(source_bytes * IMAGE_CAP_FRACTION))
+    return budget
+
+
+def capped(argv: list, limit_bytes: int) -> list:
+    """`argv` run with the kernel's per-file size limit (RLIMIT_FSIZE) set to `limit_bytes`: any file the
+    command writes past that size fails with EFBIG/SIGXFSZ instead of growing. A hard stop, not an estimate."""
+    if not isinstance(limit_bytes, int) or limit_bytes <= 0:
+        raise ValueError(f"a write cap must be a positive byte count, got {limit_bytes!r}")
+    return ["prlimit", f"--fsize={limit_bytes}"] + list(argv)
+
+
+def free_and_total(path) -> tuple:
+    return _free_and_total(path)
 
 
 def check_space(dest: Destination, *, needed_bytes: int) -> None:
@@ -286,11 +332,17 @@ def _check_readable(path) -> None:
 
 def _read_manifest(set_path) -> dict:
     mpath = Path(set_path) / MANIFEST_NAME
-    if not mpath.is_file():
-        raise BackupError(f"{Path(set_path).name} has no manifest: it is incomplete")
+    try:
+        info = mpath.lstat()
+    except FileNotFoundError:
+        raise IncompleteBackupError(f"{Path(set_path).name} has no manifest: it is incomplete") from None
+    except OSError as exc:
+        raise BackupError(f"{Path(set_path).name} manifest cannot be inspected: {exc}") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise BackupError(f"{Path(set_path).name} manifest is not a regular file")
     try:
         manifest = json.loads(mpath.read_text())
-    except ValueError as exc:
+    except (OSError, UnicodeError, ValueError) as exc:
         raise BackupError(f"{Path(set_path).name} has an unreadable manifest: {exc}") from exc
     if not isinstance(manifest, dict) or manifest.get("kind") != MANIFEST_KIND:
         raise BackupError(f"{Path(set_path).name} manifest is not a Baseline backup manifest")
@@ -549,17 +601,43 @@ def create_backup_set(dest: Destination, sources: dict, *, now: float, budgets: 
 def list_sets(dest: Destination) -> list:
     """Complete sets (a valid manifest, no failure marker), newest first. Read-only and cheap: it
     does not re-hash the archives; `verify_set` does."""
-    if not dest.backup_dir.is_dir():
+    try:
+        root_info = dest.backup_dir.lstat()
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise BackupError(f"backup-set directory cannot be inspected: {exc}") from exc
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise BackupError("backup-set path is not a regular directory")
+    try:
+        children = sorted(dest.backup_dir.iterdir())
+    except OSError as exc:
+        raise BackupError(f"backup-set directory cannot be enumerated: {exc}") from exc
     found = []
-    for child in dest.backup_dir.iterdir():
-        if not child.is_dir() or child.is_symlink() or not SET_RE.match(child.name):
+    for child in children:
+        if not SET_RE.match(child.name):
             continue
-        if (child / FAILED_VERIFY_NAME).exists():
+        try:
+            child_info = child.lstat()
+        except FileNotFoundError:
+            continue  # set disappeared after the parent directory was enumerated
+        except OSError as exc:
+            raise BackupError(f"backup set {child.name} cannot be inspected: {exc}") from exc
+        if stat.S_ISLNK(child_info.st_mode) or not stat.S_ISDIR(child_info.st_mode):
+            continue
+        try:
+            marker_info = (child / FAILED_VERIFY_NAME).lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise BackupError(f"backup set {child.name} verification marker cannot be inspected: {exc}") from exc
+        else:
+            if not stat.S_ISREG(marker_info.st_mode):
+                raise BackupError(f"backup set {child.name} has an invalid verification marker")
             continue
         try:
             manifest = _read_manifest(child)
-        except BackupError:
+        except IncompleteBackupError:
             continue
         found.append(BackupSet(name=child.name, path=child, manifest=manifest))
     found.sort(key=lambda s: (s.manifest.get("created_epoch", 0), s.name), reverse=True)
@@ -645,7 +723,10 @@ def build_sources(*, is_mount=os.path.ismount, exists=os.path.exists) -> dict:
 # Proxmox guests on the PC601's local-lvm (v0.2 row 60)
 # ---------------------------------------------------------------------------
 
-LOCAL_LVM_STORAGE = "local-lvm"
+import host_layout  # noqa: E402
+
+LOCAL_LVM_STORAGE = host_layout.GUEST_STORAGE
+GUEST_STORAGES = (host_layout.GUEST_STORAGE, "local-lvm")      # drives installed before the rename keep their guests on local-lvm
 _VMID_RE = re.compile(r"^\d{1,9}$")
 _DUMP_RE = re.compile(r"^vzdump-(qemu|lxc|openvz)-(\d+)-[A-Za-z0-9_.-]+\.(vma|tar)(\.zst|\.gz|\.lzo)?$")
 _SIZE_RE = re.compile(r"size=(\d+(?:\.\d+)?)([KMGT]?)")
@@ -675,7 +756,7 @@ def list_guests_on_local_lvm(guest_run) -> list:
             config = guest_run([tool, "config", vmid], timeout=60)
             if config.returncode != 0:
                 continue
-            lines = [l for l in (config.stdout or "").splitlines() if f"{LOCAL_LVM_STORAGE}:" in l]
+            lines = [l for l in (config.stdout or "").splitlines() if any(f"{sid}:" in l for sid in GUEST_STORAGES)]
             if lines:
                 size = 0
                 for line in lines:
@@ -728,7 +809,7 @@ def run_guest_backup(*, destination: str, run, guest_run, now: float, allowed_se
     dest = resolve_destination(destination, run=run, allowed_serials=allowed_serials, boot_serial=boot_serial)
     guests = list_guests_on_local_lvm(guest_run)
     if not guests:
-        return BackupResult(None, False, True, 0, "skipped: no VM or container has a disk on local-lvm")
+        return BackupResult(None, False, True, 0, "skipped: no VM or container has a disk on the guest storage (SESSION_TEMP)")
     needed = sum(size for _k, _v, size in guests) or STRUCTURE_ESTIMATE
     check_space(dest, needed_bytes=needed)
     names = ", ".join(f"{kind} {vmid}" for kind, vmid, _ in guests)
@@ -754,7 +835,7 @@ def main_guests(*, get_setting=None, now=time.time, print_fn=print, run=_default
         return 1
     try:
         result = run_guest_backup(destination=destination, run=run, guest_run=guest_run or _default_run, now=now(),
-                                  allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS, boot_serial=_boot_serial(),
+                                  allowed_serials=drive_admin.allowed_target_serials(), boot_serial=_boot_serial(),
                                   dry_run=dry_run, origin=origin)
     except BackupError as exc:
         print_fn(f"[FAILED] {exc}")
@@ -800,7 +881,7 @@ def main(*, get_setting=None, now=time.time, print_fn=print, run=_default_run, d
         return 1
     try:
         result = run_backup(destination=destination, run=run, sources=sources, now=now(),
-                            allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS, boot_serial=_boot_serial(),
+                            allowed_serials=drive_admin.allowed_target_serials(), boot_serial=_boot_serial(),
                             min_interval_hours=get_setting("backups", "offdrive_min_interval_hours"),
                             record_success=_record_freshness, dry_run=dry_run, force=force, origin=origin,
                             changes_only=CHANGES_ONLY_LABELS)

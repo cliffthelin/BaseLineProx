@@ -1,0 +1,84 @@
+FFFFFFFFFFF                                                              [100%]
+=================================== FAILURES ===================================
+__________ test_retry_after_live_rename_keeps_original_boot_reference __________
+tests/unit/test_vg_rename_recovery.py:13: in test_retry_after_live_rename_keeps_original_boot_reference
+    first = layout.prepare_group_rename(pending, serial=SERIAL, vg="pve", vg_uuid="uuid-401")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'host_layout' has no attribute 'prepare_group_rename'
+____________ test_pending_repair_cannot_be_reused_for_another_drive ____________
+tests/unit/test_vg_rename_recovery.py:21: in test_pending_repair_cannot_be_reused_for_another_drive
+    layout.prepare_group_rename(pending, serial=SERIAL, vg="pve", vg_uuid="uuid-401")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'host_layout' has no attribute 'prepare_group_rename'
+_________________ test_completed_name_needs_no_new_transaction _________________
+tests/unit/test_vg_rename_recovery.py:30: in test_completed_name_needs_no_new_transaction
+    assert layout.prepare_group_rename(pending, serial=SERIAL,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'host_layout' has no attribute 'prepare_group_rename'
+_____________ test_symlink_transaction_cannot_redirect_root_write ______________
+tests/unit/test_vg_rename_recovery.py:41: in test_symlink_transaction_cannot_redirect_root_write
+    layout.prepare_group_rename(pending, serial=SERIAL, vg="pve", vg_uuid="uuid-401")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'host_layout' has no attribute 'prepare_group_rename'
+___ test_redirect_migration_checks_a_failed_move_and_retains_a_retry_record ____
+tests/unit/test_redirect_migration_files.py:15: in test_redirect_migration_checks_a_failed_move_and_retains_a_retry_record
+    result = pbm.migrate_redirect_contents(RealRunner(), str(source), str(target))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'persist_bind_mounts' has no attribute 'migrate_redirect_contents'
+____ test_completed_migration_preserves_file_content_and_clears_the_record _____
+tests/unit/test_redirect_migration_files.py:28: in test_completed_migration_preserves_file_content_and_clears_the_record
+    result = pbm.migrate_redirect_contents(RealRunner(), str(source), str(target))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'persist_bind_mounts' has no attribute 'migrate_redirect_contents'
+_______ test_pending_migration_never_overwrites_a_destination_collision ________
+tests/unit/test_redirect_migration_files.py:41: in test_pending_migration_never_overwrites_a_destination_collision
+    result = pbm.migrate_redirect_contents(RealRunner(), str(source), str(target))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'persist_bind_mounts' has no attribute 'migrate_redirect_contents'
+____________ test_pc601_update_lane_refuses_pc401_before_discovery _____________
+tests/unit/test_update_lane_protection.py:9: in test_pc601_update_lane_refuses_pc401_before_discovery
+    update.discover_path("<PC401 drive serial>")
+baseline/lib/installed_drive_update.py:50: in discover_path
+    raise UpdateError('Selected serial does not identify exactly one attached drive')
+E   installed_drive_update.UpdateError: Selected serial does not identify exactly one attached drive
+
+During handling of the above exception, another exception occurred:
+tests/unit/test_update_lane_protection.py:8: in test_pc601_update_lane_refuses_pc401_before_discovery
+    with pytest.raises(update.UpdateError, match="other installer lane"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'other installer lane'
+E     Actual message: 'Selected serial does not identify exactly one attached drive'
+_________ test_pc601_updater_refuses_pc401_even_with_an_invalid_bundle _________
+tests/unit/test_update_lane_protection.py:14: in test_pc601_updater_refuses_pc401_even_with_an_invalid_bundle
+    update.update(None, serial="<PC401 drive serial>", input_bundle=tmp_path / "missing",
+baseline/lib/installed_drive_update.py:107: in update
+    installer_inputs.verify(bundle)  # Validate captured code before any device probe.
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+baseline/lib/installer_inputs.py:128: in verify
+    except (OSError,ValueError):raise InputError('Installer bundle manifest unavailable') from None
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   installer_inputs.InputError: Installer bundle manifest unavailable
+___ test_read_refuses_unmounted_storage_even_if_a_stale_settings_file_exists ___
+tests/unit/test_layered_settings.py:229: in test_read_refuses_unmounted_storage_even_if_a_stale_settings_file_exists
+    with pytest.raises(ls.SettingsError, match="not mounted"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE <class 'layered_settings.SettingsError'>
+_________ test_read_reports_missing_storage_instead_of_empty_settings __________
+tests/unit/test_layered_settings.py:235: in test_read_reports_missing_storage_instead_of_empty_settings
+    with pytest.raises(ls.SettingsError, match="not mounted"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE <class 'layered_settings.SettingsError'>
+=========================== short test summary info ============================
+FAILED tests/unit/test_vg_rename_recovery.py::test_retry_after_live_rename_keeps_original_boot_reference
+FAILED tests/unit/test_vg_rename_recovery.py::test_pending_repair_cannot_be_reused_for_another_drive
+FAILED tests/unit/test_vg_rename_recovery.py::test_completed_name_needs_no_new_transaction
+FAILED tests/unit/test_vg_rename_recovery.py::test_symlink_transaction_cannot_redirect_root_write
+FAILED tests/unit/test_redirect_migration_files.py::test_redirect_migration_checks_a_failed_move_and_retains_a_retry_record
+FAILED tests/unit/test_redirect_migration_files.py::test_completed_migration_preserves_file_content_and_clears_the_record
+FAILED tests/unit/test_redirect_migration_files.py::test_pending_migration_never_overwrites_a_destination_collision
+FAILED tests/unit/test_update_lane_protection.py::test_pc601_update_lane_refuses_pc401_before_discovery
+FAILED tests/unit/test_update_lane_protection.py::test_pc601_updater_refuses_pc401_even_with_an_invalid_bundle
+FAILED tests/unit/test_layered_settings.py::test_read_refuses_unmounted_storage_even_if_a_stale_settings_file_exists
+FAILED tests/unit/test_layered_settings.py::test_read_reports_missing_storage_instead_of_empty_settings
+11 failed, 50 deselected in 0.38s

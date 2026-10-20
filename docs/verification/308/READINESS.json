@@ -1,0 +1,22 @@
+{
+  "source_commit": "ea3a658ab9455e59d6fbfaec0e9146881314aa44",
+  "candidate_ready_for_disposable_live_tests": true,
+  "installed_drive_deployment_ready": false,
+  "physical_pc401_modified": false,
+  "runtime_scope": "QEMU live installer; actual mounts, crypto and HTTP; no installed Proxmox or physical acceptance",
+  "real_guest_checks": 14,
+  "focused_unit_passes": 217,
+  "iso": "/run/media/cane/CACHE/baseline-build/codex-pc401-runtime-20261015/pc401-disposable-test-final.iso",
+  "iso_sha256": "5d24a41e8f9ffc28eefbe72f467cb8dc648fba48f78cb0ee624112b93521edb6",
+  "independently_verified_source_files": 1128,
+  "verified_cache_files": 491,
+  "blockers": [
+    "PC401-308-01",
+    "PC401-308-02",
+    "PC401-308-03",
+    "PC401-308-04",
+    "PC401-308-05"
+  ],
+  "qemu_stopped": true,
+  "disposable_disk_qemu_img_check": "passed"
+}

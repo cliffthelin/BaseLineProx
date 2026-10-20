@@ -1,0 +1,1 @@
+{"real_qcow2_overlay": true, "real_cloud_init_iso": true, "configuration_seed_preserved_after_rebuild": true, "base_unchanged": true, "retained_disk_unchanged": true, "os_disk_reset": true, "published_ubuntu_source_used": false, "guest_booted": false, "browser_page_loaded": false, "physical_device_used": false}

@@ -91,7 +91,39 @@ class InstallProcess:
         raise NotImplementedError
 
 
+def zero_head_and_tail(path, *, size_bytes: int, head_bytes: int, tail_bytes: int) -> None:
+    """Overwrite the first `head_bytes` and last `tail_bytes` of `path` with zeros, refusing unless its real size is exactly
+    `size_bytes` (the size the safety gate validated) and the two ranges are positive, disjoint and inside it.
+
+    Why: Proxmox's installer cannot create its LVM physical volume on a drive that still carries an earlier install's LVM
+    label and volume-group metadata, which survive clearing the partition table because they live inside the old
+    partitions. Zeroing the start covers the old BIOS-boot and EFI partitions and the start of the LVM partition; the end
+    removes the backup GPT, so no tool can restore the old table from it. Only ever called after the data-protection guard
+    has passed for this exact device."""
+    if head_bytes <= 0 or tail_bytes <= 0 or head_bytes + tail_bytes >= size_bytes:
+        raise ValueError("head and tail ranges must be positive, disjoint and inside the device")
+    chunk = 8 * 2**20
+    fd = os.open(str(path), os.O_WRONLY)
+    try:
+        actual = os.lseek(fd, 0, os.SEEK_END)
+        if actual != size_bytes:
+            raise ValueError(f"device size {actual} is not the validated size {size_bytes}; nothing was written")
+        for start, length in ((0, head_bytes), (size_bytes - tail_bytes, tail_bytes)):
+            os.lseek(fd, start, os.SEEK_SET)
+            remaining = length
+            while remaining:
+                step = min(chunk, remaining)
+                os.write(fd, b"\0" * step)
+                remaining -= step
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 class RealInstallRunner(InstallRunner):
+    def scrub_signatures(self, path, size_bytes, head_bytes=2 * 2**30, tail_bytes=2**20):
+        zero_head_and_tail(path, size_bytes=size_bytes, head_bytes=head_bytes, tail_bytes=tail_bytes)
+
     def run(self, argv, timeout=30, cwd=None):
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
@@ -165,11 +197,22 @@ class _RealInstallProcess(InstallProcess):
             except socket.timeout:
                 pass
             s.sendall((command + "\n").encode())
-            time.sleep(0.3)
-            try:
-                return s.recv(65536).decode("utf-8", errors="replace")
-            except socket.timeout:
-                return ""
+            # The monitor echoes the command with cursor escapes, then the reply, then a fresh "(qemu) " prompt: read until that
+            # prompt follows the reply (a fixed short sleep returned only the echo for `info status`).
+            deadline = time.monotonic() + timeout
+            data = b""
+            while time.monotonic() < deadline:
+                try:
+                    chunk = s.recv(65536)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                data += chunk
+                text = data.decode("utf-8", errors="replace")
+                if text.rstrip().endswith("(qemu)") and "\n" in text.split(command, 1)[-1]:
+                    break
+            return data.decode("utf-8", errors="replace")
         finally:
             s.close()
 
@@ -209,7 +252,7 @@ def build_sparse_install_invocation(
     serial_log: Path, memory_mb: int = 3072, smp: int = 2,
     restrict_network: bool = True, monitor_socket: Path | None = None,
     guestfwd_host: str | None = None, guestfwd_port: int | None = None,
-    target_serial: str | None = None,
+    target_serial: str | None = None, share_dir: Path | None = None,
 ) -> QemuInvocation:
     """Sparse-file-only, guestfwd/restrict-isolated networking, no
     other drives, no host block-device paths - matching decision
@@ -311,8 +354,11 @@ def build_sparse_install_invocation(
             "-smbios", f"type=1,product={smbios_product}",
             "-serial", f"file:{serial_log}",
         ]
+    if share_dir is not None:
+        # OS install images offered to the installed system (os_isos.py): a read-only file share, not a drive.
+        argv += ["-virtfs", f"local,path={share_dir},mount_tag=baseline-isos,security_model=none,readonly=on"]
     if monitor_socket is not None:
-        argv += ["-monitor", f"unix:{monitor_socket},server,nowait"]
+        argv += ["-display", "none", "-monitor", f"unix:{monitor_socket},server,nowait"]
 
     device_inventory = {
         "drives": [
@@ -326,21 +372,32 @@ def build_sparse_install_invocation(
         "no_other_drives": True,
         "no_host_block_device_paths": True,
     }
+    if share_dir is not None:
+        device_inventory["shares"] = [f"{share_dir} (read-only 9p share, tag baseline-isos)"]
     return QemuInvocation(argv=argv, device_inventory=device_inventory)
 
 
 def build_postinstall_boot_invocation(
     *, target_image: Path, mac: str, smbios_product: str, serial_log: Path,
     memory_mb: int = 3072, smp: int = 2, restrict_network: bool = True,
-    monitor_socket: Path | None = None,
+    monitor_socket: Path | None = None, target_serial: str | None = None,
 ) -> QemuInvocation:
     """Disk-only boot, no CD-ROM at all - the installer media is never
     left attached, so it cannot be silently re-entered (decision
-    record 04's confirmed defect in the naive approach)."""
+    record 04's confirmed defect in the naive approach).
+
+    `target_serial` presents the drive as virtio-scsi + scsi-hd with that serial, exactly as the install did: an installed
+    system verifies its drive by serial, which a plain virtio-blk disk never reports."""
+    if target_serial:
+        drive = ["-drive", f"file={target_image},format=raw,if=none,id=targetdisk,cache=none",
+                 "-device", "virtio-scsi-pci,id=targetscsi",
+                 "-device", f"scsi-hd,drive=targetdisk,bus=targetscsi.0,serial={target_serial}"]
+    else:
+        drive = ["-drive", f"file={target_image},format=raw,if=virtio,cache=none"]
     argv = [
         "qemu-system-x86_64",
         "-enable-kvm", "-cpu", "host", "-m", str(memory_mb), "-smp", str(smp),
-        "-drive", f"file={target_image},format=raw,if=virtio,cache=none",
+        *drive,
         "-boot", "order=c",
         "-nic", f"user,restrict={'on' if restrict_network else 'off'},mac={mac}",
         "-smbios", f"type=1,product={smbios_product}",
@@ -349,7 +406,8 @@ def build_postinstall_boot_invocation(
     if monitor_socket is not None:
         argv += ["-monitor", f"unix:{monitor_socket},server,nowait"]
     device_inventory = {
-        "drives": [f"file={target_image.name},format=raw,if=virtio (installed target, no installer media attached)"],
+        "drives": [f"file={target_image.name}, {'virtio-scsi + scsi-hd, serial set' if target_serial else 'if=virtio'} "
+                   "(installed target, no installer media attached)"],
         "network": f"user (SLIRP), restrict={'on' if restrict_network else 'off'}, mac={mac}",
         "no_cdrom_attached": True,
     }

@@ -12,6 +12,19 @@ are two realizations of the same volume set, and both derive from one source,
   lays each volume out as a GPT partition named for it, ext4 inside, no LVM,
   no root ([decision record 46](../design/decision-records/46-sdb-partitioned-user-persistence-installer-cache-session-temp.md) style).
 
+## Physical metadata checked 2026-10-04
+
+PC601's current `/dev/sdc3` is a 475.9 GiB LVM physical volume, containing
+Proxmox root/swap and its VM thin pool; it is not an extra ext4 Baseline volume.
+PC401 currently has the six ext4 volumes listed below. Copying PC401's entire
+layout onto PC601 would remove PC601's existing Proxmox boot layout. A common
+software build is possible, but an interchangeable boot layout needs a deliberate
+migration and disk/install identity handling. A byte-for-byte clone duplicates
+partition/filesystem/LVM identities; existing planner clone checks reject
+ambiguous retained partitions when both copies are attached (DR136/137).
+Read-only evidence: [DR143](../design/decision-records/143-runtime-audit-and-drive-role-inspection.md).
+No disk contents were changed in this inspection.
+
 ## Identity is the serial, never the kernel letter
 
 Kernel letters move. On 2026-09-30 they had shifted from what every older doc
@@ -20,8 +33,8 @@ said, so a rule written as "never touch `sdb`" now points at an unrelated
 
 | Serial | Model | Kernel letter today | Was | Role |
 |---|---|---|---|---|
-| `FD01N6557110C271B` | PC601 NVMe SK hynix 512GB | `/dev/sdc` | `sdd` | Proxmox install (`pve` VG) |
-| `MD89N41071210AP4E` | PC401 NVMe SK hynix 512GB | `/dev/sdd` | `sdb` | Baseline drive (plain GPT) |
+| `<PC601 drive serial>` | PC601 NVMe SK hynix 512GB | `/dev/sdc` | `sdd` | Proxmox install (`pve` VG) |
+| `<PC401 drive serial>` | PC401 NVMe SK hynix 512GB | `/dev/sdd` | `sdb` | Baseline drive (plain GPT) |
 
 Every destructive step goes through
 [`physical_device_safety.validate_target_device`](../../baseline/lib/physical_device_safety.py)
@@ -34,8 +47,9 @@ single command. The media and other NVMe drives on this machine cannot be select
 person deliberately enrolls one (`enroll_drive`, DR135: typed serial must match, human
 confirmation every time; enrollment writes nothing to the drive and drive_guard still decides
 formatting). The one
-deliberate exception, a backup destination on a separate drive, is designed but not built
-(row 56).
+deliberate exception, a backup destination on a separate drive, is implemented
+in the add-only backup operation below; complete guest recovery coverage remains
+open (row60 / REAL-011).
 
 ## The Baseline drive, on disk vs. planned
 
@@ -102,6 +116,19 @@ deleting, renaming or overwriting call is ever added.
   checksums detect alteration of a backup but cannot prevent it.
 - **First run:** `baseline-backup-offdrive --dry-run` validates the destination, sizes the data and checks space,
   and writes nothing. Set `backups.offdrive_destination` in the Admin tab first.
+
+## Generated test artifacts (2026-10-09, DR177)
+
+New test output, disposable VM images, logs, screenshots, and generated test
+datasets belong in a unique run directory under
+`/mnt/10TB/backup/baseline-backups/testing/<task>-<UTC timestamp>/`. Do not put
+test artifacts in `INSTALLER_CACHE` or under the CACHE checkout. Use a new
+directory for each run; preserve the backup drive's add-only rule and never
+overwrite or automatically delete prior test runs. If the designated backup
+drive is absent or read-only, stop before producing large or persistent test
+outputs and report that the destination is unavailable; do not fall back to
+CACHE or another drive. At this instruction, `/mnt/10TB` is mounted read-only,
+so no test artifacts were written there.
 
 Not yet run against real hardware. Open items are in v0.2 rows 56-61.
 

@@ -11,6 +11,8 @@ subprocess.
 """
 from dataclasses import dataclass
 
+import os
+
 import pytest
 
 import harness
@@ -134,3 +136,15 @@ def test_describe_session_with_an_active_write_grant(tmp_path):
     assert harness.describe_session(session) == (
         f"session: warm (multi-turn memory active) | write: {resolved} (this session only)"
     )
+
+
+def test_the_claude_token_is_read_from_the_vault_into_the_process_environment(tmp_path, monkeypatch):
+    import vault
+    admin = vault.Vault(tmp_path / "admin")
+    admin.put("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-vaulted-value-0001")
+    monkeypatch.setattr(vault, "default_vaults", lambda: [admin])
+    monkeypatch.setattr(harness, "ENV_FILE", str(tmp_path / "absent.env"))
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    assert harness._load_env() is True
+    assert os.environ["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-vaulted-value-0001"
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)

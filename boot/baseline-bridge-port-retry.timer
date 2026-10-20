@@ -1,0 +1,10 @@
+[Unit]
+Description=Check once a minute whether the bridge has a port that exists (a no-op when it has)
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

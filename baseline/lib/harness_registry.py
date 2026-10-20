@@ -17,6 +17,10 @@ import providers
 import harness_adapter
 
 
+class HarnessAdapterError(RuntimeError):
+    """A configured harness is advertised but its real adapter is broken."""
+
+
 def adapter_module_name(harness_id: str):
     """The importable module name for `harness_id`, or None if it's
     unknown or not implemented. Pure lookup against
@@ -28,17 +32,24 @@ def adapter_module_name(harness_id: str):
 
 
 def get_adapter(harness_id: str):
-    """The real adapter module for `harness_id`, or None if it's
-    unknown, not implemented, or (defensively) named but doesn't
-    actually conform to the HarnessAdapter contract - never raises."""
-    module_name = adapter_module_name(harness_id)
-    if not module_name:
+    """Load a real adapter; return None only for an unknown/unimplemented ID.
+
+    A declared adapter that cannot be imported or violates the contract is a
+    configuration/runtime error, never an apparent absence of a selection.
+    """
+    entry=next((item for item in providers.HARNESSES if item.get('id')==harness_id),None)
+    if entry is None or not entry.get('implemented'):
         return None
+    module_name=entry.get('adapter_module')
+    if not isinstance(module_name,str) or not module_name:
+        raise HarnessAdapterError(f"harness {harness_id!r} is marked implemented but has no adapter module")
     try:
         module = importlib.import_module(module_name)
-    except ImportError:
-        return None
-    return module if harness_adapter.conforms(module) else None
+    except ImportError as exc:
+        raise HarnessAdapterError(f"harness {harness_id!r} adapter {module_name!r} cannot be imported: {exc}") from exc
+    if not harness_adapter.conforms(module):
+        raise HarnessAdapterError(f"harness {harness_id!r} adapter {module_name!r} does not satisfy the adapter contract")
+    return module
 
 
 def supports_write_grant(adapter) -> bool:

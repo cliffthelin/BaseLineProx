@@ -1,0 +1,112 @@
+# DR245: Self-contained installer - offline first boot, reboot loop, and the fixes the rehearsal exposed
+
+Date: 2026-10-10
+
+Number provisional: two agents write decision records in this tree concurrently (DR244 landed while this work
+was in progress). Renumber at merge if 245 is taken.
+
+Branch `claude/whats-left-fixes`, repo `/run/media/cane/CACHE/baseline_repo`, based on shared-tree HEAD
+`f5fede6` plus snapshot `0c9a679` of that tree's uncommitted work at 02:49 (not authored here).
+
+## Context
+
+The 2026-10-10 offline rehearsal of the self-contained installer (Proxmox + Baseline source + offline package
+repository on one ISO, installed onto a blank sparse disk with no network) reached the first-boot CONFIRM screen
+but never the kiosk, and exposed several defects. This record covers the fixes for its "what's left" list.
+
+## Decisions
+
+### 1. First boot may commit offline from the drive's own verified repository (`957b1ca`)
+
+`firstboot_statemachine`: from `network_repair_failed`, if the drive carries its own package repository -
+registered with apt AND re-verified against its manifest at that moment - the diagnostic tools are installed from
+that repository only (apt given one source list, `SourceParts=-`, so no network source is consulted), then verified
+and committed. The network failure is not overwritten: `network_repair_failed` stays in the journal,
+`network_repaired` is never written on this path (its evidence invariant is untouched), and `committed` records
+`network_verified=False`, `package_source="offline"`. Without a verified repository the old refusal is unchanged.
+Consent is not widened: this runs only after CONFIRM, whose screen names the offline source when one is present.
+
+### 2. The first-boot installer never reboots from inside Proxmox's first-boot unit (`b9b198a`)
+
+Read from `proxmox-first-boot_9.2.5` on the ISO: the unit is `Type=oneshot` and removes its
+`pending-first-boot-setup` flag in `ExecStartPost`, which runs only after the hook returns. An inline
+`systemctl reboot` killed the unit first, so the hook re-ran every boot. Now: an already-complete install returns
+successfully and does nothing; otherwise the reboot is queued with `systemd-run --no-block
+--property=After=<invoking unit>` (unit read from `/proc/self/cgroup`). Verified against real systemd (user
+instance) with the same oneshot + ExecStartPost shape: hook returns -> ExecStartPost -> queued reboot.
+
+### 3a. Scripts inbox follows the active persona (`51a94e3`)
+
+Gate and unit used the singular pre-persona `/mnt/USER`, which no persona install has, so the gate refused every
+boot and `Restart=on-failure` looped. Both now resolve the active persona's `USER_<PERSONA>` through one function.
+
+### 3c. Proposal and repair agree on what a missing lifeline fact means (`f6f4403`)
+
+`network.check_lifeline` stops at the first failing fact. Discovery read a missing fact as not-OK; both repair
+guards read it as healthy, so a NIC with no carrier was "already_healthy". One helper,
+`repair.lifeline_reports_healthy`, now requires both facts present and exactly True; a genuine `already_healthy`
+refusal is re-verified by first boot and recorded as `network_repaired` only on that fresh evidence.
+
+### 4. Run script: no default target; work folder off the repo (`4b1d513`)
+
+Two drives, two agents (Claude PC601 `<PC601 drive serial>`, Codex PC401 `<PC401 drive serial>`). The script
+hardcoded PC401 as the only target. Now `--target` is required for any stage touching a real drive (an exact
+`--confirm-wipe` serial implies it), the other drive is protected for that run, and the work folder is
+`/run/media/cane/CACHE/baseline-build/allscript-<target>` on ext4 instead of `<repo>/.runtime-proof173` on NTFS.
+
+### 5. Recovery image under a kernel-enforced write budget (`8bdd378`)
+
+Budget = real free space minus the destination's 3% reserve, enforced with `prlimit --fsize`; implemented to the
+existing (previously failing) test specification. The compressed image is no longer charged its raw size.
+
+### Also fixed along the way
+
+- `32583d9`: 20 `baseline/bin` entry points committed `100644` (13 already at `f5fede6`), invisible on NTFS where
+  every file reads as 777; an ISO built from a POSIX checkout would have shipped non-executable systemd entry
+  points. Guard test added.
+- conftest hardware guard: `prlimit` added to its wrapper list (`prlimit qemu-img ...` slipped past it).
+- 4 assertions in `test_firstboot_statemachine` that could never fail (argv starts with `env`) strengthened.
+
+### 3b. Hardware tab accepts inxi's real `Repos` shape (`06cf038`)
+
+Captured on the rehearsal VM: the only rejected section was `Repos` (`inxi -r`), whose items are objects per apt
+sources file, each followed by a list of that file's raw lines. Not QEMU-specific: any machine with more than one
+apt source failed. Schema sections must still be flat lists of objects; other sections may also hold lists of
+strings; anything else is still rejected.
+
+### 7. Provisioning must not write into the carried repository (`06933f5`)
+
+Found by the re-run rehearsal: first boot correctly refused the repository at CONFIRM because
+`npm install --offline --cache <repository>/npm-cache` had written `npm-cache/_logs/<time>-debug-0.log` into it.
+npm now logs to `/var/log/baseline-npm`, and the installer re-verifies the repository after provisioning, naming
+anything that changed.
+
+## Evidence from the re-run rehearsal (2026-10-10, ISO built from this branch, no network, sparse disk)
+
+Read on the VM's own console (`/var/log/baseline-first-boot-install.log`, `journalctl --list-boots`):
+
+- storage created all 8 volumes under the new names (USER_ADMIN ... APPDATA_PERSONAL);
+- the 2,145,298,432-byte installer ISO was carried onto INSTALLER_CACHE and 257 packages verified;
+- the reboot was queued as `systemd-run --no-block --unit=baseline-first-boot-reboot
+  --property=After=proxmox-first-boot-network-online.service ...`, and the journal shows exactly two boots;
+- `baseline-scripts-inbox`: active, running, NRestarts=0, against `/mnt/USER_ADMIN`;
+- `offline_repository()` reported the npm log file above (fixed by 7);
+- `hardware.collect()` reported `inxi section has an invalid shape`, traced to `Repos` (fixed by 3b).
+
+### 8. Plain files under /sys/class/net are not interfaces (`d4034da`, `7c1e4c0`)
+
+Found by the second re-run: after CONFIRM first boot installed the tools from the drive's repository, then died in
+the tools' functional verification: `/sys/class/net/bonding_masters` (a plain file, present whenever the bonding
+module is loaded, which is normal on Proxmox) was probed as an interface, raising `NetworkProbeError`. No commit
+marker, so the kiosk gate kept refusing. `_physical_nics` now skips non-directories.
+
+## Result of the third re-run (2026-10-10, no network, sparse disk)
+
+Install, first boot, CONFIRM, offline commit, and the kiosk browser showing the Proxmox VE login; clean shutdown,
+QEMU exit 0. This is the rehearsal on a blank virtual disk. The real PC401 run has not been done.
+
+## Not done here
+
+- 6: the OS-selection and apps-with-overlays stage is not built.
+- Two whole-drive recovery images cannot both fit on `/mnt/10TB` (819.5 GB free).
+- The 35 remaining unit-test failures predate this work (mostly in-progress `drive_installer` mount-table probing).

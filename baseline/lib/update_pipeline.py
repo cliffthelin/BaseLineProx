@@ -77,17 +77,27 @@ def _selected_keys(proxmox: dict, selection, prefix: str) -> set:
 def _apply_configs(runner: Runner, proxmox: dict, selection, network_interface: str, summary: dict) -> None:
     smartd_selected = _selected_keys(proxmox, selection, "smartd_")
     if smartd_selected:
-        merged = config_diff.read_current_smartd_config(runner)
-        merged.update({k: proxmox[k] for k in smartd_selected})
-        result = config_apply.apply_smartd_config(runner, merged)
-        (summary["applied"] if result.ok else summary["failed"]).append("smartd")
+        try:
+            merged = config_diff.read_current_smartd_config(runner)
+        except config_diff.ReadbackError as exc:
+            summary["failed"].append("smartd")
+            summary["errors"]["smartd"] = str(exc)
+        else:
+            merged.update({k: proxmox[k] for k in smartd_selected})
+            result = config_apply.apply_smartd_config(runner, merged)
+            (summary["applied"] if result.ok else summary["failed"]).append("smartd")
     else:
         summary["skipped"].append("smartd")
 
     ethtool_selected = {k for k in _selected_keys(proxmox, selection, "ethtool_") if k != "ethtool_interface"}
     if ethtool_selected:
         interface = proxmox.get("ethtool_interface") or network_interface
-        merged = config_diff.read_current_ethtool_config(runner, interface)
+        try:
+            merged = config_diff.read_current_ethtool_config(runner, interface)
+        except config_diff.ReadbackError as exc:
+            summary["failed"].append("ethtool")
+            summary["errors"]["ethtool"] = str(exc)
+            return
         merged.update({k: proxmox[k] for k in ethtool_selected})
         result = config_apply.apply_ethtool_config(runner, interface, merged)
         (summary["applied"] if result.ok else summary["failed"]).append("ethtool")
@@ -103,7 +113,7 @@ def apply_selective_update(runner: Runner, config: dict, categories: dict, *,
     names to update). Returns {"applied": [...], "skipped": [...],
     "failed": [...], "not_available": [...]} naming each real
     subsystem or requested-but-unwired category - never raises."""
-    summary = {"applied": [], "skipped": [], "failed": [], "not_available": []}
+    summary = {"applied": [], "skipped": [], "failed": [], "not_available": [], "errors": {}}
     _record_not_available(categories, summary)
 
     proxmox = config.get("proxmox") or {}

@@ -7,7 +7,7 @@ import drive_admin as da
 
 
 class RamDrive:
-    def __init__(self, root: Path, serial: str = "MD89N41071210AP4E"):
+    def __init__(self, root: Path, serial: str = "SYNTHDRIVEA00001"):
         self.root = Path(root)
         self.root.mkdir(parents=True)
         self.serial = serial
@@ -62,7 +62,8 @@ class RamDrive:
 
         monkeypatch.setitem(da.ACTIONS, "lay_out_baseline_drive", da.ActionSpec(
             "lay_out_baseline_drive", "RAM-drive stand-in for lay_out_baseline_drive", fake_layout, requires_device=True))
-        for action_id in ("repair", "update_selected", "stamp_installer_identity", "enroll_drive"):
+        for action_id in ("repair", "update_selected", "stamp_installer_identity", "enroll_drive",
+                          "update_installed_drive", "unmount_partition"):
             monkeypatch.setitem(da.ACTIONS, action_id, da.ActionSpec(
                 action_id, f"RAM-drive stand-in for {action_id}", recorder(action_id),
                 requires_device=action_id != "update_selected"))

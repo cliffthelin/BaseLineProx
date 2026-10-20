@@ -79,6 +79,38 @@ def test_status_route_matches_what_the_page_embeds(tmp_path):
         case.close()
 
 
+def test_corrupt_vm_record_is_visible_as_unavailable_inventory(tmp_path):
+    case, f, _ = _case(tmp_path)
+    try:
+        f.host.create_from_iso("broken", iso="/unused.iso", disk_gb=10)
+        (f.host.vm_dir("broken") / "vm.json").write_text("not-json")
+
+        status, raw = case.get("/vms/status")
+        assert status == 503
+        assert "cannot inspect VM broken" in json.loads(raw)["error"]
+
+        status, page = case.get("/vms")
+        assert status == 200
+        assert b"VM inventory unavailable" in page
+        assert b"cannot inspect VM broken" in page
+        assert b"No VMs yet" not in page
+    finally:
+        case.close()
+
+
+def test_homepage_probe_error_is_visible_without_hiding_vm_management(tmp_path):
+    case, f, _ = _case(tmp_path)
+    try:
+        f.host.guest_homepage = lambda: (_ for _ in ()).throw(vp.vh.VmError("bridge permission denied"))
+        status, page = case.get("/vms")
+        assert status == 200
+        assert b"Proxmox address detection failed" in page
+        assert b"bridge permission denied" in page
+        assert b"Virtual machines" in page
+    finally:
+        case.close()
+
+
 def test_changing_the_store_location_is_saved_and_validated(tmp_path):
     case, f, _ = _case(tmp_path)
     try:

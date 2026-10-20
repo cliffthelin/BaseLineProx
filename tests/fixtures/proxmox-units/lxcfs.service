@@ -1,0 +1,12 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=FUSE filesystem for LXC
+ConditionVirtualization=!container
+Before=lxc.service
+Documentation=man:lxcfs(1)
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target

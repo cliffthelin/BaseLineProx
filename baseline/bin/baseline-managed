@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Turn managed server mode on or off. Off (standalone) is the default; nothing requires a parent.
+
+    baseline-managed status
+    baseline-managed enable --mirror-root FOLDER [--remote-rebuild]
+    baseline-managed disable
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import managed_mode as mm
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("status")
+    en = sub.add_parser("enable")
+    en.add_argument("--mirror-root", required=True, help="the drive or folder that holds the mirror")
+    en.add_argument("--remote-rebuild", action="store_true")
+    sub.add_parser("disable")
+    args = parser.parse_args(argv)
+    try:
+        if args.cmd == "enable":
+            result = mm.save({"mode": "managed", "mirror_root": args.mirror_root, "remote_rebuild": args.remote_rebuild})
+        elif args.cmd == "disable":
+            result = mm.save({"mode": "standalone"})
+        else:
+            result = mm.load()
+    except mm.ManagedError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(dict(result, file=str(mm.config_path())), indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

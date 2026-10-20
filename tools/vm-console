@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Drive a development VM's console through its QEMU monitor (HMP sendkey/screendump). Development use only.
+
+    vm-console SOCKET type "text"            type text, then Enter
+    vm-console SOCKET key ctrl-alt-f2        send one key chord
+    vm-console SOCKET login PASSWORD_FILE    switch to tty2 and log in as root (password read from the 0600 file)
+    vm-console SOCKET shot OUT.png           screendump to a PNG
+
+SOCKET is the monitor socket of a VM this effort started (for example the install's `installer/monitor.sock`).
+"""
+import socket
+import sys
+import time
+from pathlib import Path
+
+NAMES = {"\n": "ret", " ": "spc", "-": "minus", ".": "dot", "/": "slash", "=": "equal", ",": "comma", "|": "shift-backslash",
+         ">": "shift-dot", "<": "shift-comma", "_": "shift-minus", ":": "shift-semicolon", ";": "semicolon", "*": "shift-8",
+         "'": "apostrophe", '"': "shift-apostrophe", "&": "shift-7", "$": "shift-4", "(": "shift-9", ")": "shift-0",
+         "+": "shift-equal", "~": "shift-grave_accent", "!": "shift-1", "[": "bracket_left", "]": "bracket_right",
+         "{": "shift-bracket_left", "}": "shift-bracket_right", "#": "shift-3", "%": "shift-5", "@": "shift-2",
+         "?": "shift-slash", "\\": "backslash", "^": "shift-6", "`": "grave_accent"}
+
+
+def keys(text):
+    """The HMP `sendkey` commands that type `text`."""
+    return ["sendkey " + (NAMES.get(ch) or (f"shift-{ch.lower()}" if ch.isupper() else ch)) for ch in text]
+
+
+def send(socket_path, commands, pause=0.04):
+    sock = socket.socket(socket.AF_UNIX)
+    sock.connect(str(socket_path))
+    sock.settimeout(2)
+    time.sleep(0.2)
+    try:
+        sock.recv(65536)
+    except OSError:
+        pass
+    for command in commands:
+        sock.send((command + "\n").encode())
+        time.sleep(pause)
+        try:
+            sock.recv(65536)
+        except OSError:
+            pass
+    sock.close()
+
+
+def main(argv):
+    if len(argv) < 3:
+        raise SystemExit(__doc__)
+    sock, action, rest = argv[0], argv[1], argv[2:]
+    if action == "type":
+        send(sock, keys(rest[0] + "\n"))
+    elif action == "key":
+        send(sock, [f"sendkey {rest[0]}"])
+    elif action == "login":
+        password = Path(rest[0]).read_text().strip()
+        send(sock, ["sendkey ctrl-alt-f2"])
+        time.sleep(2)
+        send(sock, keys("root\n"))
+        time.sleep(2)
+        send(sock, keys(password + "\n"))
+        time.sleep(3)
+    elif action == "shot":
+        ppm = Path(rest[0]).with_suffix(".ppm")
+        send(sock, [f"screendump {ppm}"])
+        time.sleep(1)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "baseline/lib"))
+        from drive_setup_install import ppm_to_png
+        Path(rest[0]).write_bytes(ppm_to_png(ppm.read_bytes()))
+    else:
+        raise SystemExit(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -9,30 +9,93 @@
 # expected on real hardware, but Node 22 is required regardless).
 set -euo pipefail
 
+# A file that is already there with the same content is not copied again: an unchanged file costs the drive a read, not a write.
+cp() {
+  if [ "$#" -eq 2 ] && [ -f "$1" ] && [ -f "$2" ] && cmp -s "$1" "$2"; then return 0; fi
+  command cp "$@"
+}
+
+# Nothing already correct is rewritten. `put FILE < content` writes FILE only when its content would change; `sync_tree SRC DST` copies only files that differ (a file with the same content is left untouched).
+put() {
+  _t=$(mktemp) && cat > "$_t" || return 1
+  if [ -f "$1" ] && cmp -s "$_t" "$1"; then rm -f "$_t"; else cat "$_t" > "$1" && rm -f "$_t"; fi
+}
+sync_tree() {
+  ( cd "$1" && find . -type f -not -path '*/__pycache__/*' -print0 ) | while IFS= read -r -d '' f; do
+    if ! cmp -s "$1/$f" "$2/$f" 2>/dev/null; then mkdir -p "$(dirname "$2/$f")" && command cp "$1/$f" "$2/$f"; fi
+  done
+}
+
+# Self-contained installs (baseline-first-boot-install) set BASELINE_PACKAGE_CACHE to the drive's own offline
+# package cache and APT_CONFIG to sources that point only at it: nothing below then reaches the internet.
+if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
+    [ -n "${APT_CONFIG:-}" ] || { echo "BASELINE_PACKAGE_CACHE is set without an offline APT_CONFIG" >&2; exit 1; }
+    echo "=== Offline install from $BASELINE_PACKAGE_CACHE (no internet is used) ==="
+fi
+
 echo "=== Disabling Proxmox enterprise repos (no subscription assumed) ==="
 for f in pve-enterprise.sources ceph.sources; do
     if [ -f "/etc/apt/sources.list.d/$f" ]; then
         mv "/etc/apt/sources.list.d/$f" "/etc/apt/sources.list.d/$f.disabled"
     fi
 done
+# The Proxmox VE no-subscription repository is the one an unsubscribed host can use. It is written after the update above so an
+# offline install (APT_CONFIG pointing only at the drive's cache) never reaches for it; a normal `apt update` on a connected host does.
+codename="$(. /etc/os-release; echo "${VERSION_CODENAME:-trixie}")"
+if [ ! -f /etc/apt/sources.list.d/pve-no-subscription.sources ] && [ -f /usr/share/keyrings/proxmox-archive-keyring.gpg ]; then
+    cat > /etc/apt/sources.list.d/pve-no-subscription.sources <<PVE_NO_SUB
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: $codename
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+PVE_NO_SUB
+fi
 apt-get update
 
 echo "=== Installing base packages ==="
 apt-get install -y inxi python3-rich python3-textual tmux gnupg
 
 echo "=== Installing kiosk GUI packages (Track A3 - cage + stock Chromium) ==="
-apt-get install -y cage chromium xorriso curl libnotify-bin
+apt-get install -y cage chromium xorriso curl libnotify-bin kbd
+
+echo "=== Installing sound and Bluetooth (mouse, keyboard, audio, data transfer, tether from the host's browser GUI) ==="
+apt-get install -y bluez pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth
 
 echo "=== Installing Podman (Track B4 - Quadlet service management) ==="
 apt-get install -y podman
 mkdir -p /etc/containers/systemd
 
 echo "=== Installing Node.js 22 (NodeSource - Debian's own package is too old) ==="
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
+    : # nodejs 22 was collected from NodeSource into the offline cache when the installer was built
+else
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+fi
 apt-get install -y nodejs
 
 echo "=== Installing Claude Code ==="
-npm install -g @anthropic-ai/claude-code
+if [ -n "${BASELINE_PACKAGE_CACHE:-}" ]; then
+    # npm's own cache, filled with every tarball Claude Code needs when the installer was built. npm writes into the
+    # cache it is given (a debug log under _logs on 2026-10-10, a rewritten cacache index entry on 2026-10-11), and any
+    # write into the carried, manifest-verified repository makes first boot refuse it. npm therefore works in a scratch
+    # copy; the carried repository is only ever read.
+    NPM_SCRATCH=/var/cache/baseline-npm
+    rm -rf "$NPM_SCRATCH"
+    cp -a "$BASELINE_PACKAGE_CACHE/npm-cache" "$NPM_SCRATCH"
+    mkdir -p /var/log/baseline-npm
+    npm install -g --offline --cache "$NPM_SCRATCH" --logs-dir /var/log/baseline-npm \
+        @anthropic-ai/claude-code
+    # The other two harnesses are installed from the same cache when it carries them; a cache built before they were added still
+    # finishes the installation (Claude Code is the one the rest of provisioning needs).
+    for extra in opencode-ai @openai/codex; do
+        npm install -g --offline --cache "$NPM_SCRATCH" --logs-dir /var/log/baseline-npm "$extra" \
+            || echo "NOTE: $extra is not in this installer's offline cache; install it with the cache rebuilt"
+    done
+    rm -rf "$NPM_SCRATCH"
+else
+    npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
+fi
 
 echo "=== Deploying Baseline app ==="
 mkdir -p /opt/baseline/bin /opt/baseline/lib /etc/baseline /var/lib/baseline
@@ -81,6 +144,20 @@ cp "$SRC/baseline/lib/repair_rollback.py" /opt/baseline/lib/repair_rollback.py
 cp "$SRC/baseline/lib/firstboot_network_repair.py" /opt/baseline/lib/firstboot_network_repair.py
 cp "$SRC/baseline/bin/baseline-repair-rollback" /opt/baseline/bin/baseline-repair-rollback
 cp "$SRC/baseline/bin/baseline-additive-dhcp-reapply" /opt/baseline/bin/baseline-additive-dhcp-reapply
+cp "$SRC/baseline/bin/baseline-network-retry" /opt/baseline/bin/baseline-network-retry
+cp "$SRC/baseline/lib/network_retry.py" /opt/baseline/lib/network_retry.py
+cp "$SRC/baseline/bin/baseline-bridge-port" /opt/baseline/bin/baseline-bridge-port
+cp "$SRC/boot/baseline-proxmox-defaults.sh" /opt/baseline/bin/baseline-proxmox-defaults
+cp "$SRC/baseline/lib/bridge_port.py" /opt/baseline/lib/bridge_port.py
+cp "$SRC/baseline/bin/baseline-volume-growth" /opt/baseline/bin/baseline-volume-growth
+cp "$SRC/baseline/lib/volume_growth.py" /opt/baseline/lib/volume_growth.py
+cp "$SRC/baseline/lib/host_layout.py" /opt/baseline/lib/host_layout.py
+cp "$SRC/baseline/bin/baseline-machine-check" /opt/baseline/bin/baseline-machine-check
+cp "$SRC/baseline/lib/machine_check.py" /opt/baseline/lib/machine_check.py
+chmod +x /opt/baseline/bin/baseline-machine-check
+chmod +x /opt/baseline/bin/baseline-volume-growth
+chmod +x /opt/baseline/bin/baseline-bridge-port
+chmod +x /opt/baseline/bin/baseline-proxmox-defaults
 # Gate E: the real, integrated first-boot authorization state machine
 # (docs/design/decision-records/25) - connects proxmox_detect.py
 # (informational), firstboot_network_repair.py's already-real Gate A
@@ -109,6 +186,8 @@ cp "$SRC/baseline/bin/baseline-firstboot" /opt/baseline/bin/baseline-firstboot
 # before baseline-firstboot.service or baseline.service ever touch
 # those paths; see boot/baseline-persist-bind-mounts.service's own
 # ordering. Not yet run against real hardware.
+mkdir -p /etc/systemd/system/bluetooth.service.d
+cp "$SRC/boot/bluetooth-persistence.conf" /etc/systemd/system/bluetooth.service.d/baseline-persistence.conf
 cp "$SRC/baseline/lib/persist_bind_mounts.py" /opt/baseline/lib/persist_bind_mounts.py
 cp "$SRC/baseline/bin/baseline-persist-bind-mounts" /opt/baseline/bin/baseline-persist-bind-mounts
 # Physical Phase P0: read-only current-drive inventory collector, ported
@@ -118,7 +197,7 @@ cp "$SRC/baseline/bin/baseline-persist-bind-mounts" /opt/baseline/bin/baseline-p
 # for an operator to run by hand (`baseline-drive-inventory collect`)
 # on demand. Collects only; never repairs, reconfigures, or restarts
 # anything.
-cp -r "$SRC/baseline/lib/inventory" /opt/baseline/lib/inventory
+sync_tree "$SRC/baseline/lib/inventory" /opt/baseline/lib/inventory
 cp "$SRC/baseline/bin/baseline-drive-inventory" /opt/baseline/bin/baseline-drive-inventory
 # Track A5: unified sensors + per-VM dashboard. proxmox_vm_metrics.py
 # queries Proxmox's own pvesh for live/historical per-VM stats (no
@@ -154,6 +233,11 @@ cp "$SRC/baseline/bin/baseline-kiosk-gate" /opt/baseline/bin/baseline-kiosk-gate
 # this project uses.
 mkdir -p /var/lib/baseline/settings-web
 cp "$SRC/baseline/lib/settings_web.py" /opt/baseline/lib/settings_web.py
+# web_request_json.py: imported by settings_web, baseline_web, control_panel_web and scripts_inbox_web.
+cp "$SRC/baseline/lib/web_request_json.py" /opt/baseline/lib/web_request_json.py
+cp "$SRC/baseline/lib/master_configuration.py" /opt/baseline/lib/master_configuration.py
+cp "$SRC/baseline/lib/configuration_drafts.py" /opt/baseline/lib/configuration_drafts.py
+cp "$SRC/baseline/lib/configuration_draft_ui.py" /opt/baseline/lib/configuration_draft_ui.py
 cp "$SRC/baseline/lib/settings_web_gate.py" /opt/baseline/lib/settings_web_gate.py
 cp "$SRC/baseline/bin/baseline-settings-web" /opt/baseline/bin/baseline-settings-web
 cp "$SRC/baseline/bin/baseline-settings-web-gate" /opt/baseline/bin/baseline-settings-web-gate
@@ -250,13 +334,11 @@ cp "$SRC/baseline/bin/baseline-scripts-inbox-gate" /opt/baseline/bin/baseline-sc
 # 57, 58).
 cp "$SRC/baseline/lib/vm_scripts.py" /opt/baseline/lib/vm_scripts.py
 cp "$SRC/baseline/lib/quadlet.py" /opt/baseline/lib/quadlet.py
-# vm_scripts.py's own adoption-bridge functions (start/stop/destroy)
-# import these two as an optional, try/except-guarded dependency - real
-# code, tested (test_vm_provision.py/test_pct_provision.py), but never
-# staged before now (decision record 65's audit), silently degrading
-# the bridge to a stub CommandResult on any real deployed machine
-# rather than crashing. Staged for the same reason vm_scripts.py itself
-# is: operator-invoked-only, no systemd unit.
+# vm_scripts.py's adoption bridge imports these real, tested lifecycle
+# implementations directly. Stage both before callers so a deployed
+# install has the same functions exercised by test_vm_provision.py and
+# test_pct_provision.py. These stay operator-invoked; no systemd unit
+# starts or manages them automatically.
 cp "$SRC/baseline/lib/vm_provision.py" /opt/baseline/lib/vm_provision.py
 cp "$SRC/baseline/lib/pct_provision.py" /opt/baseline/lib/pct_provision.py
 # The real "Master Config" control-plane: target-drive validation,
@@ -275,6 +357,27 @@ cp "$SRC/baseline/lib/pct_provision.py" /opt/baseline/lib/pct_provision.py
 # are plain one-shot CLI tools with no service to wire at all.
 cp "$SRC/baseline/lib/physical_device_safety.py" /opt/baseline/lib/physical_device_safety.py
 cp "$SRC/baseline/lib/drive_installer.py" /opt/baseline/lib/drive_installer.py
+cp "$SRC/baseline/lib/drive_recovery.py" /opt/baseline/lib/drive_recovery.py
+cp "$SRC/baseline/lib/single_drive_storage.py" /opt/baseline/lib/single_drive_storage.py
+cp "$SRC/baseline/lib/storage_policy.py" /opt/baseline/lib/storage_policy.py
+cp "$SRC/boot/baseline-storage-verify.service" /etc/systemd/system/baseline-storage-verify.service
+cp "$SRC/boot/baseline-storage-reconcile.service" /etc/systemd/system/baseline-storage-reconcile.service
+for storage_unit in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service; do
+    mkdir -p "/etc/systemd/system/$storage_unit.d"
+    put "/etc/systemd/system/$storage_unit.d/storage.conf" <<'STORAGE_GATE'
+[Unit]
+Requires=baseline-storage-verify.service
+After=baseline-storage-verify.service
+STORAGE_GATE
+done
+# Proxmox's storage definitions are reconciled once pve-cluster runs (after the redirects); Baseline's own services wait for that.
+for reconcile_unit in baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service; do
+    put "/etc/systemd/system/$reconcile_unit.d/reconcile.conf" <<'RECONCILE_GATE'
+[Unit]
+Requires=baseline-storage-reconcile.service
+After=baseline-storage-reconcile.service
+RECONCILE_GATE
+done
 cp "$SRC/baseline/lib/config_diff.py" /opt/baseline/lib/config_diff.py
 cp "$SRC/baseline/lib/update_pipeline.py" /opt/baseline/lib/update_pipeline.py
 cp "$SRC/baseline/lib/backup_restore.py" /opt/baseline/lib/backup_restore.py
@@ -288,11 +391,46 @@ cp "$SRC/baseline/lib/offdrive_backup.py" /opt/baseline/lib/offdrive_backup.py
 cp "$SRC/baseline/lib/web_security.py" /opt/baseline/lib/web_security.py
 cp "$SRC/baseline/lib/hitl.py" /opt/baseline/lib/hitl.py
 cp "$SRC/baseline/lib/drive_guard.py" /opt/baseline/lib/drive_guard.py
+cp "$SRC/baseline/INSTALLER_UUID" /opt/baseline/INSTALLER_UUID
+cp "$SRC/baseline/lib/cardinality.py" /opt/baseline/lib/cardinality.py         # exactly-one checks and the read-only host survey
+cp "$SRC/baseline/lib/write_once.py" /opt/baseline/lib/write_once.py
+cp "$SRC/baseline/lib/managed_mode.py" /opt/baseline/lib/managed_mode.py             # managed server mode (opt-in; standalone by default)
+cp "$SRC/baseline/lib/managed_mode_page.py" /opt/baseline/lib/managed_mode_page.py
+cp "$SRC/baseline/lib/nav_tree.py" /opt/baseline/lib/nav_tree.py
+cp "$SRC/baseline/lib/console_theme.py" /opt/baseline/lib/console_theme.py          # the one look every console page shares
+cp "$SRC/baseline/lib/lane_files.py" /opt/baseline/lib/lane_files.py                # where the lane's operator files are
+cp "$SRC/baseline/lib/used_backup.py" /opt/baseline/lib/used_backup.py                # backups hold only what a filesystem uses, never its empty space
+cp "$SRC/baseline/lib/drive_recovery_used.py" /opt/baseline/lib/drive_recovery_used.py
+cp "$SRC/baseline/lib/path_picker.py" /opt/baseline/lib/path_picker.py              # folders are browsed or pasted-and-validated, never typed
+cp "$SRC/baseline/lib/settings_ui.py" /opt/baseline/lib/settings_ui.py                # how settings are shown: cards, plain names, the right control
+cp "$SRC/baseline/lib/console_charts.py" /opt/baseline/lib/console_charts.py            # inline charts shared by the console pages
+cp "$SRC/baseline/lib/hardware_overview.py" /opt/baseline/lib/hardware_overview.py
+cp "$SRC/baseline/lib/network_connection.py" /opt/baseline/lib/network_connection.py       # one connection's name, power and role (TUI and console)
+cp "$SRC/baseline/lib/network_connection_page.py" /opt/baseline/lib/network_connection_page.py
+cp "$SRC/baseline/lib/web_address.py" /opt/baseline/lib/web_address.py            # the console's own address (an IP of this host and a port)
+cp "$SRC/baseline/lib/web_address_page.py" /opt/baseline/lib/web_address_page.py
+cp "$SRC/baseline/bin/baseline-managed" /opt/baseline/bin/baseline-managed
+chmod 755 /opt/baseline/bin/baseline-managed
+cp "$SRC/baseline/lib/twin_sync.py" /opt/baseline/lib/twin_sync.py               # keeps two paired Baseline drives the same (DR272)
+cp "$SRC/baseline/lib/data_history.py" /opt/baseline/lib/data_history.py           # every data volume keeps its version history; recorded at a rebuild
+cp "$SRC/baseline/bin/baseline-twin" /opt/baseline/bin/baseline-twin
+chmod 755 /opt/baseline/bin/baseline-twin
 # Deliberate drive enrollment and the installer plan (discover/autofill/validate/compile), 2026-10-03.
 cp "$SRC/baseline/lib/drive_enrollment.py" /opt/baseline/lib/drive_enrollment.py
 cp "$SRC/baseline/lib/install_plan.py" /opt/baseline/lib/install_plan.py
 cp "$SRC/baseline/lib/install_plan_page.py" /opt/baseline/lib/install_plan_page.py
+cp "$SRC/baseline/lib/installer_desktop.py" /opt/baseline/lib/installer_desktop.py
+cp "$SRC/baseline/lib/installation_readiness.py" /opt/baseline/lib/installation_readiness.py
+cp "$SRC/baseline/lib/installer_inputs.py" /opt/baseline/lib/installer_inputs.py
+cp "$SRC/baseline/lib/installer_sources.py" /opt/baseline/lib/installer_sources.py
+cp "$SRC/baseline/lib/bluetooth_transfer.py" /opt/baseline/lib/bluetooth_transfer.py
+cp "$SRC/baseline/lib/installed_drive_update.py" /opt/baseline/lib/installed_drive_update.py
+cp "$SRC/baseline/bin/baseline-drive-update" /opt/baseline/bin/baseline-drive-update
+chmod 755 /opt/baseline/bin/baseline-drive-update
 cp "$SRC/baseline/bin/baseline-install-plan" /opt/baseline/bin/baseline-install-plan
+cp "$SRC/baseline/bin/baseline-single-drive-storage" /opt/baseline/bin/baseline-single-drive-storage
+cp "$SRC/baseline/bin/baseline-drive-recovery" /opt/baseline/bin/baseline-drive-recovery
+chmod 755 /opt/baseline/bin/baseline-single-drive-storage /opt/baseline/bin/baseline-drive-recovery
 chmod 755 /opt/baseline/bin/baseline-install-plan
 cp "$SRC/baseline/lib/web_gate.py" /opt/baseline/lib/web_gate.py
 cp "$SRC/baseline/lib/operations.py" /opt/baseline/lib/operations.py
@@ -318,6 +456,90 @@ cp "$SRC/baseline/lib/baseline_drive_layout.py" /opt/baseline/lib/baseline_drive
 # to the operator to run themselves.
 cp "$SRC/baseline/lib/drive_admin.py" /opt/baseline/lib/drive_admin.py
 cp "$SRC/baseline/lib/baseline_web.py" /opt/baseline/lib/baseline_web.py
+cp "$SRC/baseline/lib/console_switch.py" /opt/baseline/lib/console_switch.py
+cp "$SRC/baseline/lib/tools_page.py" /opt/baseline/lib/tools_page.py
+cp "$SRC/baseline/lib/tool_runner.py" /opt/baseline/lib/tool_runner.py
+cp "$SRC/baseline/lib/file_manager.py" /opt/baseline/lib/file_manager.py
+# AI profiles remain on USER_ADMIN; clients and guest receivers use RAM only.
+cp "$SRC/baseline/lib/ai_provisioning.py" /opt/baseline/lib/ai_provisioning.py
+cp "$SRC/baseline/lib/ai_runtime.py" /opt/baseline/lib/ai_runtime.py
+cp "$SRC/baseline/lib/ai_installer_page.py" /opt/baseline/lib/ai_installer_page.py
+cp "$SRC/baseline/lib/ai_sync.py" /opt/baseline/lib/ai_sync.py
+cp "$SRC/baseline/lib/claude_history.py" /opt/baseline/lib/claude_history.py
+cp "$SRC/baseline/bin/baseline-maintain" /opt/baseline/bin/baseline-maintain
+chmod 0755 /opt/baseline/bin/baseline-maintain
+cp "$SRC/baseline/bin/baseline-ai-run" /opt/baseline/bin/baseline-ai-run
+cp "$SRC/baseline/bin/baseline-ai-sync" /opt/baseline/bin/baseline-ai-sync
+chmod 0755 /opt/baseline/bin/baseline-ai-run /opt/baseline/bin/baseline-ai-sync
+cp "$SRC/boot/baseline-ai-sync.service" /etc/systemd/system/baseline-ai-sync.service
+cp "$SRC/boot/baseline-ai-sync.timer" /etc/systemd/system/baseline-ai-sync.timer
+systemctl enable baseline-ai-sync.timer
+cp "$SRC/baseline/lib/vault_grants.py" /opt/baseline/lib/vault_grants.py
+cp "$SRC/baseline/lib/guest_persistence.py" /opt/baseline/lib/guest_persistence.py
+cp "$SRC/baseline/lib/turnkey.py" /opt/baseline/lib/turnkey.py
+cp "$SRC/baseline/lib/signin_share.py" /opt/baseline/lib/signin_share.py
+cp "$SRC/baseline/lib/operator_identity.py" /opt/baseline/lib/operator_identity.py
+cp "$SRC/baseline/lib/vault.py" /opt/baseline/lib/vault.py
+cp "$SRC/baseline/lib/drive_names.py" /opt/baseline/lib/drive_names.py
+cp "$SRC/baseline/lib/mounted_places.py" /opt/baseline/lib/mounted_places.py
+cp "$SRC/baseline/lib/audio_bluetooth.py" /opt/baseline/lib/audio_bluetooth.py
+cp "$SRC/baseline/lib/power_control.py" /opt/baseline/lib/power_control.py
+cp "$SRC/baseline/lib/vm_power.py" /opt/baseline/lib/vm_power.py
+cp "$SRC/baseline/lib/swap_config.py" /opt/baseline/lib/swap_config.py
+cp "$SRC/baseline/lib/memory_page.py" /opt/baseline/lib/memory_page.py
+cp "$SRC/baseline/lib/layered_settings.py" /opt/baseline/lib/layered_settings.py
+cp "$SRC/baseline/lib/launcher_model.py" /opt/baseline/lib/launcher_model.py
+cp "$SRC/baseline/lib/launcher_state.py" /opt/baseline/lib/launcher_state.py
+cp "$SRC/baseline/lib/launcher_page.py" /opt/baseline/lib/launcher_page.py
+cp "$SRC/baseline/lib/ceph_setup.py" /opt/baseline/lib/ceph_setup.py
+cp "$SRC/baseline/lib/tfa_setup.py" /opt/baseline/lib/tfa_setup.py
+cp "$SRC/baseline/lib/harness_install.py" /opt/baseline/lib/harness_install.py
+cp "$SRC/baseline/lib/kasm_setup.py" /opt/baseline/lib/kasm_setup.py
+cp "$SRC/baseline/lib/os_list.py" /opt/baseline/lib/os_list.py
+cp "$SRC/baseline/lib/user_admin.py" /opt/baseline/lib/user_admin.py
+cp "$SRC/baseline/lib/os_profiles.py" /opt/baseline/lib/os_profiles.py
+cp "$SRC/baseline/lib/driver_profiles.py" /opt/baseline/lib/driver_profiles.py
+cp "$SRC/baseline/bin/baseline-drivers" /opt/baseline/bin/baseline-drivers
+chmod +x /opt/baseline/bin/baseline-drivers
+cp "$SRC/baseline/lib/kasm_page.py" /opt/baseline/lib/kasm_page.py
+cp "$SRC/baseline/lib/kasm_telemetry.py" /opt/baseline/lib/kasm_telemetry.py
+cp "$SRC/baseline/lib/kasm_registry.py" /opt/baseline/lib/kasm_registry.py
+cp "$SRC/baseline/lib/kasm_settings_ui.py" /opt/baseline/lib/kasm_settings_ui.py
+cp "$SRC/baseline/lib/kasm_settings.py" /opt/baseline/lib/kasm_settings.py
+cp "$SRC/baseline/lib/prebuilt_environment.py" /opt/baseline/lib/prebuilt_environment.py
+cp "$SRC/baseline/lib/app_environment.py" /opt/baseline/lib/app_environment.py
+cp "$SRC/baseline/lib/app_catalogue.py" /opt/baseline/lib/app_catalogue.py
+install -d /opt/baseline/config
+cmp -s "$SRC/config/app-catalogue.json" /opt/baseline/config/app-catalogue.json || cp "$SRC/config/app-catalogue.json" /opt/baseline/config/app-catalogue.json
+cp "$SRC/baseline/lib/os_build.py" /opt/baseline/lib/os_build.py
+cp "$SRC/baseline/lib/kasm_wiki.py" /opt/baseline/lib/kasm_wiki.py
+cp "$SRC/baseline/lib/kasm_proposals.py" /opt/baseline/lib/kasm_proposals.py
+cp "$SRC/baseline/lib/kasm_advice.py" /opt/baseline/lib/kasm_advice.py
+cp "$SRC/baseline/lib/kasm_advice_page.py" /opt/baseline/lib/kasm_advice_page.py
+cp "$SRC/baseline/bin/baseline-kasm" /opt/baseline/bin/baseline-kasm
+chmod +x /opt/baseline/bin/baseline-kasm
+cp "$SRC/boot/baseline-kasm-setup.service" /etc/systemd/system/baseline-kasm-setup.service
+cp "$SRC/boot/baseline-kasm-setup.timer" /etc/systemd/system/baseline-kasm-setup.timer
+cp "$SRC/boot/baseline-kasm-telemetry.service" /etc/systemd/system/baseline-kasm-telemetry.service
+cp "$SRC/boot/baseline-kasm-telemetry.timer" /etc/systemd/system/baseline-kasm-telemetry.timer
+cp "$SRC/baseline/bin/baseline-harness-install" /opt/baseline/bin/baseline-harness-install
+chmod +x /opt/baseline/bin/baseline-harness-install
+cp "$SRC/boot/baseline-harness-install.service" /etc/systemd/system/baseline-harness-install.service
+cp "$SRC/boot/baseline-harness-install.timer" /etc/systemd/system/baseline-harness-install.timer
+cp "$SRC/baseline/lib/codex_adapter.py" /opt/baseline/lib/codex_adapter.py
+cp "$SRC/baseline/lib/home_page.py" /opt/baseline/lib/home_page.py
+cp "$SRC/baseline/lib/environments.py" /opt/baseline/lib/environments.py
+cp "$SRC/baseline/lib/vault_crypto.py" /opt/baseline/lib/vault_crypto.py
+cp "$SRC/baseline/lib/console_commands.py" /opt/baseline/lib/console_commands.py
+cp "$SRC/baseline/lib/chat_page.py" /opt/baseline/lib/chat_page.py
+cp "$SRC/baseline/lib/network_view.py" /opt/baseline/lib/network_view.py
+cp "$SRC/baseline/lib/sensors_view.py" /opt/baseline/lib/sensors_view.py
+cp "$SRC/baseline/lib/provider_setup.py" /opt/baseline/lib/provider_setup.py
+cp "$SRC/baseline/lib/ai_setup_page.py" /opt/baseline/lib/ai_setup_page.py
+cp "$SRC/baseline/lib/host_restart.py" /opt/baseline/lib/host_restart.py
+cp "$SRC/baseline/lib/structured_controls.py" /opt/baseline/lib/structured_controls.py
+cp "$SRC/baseline/lib/hardware_configuration.py" /opt/baseline/lib/hardware_configuration.py
+cp "$SRC/baseline/lib/hardware_tabs.py" /opt/baseline/lib/hardware_tabs.py
 # VM library: Proxmox owns lifecycle on the substrate; local QEMU is the
 # development backend. Ubuntu's seed builder needs xorriso above.
 cp "$SRC/baseline/lib/vm_host.py" /opt/baseline/lib/vm_host.py
@@ -334,6 +556,18 @@ cp "$SRC/baseline/lib/container_page.py" /opt/baseline/lib/container_page.py
 # these as a real staging gap, the same class of bug decision records
 # 80/81 already found and fixed for other modules.
 cp "$SRC/baseline/lib/self_installer.py" /opt/baseline/lib/self_installer.py
+# first_boot_hook.py / offline_cache.py: the self-contained installer an installed drive can rebuild itself with.
+cp "$SRC/baseline/lib/first_boot_hook.py" /opt/baseline/lib/first_boot_hook.py
+cp "$SRC/baseline/lib/offline_cache.py" /opt/baseline/lib/offline_cache.py
+cp "$SRC/baseline/lib/cache_learn.py" /opt/baseline/lib/cache_learn.py
+# DR255: hierarchical identifiers (host, substrate, VM, application, hardware), minted on the installed system from their parent
+cp "$SRC/baseline/lib/identifiers.py" /opt/baseline/lib/identifiers.py
+cp "$SRC/baseline/lib/references.py" /opt/baseline/lib/references.py
+cp "$SRC/baseline/lib/machine_context.py" /opt/baseline/lib/machine_context.py
+cp "$SRC/baseline/lib/installer_identity.py" /opt/baseline/lib/installer_identity.py
+cp "$SRC/baseline/bin/baseline-cache-learn" /opt/baseline/bin/baseline-cache-learn
+chmod 755 /opt/baseline/bin/baseline-cache-learn
+cp "$SRC/boot/baseline-cache-learn.apt.conf" /etc/apt/apt.conf.d/99baseline-cache-learn
 cp "$SRC/baseline/lib/drive_setup_acquire.py" /opt/baseline/lib/drive_setup_acquire.py
 cp "$SRC/baseline/lib/drive_setup_answer.py" /opt/baseline/lib/drive_setup_answer.py
 cp "$SRC/baseline/lib/drive_setup_install.py" /opt/baseline/lib/drive_setup_install.py
@@ -350,7 +584,7 @@ cp "$SRC/baseline/bin/baseline-update" /opt/baseline/bin/baseline-update
 cp "$SRC/baseline/bin/baseline-backup" /opt/baseline/bin/baseline-backup
 cp "$SRC/baseline/bin/baseline-config-crypto" /opt/baseline/bin/baseline-config-crypto
 cp "$SRC/baseline/bin/baseline-control-panel" /opt/baseline/bin/baseline-control-panel
-chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check
+chmod +x /opt/baseline/bin/baseline /opt/baseline/bin/baseline-auth-setup.sh /opt/baseline/bin/baseline-setup-wizard /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply /opt/baseline/bin/baseline-network-retry /opt/baseline/bin/baseline-firstboot /opt/baseline/bin/baseline-drive-inventory /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate /opt/baseline/bin/baseline-persist-bind-mounts /opt/baseline/bin/baseline-diff /opt/baseline/bin/baseline-update /opt/baseline/bin/baseline-backup /opt/baseline/bin/baseline-config-crypto /opt/baseline/bin/baseline-control-panel /opt/baseline/bin/baseline-build-iso /opt/baseline/bin/baseline-scripts-inbox /opt/baseline/bin/baseline-scripts-inbox-gate /opt/baseline/bin/baseline-sensors-set-interval /opt/baseline/bin/baseline-recovery-mode /opt/baseline/bin/baseline-web /opt/baseline/bin/baseline-dependency-check
 
 echo "=== Locking the installed code: root-owned, not writable by anyone else ==="
 # Nothing that runs this code may be able to rewrite it (an attacker in a service, or a bug,
@@ -364,10 +598,20 @@ if [ -d /var/lib/baseline ]; then chmod -R go-rwx /var/lib/baseline; fi
 echo "=== Staging systemd units (not yet activated - see verification/activation below) ==="
 cp "$SRC/boot/baseline.service" /etc/systemd/system/baseline.service
 cp "$SRC/boot/baseline-additive-dhcp-reapply.service" /etc/systemd/system/baseline-additive-dhcp-reapply.service
+cp "$SRC/boot/baseline-network-retry.service" /etc/systemd/system/baseline-network-retry.service
+cp "$SRC/boot/baseline-bridge-port.service" /etc/systemd/system/baseline-bridge-port.service
+cp "$SRC/boot/baseline-bridge-port-retry.service" /etc/systemd/system/baseline-bridge-port-retry.service
+cp "$SRC/boot/baseline-bridge-port-retry.timer" /etc/systemd/system/baseline-bridge-port-retry.timer
+cp "$SRC/boot/baseline-volume-growth.service" /etc/systemd/system/baseline-volume-growth.service
+cp "$SRC/boot/baseline-volume-growth.timer" /etc/systemd/system/baseline-volume-growth.timer
+cp "$SRC/boot/baseline-machine-check.service" /etc/systemd/system/baseline-machine-check.service
+cp "$SRC/boot/baseline-machine-check.timer" /etc/systemd/system/baseline-machine-check.timer
+cp "$SRC/boot/baseline-network-retry.timer" /etc/systemd/system/baseline-network-retry.timer
 cp "$SRC/boot/baseline-persist-bind-mounts.service" /etc/systemd/system/baseline-persist-bind-mounts.service
 cp "$SRC/boot/baseline-firstboot.service" /etc/systemd/system/baseline-firstboot.service
 cp "$SRC/boot/baseline-sensors-collect.service" /etc/systemd/system/baseline-sensors-collect.service
 cp "$SRC/boot/baseline-sensors-collect.timer" /etc/systemd/system/baseline-sensors-collect.timer
+for u in baseline-twin-sync.service baseline-twin-sync.timer baseline-twin-health.service baseline-twin-health.timer; do cp "$SRC/boot/$u" "/etc/systemd/system/$u"; done
 cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
 # baseline-web.service supersedes baseline-settings-web.service
 # (decision record 83) - the merged app is a strict superset, so the
@@ -375,6 +619,11 @@ cp "$SRC/boot/baseline-kiosk.service" /etc/systemd/system/baseline-kiosk.service
 # the bin script itself remains staged above for standalone use.
 cp "$SRC/boot/baseline-web.service" /etc/systemd/system/baseline-web.service
 cp "$SRC/boot/baseline-scripts-inbox.service" /etc/systemd/system/baseline-scripts-inbox.service
+# Proxmox's own state is overlay data on USER_ADMIN (DR259): every Proxmox service that reads it starts after the redirects are bound.
+for unit in pve-cluster pve-firewall pvedaemon pveproxy pvestatd rrdcached; do
+    mkdir -p "/etc/systemd/system/$unit.service.d"
+    cp "$SRC/boot/proxmox-overlay.conf" "/etc/systemd/system/$unit.service.d/baseline-overlay.conf"
+done
 
 echo "=== Installing the Proxmox<->BaselineOS return command ==="
 # The (p) key inside Baseline switches tty1 -> tty2 (a real Proxmox
@@ -383,7 +632,11 @@ echo "=== Installing the Proxmox<->BaselineOS return command ==="
 cp "$SRC/boot/baseline-return.sh" /etc/profile.d/baseline-return.sh
 
 echo "=== Verifying tty1 console font (read-only check, does not touch tty1 ownership) ==="
-bash "$SRC/tests/console_font_check.sh"
+if [ "${BASELINE_OFFLINE_INSTALL:-0}" = "1" ]; then
+    echo "Offline target: console font verification deferred to target boot; host tty is not the target console."
+else
+    bash "$SRC/tests/console_font_check.sh"
+fi
 
 # --- Atomic verification before any tty1/getty state changes --------------
 #
@@ -407,6 +660,7 @@ verify_fail() { echo "VERIFY FAILED: $1" >&2; exit 1; }
 
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
+         /opt/baseline/bin/baseline-network-retry /opt/baseline/lib/network_retry.py \
          /opt/baseline/bin/baseline-sensors-collect \
          /opt/baseline/lib/firstboot_statemachine.py /opt/baseline/lib/firstboot_network_repair.py \
          /opt/baseline/lib/proxmox_detect.py /opt/baseline/lib/diagnostics.py /opt/baseline/lib/setup_intent.py \
@@ -451,13 +705,14 @@ done
 command -v podman >/dev/null 2>&1 || verify_fail "podman not found on PATH after install"
 [ -d /etc/containers/systemd ] || verify_fail "missing /etc/containers/systemd (Quadlet unit directory)"
 for u in baseline.service baseline-additive-dhcp-reapply.service baseline-firstboot.service \
-         baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
+         baseline-network-retry.service baseline-network-retry.timer baseline-sensors-collect.service baseline-sensors-collect.timer baseline-kiosk.service \
          baseline-web.service baseline-scripts-inbox.service \
                   baseline-dependency-check.service baseline-dependency-check.timer; do
     [ -s "/etc/systemd/system/$u" ] || verify_fail "missing staged unit: $u"
 done
 for f in /opt/baseline/bin/baseline /opt/baseline/bin/baseline-firstboot \
          /opt/baseline/bin/baseline-repair-rollback /opt/baseline/bin/baseline-additive-dhcp-reapply \
+         /opt/baseline/bin/baseline-network-retry \
          /opt/baseline/bin/baseline-sensors-collect /opt/baseline/bin/baseline-kiosk-gate \
          /opt/baseline/bin/baseline-settings-web /opt/baseline/bin/baseline-settings-web-gate \
          /opt/baseline/bin/baseline-persist-bind-mounts \
@@ -481,18 +736,87 @@ echo "=== Enabling units for next boot (no --now, no getty changes - nothing her
 systemctl daemon-reload
 systemctl enable baseline-persist-bind-mounts.service
 systemctl enable baseline-firstboot.service
+systemctl enable baseline-storage-verify.service
+systemctl enable baseline-storage-reconcile.service
 systemctl enable baseline.service
 systemctl enable baseline-additive-dhcp-reapply.service
+# smartd exits 17 ("no SMART devices to monitor") on a machine whose drives are all USB bridges or virtual; that is not a failure.
+mkdir -p /etc/systemd/system/smartmontools.service.d
+put /etc/systemd/system/smartmontools.service.d/baseline.conf <<'SMARTD_DROPIN'
+[Service]
+SuccessExitStatus=17
+SMARTD_DROPIN
+# smartd 7.5 aborted with heap corruption ("malloc(): unaligned tcache chunk") right after "does not support NVMe Self-tests, ignoring -l
+# selftest" on a laptop's internal NVMe (PC601 on a Dell Latitude 5290, 2026-10-12). The stock DEVICESCAN line implies -a, which includes
+# the self-test directives; health, attributes and the error log are asked for explicitly instead.
+if [ -f /etc/smartd.conf ] && grep -qE '^DEVICESCAN -d removable -n standby -m root -M exec /usr/share/smartmontools/smartd-runner$' /etc/smartd.conf; then
+    sed -i -E 's|^DEVICESCAN -d removable -n standby -m root -M exec |DEVICESCAN -d removable -n standby -H -f -l error -m root -M exec |' /etc/smartd.conf
+fi
+# The drive itself sits behind a USB-NVMe bridge. With UAS (the fast USB mode) the host controller stalled the command queue
+# ("Transfer event ... for unknown stream ring", commands aged 61 s, resets): the root filesystem went read-only and the machine froze
+# (PC601 on two machines, 2026-10-12). These bridges are told to use plain usb-storage instead, which every controller handles.
+put /etc/modprobe.d/baseline-usb-storage.conf <<'USB_QUIRKS'
+# Baseline: no UAS for USB-NVMe bridges that stall the xHCI stream rings (Realtek RTL9210/RTL9220, JMicron JMS583).
+options usb-storage quirks=0bda:9210:u,0bda:9220:u,152d:0583:u
+USB_QUIRKS
+update-initramfs -u -k all || true
+systemctl daemon-reload
+# Proxmox as a fresh host should show it; the subscription notice comes back with a package upgrade, so the hook removes it again.
+put /etc/apt/apt.conf.d/99baseline-proxmox-defaults <<'APT_HOOK'
+DPkg::Post-Invoke { "/opt/baseline/bin/baseline-proxmox-defaults nag >/dev/null 2>&1 || true"; };
+APT_HOOK
+/opt/baseline/bin/baseline-proxmox-defaults || true
+systemctl enable baseline-bridge-port.service
+systemctl enable baseline-bridge-port-retry.timer
+systemctl enable baseline-harness-install.timer
+systemctl enable baseline-kasm-setup.timer
+systemctl enable baseline-kasm-telemetry.timer
+systemctl enable baseline-volume-growth.timer
+systemctl enable baseline-machine-check.timer
+systemctl enable baseline-network-retry.timer
 systemctl enable baseline-sensors-collect.timer
+systemctl enable baseline-twin-sync.timer baseline-twin-health.timer
+/opt/baseline/bin/baseline-twin version-write || echo "WARNING: could not record the installed version (the twin gate will report unknown)"
+# Unit files are data: copied from the source tree they kept its execute bit, which systemd warns about at every boot.
+chmod 644 /etc/systemd/system/baseline*.service /etc/systemd/system/baseline*.timer 2>/dev/null || true
+# The browser's bookmarks bar: where Proxmox's tools and Baseline are, visible on every page.
+mkdir -p /etc/chromium/policies/managed
+put /etc/chromium/policies/managed/baseline.json <<'CHROMIUM_POLICY'
+{
+  "BookmarkBarEnabled": true,
+  "ManagedBookmarks": [
+    {"toplevel_name": "Baseline"},
+    {"name": "Home", "url": "http://localhost:8100/home"},
+    {"name": "Hardware", "url": "http://localhost:8100/hardware"},
+    {"name": "Network", "url": "http://localhost:8100/network"},
+    {"name": "Sensors", "url": "http://localhost:8100/sensors"},
+    {"name": "Audio and Bluetooth", "url": "http://localhost:8100/audio"},
+    {"name": "Virtual machines", "url": "http://localhost:8100/vms"},
+    {"name": "Workspaces (Kasm)", "url": "http://localhost:8100/workspaces"},
+    {"name": "Environments", "url": "http://localhost:8100/environments"},
+    {"name": "Chat", "url": "http://localhost:8100/chat"},
+    {"name": "Console", "url": "http://localhost:8100/shell"},
+    {"name": "Diagnostic tools (5)", "url": "http://localhost:8100/tools"},
+    {"name": "AI providers (sign in)", "url": "http://localhost:8100/ai-setup"},
+    {"name": "Vault", "url": "http://localhost:8100/vault"},
+    {"name": "Two-factor setup", "url": "http://localhost:8100/security"},
+    {"name": "Ceph", "url": "http://localhost:8100/ceph"},
+    {"name": "Baseline text console (this screen)", "url": "http://localhost:8100/console"},
+    {"name": "Proxmox VE (storage, firewall, users and two-factor, Ceph, backup)", "url": "https://localhost:8006"}
+  ],
+  "HomepageLocation": "https://localhost:8006",
+  "ShowHomeButton": true
+}
+CHROMIUM_POLICY
 systemctl enable baseline-kiosk.service
 systemctl enable baseline-web.service
 systemctl enable baseline-scripts-inbox.service
 systemctl enable baseline-dependency-check.timer
 
-for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-dependency-check.timer; do
+for u in baseline-persist-bind-mounts.service baseline-firstboot.service baseline.service baseline-additive-dhcp-reapply.service baseline-network-retry.timer baseline-sensors-collect.timer baseline-kiosk.service baseline-web.service baseline-scripts-inbox.service baseline-dependency-check.timer; do
     [ "$(systemctl is-enabled "$u")" = "enabled" ] || verify_fail "unit did not report enabled after systemctl enable: $u"
 done
-echo "PASS: all nine units confirmed enabled."
+echo "PASS: all ten units confirmed enabled."
 
 echo
 echo "Done. Nothing on this tty/session was touched or disabled - this"

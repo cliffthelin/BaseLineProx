@@ -103,11 +103,11 @@ def test_install_plan_refuses_unknown_boot_identity_instead_of_offering_boot_dis
                     allowed_serials={BASE, PVE}, boot_serial=None, is_installer_uuid=lambda guid: False)
 
 
-@pytest.mark.parametrize("replacement", ["NOTENROLLEDREVIEW1", PVE])
+@pytest.mark.parametrize("replacement", ["NOTENROLLEDREVIEW1", BASE])      # PC601 (PVE) is this lane's drive under test; a swap to anything else, including PC401, must stop the layout
 def test_review_layout_refuses_serial_change_after_confirmation(monkeypatch, replacement):
     import drive_guard as dg
     monkeypatch.setattr(dg, "_default_run", lambda argv: (0, BLANK))
-    pds_runner = FakePdsRunner(size_bytes=512_110_190_592, drive_table=BLANK)
+    pds_runner = FakePdsRunner(size_bytes=512_110_190_592, drive_table=BLANK, serial=PVE)
 
     class SwappingRunner(Runner):
         def run(self, argv, timeout=10):
@@ -127,13 +127,13 @@ def test_review_layout_refuses_serial_change_after_confirmation(monkeypatch, rep
 def test_layout_stops_if_drive_is_replaced_between_destructive_steps(monkeypatch):
     import drive_guard as dg
     monkeypatch.setattr(dg, "_default_run", lambda argv: (0, BLANK))
-    pds_runner = FakePdsRunner(size_bytes=512_110_190_592, drive_table=BLANK)
+    pds_runner = FakePdsRunner(size_bytes=512_110_190_592, drive_table=BLANK, serial=PVE)
 
     class SwappingRunner(Runner):
         def run(self, argv, timeout=10):
             result = super().run(argv, timeout)
             if argv[0] == "wipefs":
-                pds_runner.serial = PVE
+                pds_runner.serial = BASE
             return result
 
     runner = SwappingRunner()
@@ -155,7 +155,7 @@ def test_review_enrollment_refuses_when_boot_identity_is_unknown():
 @pytest.mark.parametrize("boot_serial", [None, "", "\n"])
 def test_device_gate_refuses_unreadable_boot_serial(boot_serial):
     import physical_device_safety as pds
-    runner = FakePdsRunner(boot_serial=boot_serial)
+    runner = FakePdsRunner(serial=BASE, boot_serial=boot_serial)
     # Return genuinely missing/empty udev identity rather than str(None).
     original = runner.run
     def run(argv):

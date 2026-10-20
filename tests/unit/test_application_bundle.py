@@ -1,7 +1,139 @@
 import json
+import tempfile
 from pathlib import Path
+import unittest
 import pytest
 import environment_recipes as er
+
+
+class CustomApplicationSourceContractTests(unittest.TestCase):
+    def setUp(self):
+        import application_bundle as ab
+        self._registry={name:getattr(ab,name).copy() if isinstance(getattr(ab,name),dict) else getattr(ab,name)
+                        for name in ('APPS','APPLICATION_DEFINITIONS','PACKAGES','SOURCES','EXECUTABLES')}
+
+    def tearDown(self):
+        import application_bundle as ab
+        for name,value in self._registry.items():setattr(ab,name,value)
+
+    def test_deployed_catalog_loader_resolves_source_tree_and_registers_entries(self):
+        import tempfile
+        import application_bundle as ab
+        with tempfile.TemporaryDirectory(prefix='baseline-app-catalog-') as scratch:
+            root=Path(scratch)
+            (root/'baseline/lib').mkdir(parents=True)
+            (root/'boot').mkdir()
+            (root/'boot/provision.sh').write_text('#!/bin/sh\n')
+            (root/'packaging/application-definitions').mkdir(parents=True)
+            definition={
+                'id':'catalog-editor','name':'Catalog editor','package':'catalog-editor',
+                'executable':'usr/bin/catalog-editor',
+                'source_url':'https://packages.example.org/catalog/catalog-editor_1.2_amd64.deb',
+                'sha256':'b'*64,
+            }
+            entry=root/'packaging/application-definitions/catalog-editor.json'
+            entry.write_text(json.dumps(definition))
+            loaded=ab.load_deployed_application_definitions(root/'baseline/lib/application_bundle.py')
+            self.assertEqual(loaded,[definition])
+            self.assertIn('catalog-editor',ab.APPS)
+            self.assertEqual(ab.custom_application_source(ab.APPLICATION_DEFINITIONS['catalog-editor'])['url'],definition['source_url'])
+
+    def test_application_catalog_loader_returns_no_entries_when_catalog_is_absent(self):
+        import application_bundle as ab
+        with tempfile.TemporaryDirectory(prefix='baseline-empty-app-catalog-') as scratch:
+            self.assertEqual(ab.load_application_catalog(Path(scratch)/'application-definitions'),[])
+
+    def test_application_definition_is_saved_atomically_under_selected_state_directory(self):
+        import tempfile
+        import application_bundle as ab
+        with tempfile.TemporaryDirectory(prefix='baseline-user-state-') as scratch:
+            state=Path(scratch)/'user-state'
+            catalog=ab.application_catalog_directory(state_dir=state)
+            definition={
+                'id':'catalog-editor','name':'Catalog editor','package':'catalog-editor',
+                'executable':'usr/bin/catalog-editor',
+                'source_url':'https://packages.example.org/catalog/catalog-editor_1.2_amd64.deb',
+                'sha256':'b'*64,
+            }
+            ab.save_application_definition(catalog,definition)
+            self.assertEqual(ab.load_application_catalog(catalog),[definition])
+            self.assertEqual(set(p.name for p in catalog.iterdir()),{'catalog-editor.json'})
+            self.assertEqual(catalog.joinpath('catalog-editor.json').stat().st_mode&0o777,0o600)
+            self.assertEqual(ab.application_catalog_directory(env={'BASELINE_STATE_DIR':str(state)}),catalog)
+            with self.assertRaises(er.RecipeError):ab.save_application_definition(catalog,definition)
+            self.assertEqual(set(p.name for p in catalog.iterdir()),{'catalog-editor.json'})
+
+    def test_baseline_apps_cli_reloads_custom_catalog_from_user_state_after_restart(self):
+        import tempfile,os,subprocess,sys
+        import application_bundle as ab
+        with tempfile.TemporaryDirectory(prefix='baseline-cli-app-catalog-') as scratch:
+            state=Path(scratch)/'user-state';catalog=ab.application_catalog_directory(state_dir=state)
+            definition={
+                'id':'catalog-editor','name':'Catalog editor','package':'catalog-editor',
+                'executable':'usr/bin/catalog-editor',
+                'source_url':'https://packages.example.org/catalog/catalog-editor_1.2_amd64.deb',
+                'sha256':'b'*64,
+            }
+            ab.save_application_definition(catalog,definition)
+            config=Path(scratch)/'settings.json';config.write_text('{"scale":1.25}')
+            cli=Path(__file__).resolve().parents[2]/'baseline/bin/baseline-apps'
+            env={**os.environ,'BASELINE_STATE_DIR':str(state),'PYTHONDONTWRITEBYTECODE':'1'}
+            result=subprocess.run([sys.executable,str(cli),'capture','catalog-editor',str(config)],
+                capture_output=True,text=True,env=env,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(json.loads(result.stdout)['app'],'catalog-editor')
+            tasker=Path(__file__).resolve().parents[2]/'baseline/bin/baseline-tasker'
+            catalog_result=subprocess.run([sys.executable,str(tasker),'catalog'],
+                capture_output=True,text=True,env=env,timeout=15)
+            self.assertEqual(catalog_result.returncode,0,catalog_result.stderr)
+            self.assertIn('catalog-editor',catalog_result.stdout)
+
+    def test_custom_catalog_entry_requires_an_exact_https_package_and_sha256(self):
+        import application_bundle as ab
+        definition={
+            'id':'my-editor','name':'My editor','package':'my-editor',
+            'executable':'usr/bin/my-editor',
+            'source_url':'https://packages.example.org/editor/my-editor_2.4.1_amd64.deb',
+            'sha256':'a'*64,
+        }
+        checked=ab.validate_application_definition(definition)
+        self.assertEqual(checked['source_url'],definition['source_url'])
+        self.assertEqual(checked['sha256'],'a'*64)
+        self.assertEqual(ab.custom_application_source(checked),{
+            'url':definition['source_url'],'sha256':'a'*64,'package':'my-editor','medium':'deb'})
+        for change in (
+            {'source_url':'http://packages.example.org/editor/my-editor.deb'},
+            {'source_url':'https://packages.example.org/editor/my-editor.deb?redirect=1'},
+            {'sha256':'not-a-digest'},
+        ):
+            with self.subTest(change=change), self.assertRaises(er.RecipeError):
+                ab.validate_application_definition({**definition,**change})
+
+    def test_custom_package_metadata_must_match_registered_package_and_architecture(self):
+        import application_bundle as ab
+        fields='Package: my-editor\nVersion: 2.4.1\nArchitecture: amd64\n'
+        self.assertEqual(ab.custom_package_version(fields,'my-editor'),'2.4.1')
+        for package_fields in (
+            'Package: other\nVersion: 2.4.1\nArchitecture: amd64\n',
+            'Package: my-editor\nVersion: 2.4.1\nArchitecture: arm64\n',
+            'Package: my-editor\nArchitecture: amd64\n',
+        ):
+            with self.subTest(package_fields=package_fields), self.assertRaises(er.RecipeError):
+                ab.custom_package_version(package_fields,'my-editor')
+
+    def test_tasker_revision_changes_when_a_custom_application_source_lock_changes(self):
+        import application_bundle as ab
+        import tasker
+        definition={'id':'catalog-editor','name':'Catalog editor','package':'catalog-editor',
+            'executable':'usr/bin/catalog-editor',
+            'source_url':'https://packages.example.org/catalog/catalog-editor_1.2_amd64.deb',
+            'sha256':'b'*64}
+        ab.register_application(definition)
+        before=tasker.catalog()['components'][0]['revision']
+        changed={**definition,'sha256':'d'*64}
+        ab.APPLICATION_DEFINITIONS['catalog-editor']=changed
+        after=tasker.catalog()['components'][0]['revision']
+        self.assertNotEqual(before,after,'tasker revision omitted the custom source lock')
 
 
 def test_capture_configuration_is_portable_and_unknown_content_is_excluded():
@@ -253,6 +385,8 @@ def test_launch_supplies_a_private_dbus_session_without_host_service_activation(
     assert not any('/run/user/' in str(arg) and 'bus' in str(arg) for arg in seen[0])
 
 
+
+
 def test_managed_capture_extracts_native_homepage_without_opaque_profile_content(tmp_path):
     import application_bundle as ab
     generation=tmp_path/'generation';generation.mkdir();data=tmp_path/'private';data.mkdir()
@@ -470,3 +604,28 @@ def test_storage_paths_refuse_parent_traversal_before_mutation(tmp_path):
     import application_bundle as ab
     with pytest.raises(er.RecipeError):ab._path(tmp_path/'cache/../private')
     assert not (tmp_path/'cache').exists() and not (tmp_path/'private').exists()
+
+
+def test_launch_scale_override_persists_for_apps_without_native_preference_adapter(tmp_path):
+    import application_bundle as ab
+    source={'url':'https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb',
+            'sha256':'a'*64,'version':'26.930.31730','package':'chatgpt','medium':'deb'}
+    recipe=ab.bind('chatgpt',{'scale':1.0},source,ab.target_platform())
+    generation=tmp_path/'generation';generation.mkdir();data=tmp_path/'private';(data/'home').mkdir(parents=True)
+    (generation/'BUILD.json').write_text(json.dumps(recipe))
+    (generation/'DBUS-SESSION.conf').write_text(ab.PRIVATE_DBUS_CONFIG)
+    identity={'format':'baseline.app-state/v1','app':'chatgpt','id':'a'*32}
+    (data/'IDENTITY.json').write_text(json.dumps(identity))
+    (generation/'INSTALL.json').write_text(json.dumps({'retained_identity':identity['id'],'recipe_digest':ab.digest(recipe)}))
+    result=ab.apply_configuration(data,{'scale':1.5})
+    assert result['changed_keys']==['scale'] and result['native_file_updated'] is False
+    captured=ab.capture_installed(generation,data)
+    assert captured['recipe']['configuration']['scale']==1.5
+    settings_file=data/'home/.baseline/BASELINE.json'
+    assert json.loads(settings_file.read_text())=={
+        'format':'baseline.app-settings/v1','configuration':{'scale':1.5}}
+    archive=tmp_path/'retained-state.tar'
+    ab.backup_state(data,archive)
+    import tarfile
+    with tarfile.open(archive) as backup:
+        assert 'home/.baseline/BASELINE.json' in backup.getnames()

@@ -20,6 +20,15 @@ rewrite like smartd.conf.
 from fake_runner import FakeProc, FakeRunner
 
 import update_pipeline as up
+from test_config_diff import ETHTOOL_SETTINGS_OUTPUT, ETHTOOL_FEATURES_OUTPUT, ETHTOOL_PAUSE_OUTPUT
+
+
+def observed_runner():
+    return FakeRunner(command_responses=[
+        (lambda a: a[0] == "ethtool" and len(a) == 2, FakeProc(0, ETHTOOL_SETTINGS_OUTPUT, "")),
+        (lambda a: a[:2] == ["ethtool", "-k"], FakeProc(0, ETHTOOL_FEATURES_OUTPUT, "")),
+        (lambda a: a[:2] == ["ethtool", "-a"], FakeProc(0, ETHTOOL_PAUSE_OUTPUT, "")),
+    ])
 
 CONFIG = {
     "proxmox": {
@@ -72,7 +81,7 @@ def test_configs_off_entirely_skips_smartd_and_ethtool():
 
 
 def test_configs_true_applies_every_field():
-    runner = FakeRunner()
+    runner = observed_runner()
     summary = up.apply_selective_update(runner, CONFIG, {"configs": True}, network_interface="eno1")
     assert "smartd" in summary["applied"]
     assert "ethtool" in summary["applied"]
@@ -111,7 +120,7 @@ def test_configs_partial_selection_only_touches_the_selected_subsystem():
 
 
 def test_all_categories_together():
-    runner = FakeRunner()
+    runner = observed_runner()
     summary = up.apply_selective_update(
         runner, CONFIG,
         {"code": True, "drivers": True, "applications": True, "os": True, "configs": True},

@@ -50,6 +50,47 @@ def inbox_dir_for(persona: str | None = None) -> str:
     import drive_installer as di
     return f"{di.persona_mountpoint(persona)}/scripts_inbox"
 
+
+def active_persona_paths(
+        runner: Runner, *, independent_marker_path="/etc/baseline/independent-drive.json",
+        policy_path=None, active_persona_marker_path=None) -> dict:
+    """Resolve every persistent scripts-inbox path from one active volume.
+
+    The gate and server share this result so they cannot check one volume and
+    then store credentials or scripts on another. The persistence resolver
+    validates independent-drive policy/persona identity before returning.
+    """
+    import persist_bind_mounts as pbm
+    kwargs = {"independent_marker_path": independent_marker_path,
+              "policy_path": policy_path}
+    if active_persona_marker_path is not None:
+        kwargs["active_persona_marker_path"] = active_persona_marker_path
+    mountpoint = pbm.active_user_mountpoint(runner, **kwargs)
+    persona = None if mountpoint == pbm.MOUNT_POINT else pbm.get_active_persona(
+        runner, marker_path=active_persona_marker_path or pbm.ACTIVE_PERSONA_MARKER_PATH)
+    return {
+        "persona": persona,
+        "mountpoint": mountpoint,
+        "inbox_dir": f"{mountpoint}/scripts_inbox",
+        "data_path": f"{mountpoint}/scripts-inbox-auth/store.json",
+    }
+
+
+def persistent_paths_for_active_user(
+        runner: Runner, *, independent_marker_path="/etc/baseline/independent-drive.json",
+        policy_path=None, active_persona_marker_path=None) -> tuple[str, str]:
+    """Return the auth-store and inbox paths on the validated active volume.
+
+    Runtime services use this instead of hardcoding /mnt/USER, which is only
+    the legacy single-volume mountpoint on independent-drive installations.
+    """
+    paths = active_persona_paths(
+        runner, independent_marker_path=independent_marker_path,
+        policy_path=policy_path,
+        active_persona_marker_path=active_persona_marker_path,
+    )
+    return paths["data_path"], paths["inbox_dir"]
+
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 

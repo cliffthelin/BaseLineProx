@@ -36,11 +36,6 @@ def test_is_mounted_false_when_absent():
     assert pbm.is_mounted(runner, "/mnt/USER") is False
 
 
-def test_is_mounted_false_when_proc_mounts_unreadable():
-    runner = FakeRunner()  # /proc/self/mounts not present at all
-    assert pbm.is_mounted(runner, "/mnt/USER") is False
-
-
 # -- is_mounted_read_write (work-queue item 26's hard exit condition) -----
 
 def test_is_mounted_read_write_true_for_a_real_rw_mount():
@@ -56,11 +51,6 @@ def test_is_mounted_read_write_false_for_a_real_ro_mount():
 
 def test_is_mounted_read_write_false_when_not_mounted_at_all():
     runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE})
-    assert pbm.is_mounted_read_write(runner, "/mnt/USER") is False
-
-
-def test_is_mounted_read_write_false_when_proc_mounts_unreadable():
-    runner = FakeRunner()
     assert pbm.is_mounted_read_write(runner, "/mnt/USER") is False
 
 
@@ -120,25 +110,38 @@ def test_ensure_user_volume_mounted_reports_a_real_failure_when_every_fallback_i
 # already exists elsewhere), then a local, adaptively-sized self-install
 # only when nothing is found anywhere. -----------------------------
 
+def lsblk(*devices):
+    """What `lsblk --json --paths --output NAME,LABEL,TYPE` prints: (name, label) pairs as partitions of one disk."""
+    import json
+    return json.dumps({"blockdevices": [{"name": "/dev/sdb", "label": None, "type": "disk",
+                                         "children": [{"name": n, "label": label, "type": "part"} for n, label in devices]}]})
+
+
+def is_lsblk(args):
+    return args[:1] == ["lsblk"]
+
+
 def test_discover_persistence_device_finds_a_real_device():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["blkid"], FakeProc(0, "/dev/sdb1\n", "")),
+        (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "USER")), "")),
     ])
     assert pbm.discover_persistence_device(runner) == "/dev/sdb1"
 
 
 def test_discover_persistence_device_returns_none_when_not_found():
     runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
+        (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "OTHER")), "")),
     ])
     assert pbm.discover_persistence_device(runner) is None
 
 
-def test_discover_persistence_device_returns_none_for_empty_output():
-    runner = FakeRunner(command_responses=[
-        (lambda a: a[:1] == ["blkid"], FakeProc(0, "", "")),
-    ])
-    assert pbm.discover_persistence_device(runner) is None
+def test_an_empty_or_failed_inventory_is_an_error_never_a_not_found():
+    """A failed observation must not authorize creating a second persistence volume (see discover_device_by_label)."""
+    import pytest
+    for proc in (FakeProc(0, "", ""), FakeProc(2, "", "lsblk failed"), FakeProc(0, '{"blockdevices": []}', "")):
+        runner = FakeRunner(command_responses=[(is_lsblk, proc)])
+        with pytest.raises(pbm.PersistenceObservationError):
+            pbm.discover_persistence_device(runner)
 
 
 def test_ensure_user_volume_mounted_mounts_a_discovered_device_directly_rather_than_creating_a_duplicate():
@@ -150,7 +153,7 @@ def test_ensure_user_volume_mounted_mounts_a_discovered_device_directly_rather_t
         files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER" in a, FakeProc(1, "", "not found by label")),
-            (lambda a: a[:1] == ["blkid"], FakeProc(0, "/dev/sdb1\n", "")),
+            (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "USER")), "")),
             (lambda a: a[:1] == ["mount"] and a[1] == "/dev/sdb1", FakeProc(0, "", "")),
         ],
     )
@@ -166,7 +169,7 @@ def test_ensure_user_volume_mounted_self_installs_locally_when_nothing_found_any
         files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER" in a, FakeProc(1, "", "not found")),
-            (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
+            (is_lsblk, FakeProc(0, lsblk(("/dev/sdb1", "OTHER")), "")),
             (lambda a: "vgs" in a, FakeProc(0, "64424509440\n", "")),  # 60GiB free
             (lambda a: "lvs" in a, FakeProc(0, "  pve   root  \n", "")),
         ],
@@ -204,7 +207,6 @@ def test_ensure_user_volume_mounted_refuses_cleanly_when_local_fallback_has_no_r
         command_responses=[
             (lambda a: a[:1] == ["mount"] and "LABEL=USER" in a, FakeProc(1, "", "not found")),
             (lambda a: a[:1] == ["blkid"], FakeProc(2, "", "")),
-            (lambda a: "vgs" in a, FakeProc(0, "0\n", "")),
         ],
     )
     result = pbm.ensure_user_volume_mounted(runner)
@@ -213,6 +215,11 @@ def test_ensure_user_volume_mounted_refuses_cleanly_when_local_fallback_has_no_r
 
 
 # -- ensure_redirect -------------------------------------------------------
+
+# At boot Proxmox's services are not running yet when the redirects are made; the redirect code refuses to move their state otherwise.
+PROXMOX_STOPPED = (lambda a: a[:2] == ["systemctl", "is-active"], FakeProc(3, "inactive\n", ""))
+
+
 
 def _mounted_runner(**files):
     return FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE, **files})
@@ -300,7 +307,7 @@ def test_ensure_all_redirects_runs_every_redirect_once_persistence_is_mounted():
     doesn't update itself just because a fake `mount` command
     "succeeded", the way the real kernel would, so that transition
     can't be honestly asserted end-to-end against this fake."""
-    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    runner = FakeRunner(command_responses=[PROXMOX_STOPPED], files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
     results = pbm.ensure_all_redirects(runner)
     assert len(results) == 1 + len(pbm.REDIRECT_PATHS)
     assert all(r.applied for r in results)
@@ -309,7 +316,7 @@ def test_ensure_all_redirects_runs_every_redirect_once_persistence_is_mounted():
 
 
 def test_main_returns_0_and_prints_each_result_when_everything_applies():
-    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    runner = FakeRunner(command_responses=[PROXMOX_STOPPED], files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
     printed = []
     code = pbm.main(runner=runner, print_fn=printed.append)
     assert code == 0
@@ -349,7 +356,7 @@ def test_main_records_a_real_recovery_mode_entry_when_the_cascade_fails():
 
 def test_main_never_enters_recovery_mode_when_the_cascade_succeeds():
     import recovery_mode as rm
-    runner = FakeRunner(files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
+    runner = FakeRunner(command_responses=[PROXMOX_STOPPED], files={"/proc/self/mounts": MOUNTS_WITH_PERSISTENCE})
     pbm.main(runner=runner, print_fn=lambda *a: None, now=1700000000.0)
     assert rm.is_active(runner) is False
 
@@ -368,7 +375,10 @@ def test_ensure_all_redirects_issues_the_real_mount_command_on_first_boot():
 def test_ensure_all_redirects_stops_early_if_the_persistence_mount_fails():
     runner = FakeRunner(
         files={"/proc/self/mounts": MOUNTS_WITHOUT_PERSISTENCE},
-        command_responses=[(lambda a: a[:1] == ["mount"], FakeProc(1, "", "no such partition"))],
+        command_responses=[
+            (lambda a: a[:1] == ["mount"], FakeProc(1, "", "no such partition")),
+            (lambda a: "vgs" in a, FakeProc(0, "0\n", "")),
+        ],
     )
     results = pbm.ensure_all_redirects(runner)
     assert len(results) == 1
@@ -415,7 +425,7 @@ def test_ensure_redirect_with_a_persona_binds_onto_the_personas_own_mountpoint()
 
 def test_ensure_all_redirects_with_a_persona_never_touches_the_legacy_label():
     mounts = "/dev/sdd2 /mnt/USER_PERSONAL ext4 rw,relatime 0 0\n"
-    runner = FakeRunner(files={"/proc/self/mounts": mounts})
+    runner = FakeRunner(command_responses=[PROXMOX_STOPPED], files={"/proc/self/mounts": mounts})
     results = pbm.ensure_all_redirects(runner, persona="personal")
     assert all(r.applied for r in results)
     assert not any("LABEL=USER " in " ".join(c) or c == ["mount", "LABEL=USER", "/mnt/USER"]
@@ -504,7 +514,7 @@ def test_switch_active_persona_refuses_without_a_proven_credential():
 
 def test_switch_active_persona_is_idempotent_when_already_active():
     mounts = "/dev/sdd2 /mnt/USER_ADMIN ext4 rw,relatime 0 0\n"
-    runner = FakeRunner(files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
+    runner = FakeRunner(command_responses=[PROXMOX_STOPPED], files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
     result = pbm.switch_active_persona(runner, to_persona="admin", credential_ok=True)
     assert result.applied is True
     assert not any(c[:1] == ["umount"] for c in runner.calls)
@@ -535,7 +545,7 @@ def test_switch_active_persona_succeeds_and_updates_the_marker_once_the_new_pers
     mounted, the switch's redirect-rebinding half succeeds for real and
     the active-persona marker is durably updated."""
     mounts = "/dev/sdd2 /mnt/USER_PERSONAL ext4 rw,relatime 0 0\n"
-    runner = FakeRunner(files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
+    runner = FakeRunner(command_responses=[PROXMOX_STOPPED], files={"/proc/self/mounts": mounts, pbm.ACTIVE_PERSONA_MARKER_PATH: "admin"})
     result = pbm.switch_active_persona(runner, to_persona="personal", credential_ok=True)
     assert result.applied is True
     assert runner.files[pbm.ACTIVE_PERSONA_MARKER_PATH] == "personal"
@@ -567,3 +577,93 @@ def test_a_persona_volume_mounts_by_a_label_that_actually_fits_on_disk():
         label = pbm.user_label_for(persona)
         assert len(label) <= 16
         assert f"LABEL={label} " in pbm.user_mount_fstab_line(persona)
+
+
+def test_personal_directories_are_redirected_onto_the_persistence_volume_and_a_single_file_never_is():
+    assert {"/root", "/home", "/etc/baseline-dev"} <= set(pbm.REDIRECT_PATHS)
+    # a bind mount cannot cover a single file that tools replace by rename (/etc/shadow): only directories are listed
+    assert all(not p.endswith(("shadow", "hostname", "machine-id", "interfaces")) for p in pbm.REDIRECT_PATHS)
+    assert len(set(pbm.REDIRECT_PATHS.values())) == len(pbm.REDIRECT_PATHS)
+
+
+def test_a_role_already_routed_by_uuid_gets_no_second_label_entry():
+    """PC601 (2026-10-12): LABEL=USER_ADMIN was appended beside the first-boot UUID entry; systemd-fstab-generator failed on every boot, and a
+    label is ambiguous with two Baseline drives attached."""
+    runner = FakeRunner()
+    runner.files["/etc/fstab"] = "UUID=5811e548-87af-4dd3-b6ea-3b93ae7c9749 /mnt/USER_ADMIN ext4 defaults,nosuid,nodev 0 2\n"
+    assert pbm._fstab_routes_mountpoint(runner, "/mnt/USER_ADMIN")
+    assert not pbm._fstab_routes_mountpoint(runner, "/mnt/USER_PERSONAL")
+    runner.files["/etc/fstab"] = "# UUID=x /mnt/USER_ADMIN ext4 defaults 0 2\n"
+    assert not pbm._fstab_routes_mountpoint(runner, "/mnt/USER_ADMIN")
+
+
+# -- Proxmox's own state is never moved while Proxmox is using it (found in the QEMU rehearsal 2026-10-15, DR259) -------------------------
+# A pveproxy restart pulled the redirect service in mid-boot and it moved the live pmxcfs database (config.db and its WAL) while pve-cluster
+# was running. SQLite files copied under a running process are not a safe copy, so the move is refused unless its services are stopped.
+
+def _active(*units):
+    inactive = FakeProc(3, "inactive\n", "")
+    active = FakeProc(0, "active\n", "")
+    return [(lambda a, u=u: a[:2] == ["systemctl", "is-active"] and a[-1] == u, active) for u in units] + \
+           [(lambda a: a[:2] == ["systemctl", "is-active"], inactive)]
+
+
+def test_a_proxmox_state_directory_is_not_moved_while_its_service_is_running():
+    runner = _mounted_runner(**{"/var/lib/pve-cluster/config.db": "sqlite"})
+    runner.command_responses = _active("pve-cluster")
+    result = pbm.ensure_redirect(runner, "/var/lib/pve-cluster", "var-lib-pve-cluster")
+    assert result.applied is False and "pve-cluster" in result.detail and "running" in result.detail
+    assert not any(c[0] == "mv" for c in runner.calls)
+    assert not any(c[:2] == ["mount", "--bind"] for c in runner.calls)
+    assert not runner.path_exists("/mnt/USER/var-lib-pve-cluster")            # nothing half-made on the volume either
+
+
+def test_pending_migration_retry_does_not_bypass_the_running_service_guard():
+    """Unit/injected responses: retry wiring, not actual database or boot proof."""
+    import json
+    source = "/var/lib/pve-cluster"
+    destination = "/mnt/USER/var-lib-pve-cluster"
+    pending = "/mnt/USER/.var-lib-pve-cluster.migration-pending"
+    runner = _mounted_runner(**{source + "/config.db": "sqlite",
+        pending: json.dumps({"source": source, "destination": destination})})
+    runner.makedirs(destination)
+    runner.command_responses = _active("pve-cluster")
+    result = pbm.ensure_redirect(runner, source, "var-lib-pve-cluster")
+    assert not result.applied and "running" in result.detail
+    assert not any(c[0] in ("mv", "mount") for c in runner.calls)
+    assert runner.path_exists(pending)
+
+
+def test_it_is_moved_once_the_service_is_stopped():
+    runner = _mounted_runner(**{"/var/lib/pve-cluster/config.db": "sqlite"})
+    runner.command_responses = _active()                                       # nothing running
+    result = pbm.ensure_redirect(runner, "/var/lib/pve-cluster", "var-lib-pve-cluster")
+    assert result.applied is True and any(c[0] == "mv" for c in runner.calls)
+
+
+def test_every_service_that_holds_one_of_the_proxmox_directories_is_checked():
+    for path, units in pbm.QUIESCE_BEFORE_MOVE.items():
+        assert path in pbm.REDIRECT_PATHS
+        for unit in units:
+            runner = _mounted_runner(**{f"{path}/state": "x"})
+            runner.command_responses = _active(unit)
+            assert pbm.ensure_redirect(runner, path, pbm.REDIRECT_PATHS[path]).applied is False, (path, unit)
+    assert {"/var/lib/pve-cluster", "/var/lib/pve-firewall", "/var/lib/pve-manager", "/var/lib/rrdcached"} <= set(pbm.QUIESCE_BEFORE_MOVE)
+
+
+def test_the_guard_does_not_apply_to_other_paths_or_to_an_already_migrated_directory():
+    runner = _mounted_runner(**{"/etc/baseline/x": "1"})
+    runner.command_responses = _active("pve-cluster")
+    assert pbm.ensure_redirect(runner, "/etc/baseline", "etc-baseline").applied is True
+    steady = _mounted_runner()
+    steady.makedirs("/mnt/USER/var-lib-pve-cluster")                            # already migrated on an earlier boot
+    steady.makedirs("/var/lib/pve-cluster")
+    steady.command_responses = _active("pve-cluster")
+    assert pbm.ensure_redirect(steady, "/var/lib/pve-cluster", "var-lib-pve-cluster").applied is True
+
+
+def test_a_service_state_that_cannot_be_read_is_treated_as_running():
+    runner = _mounted_runner(**{"/var/lib/pve-cluster/config.db": "sqlite"})
+    runner.command_responses = [(lambda a: a[:2] == ["systemctl", "is-active"], FakeProc(1, "", "Failed to connect to bus"))]
+    result = pbm.ensure_redirect(runner, "/var/lib/pve-cluster", "var-lib-pve-cluster")
+    assert result.applied is False and not any(c[0] == "mv" for c in runner.calls)

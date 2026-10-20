@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote
 
 import scripts_inbox as si
+from web_request_json import JsonBodyError, read_json_object
 from settings_web import FileBackedPasswordVerifier, LocalAppStore, SessionStore, handle_login
 
 
@@ -100,17 +101,15 @@ class ScriptsInboxHandler(http.server.BaseHTTPRequestHandler):
         return self.headers.get("X-Session-Token", "")
 
     def _read_json_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length) if length else b""
-        try:
-            return json.loads(raw.decode()) if raw else {}
-        except ValueError:
-            return {}
+        return read_json_object(self.headers,self.rfile)
 
     def do_POST(self):  # noqa: N802 - stdlib method name
         deps = self.server.deps  # type: ignore[attr-defined]
         now = deps["clock"]()
-        body = self._read_json_body()
+        try:
+            body = self._read_json_body()
+        except JsonBodyError as exc:
+            return self._respond(RouteResult('refused',400,{'error':str(exc)}))
 
         if self.path == "/login":
             result = handle_login(deps["verifier"], deps["sessions"],
@@ -169,13 +168,27 @@ def build_real_server(*, bind_host: str = "0.0.0.0", bind_port: int = 8200,
     return httpd
 
 
+def resolve_paths(env, *, runner=None, **resolver_options) -> tuple:
+    """(auth store, inbox folder) for the server. Both set explicitly in `env` (local development) are used as given;
+    neither set means the validated active persistence volume, the same one baseline-scripts-inbox-gate checks
+    (scripts_inbox.persistent_paths_for_active_user). Setting only one is refused rather than guessed."""
+    data, inbox = env.get("BASELINE_SCRIPTS_INBOX_DATA"), env.get("BASELINE_SCRIPTS_INBOX_DIR")
+    if data and inbox:
+        return data, inbox
+    if data or inbox:
+        raise ValueError("set both BASELINE_SCRIPTS_INBOX_DATA and BASELINE_SCRIPTS_INBOX_DIR, or neither")
+    if runner is None:
+        from repair import RealRunner
+        runner = RealRunner()
+    return si.persistent_paths_for_active_user(runner, **resolver_options)
+
+
 def main() -> int:
     import os
     import sys
 
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8200
-    data_path = os.environ.get("BASELINE_SCRIPTS_INBOX_DATA", "/tmp/baseline-scripts-inbox/store.db")
-    inbox_dir = os.environ.get("BASELINE_SCRIPTS_INBOX_DIR", si.DEFAULT_INBOX_DIR)
+    data_path, inbox_dir = resolve_paths(os.environ)
     server = build_real_server(bind_port=port, data_path=data_path, inbox_dir=inbox_dir)
     print(f"Baseline scripts inbox on http://0.0.0.0:{port}/  (no default login: it needs an account created by first-run setup)")
     print(f"Data store: {data_path}")

@@ -1,0 +1,10 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ test_pending_migration_retry_does_not_bypass_the_running_service_guard ____
+tests/unit/test_persist_bind_mounts.py:632: in test_pending_migration_retry_does_not_bypass_the_running_service_guard
+    assert not result.applied and "running" in result.detail
+E   AssertionError: assert (not True)
+E    +  where True = ApplyResult(applied=True, detail='/var/lib/pve-cluster bind-mounted to /mnt/USER/var-lib-pve-cluster').applied
+=========================== short test summary info ============================
+FAILED tests/unit/test_persist_bind_mounts.py::test_pending_migration_retry_does_not_bypass_the_running_service_guard
+1 failed, 62 deselected in 0.15s

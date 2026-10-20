@@ -1,0 +1,3 @@
+# Each lane keeps its own pinned installer UUID when source moves between lanes (DR304 / DR254). Needs, once per clone:
+#   git config merge.ours.driver true
+baseline/INSTALLER_UUID merge=ours

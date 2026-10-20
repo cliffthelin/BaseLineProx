@@ -17,6 +17,8 @@ import uuid
 from urllib.parse import unquote
 from pathlib import Path
 
+import references
+
 import vm_host as vh
 import drive_setup_answer as answer
 
@@ -44,6 +46,15 @@ class DistroContainers:
         if rc:
             raise vh.VmError(f'{args[0]} {args[1]} failed: {err.strip()[-400:]}')
         return out
+
+    def guest_exec(self, name, command, data=b''):
+        record = self._managed(name)
+        if not self.status(name)["running"]:
+            raise vh.VmError("container must be running for AI delivery")
+        rc, _out, _err = self.run_input(["pct", "exec", str(record["vmid"]), "--", *command], data)
+        if rc:
+            raise vh.VmError("container did not accept AI setup; no command output was exposed")
+        return {"exited": True, "exitcode": 0}
 
     def catalog(self):
         names = set()
@@ -173,6 +184,7 @@ class DistroContainers:
                   'os_storage': os_storage, 'memory_mb': int(memory_mb), 'cpus': int(cpus),
                   'password_hash': self.password_hasher(password), 'phase': 'creating'}
         self._save(self._record_path(name), record)
+        references.link_external('vm', 'ct-' + name, record['vmid'], scheme='vmid')
         for kind in ('home', 'root', 'data'):
             path = self.data_path(name, kind)
             path.mkdir(parents=True, mode=0o700)

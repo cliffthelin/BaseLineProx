@@ -23,7 +23,7 @@ is entered.
 
 ## VM data (2026-10-01 increment)
 
-The VM library defaults to `/mnt/USER_ADMIN/vm-data`: Ubuntu's retained home
+The VM library defaults to `/mnt/USER_PERSONAL/vm-data` (DR259; a drive that already holds VM records under the old `/mnt/USER_ADMIN/vm-data` keeps it): Ubuntu's retained home
 disk and hash-only recipe/account profile, Proxmox name/VMID control records,
 and full writable disks for ordinary VMs without overlays. An Ubuntu OS
 rebuild keeps these files and refuses to format an existing home disk.

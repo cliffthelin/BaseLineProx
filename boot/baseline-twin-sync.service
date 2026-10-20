@@ -1,0 +1,10 @@
+[Unit]
+Description=Baseline twin sync: keep the two Baseline drives the same while both are attached
+After=baseline-persist-bind-mounts.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-twin sync
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1
+RemainAfterExit=no

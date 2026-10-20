@@ -1,0 +1,342 @@
+#!/usr/bin/env python3
+"""Build the offline package cache a self-contained Baseline installer carries (see baseline/lib/offline_cache.py).
+
+Runs on the build machine, which has internet; the installed target never needs it. Dependencies are resolved
+against exactly what the installer installs: a throwaway Proxmox VE is installed from the SAME ISO into a sparse
+disk image (disposable-QEMU answer mode, accepted for throwaway VMs only - docs/INSTALL.md step 2), then booted with
+network access only through the allowlisted package proxy (baseline/lib/installer_package_proxy.py). In it:
+
+  apt-get install --download-only   every package provision.sh installs (offline_cache.provision_packages),
+                                    plus Node.js 22 from NodeSource, with all dependencies
+  npm install --cache               Claude Code, OpenCode and OpenAI Codex, filling npm's own cache with every tarball they need
+  apps                              the five applications (VS Code, Spotify, Chrome, ChatGPT, Claude Desktop) prepared with
+                                    `baseline-apps prepare` for Debian 13 (publisher download, pinned sha256, recipe), and
+                                    - in the VM - the dependencies of their packages, so `baseline-apps install` needs no network
+
+Read-through: `--seed` folders (an earlier cache, the drive's own carried/learned cache, a flat folder of .debs) pre-fill the
+VM's package and npm caches and the prepared applications, so only what is missing is downloaded; the new cache keeps
+everything it was seeded with. Drivers (CPU microcode, Wi-Fi firmware: installer_cache.firmware_packages) are carried too.
+
+The .debs and the npm cache are copied out, indexed (dpkg-scanpackages) and listed in MANIFEST.json. The VM and its
+throwaway credentials are deleted afterwards.
+
+    baseline-build-offline-cache --source-iso proxmox-ve_9.2-1.iso --assistant proxmox-auto-install-assistant \\
+        --workspace /run/media/cane/CACHE/baseline-build/cache-vm --output /run/media/cane/CACHE/baseline-build/offline-cache
+"""
+import argparse
+import gzip
+import json
+import os
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "baseline/lib"))
+import drive_setup_answer as dsan  # noqa: E402
+import drive_setup_install as dsi  # noqa: E402
+import installer_cache  # noqa: E402,F401
+import offline_cache  # noqa: E402
+
+PROXY = REPO / "baseline/lib/installer_package_proxy.py"
+PROXY_PORT = 32165
+SERIAL = "BLCACHEBUILD1"
+MAC = "52:54:00:ba:5e:c1"
+SSH_PORT = 22481
+GUEST_PROXY = "http://10.0.2.100:3128"
+
+
+def say(*parts):
+    print("[offline-cache]", *parts, flush=True)
+
+
+def answer(password_hash, ssh_key):
+    nic = "enx" + MAC.replace(":", "")
+    return f"""[global]
+keyboard = "en-us"
+country = "us"
+fqdn = "baseline-cache-builder.local"
+mailto = "root@localhost"
+timezone = "UTC"
+root-password-hashed = "{password_hash}"
+root-ssh-keys = ["{ssh_key}"]
+reboot-mode = "power-off"
+
+[network]
+source = "from-answer"
+cidr = "10.0.2.15/24"
+dns = "10.0.2.3"
+gateway = "10.0.2.2"
+filter.ID_NET_NAME_MAC = "{nic}"
+
+[disk-setup]
+filesystem = "ext4"
+filter.ID_SERIAL_SHORT = "{SERIAL}"
+lvm.maxroot = 32
+lvm.swapsize = 4
+lvm.maxvz = 8
+"""
+
+
+def install_vm(args, work):
+    key = work / "builder-key"
+    if not key.exists():
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "baseline-cache-builder", "-f", key],
+                       check=True)
+    key.chmod(0o600)          # a default ACL on the build drive can widen it; ssh refuses a readable private key
+    password = dsan.generate_one_time_password()           # throwaway VM: never shown, deleted with the VM
+    answer_file = work / "answer.toml"
+    answer_file.write_text(answer(dsan.hash_password_sha512crypt(password, secrets.token_hex(8)),
+                                  Path(str(key) + ".pub").read_text().strip()))
+    answer_file.chmod(0o600)
+    check = subprocess.run([str(args.assistant), "validate-answer", str(answer_file)], capture_output=True, text=True)
+    if check.returncode:
+        raise RuntimeError("answer file rejected: " + check.stdout + check.stderr)
+    iso = work / "builder.iso"
+    outcome = dsan.prepare_iso_defensively(
+        dsan.RealAnswerRunner(), binary=args.assistant, source_iso=args.source_iso, answer_file=answer_file,
+        fetch_from="iso", output_path=iso, tmp_dir=work / "prep-tmp", workspace_root=work,
+        expected_fetch_mode="iso", min_size=1_000_000_000, max_size=3_000_000_000, forbidden_iso_strings=[])
+    if not outcome.ok:
+        raise RuntimeError(f"prepare-iso failed: {[c for c in outcome.postconditions if not c.ok]}")
+    image = work / "builder.raw"
+    with open(image, "wb") as stream:
+        stream.truncate(64 * 1024**3)                       # sparse
+    invocation = dsi.build_sparse_install_invocation(
+        target_image=image, prepared_iso=iso, mac=MAC, smbios_product="baseline-cache-builder",
+        serial_log=work / "install-serial.log", memory_mb=4096, smp=4, restrict_network=True,
+        target_serial=SERIAL)
+    say("installing the throwaway Proxmox VE (powers itself off when done)")
+    proc = subprocess.run([*invocation.argv, "-display", "none"], timeout=3600)
+    if proc.returncode:
+        raise RuntimeError(f"install VM exited {proc.returncode}")
+    return image, key
+
+
+def start_proxy(work):
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", PROXY_PORT)) == 0:
+            return None
+    log = open(work / "proxy.log", "a")
+    proc = subprocess.Popen([sys.executable, str(PROXY)], stdout=log, stderr=log, start_new_session=True)
+    time.sleep(1)
+    return proc
+
+
+def boot_vm(image, work):
+    argv = ["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-m", "6144", "-smp", "4",
+            "-drive", f"file={image},format=raw,if=none,id=targetdisk,cache=none",
+            "-device", "virtio-scsi-pci,id=targetscsi",
+            "-device", f"scsi-hd,drive=targetdisk,bus=targetscsi.0,serial={SERIAL}",
+            "-boot", "order=c",
+            "-nic", (f"user,restrict=on,mac={MAC},guestfwd=tcp:10.0.2.100:3128-cmd:nc 127.0.0.1 {PROXY_PORT},"
+                     f"hostfwd=tcp:127.0.0.1:{SSH_PORT}-:22"),
+            "-smbios", "type=1,product=baseline-cache-builder",
+            "-display", "none", "-serial", f"file:{work / 'boot-serial.log'}"]
+    log = open(work / "boot-qemu.log", "ab")
+    return subprocess.Popen(argv, stdout=log, stderr=log, start_new_session=True)
+
+
+def ssh(key, command, *, timeout=3600, check=True, stdout=None):
+    argv = ["ssh", "-i", str(key), "-p", str(SSH_PORT), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=5",
+            "root@127.0.0.1", command]
+    proc = subprocess.run(argv, timeout=timeout, stdout=stdout or subprocess.PIPE, stderr=subprocess.PIPE)
+    if check and proc.returncode:
+        raise RuntimeError(f"builder VM command failed ({proc.returncode}): {command}\n{proc.stderr.decode()[-2000:]}")
+    return proc
+
+
+def collect(key, packages, output, apps=None, seeds=()):
+    proxy_env = f"export http_proxy={GUEST_PROXY} https_proxy={GUEST_PROXY} DEBIAN_FRONTEND=noninteractive;"
+    ssh(key, "for f in pve-enterprise.sources ceph.sources; do [ -f /etc/apt/sources.list.d/$f ] && "
+             "mv /etc/apt/sources.list.d/$f /etc/apt/sources.list.d/$f.disabled; done; "
+             f"printf 'Acquire::http::Proxy \"{GUEST_PROXY}\";\\nAcquire::https::Proxy \"{GUEST_PROXY}\";\\n' "
+             "> /etc/apt/apt.conf.d/99baseline-cache-proxy")
+    # Drivers (microcode, Wi-Fi firmware) live in Debian's non-free-firmware component.
+    ssh(key, "for f in /etc/apt/sources.list.d/debian.sources; do [ -f $f ] && "
+             "sed -i '/^Types: deb/,/^$/ { /^Components:/ { /non-free-firmware/! s/$/ non-free-firmware/ } }' $f; done; true")
+    say("adding NodeSource 22 (the same repository provision.sh uses online)")
+    ssh(key, proxy_env + "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -")
+    say("downloading", len(packages), "packages with all dependencies:", " ".join(packages))
+    ssh(key, "apt-get clean")
+    debs = offline_cache.seed_debs(seeds)
+    if debs:
+        say("seeding the builder with", len(debs), "packages already on hand; only what is missing is downloaded")
+        push_debs(key, debs, "/var/cache/apt/archives")
+    ssh(key, proxy_env + "apt-get install --download-only -y " + " ".join(packages))
+    # Drivers are chosen per machine, so every one is carried even when this VM's own base already has it installed
+    # (apt would otherwise download nothing for it).
+    ssh(key, proxy_env + "apt-get install --reinstall --download-only -y " + " ".join(installer_cache.firmware_packages()))
+    if apps is not None:
+        say("collecting the dependencies of the application packages")
+        push(key, apps, "/root/apps")
+        ssh(key, proxy_env + "apt-get install --download-only -y /root/apps/*/source.deb")
+    apt_dir = output / "apt"
+    apt_dir.mkdir(parents=True)
+    with open(output / "apt.tar", "wb") as stream:
+        ssh(key, "tar -C /var/cache/apt/archives -cf - --exclude=partial --exclude=lock .", stdout=stream)
+    subprocess.run(["tar", "-xf", str(output / "apt.tar"), "-C", str(apt_dir)], check=True)
+    (output / "apt.tar").unlink()
+    say("filling npm's cache with Claude Code")
+    npm_seed = next((seed for seed in map(Path, seeds) if (seed / "npm-cache").is_dir()), None)
+    ssh(key, "rm -rf /root/npm-cache")
+    if npm_seed is not None:
+        say("seeding npm's cache from", npm_seed / "npm-cache")
+        _stream_into_vm(key, ["tar", "-C", str(npm_seed), "-cf", "-", "npm-cache"], "/root")
+    ssh(key, proxy_env + "apt-get install -y nodejs && "
+             f"npm install -g --cache /root/npm-cache --proxy {GUEST_PROXY} --https-proxy {GUEST_PROXY} "
+             "@anthropic-ai/claude-code opencode-ai @openai/codex")
+    with open(output / "npm.tar", "wb") as stream:
+        ssh(key, "tar -C /root -cf - npm-cache", stdout=stream)
+    subprocess.run(["tar", "-xf", str(output / "npm.tar"), "-C", str(output)], check=True)
+    (output / "npm.tar").unlink()
+
+
+def prepare_apps(folder):
+    """`baseline-apps prepare` for every application on the build machine (which has internet), unless already done.
+    Result: <folder>/<app>/{source.deb|source.tar.gz, recipe.json}."""
+    import application_bundle
+    config = folder / "empty-configuration.json"
+    folder.mkdir(parents=True, exist_ok=True)
+    config.write_text("{}\n")
+    for app in application_bundle.APPS:
+        target = folder / app
+        if (target / "recipe.json").is_file():
+            continue
+        if target.exists():
+            shutil.rmtree(target)             # a previous attempt that never produced a recipe
+        say("preparing", app)
+        proc = subprocess.run([str(REPO / "baseline/bin/baseline-apps"), "prepare", app, str(config), str(target),
+                               "--os", "debian", "--release", "13"], capture_output=True, text=True, timeout=1800)
+        if proc.returncode:
+            raise RuntimeError(f"baseline-apps prepare {app} failed: {proc.stderr.strip()[-600:]}")
+        (target / "recipe.json").write_text(json.dumps(json.loads(proc.stdout)["recipe"], indent=1, sort_keys=True) + "\n")
+
+
+def _stream_into_vm(key, tar_argv, destination):
+    tar = subprocess.Popen(tar_argv, stdout=subprocess.PIPE)
+    ssh_argv = ["ssh", "-i", str(key), "-p", str(SSH_PORT), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "root@127.0.0.1",
+                f"tar -C {destination} -xf -"]
+    result = subprocess.run(ssh_argv, stdin=tar.stdout, capture_output=True)
+    tar.wait()
+    if result.returncode or tar.returncode:
+        raise RuntimeError(f"copying into the builder VM ({destination}) failed: {result.stderr.decode()[-500:]}")
+
+
+def push(key, folder, destination):
+    """Copy a folder into the builder VM."""
+    ssh(key, f"rm -rf {destination} && mkdir -p {destination}")
+    _stream_into_vm(key, ["tar", "-C", str(folder), "-cf", "-", "."], destination)
+
+
+def push_debs(key, debs, destination):
+    """Copy package files into the builder VM (grouped by folder so the command line stays short)."""
+    ssh(key, f"mkdir -p {destination}")
+    by_folder = {}
+    for deb in debs:
+        by_folder.setdefault(deb.parent, []).append(deb.name)
+    for folder, names in by_folder.items():
+        _stream_into_vm(key, ["tar", "-C", str(folder), "-cf", "-", *names], destination)
+
+
+def index(output):
+    apt_dir = output / "apt"
+    debs = sorted(apt_dir.glob("*.deb"))
+    if not debs:
+        raise RuntimeError("no packages were collected")
+    listing = subprocess.run(["dpkg-scanpackages", "--multiversion", ".", "/dev/null"], cwd=apt_dir, check=True,
+                             capture_output=True).stdout
+    (apt_dir / "Packages").write_bytes(listing)
+    (apt_dir / "Packages.gz").write_bytes(gzip.compress(listing))
+    offline_cache.write_built_for(output, REPO)      # what this cache was built for; part of the manifest, so a target verifies it
+    manifest = offline_cache.build_manifest(output)
+    (output / "MANIFEST.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
+    offline_cache.verify_manifest(output, manifest)
+    size = sum((output / name).stat().st_size for name in manifest)
+    say(f"offline cache ready: {len(debs)} packages, {len(manifest)} files, {size // 2**20} MiB -> {output}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--source-iso", type=Path, required=True)
+    parser.add_argument("--assistant", type=Path, required=True)
+    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--seed", type=Path, action="append", default=[],
+                        help="a folder to fill the cache from before downloading anything (repeatable): an earlier "
+                             "cache, the drive's own installer cache, or a folder of .debs")
+    parser.add_argument("--refresh-apps", action="store_true",
+                        help="download the applications again instead of reusing prepared ones")
+    parser.add_argument("--apps", type=Path, help="build-machine folder for the prepared applications (made if absent); "
+                                                 "without it the cache carries no applications")
+    parser.add_argument("--kasm-base", type=Path, help="a prepared Kasm base (the folder baseline-build-kasm-base wrote: the qcow2 and KASM.json); "
+                                                       "carried so Kasm can be built on a new setup with no internet. About 15 GiB.")
+    parser.add_argument("--os-bases", type=Path, help="the folder baseline-build-os-base wrote (<os>-base.qcow2 and <os>-base.json); the ready-made VM bases that pass their checks are carried "
+                                                      "so each listed system can be created already set up. Several GiB each.")
+    args = parser.parse_args()
+    if args.output.exists():
+        raise RuntimeError(f"{args.output} already exists; the cache is built fresh, never merged")
+    packages = offline_cache.required_packages(REPO)
+    if args.apps is not None:
+        if not args.refresh_apps:
+            for app in offline_cache.seed_apps(args.apps, args.seed):
+                say("reusing the prepared", app, "from a seed")
+        prepare_apps(args.apps)
+    work = args.workspace
+    work.mkdir(parents=True, exist_ok=True)
+    work.chmod(0o700)
+    image, key = install_vm(args, work)
+    proxy = start_proxy(work)
+    vm = boot_vm(image, work)
+    staging = args.output.with_name(args.output.name + ".partial")
+    try:
+        deadline = time.monotonic() + 600
+        while ssh(key, "true", timeout=20, check=False).returncode:
+            if vm.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(f"builder VM did not come up for SSH; see {work}")
+            time.sleep(5)
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir(parents=True)
+        collect(key, packages, staging, args.apps, args.seed)
+        if args.apps is not None:
+            import application_bundle
+            shutil.copytree(args.apps, staging / offline_cache.APP_BUNDLE,
+                            ignore=shutil.ignore_patterns("empty-configuration.json"))
+            for item in offline_cache.verify_app_bundle(staging, application_bundle.APPS):
+                say("carried:", item["app"], item["version"], f"{item['bytes'] // 2**20} MiB")
+        if args.kasm_base is not None:
+            kasm = offline_cache.carry_kasm_base(args.kasm_base, staging)
+            say("carried: Kasm", kasm["kasm_version"], f"{kasm['bytes'] // 2**20} MiB")
+        if args.os_bases is not None:
+            bases = offline_cache.carry_os_bases(args.os_bases, staging)
+            for os_id, size in bases["carried"].items():
+                say("carried: ready-made", os_id, f"{size // 2**20} MiB")
+            for os_id, why in bases["refused"].items():
+                say("NOT carried: ready-made", os_id, "-", why)
+        index(staging)
+        os.replace(staging, args.output)
+    finally:
+        ssh(key, "systemctl poweroff", timeout=30, check=False)
+        try:
+            vm.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            vm.terminate()
+        if proxy is not None:
+            proxy.terminate()
+    shutil.rmtree(work)                                     # the throwaway VM, its credentials and key
+    say("throwaway build VM deleted")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        print(f"[offline-cache] STOPPED: {exc}", file=sys.stderr)
+        sys.exit(1)

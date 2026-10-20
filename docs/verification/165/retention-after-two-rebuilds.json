@@ -1,0 +1,13 @@
+{
+  "guest_stopped": true,
+  "inspection_read_only": true,
+  "home_label": "baseline-home",
+  "document_sha256": "37e7e1fe20de9d4138fe8012a769292d5a8d9807d85bdfdad761a4e90a9e930d",
+  "bookmarks": [
+    [
+      "baseline-pc401 - Proxmox Virtual Environment",
+      "https://10.0.2.15:8006/#v1:0:18:4:::::::"
+    ]
+  ],
+  "inspection_cleanup_verified": true
+}

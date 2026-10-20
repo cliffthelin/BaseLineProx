@@ -22,7 +22,7 @@ def test_create_vm_argv_shape():
         "--memory", "2048",
         "--cores", "2",
         "--net0", "virtio,bridge=vmbr0",
-        "--scsi0", "local-lvm:8",
+        "--scsi0", f"{vp.DEFAULT_VM_STORAGE}:8",
         "--ide2", "local:iso/debian-12.iso,media=cdrom",
         "--boot", "order=ide2;scsi0",
     ]

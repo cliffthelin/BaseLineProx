@@ -20,6 +20,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import references
 import registry
 
 EVENT_LOG = Path("/var/log/baseline/network.events.jsonl")
@@ -27,6 +28,10 @@ LLM_PROBE_HOST = "api.anthropic.com"
 LLM_PROBE_PORT = 443
 INTERNET_PROBE_HOST = "1.1.1.1"
 INTERNET_PROBE_PORT = 53
+
+
+class NetworkProbeError(RuntimeError):
+    """A required host-network observation failed and is not an empty result."""
 
 
 def _log_event(step: str, status: str, detail: str) -> None:
@@ -42,21 +47,35 @@ def _log_event(step: str, status: str, detail: str) -> None:
         f.write(json.dumps(rec) + "\n")
 
 
-def _physical_nics():
+def _physical_nics(base=None):
     """Real NICs under /sys/class/net - excludes lo and software bridges."""
     out = []
-    base = Path("/sys/class/net")
-    if not base.exists():
-        return out
-    for entry in sorted(base.iterdir()):
+    base = Path("/sys/class/net") if base is None else base
+    try:
+        entries = sorted(base.iterdir())
+    except OSError as exc:
+        raise NetworkProbeError(f"physical NIC inventory unavailable at {base}: {exc}") from exc
+    for entry in entries:
         name = entry.name
         if name == "lo":
             continue
-        if (entry / "bridge").exists():
+        if not entry.is_dir():
+            continue  # e.g. bonding_masters, a plain file present whenever the bonding module is loaded
+        if _sysfs_path_exists(entry / "bridge"):
             continue  # this is a bridge (e.g. vmbr0), not a physical NIC
-        if (entry / "device").exists():
+        if _sysfs_path_exists(entry / "device"):
             out.append(name)
     return out
+
+
+def _sysfs_path_exists(path):
+    try:
+        path.stat()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise NetworkProbeError(f"could not inspect sysfs path {path}: {exc}") from exc
 
 
 FRIENDLY_DRIVERS = {
@@ -76,12 +95,20 @@ FRIENDLY_DRIVERS = {
 WIRED_DRIVERS = {"r8152", "r8169", "r8168", "e1000e", "igb", "tg3", "bnx2"}
 
 
-def is_wired(ifname: str) -> bool:
+def _driver_name(ifname: str) -> str | None:
     driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
     try:
-        return driver_link.resolve().name in WIRED_DRIVERS
-    except OSError:
-        return False
+        return driver_link.resolve(strict=True).name
+    except FileNotFoundError:
+        return None
+    except (OSError, RuntimeError) as exc:
+        raise NetworkProbeError(f"driver observation unavailable for {ifname}: {exc}") from exc
+
+
+def is_wired(ifname: str) -> bool | None:
+    """True/False for an observed driver; None when no driver is bound."""
+    driver = _driver_name(ifname)
+    return driver in WIRED_DRIVERS if driver is not None else None
 
 
 # Interface aliases moved onto registry.py directly (decision record
@@ -105,6 +132,7 @@ def save_alias(ifname: str, alias: str) -> None:
     registry.register_type(ALIASES_TYPE_ID, "Operator-chosen interface display names (network.py)",
                             default_scope=registry.PROTECTED)
     registry.upsert_entry(ALIASES_TYPE_ID, ifname, attributes={}, scope=registry.PROTECTED)
+    references.link(ALIASES_TYPE_ID, ifname, kind="hardware", name="nic-" + ifname)
     alias = alias.strip()
     registry.set_value(ALIASES_TYPE_ID, ifname, alias if alias else None, scope=registry.PROTECTED)
 
@@ -116,10 +144,9 @@ def friendly_name(ifname: str, show_hardware_id: bool = False) -> str:
     aliases = load_aliases()
     label = aliases.get(ifname)
     if label is None:
-        driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
         try:
-            label = FRIENDLY_DRIVERS.get(driver_link.resolve().name)
-        except OSError:
+            label = FRIENDLY_DRIVERS.get(_driver_name(ifname))
+        except NetworkProbeError:
             label = None
     if label is None:
         label = "Bridge" if (Path("/sys/class/net") / ifname / "bridge").exists() else ifname
@@ -129,7 +156,7 @@ def friendly_name(ifname: str, show_hardware_id: bool = False) -> str:
 
 
 def device_details(ifname: str) -> dict:
-    """Best-effort hardware identity for one interface, pulled from udev's
+    """Hardware identity for one interface, pulled from udev's
     own hardware database - works uniformly for onboard (PCI) and
     external (USB dock/tether) devices without hand-parsing lspci/lsusb.
     Baseline's own inxi-based Hardware tab lists the same physical device
@@ -138,17 +165,23 @@ def device_details(ifname: str) -> dict:
     "which manufacturer, on what bus, using which driver" bridged into
     the Network tab's own modal instead of sending the operator to
     cross-reference the Hardware tab by hand."""
+    errors = []
+    props = {}
     try:
-        out = subprocess.run(["udevadm", "info", "-q", "property", f"/sys/class/net/{ifname}"],
-                              capture_output=True, text=True, timeout=5).stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        out = ""
-    props = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
-    driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
+        result = subprocess.run(["udevadm", "info", "-q", "property", f"/sys/class/net/{ifname}"],
+                                capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            props = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        else:
+            detail = (result.stderr or result.stdout or f"udevadm exited with status {result.returncode}").strip()
+            errors.append(f"udev hardware identity unavailable: {detail}")
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        errors.append(f"udev hardware identity unavailable: {exc}")
     try:
-        driver = driver_link.resolve().name
-    except OSError:
+        driver = _driver_name(ifname)
+    except NetworkProbeError as exc:
         driver = None
+        errors.append(str(exc))
     bus = props.get("ID_BUS")
     connection = {"pci": "Onboard (PCI)", "usb": "External (USB)"}.get(bus, bus or "unknown")
     # ID_OUI_FROM_DATABASE is the manufacturer that put the part on the
@@ -158,9 +191,10 @@ def device_details(ifname: str) -> dict:
     return {
         "driver": driver or "unknown",
         "connection": connection,
-        "chipset_vendor": props.get("ID_VENDOR_FROM_DATABASE") or props.get("ID_VENDOR", ""),
-        "model": props.get("ID_MODEL_FROM_DATABASE") or props.get("ID_MODEL", ""),
-        "manufacturer": props.get("ID_OUI_FROM_DATABASE", ""),
+        "chipset_vendor": props.get("ID_VENDOR_FROM_DATABASE") or props.get("ID_VENDOR") or "unknown",
+        "model": props.get("ID_MODEL_FROM_DATABASE") or props.get("ID_MODEL") or "unknown",
+        "manufacturer": props.get("ID_OUI_FROM_DATABASE") or "unknown",
+        "errors": errors,
     }
 
 
@@ -170,9 +204,13 @@ def is_admin_up(ifname: str) -> bool:
     the IFF_UP bit rather than parsing `ip link show` text."""
     try:
         flags = int(Path(f"/sys/class/net/{ifname}/flags").read_text().strip(), 16)
-        return bool(flags & 0x1)
-    except (OSError, ValueError):
-        return True
+    except OSError as exc:
+        raise NetworkProbeError(f"administrative state unavailable for {ifname}: {exc}") from exc
+    except ValueError as exc:
+        raise NetworkProbeError(f"malformed admin state for {ifname}") from exc
+    if flags < 0:
+        raise NetworkProbeError(f"malformed admin state for {ifname}: negative flags")
+    return bool(flags & 0x1)
 
 
 def set_admin_state(ifname: str, up: bool):
@@ -180,10 +218,19 @@ def set_admin_state(ifname: str, up: bool):
     cosmetic toggle - disabling the interface you're using to reach this
     console over the network will actually disconnect it."""
     action = "up" if up else "down"
-    result = subprocess.run(["ip", "link", "set", ifname, action], capture_output=True, text=True, timeout=5)
+    try:
+        result = subprocess.run(["ip", "link", "set", ifname, action], capture_output=True, text=True, timeout=5)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, f"ip link set {ifname} {action} unavailable: {exc}"
     if result.returncode != 0:
         return False, (result.stderr or f"ip link set {ifname} {action} failed").strip()
-    return True, f"{ifname} set {action}"
+    try:
+        observed = is_admin_up(ifname)
+    except NetworkProbeError as exc:
+        return False, f"ip accepted {ifname} {action}, but administrative-state readback failed: {exc}"
+    if observed is not up:
+        return False, f"ip accepted {ifname} {action}, but readback mismatch: observed {'up' if observed else 'down'}"
+    return True, f"{ifname} is {'enabled' if up else 'disabled'} (readback verified)"
 
 
 def _human_bytes(n: int) -> str:
@@ -195,16 +242,21 @@ def _human_bytes(n: int) -> str:
 
 
 def interface_stats(ifname: str):
-    """(rx_bytes, tx_bytes) lifetime counters for this interface, or
-    (None, None) if unreadable. Non-zero even on a currently-down
-    interface that carried traffic earlier this boot."""
+    """(rx_bytes, tx_bytes) lifetime counters for this interface.
+
+    Non-zero even on a currently-down interface that carried traffic
+    earlier this boot. Read and parse failures remain explicit errors,
+    never a fabricated zero-traffic result.
+    """
     stats = Path("/sys/class/net") / ifname / "statistics"
     try:
         rx = int((stats / "rx_bytes").read_text().strip())
         tx = int((stats / "tx_bytes").read_text().strip())
         return rx, tx
-    except (OSError, ValueError):
-        return None, None
+    except OSError as exc:
+        raise NetworkProbeError(f"traffic counters unavailable for {ifname}: {exc}") from exc
+    except ValueError as exc:
+        raise NetworkProbeError(f"malformed traffic counters for {ifname}") from exc
 
 
 def interface_traffic_label(ifname: str) -> str:
@@ -219,10 +271,14 @@ def interface_traffic_label(ifname: str) -> str:
 
 
 def _carrier(ifname: str):
+    path = Path("/sys/class/net") / ifname / "carrier"
     try:
-        return (Path("/sys/class/net") / ifname / "carrier").read_text().strip() == "1"
-    except OSError:
-        return None
+        value = path.read_text().strip()
+    except OSError as exc:
+        raise NetworkProbeError(f"carrier state unavailable for {ifname}: {exc}") from exc
+    if value not in ("0", "1"):
+        raise NetworkProbeError(f"malformed carrier state for {ifname}: {value!r}")
+    return value == "1"
 
 
 def list_interfaces():
@@ -232,12 +288,29 @@ def list_interfaces():
     (DNS/gateway/internet checks) needed just to list what's there."""
     out = []
     for name in _physical_nics():
+        try:
+            carrier = _carrier(name)
+            carrier_error = None
+        except NetworkProbeError as exc:
+            carrier = None
+            carrier_error = str(exc)
+        try:
+            driver_name = _driver_name(name)
+            driver_bound = driver_name is not None
+            wired = driver_name in WIRED_DRIVERS if driver_name is not None else None
+            driver_error = None
+        except NetworkProbeError as exc:
+            driver_bound = None
+            wired = None
+            driver_error = str(exc)
         out.append({
             "name": name,
             "friendly": friendly_name(name),
-            "driver_bound": os.path.exists(f"/sys/class/net/{name}/device/driver"),
-            "carrier": bool(_carrier(name)),
-            "wired": is_wired(name),
+            "driver_bound": driver_bound,
+            "driver_error": driver_error,
+            "carrier": carrier,
+            "carrier_error": carrier_error,
+            "wired": wired,
         })
     return out
 
@@ -246,8 +319,10 @@ def _bridge_members(brname: str):
     brif = Path("/sys/class/net") / brname / "brif"
     try:
         return [p.name for p in brif.iterdir()]
-    except OSError:
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise NetworkProbeError(f"could not inspect bridge members for {brname}: {exc}") from exc
 
 
 def _route_dev_is_live(dev: str, up_nics: list) -> bool:
@@ -269,15 +344,24 @@ def _route_default(up_nics=None):
     failure still reports the same "no live device" detail as before."""
     up_nics = up_nics or []
     try:
-        out = subprocess.run(["ip", "-4", "route", "show", "default"],
-                              capture_output=True, text=True, timeout=5).stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None, None
+        proc = subprocess.run(["ip", "-4", "route", "show", "default"],
+                              capture_output=True, text=True, timeout=5)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise NetworkProbeError(f"default route query unavailable: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"ip exited with status {proc.returncode}").strip()
+        raise NetworkProbeError(f"default route query failed: {detail}")
+    out = proc.stdout
     routes = []
     for line in out.splitlines():
         parts = line.split()
-        if "via" in parts and "dev" in parts:
-            routes.append((parts[parts.index("via") + 1], parts[parts.index("dev") + 1]))
+        if not parts or parts[0] != "default" or "dev" not in parts:
+            continue
+        dev_index = parts.index("dev")
+        if dev_index + 1 >= len(parts):
+            continue
+        gw = parts[parts.index("via") + 1] if "via" in parts and parts.index("via") + 1 < len(parts) else None
+        routes.append((gw, parts[dev_index + 1]))
     if not routes:
         return None, None
     for gw, dev in routes:
@@ -288,15 +372,25 @@ def _route_default(up_nics=None):
 
 def _addr_for(ifname: str):
     try:
-        out = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", ifname],
-                              capture_output=True, text=True, timeout=5).stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
+        proc = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", ifname],
+                              capture_output=True, text=True, timeout=5)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise NetworkProbeError(f"address query unavailable for {ifname}: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"ip exited with status {proc.returncode}").strip()
+        raise NetworkProbeError(f"address query failed for {ifname}: {detail}")
+    out = proc.stdout
     for line in out.splitlines():
         parts = line.split()
         if "inet" in parts:
-            cidr = parts[parts.index("inet") + 1]
-            return str(ipaddress.ip_interface(cidr).ip)
+            address_index = parts.index("inet") + 1
+            if address_index >= len(parts):
+                raise NetworkProbeError(f"malformed IPv4 address output from ip for {ifname}: {line!r}")
+            cidr = parts[address_index]
+            try:
+                return str(ipaddress.ip_interface(cidr).ip)
+            except ValueError as exc:
+                raise NetworkProbeError(f"malformed IPv4 address from ip for {ifname}: {cidr!r}") from exc
     return None
 
 
@@ -330,21 +424,64 @@ def check_lifeline():
         _log_event(name, "pass" if ok else "fail", detail)
         return ok
 
-    nics = _physical_nics()
+    try:
+        nics = _physical_nics()
+    except NetworkProbeError as exc:
+        record("nic_detected", False, f"physical NIC inventory unavailable: {exc}")
+        return facts
     if not record("nic_detected", bool(nics), ", ".join(nics) or "no physical NIC found"):
         return facts
 
-    up_nics = [n for n in nics if _carrier(n)]
-    driver_ok = any(os.path.exists(f"/sys/class/net/{n}/device/driver") for n in nics)
-    if not record("driver_bound", driver_ok, ", ".join(nics)):
+    up_nics = []
+    carrier_errors = []
+    for name in nics:
+        try:
+            if _carrier(name):
+                up_nics.append(name)
+        except NetworkProbeError as exc:
+            carrier_errors.append(str(exc))
+    if carrier_errors and not up_nics:
+        record("carrier_present", False, f"carrier observation unavailable: {'; '.join(carrier_errors)}")
+        return facts
+    bound_drivers = []
+    driver_errors = []
+    for name in nics:
+        try:
+            if _driver_name(name) is not None:
+                bound_drivers.append(name)
+        except NetworkProbeError as exc:
+            driver_errors.append((name, str(exc)))
+    if not bound_drivers and driver_errors:
+        record("driver_bound", False, "driver observation unavailable: " + "; ".join(
+            f"{name}: {detail}" for name, detail in driver_errors))
+        return facts
+    unknown_names = {name for name, _detail in driver_errors}
+    unbound = [name for name in nics if name not in bound_drivers and name not in unknown_names]
+    driver_detail = f"bound={bound_drivers} unbound={unbound}"
+    if driver_errors:
+        driver_detail += " unknown=" + "; ".join(f"{name}: {detail}" for name, detail in driver_errors)
+    if not record("driver_bound", bool(bound_drivers), driver_detail):
         return facts
 
-    if not record("carrier_present", bool(up_nics), f"up={up_nics} down={[n for n in nics if n not in up_nics]}"):
+    carrier_detail = f"up={up_nics} down={[n for n in nics if n not in up_nics]}"
+    if carrier_errors:
+        carrier_detail += f" unknown={carrier_errors}"
+    if not record("carrier_present", bool(up_nics), carrier_detail):
         return facts
 
-    gw, dev = _route_default(up_nics)
-    ip_addr = _addr_for(dev) if dev else None
-    if not record("address_assigned", bool(ip_addr), f"{dev}: {ip_addr}" if ip_addr else f"no address on {dev or 'default route device'}"):
+    try:
+        gw, dev = _route_default(up_nics)
+    except NetworkProbeError as exc:
+        record("address_assigned", False, f"default route query unavailable: {exc}")
+        return facts
+    try:
+        ip_addr = _addr_for(dev) if dev else None
+    except NetworkProbeError as exc:
+        record("address_assigned", False, f"address query unavailable: {exc}")
+        return facts
+    address_detail = (f"{dev}: {ip_addr}" if ip_addr else
+                      (f"no IPv4 address assigned to {dev}" if dev else "no default-route device found; address cannot be attributed"))
+    if not record("address_assigned", bool(ip_addr), address_detail):
         return facts
 
     if not gw:

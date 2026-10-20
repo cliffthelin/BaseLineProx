@@ -20,6 +20,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -27,7 +28,20 @@ from pathlib import Path
 GIB = 2**30
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 DEFAULT_STORE = Path("/mnt/BASELINE/vm-runtime")
-DEFAULT_PERSISTENCE_STORE = Path("/mnt/USER_ADMIN/vm-data")
+DEFAULT_PERSISTENCE_STORE = Path("/mnt/USER_PERSONAL/vm-data")     # DR257: VMs never write to USER_ADMIN; their state is the user's
+LEGACY_PERSISTENCE_STORE = Path("/mnt/USER_ADMIN/vm-data")          # the default before DR257; kept for drives that already hold VMs there
+
+
+def default_persistence_store(legacy: Path = LEGACY_PERSISTENCE_STORE) -> Path:
+    """USER_PERSONAL for a new drive; the old USER_ADMIN folder only when it already holds VM records, so those are not orphaned (and
+    Proxmox's `baseline-user` storage, registered against that path, keeps matching)."""
+    machines = Path(legacy) / "control" / "machines"
+    try:
+        if machines.is_dir() and any(machines.iterdir()):
+            return Path(legacy)
+    except OSError:
+        pass
+    return DEFAULT_PERSISTENCE_STORE
 DEFAULT_ISO_DIR = Path("/mnt/INSTALLER_CACHE/isos")
 FREE_HEADROOM = 10 * GIB
 VM_NICENESS = 10      # Proxmox and its own guests (nice 0) win any CPU contention against VMs started here
@@ -45,9 +59,32 @@ def valid_name(name) -> bool:
 
 def list_isos(iso_dir) -> list:
     d = Path(iso_dir)
-    if not d.is_dir():
+    try:
+        directory_stat = d.lstat()
+    except FileNotFoundError:
         return []
-    return [{"name": p.name, "path": str(p), "size": p.stat().st_size} for p in sorted(d.glob("*.iso"))]
+    except OSError as exc:
+        raise VmError(f"cannot inspect ISO directory {d}: {exc}") from exc
+    if stat.S_ISLNK(directory_stat.st_mode):
+        raise VmError(f"ISO directory path is a symlink: {d}")
+    if not stat.S_ISDIR(directory_stat.st_mode):
+        raise VmError(f"ISO directory path is not a directory: {d}")
+    try:
+        entries = sorted(d.iterdir())
+    except OSError as exc:
+        raise VmError(f"cannot list ISO directory {d}: {exc}") from exc
+    isos = []
+    for path in entries:
+        if path.suffix.lower() != ".iso":
+            continue
+        try:
+            entry_stat = path.lstat()
+        except OSError as exc:
+            raise VmError(f"cannot inspect ISO entry {path}: {exc}") from exc
+        if not stat.S_ISREG(entry_stat.st_mode):
+            raise VmError(f"ISO entry is not a regular file: {path}")
+        isos.append({"name": path.name, "path": str(path), "size": entry_stat.st_size})
+    return isos
 
 
 def default_display(env) -> str:
@@ -69,6 +106,8 @@ def _real_spawn(argv) -> int:
 
 
 def _real_alive(pid: int) -> bool:
+    if type(pid) is not int or pid <= 0:
+        raise VmError("process observation requires a positive process ID")
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -76,16 +115,24 @@ def _real_alive(pid: int) -> bool:
     except PermissionError:
         return True
     try:
-        return Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0] != "Z"
-    except OSError:
-        return False
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except OSError as exc:
+        raise VmError(f"cannot inspect process state for PID {pid}: {exc}") from exc
+    if not fields:
+        raise VmError(f"process state for PID {pid} is malformed")
+    return fields[0] != "Z"
 
 
 def _real_cmdline(pid: int) -> list:
+    if type(pid) is not int or pid <= 0:
+        raise VmError("process observation requires a positive process ID")
     try:
-        return Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\0")
-    except OSError:
+        content = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError as exc:
+        raise VmError(f"cannot inspect command line for PID {pid}: {exc}") from exc
+    if not content:
         return []
+    return [argument.decode(errors="replace") for argument in content.rstrip(b"\0").split(b"\0")]
 
 
 def _real_kill(pid: int) -> None:
@@ -116,12 +163,13 @@ def _real_free(path) -> int:
 class VmHost:
     def __init__(self, store, *, run=_real_run, spawn=_real_spawn, is_alive=_real_alive, qmp=_real_qmp,
                  kill=_real_kill, sleep=time.sleep, free_bytes=_real_free, cmdline=_real_cmdline, runtime_dir=None,
-                 persistence_store=DEFAULT_PERSISTENCE_STORE):
+                 persistence_store=DEFAULT_PERSISTENCE_STORE, grow_volume=None):
         self.store = Path(store)
         self.persistence_store = Path(persistence_store)
         self.runtime_dir = Path(runtime_dir) if runtime_dir else Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "baseline-vms"
         self.run, self.spawn, self.is_alive, self.qmp, self.kill = run, spawn, is_alive, qmp, kill
         self.sleep, self.free_bytes, self._cmdline = sleep, free_bytes, cmdline
+        self.grow_volume = grow_volume      # callable(label, needed_bytes) that extends a Baseline role volume; None where volumes do not grow
 
     # ---- paths -------------------------------------------------------------------------------------------------
     @property
@@ -181,9 +229,18 @@ class VmHost:
     def _spec(self, name: str) -> dict:
         path = self.vm_dir(name) / "vm.json"
         try:
-            return json.loads(path.read_text())
-        except (OSError, ValueError):
+            text = path.read_text()
+        except FileNotFoundError:
             raise VmError(f"no such VM: {name}") from None
+        except OSError as exc:
+            raise VmError(f"cannot read VM record for {name}: {exc}") from exc
+        try:
+            spec = json.loads(text)
+        except (ValueError, UnicodeError):
+            raise VmError(f"invalid VM record for {name}: vm.json is not valid JSON") from None
+        if not isinstance(spec, dict):
+            raise VmError(f"invalid VM record for {name}: expected a JSON object")
+        return spec
 
     def _write_spec(self, name: str, spec: dict) -> None:
         (self.vm_dir(name) / "vm.json").write_text(json.dumps(spec, indent=1))
@@ -199,13 +256,28 @@ class VmHost:
             if not os.path.ismount(mount):
                 raise VmError(f"{mount} must be mounted before storing VM state")
 
+    def _ensure_room(self, path: Path, needed: int, refusal: str) -> None:
+        """Free space is a property of a role volume that grows on demand, not of its current size (a fresh drive's volumes start at 1 GiB): when the
+        path is on a Baseline role volume and a growth hook is configured, ask it for the room first. Refuses, with the reason, when it cannot."""
+        if self.free_bytes(path) >= needed:
+            return
+        parts = Path(path).parts
+        label = parts[2] if len(parts) > 2 and parts[1] == "mnt" and re.fullmatch(r"[A-Z][A-Z0-9_]{1,31}", parts[2]) else None
+        if label is not None and self.grow_volume is not None:
+            try:
+                self.grow_volume(label, needed)
+            except Exception as exc:        # noqa: BLE001 - the growth module's own reason is what the person needs to read
+                raise VmError(f"{refusal}: {exc}") from exc
+            if self.free_bytes(path) >= needed:
+                return
+        raise VmError(refusal)
+
     def _new_dir(self, name: str, size_gb: int) -> Path:
         self._check_store(self.store)
         d = self.vm_dir(name)
         if d.exists():
             raise VmError(f"a VM named {name} already exists")
-        if self.free_bytes(self.store) < FREE_HEADROOM + size_gb * GIB // 10:
-            raise VmError("not enough free space in the VM store for this VM")
+        self._ensure_room(self.store, FREE_HEADROOM + size_gb * GIB // 10, "not enough free space in the VM store for this VM")
         d.mkdir(parents=True)
         return d
 
@@ -223,8 +295,7 @@ class VmHost:
         self._check_store(self.persistence_store)
         if self.persistence_store.resolve().is_relative_to(self.store.resolve()) or self.store.resolve().is_relative_to(self.persistence_store.resolve()):
             raise VmError("protected disks must be outside the disposable VM store")
-        if self.free_bytes(self.persistence_store) < FREE_HEADROOM + int(disk_gb) * GIB // 10:
-            raise VmError("not enough free space for the standard VM disk")
+        self._ensure_room(self.persistence_store, FREE_HEADROOM + int(disk_gb) * GIB // 10, "not enough free space for the standard VM disk")
         d = self._new_dir(name, 0)
         root = self.standalone_path(name)
         if root.parent.exists():
@@ -240,6 +311,38 @@ class VmHost:
                 "cpus": int(cpus), "disk_gb": int(disk_gb), "root_disk": str(root)}
         self._write_spec(name, spec)
         return spec
+
+    def create_retained_base(self, name: str, *, base: str, memory_mb=4096, cpus=2, graphics=None):
+        """Import an appliance whose own disk contains its account state; never disposable."""
+        self._need_name(name)
+        if not (256 <= int(memory_mb) <= 1048576 and 1 <= int(cpus) <= 128):
+            raise VmError("memory or cpu count out of range")
+        if graphics not in (None, 'virgl'):
+            raise VmError("unsupported appliance graphics")
+        self._check_store(self.store)
+        self._check_store(self.persistence_store)
+        if self.persistence_store.resolve().is_relative_to(self.store.resolve()) or self.store.resolve().is_relative_to(self.persistence_store.resolve()):
+            raise VmError("protected disks must be outside the disposable VM store")
+        source = self.base_path(base)
+        if not source.is_file():
+            raise VmError("appliance base is missing")
+        self._ensure_room(self.persistence_store, FREE_HEADROOM + source.stat().st_size, "not enough space for retained appliance")
+        folder = self._new_dir(name, 0)
+        root = self.standalone_path(name)
+        if root.parent.exists():
+            shutil.rmtree(folder)
+            raise VmError("retained state already exists; refusing to replace it")
+        root.parent.mkdir(parents=True)
+        try:
+            self._create_disk(root.parent, ['qemu-img', 'convert', '-f', 'qcow2', '-O', 'qcow2', str(source), str(root)])
+            spec = dict(name=name, base=None, source_base=base, iso=None, iso_done=True,
+                        memory_mb=int(memory_mb), cpus=int(cpus), disk_gb=None,
+                        root_disk=str(root), graphics=graphics)
+            self._write_spec(name, spec)
+            return spec
+        except Exception:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
 
     def create_overlay(self, name: str, *, base: str, memory_mb: int = 4096, cpus: int = 2,
                        persistence_gb: int = 32) -> dict:
@@ -262,9 +365,11 @@ class VmHost:
             raise VmError(f"{name} has retained user data; explicitly reattach it instead of replacing it")
         self._create_disk(d, ["qemu-img", "create", "-f", "qcow2", "-b", str(bpath), "-F", "qcow2",
                               str(self.disk_path(name))])
-        if self.free_bytes(self.persistence_store) < FREE_HEADROOM + int(persistence_gb) * GIB // 10:
+        try:
+            self._ensure_room(self.persistence_store, FREE_HEADROOM + int(persistence_gb) * GIB // 10, "not enough free space for the retained user disk")
+        except VmError:
             shutil.rmtree(d)
-            raise VmError("not enough free space for the retained user disk")
+            raise
         try:
             data_dir.mkdir(parents=True)
             self._create_disk(data_dir, ["qemu-img", "create", "-f", "qcow2", str(data_path),
@@ -282,11 +387,21 @@ class VmHost:
     def _pidfile(self, name: str) -> Path:
         return self.vm_dir(name) / "vm.pid"
 
-    def _recorded_pid(self, name: str):
+    def _recorded_pid(self, name: str, *, pidfile_path=None):
+        self._need_name(name)
+        pidfile = Path(pidfile_path) if pidfile_path is not None else self._pidfile(name)
         try:
-            return int(json.loads(self._pidfile(name).read_text())["pid"])
-        except (OSError, ValueError, KeyError):
+            record = json.loads(pidfile.read_text())
+        except FileNotFoundError:
             return None
+        except OSError as exc:
+            raise VmError(f"cannot inspect VM PID record {pidfile}: {exc}") from exc
+        except (ValueError, TypeError) as exc:
+            raise VmError(f"VM PID record {pidfile} is invalid JSON: {exc}") from exc
+        pid = record.get("pid") if isinstance(record, dict) else None
+        if type(pid) is not int or pid <= 0:
+            raise VmError(f"VM PID record {pidfile} must contain a positive integer PID")
+        return pid
 
     def _is_our_qemu(self, name: str, pid) -> bool:
         if pid is None or not self.is_alive(pid):
@@ -325,6 +440,17 @@ class VmHost:
                 "-device", "qemu-xhci", "-device", "usb-tablet", "-vga", "virtio",
                 "-display", "none" if display == "vnc" else display,
                 "-qmp", f"unix:{self.sock_path(name)},server=on,wait=off"]
+        if spec.get('source_base') == 'fydeos-base':
+            index = argv.index('-drive')
+            argv[index + 1] = f'file={self.disk_path(name)},if=none,id=fydeos-root,format=qcow2'
+            argv[index + 2:index + 2] = ['-device', 'ich9-ahci,id=fydeos-ahci',
+                                       '-device', 'ide-hd,drive=fydeos-root,bus=fydeos-ahci.0']
+            argv[argv.index('virtio-net-pci,netdev=n0')] = 'e1000,netdev=n0'
+        if spec.get('graphics') == 'virgl':
+            index = argv.index('-vga')
+            argv[index:index + 2] = ['-vga', 'none', '-device', 'virtio-vga-gl']
+            index = argv.index('-display')
+            argv[index + 1] = 'egl-headless,rendernode=/dev/dri/renderD128' if display in ('vnc', 'none') else display + ',gl=on'
         if display == "vnc":
             argv += ["-vnc", f"127.0.0.1:{self.vnc_display_number(name)}"]
         if spec.get("uefi"):
@@ -440,22 +566,63 @@ class VmHost:
         os.replace(fresh, disk)
 
     def freeze_as_base(self, name: str, base_name: str) -> None:
-        spec = self._need_stopped(name)
-        if spec.get("base"):
-            raise VmError("only a standalone VM can become a base image")
+        self._need_name(name)
+        self._need_name(base_name)
+        operation = self.store / "operations" / f"freeze-{name}.json"
         target = self.base_path(base_name)
-        if target.exists():
-            raise VmError(f"a base image named {base_name} already exists")
         self.bases_dir.mkdir(parents=True, exist_ok=True)
-        disk = self.disk_path(name)
-        shutil.move(str(disk), str(target))
+        if operation.exists():
+            try:
+                state = json.loads(operation.read_text())
+            except (OSError, ValueError):
+                raise VmError(f"freeze operation state for {name} is unreadable; refusing to guess") from None
+            if state != {"vm": name, "base": base_name}:
+                raise VmError(f"another incomplete freeze operation exists for {name}")
+        else:
+            spec = self._need_stopped(name)
+            if spec.get("base") or not spec.get("root_disk"):
+                raise VmError("only a standalone VM can become a base image")
+            if Path(spec["root_disk"]) != self.standalone_path(name):
+                raise VmError("unexpected standalone disk location")
+            if target.exists():
+                raise VmError(f"a base image named {base_name} already exists")
+            operation.parent.mkdir(parents=True, exist_ok=True)
+            with operation.open("x") as stream:
+                stream.write(json.dumps({"vm": name, "base": base_name}))
+                stream.flush()
+                os.fsync(stream.fileno())
+
+        vm_dir = self.vm_dir(name)
+        source = self.standalone_path(name)
+        if vm_dir.exists():
+            # A retry may resume only the same stopped standalone VM. The durable
+            # operation record survives if rmtree partially removes this directory.
+            if (vm_dir / "vm.json").is_file():
+                spec = self._need_stopped(name)
+                if spec.get("base") or not spec.get("root_disk") or Path(spec["root_disk"]) != source:
+                    raise VmError("incomplete freeze no longer matches the standalone VM")
+            elif source.exists() or not target.is_file():
+                raise VmError("incomplete freeze has no VM record or completed base image")
+        if source.exists() and target.exists():
+            raise VmError("both source disk and base image exist during freeze; refusing to replace either")
+        if source.exists():
+            shutil.move(str(source), str(target))
+        elif not target.is_file():
+            raise VmError("incomplete freeze has neither its source disk nor a base image")
         os.chmod(target, 0o444)
-        shutil.rmtree(self.vm_dir(name), ignore_errors=True)
+        if vm_dir.exists():
+            shutil.rmtree(vm_dir)
+        operation.unlink()
 
     def delete_vm(self, name: str) -> None:
         spec = self._need_stopped(name)
+        if spec.get("root_disk") and not spec.get("deleting"):
+            # Persist intent before touching the separately stored disk. If cleanup
+            # is interrupted, a retry can distinguish our missing disk from drift.
+            spec["deleting"] = True
+            self._write_spec(name, spec)
         if spec.get("root_disk"):
-            self.disk_path(name).unlink()
+            self.standalone_path(name).unlink(missing_ok=bool(spec.get("deleting")))
         shutil.rmtree(self.vm_dir(name))
 
     def delete_base(self, base_name: str) -> None:
@@ -470,6 +637,7 @@ class VmHost:
 
     # ---- listing -----------------------------------------------------------------------------------------------
     def list_bases(self) -> list:
+        self._check_store(self.store)
         if not self.bases_dir.is_dir():
             return []
         out = []
@@ -480,6 +648,7 @@ class VmHost:
         return out
 
     def list_vms(self) -> list:
+        self._check_store(self.store)
         if not self.vms_dir.is_dir():
             return []
         out = []
@@ -487,6 +656,6 @@ class VmHost:
             if valid_name(d.name) and (d / "vm.json").is_file():
                 try:
                     out.append(self.status(d.name))
-                except VmError:
-                    continue
+                except VmError as exc:
+                    raise VmError(f"cannot inspect VM {d.name}: {exc}") from exc
         return out

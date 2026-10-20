@@ -34,6 +34,10 @@ discipline `repair.py`'s `Runner`/`FakeRunner` established.
 from __future__ import annotations
 
 import html
+from contextlib import contextmanager
+import hashlib
+import hmac
+import sqlite3
 import os
 import http.server
 import json
@@ -196,20 +200,65 @@ class ActivePersonaProvider:
 @dataclass
 class SessionStore:
     sessions: dict = field(default_factory=dict)
+    path: Path | None = None
+    mac_key: bytes | None = None
+
+    def __post_init__(self):
+        if self.path is None:return
+        if not self.mac_key:raise ValueError('Durable sessions require a signing key')
+        self.path=Path(self.path);self.path.parent.mkdir(parents=True,exist_ok=True)
+        fd=os.open(self.path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600);os.close(fd)
+        os.chmod(self.path,0o600)
+        with self._connection() as db:
+            db.execute('CREATE TABLE IF NOT EXISTS sessions (digest TEXT PRIMARY KEY, document TEXT NOT NULL, mac TEXT NOT NULL)')
+
+    @contextmanager
+    def _connection(self):
+        db=sqlite3.connect(self.path)
+        try:
+            with db:yield db
+        finally:db.close()
+
+    def _digest(self,token):return hashlib.sha256(token.encode()).hexdigest()
+
+    def persist(self,session):
+        if self.path is None:return
+        digest=self._digest(session.token)
+        document=json.dumps({key:getattr(session,key) for key in ('username','created','ttl_s','persona','role')},sort_keys=True,allow_nan=False)
+        mac=hmac.new(self.mac_key,(digest+':'+document).encode(),hashlib.sha256).hexdigest()
+        with self._connection() as db:
+            db.execute('PRAGMA synchronous=FULL')
+            db.execute('INSERT OR REPLACE INTO sessions VALUES (?,?,?)',(digest,document,mac))
 
     def create(self, username: str, now: float, persona: str | None = None, role: str = "admin") -> LoginSession:
         token = secrets.token_urlsafe(32)
         session = LoginSession(token=token, username=username, created=now, persona=persona, role=role)
         self.sessions[token] = session
+        self.persist(session)
         return session
 
+    def revoke(self,token):
+        self.sessions.pop(token,None)
+        if self.path is not None:
+            with self._connection() as db:db.execute('DELETE FROM sessions WHERE digest=?',(self._digest(token),))
+
     def get(self, token: str, now: float) -> LoginSession | None:
-        session = self.sessions.get(token)
-        if session is None:
-            return None
+        if not isinstance(token,str) or not token:return None
+        if self.path is None:session=self.sessions.get(token)
+        else:
+            digest=self._digest(token)
+            with self._connection() as db:row=db.execute('SELECT document,mac FROM sessions WHERE digest=?',(digest,)).fetchone()
+            if row is None:return None
+            document,mac=row
+            expected=hmac.new(self.mac_key,(digest+':'+document).encode(),hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(expected,mac):return None
+            try:session=LoginSession(token=token,**json.loads(document))
+            except (TypeError,ValueError):return None
+        if session is None:return None
         if session.expired(now):
-            del self.sessions[token]
+            self.revoke(token)
             return None
+        self.sessions[token]=session
         return session
 
 
@@ -302,6 +351,23 @@ def handle_settings_edit(sessions: SessionStore, applier: SectionApplier,
     return RouteResult("refused", 422, {"detail": result.detail})
 
 
+def handle_iperf3_run(sessions: SessionStore, applier: SectionApplier,
+                      token: str, config: dict, now: float,
+                      persona_provider: ActivePersonaProvider | None = None) -> RouteResult:
+    session = sessions.get(token, now)
+    if session is None:
+        return RouteResult("refused", 401, {"error": "not authenticated"})
+    stale = _stale_persona_result(session, persona_provider)
+    if stale is not None:
+        return stale
+    run = getattr(applier, "run_iperf3", None)
+    if not callable(run):
+        return RouteResult("refused", 503, {"detail": "Active network diagnostics are unavailable"})
+    result = run(config)
+    return RouteResult("applied" if result.applied else "refused", 200 if result.applied else 422,
+                       {"detail": result.detail})
+
+
 # ---------------------------------------------------------------------------
 # The Admin tab (work-queue item 28, decision record 80): a real web
 # surface over settings_store.py's schema-driven groups (session TTLs,
@@ -391,28 +457,46 @@ def handle_admin_edit(sessions: SessionStore, runner, elevation_store, token: st
 # hands off rather than crashing, same convention as the Admin tab above.
 # ---------------------------------------------------------------------------
 
-def handle_recovery_view(runner, *, personas: tuple) -> RouteResult:
+def handle_recovery_view(runner, *, personas: tuple,
+                         mount_table_path: str = "/proc/self/mounts",
+                         state_path: str = "/mnt/SESSION_TEMP/recovery_mode/state.json") -> RouteResult:
     if runner is None:
         return RouteResult(
             "handed_off", 409,
             {"reason": "no Runner configured for this deployment - recovery discovery needs one"})
     import recovery_mode
-    report = recovery_mode.discover(runner, personas=personas)
+    import persist_bind_mounts as pbm
+    try:
+        report = recovery_mode.discover(runner, personas=personas,
+                                        mount_table_path=mount_table_path)
+        recovery_active = recovery_mode.is_active(runner, state_path=state_path)
+    except (pbm.PersistenceObservationError,
+            recovery_mode.RecoveryStateObservationError) as exc:
+        return RouteResult("unavailable", 503, {"error": str(exc)})
     return RouteResult("applied", 200, {
         "personas_found": report.personas_found,
         "personas_missing": report.personas_missing,
         "active_persona": report.active_persona,
-        "recovery_active": recovery_mode.is_active(runner),
+        "recovery_active": recovery_active,
     })
 
 
-def handle_recovery_exit(runner, *, personas: tuple, now: float) -> RouteResult:
+def handle_recovery_exit(runner, *, personas: tuple, now: float,
+                         mount_table_path: str = "/proc/self/mounts",
+                         state_path: str = "/mnt/SESSION_TEMP/recovery_mode/state.json") -> RouteResult:
     if runner is None:
         return RouteResult(
             "handed_off", 409,
             {"reason": "no Runner configured for this deployment - recovery exit needs one"})
     import recovery_mode
-    result = recovery_mode.attempt_exit(runner, personas=personas, now=now)
+    import persist_bind_mounts as pbm
+    try:
+        result = recovery_mode.attempt_exit(runner, personas=personas, now=now,
+                                            mount_table_path=mount_table_path,
+                                            state_path=state_path)
+    except (pbm.PersistenceObservationError,
+            recovery_mode.RecoveryStateObservationError) as exc:
+        return RouteResult("unavailable", 503, {"error": str(exc)})
     if not result.applied:
         return RouteResult("refused", 409, {"reason": result.detail})
     return RouteResult("applied", 200, {"detail": result.detail})
@@ -521,11 +605,8 @@ class SettingsHandler(web_security.SecureHandlerMixin, http.server.BaseHTTPReque
         return self.rfile.read(length) if length else b""
 
     def _read_json_body(self) -> dict:
-        raw = self._read_body_bytes()
-        try:
-            return json.loads(raw.decode()) if raw else {}
-        except ValueError:
-            return {}
+        from web_request_json import read_json_object
+        return read_json_object(self.headers,self.rfile)
 
     def _read_form_body(self) -> dict:
         raw = self._read_body_bytes().decode()
@@ -576,7 +657,10 @@ class SettingsHandler(web_security.SecureHandlerMixin, http.server.BaseHTTPReque
             return self._reject(403, "cross-site request refused")
         if self._refuse_unauthenticated(deps, now, json_mode):
             return
-        body = self._read_json_body() if json_mode else self._read_form_body()
+        try:
+            body = self._read_json_body() if json_mode else self._read_form_body()
+        except ValueError as exc:
+            return self._json(400,{"outcome":"refused","error":str(exc)})
 
         if self.path == "/login":
             if self._throttled("login", now):
@@ -608,6 +692,16 @@ class SettingsHandler(web_security.SecureHandlerMixin, http.server.BaseHTTPReque
             notice = result.body.get("detail") or result.body.get("reason", "")
             settings = deps["source"].current_settings()
             return self._html_response(result.status, render_settings_page(settings, notice))
+
+        if self.path == "/diagnostics/iperf3/run":
+            options = body if json_mode else reconstruct_typed_form_values(
+                body, ["role", "peer_address", "port", "bind_address"])
+            result = handle_iperf3_run(deps["sessions"], deps["applier"], self._token(), options, now,
+                                       persona_provider=deps.get("persona_provider"))
+            if json_mode:
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            return self._html_response(result.status, render_settings_page(
+                deps["source"].current_settings(), result.body.get("detail") or result.body.get("error", "")))
 
         if self.path == "/setup/new-account":
             store = deps.get("store")
@@ -731,7 +825,8 @@ class SettingsHandler(web_security.SecureHandlerMixin, http.server.BaseHTTPReque
             if json_mode:
                 return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome != "applied":
-                return self._html_response(result.status, render_recovery_page({}, result.body.get("reason", "")))
+                notice = result.body.get("error") or result.body.get("reason", "")
+                return self._html_response(result.status, render_recovery_page({}, notice))
             return self._html_response(200, render_recovery_page(result.body))
 
         if self.path.startswith("/admin"):
@@ -764,7 +859,7 @@ _DEFAULT_SETTINGS_SECTIONS = {
     "firewall": {"allow_lan_only": True},
     "tether": {"enabled": False},
     "ssh": {"password_auth": False},
-    "handoff": {"restored_categories": []},
+    "handoff": {"restored_categories": [], "archive_path": ""},
     "diagnostics": {
         # Per decision record 22: all 5 install and run cleanly
         # via apt on a real automated-install target. Fields
@@ -865,6 +960,16 @@ def export_install_config(store_settings: dict) -> dict:
     return config
 
 
+def _store_locked(method):
+    """Serialize shared connection access and compound settings updates."""
+    from functools import wraps
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return locked
+
+
 class LocalAppStore:
     """One small, real SQLite database (decision record 91 - this used
     to be a single on-disk JSON file, `JsonFileStore`, rewritten whole
@@ -899,7 +1004,9 @@ class LocalAppStore:
             # whatever the umask. Create it before SQLite does: SQLite gives its -wal and
             # -shm files the main file's mode, so they inherit this too.
             os.close(os.open(str(self.path), os.O_CREAT | os.O_WRONLY, 0o600))
-        self._conn = sqlite3.connect(str(self.path))
+        import threading
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute(
@@ -933,6 +1040,7 @@ class LocalAppStore:
         import hmac as _hmac
         return _hmac.new(self._mac_key, f"{namespace}\0{key}\0{value_json}".encode(), hashlib.sha256).hexdigest()
 
+    @_store_locked
     def _trusted(self, namespace: str, key: str, value_json: str) -> bool:
         """True for an unprotected row, or a protected row whose signature verifies. Otherwise reports it once."""
         if not self._protected(namespace):
@@ -947,6 +1055,7 @@ class LocalAppStore:
                              "detail": "a stored credential row failed its integrity check and is being ignored"})
         return False
 
+    @_store_locked
     def _adopt_once(self, marker) -> None:
         """First run with a key on an existing store: sign what is there, once. After the marker exists nothing is
         adopted, so a database someone swapped in (unsigned) is never trusted."""
@@ -960,6 +1069,7 @@ class LocalAppStore:
         os.makedirs(os.path.dirname(marker), exist_ok=True, mode=0o700)
         os.close(os.open(marker, os.O_CREAT | os.O_WRONLY, 0o600))
 
+    @_store_locked
     def _get(self, namespace: str, key: str):
         row = self._conn.execute(
             "SELECT value FROM kv WHERE namespace = ? AND key = ?", (namespace, key)
@@ -968,6 +1078,7 @@ class LocalAppStore:
             return None
         return json.loads(row[0])
 
+    @_store_locked
     def _put(self, namespace: str, key: str, value) -> None:
         encoded = json.dumps(value)
         self._conn.execute(
@@ -981,10 +1092,12 @@ class LocalAppStore:
             self._reported.discard((namespace, key))
         self._conn.commit()
 
+    @_store_locked
     def _namespace(self, namespace: str) -> dict:
         rows = self._conn.execute("SELECT key, value FROM kv WHERE namespace = ?", (namespace,)).fetchall()
         return {k: json.loads(v) for k, v in rows if self._trusted(namespace, k, v)}
 
+    @_store_locked
     def _exists_untrusted(self, namespace: str, key: str | None = None) -> bool:
         """Is there ANY row, signed or not? Used where a tampered row must still count as 'there is data'."""
         sql, args = "SELECT 1 FROM kv WHERE namespace = ?", [namespace]
@@ -1022,6 +1135,7 @@ class LocalAppStore:
     def settings(self) -> dict:
         return self._namespace("settings")
 
+    @_store_locked
     def update_section(self, section: str, values: dict) -> None:
         current = self._get("settings", section) or {}
         current.update(values)
@@ -1030,6 +1144,7 @@ class LocalAppStore:
     def save_pending_account(self, username: str, password_hash: str) -> None:
         self._put("pending_accounts", username, {"password_hash": password_hash, "config": {}})
 
+    @_store_locked
     def record_rebuild(self, target: str, config: dict, now: float) -> None:
         self._conn.execute(
             "INSERT INTO rebuild_log (target, config, at) VALUES (?, ?, ?)",
@@ -1037,6 +1152,7 @@ class LocalAppStore:
         )
         self._conn.commit()
 
+    @_store_locked
     def rebuild_log(self) -> list:
         """Every recorded rebuild, oldest first - the real, public way
         to read back what `record_rebuild` wrote (there was no way to
@@ -1288,6 +1404,22 @@ Failures can include partial system changes; persistence is not runtime proof.
         self.store = store
         self.runner = runner
 
+    def run_iperf3(self, config: dict) -> ApplyResult:
+        """Explicit active diagnostic action; saving options never invokes it."""
+        import config_pipeline
+        if not isinstance(config, dict) or set(config) - {"role", "peer_address", "port", "bind_address"}:
+            return ApplyResult(False, "Invalid network test options")
+        if config.get("role", "client") == "client" and not config.get("peer_address"):
+            return ApplyResult(False, "Choose a LAN peer address before running a client test")
+        summary = config_pipeline.apply_stored_config(
+            self.runner, {"diagnostics": {"iperf3": config}}, network_interface="eno1",
+            run_active_diagnostics=True)
+        if summary["failed"]:
+            return ApplyResult(False, summary["errors"].get("iperf3", "Network test failed"))
+        if "iperf3" not in summary["applied"]:
+            return ApplyResult(False, "No network test was run")
+        return ApplyResult(True, summary["details"]["iperf3"])
+
     def apply(self, section: str, new_values: dict) -> ApplyResult:
         import config_pipeline
         if section not in KNOWN_SECTIONS or not isinstance(new_values, dict):
@@ -1296,6 +1428,9 @@ Failures can include partial system changes; persistence is not runtime proof.
         for key, value in new_values.items():
             if key not in schema or type(value) is not type(schema[key]):
                 return ApplyResult(False, f"invalid live settings field or type: {key}")
+        if section == "diagnostics":
+            self.store.update_section(section, new_values)
+            return ApplyResult(True, "Diagnostic options saved; no network test run. Use Run network test when ready.")
         try:
             summary = config_pipeline.apply_stored_config(
                 self.runner, {section: new_values},
@@ -1303,7 +1438,8 @@ Failures can include partial system changes; persistence is not runtime proof.
         except Exception as exc:
             return ApplyResult(False, f"live settings application failed: {exc}")
         if summary["failed"]:
-            return ApplyResult(False, f"live settings application failed: {', '.join(summary['failed'])}; "
+            reasons = "; ".join(summary.get("errors", {}).get(name, name) for name in summary["failed"])
+            return ApplyResult(False, f"live settings application failed: {reasons}; "
                                f"completed: {', '.join(summary['applied']) or 'none'}; values were not saved")
         if not summary["applied"]:
             return ApplyResult(False, "no supported live settings operation requested; values were not saved")
@@ -1346,7 +1482,7 @@ class LoggingRebuildTrigger(RebuildTrigger):
         self.store.record_rebuild(target, config, self.clock())
         return ApplyResult(
             applied=False,
-            detail=f"Rebuild request for {target} recorded. Not yet wired to "
+            detail=f"REAL-009: Rebuild request for {target} recorded. Not yet wired to "
                    f"drive_setup_install.py's real install pipeline - this "
                    f"target was not rebuilt.",
         )
@@ -1373,10 +1509,16 @@ label { display: flex; align-items: center; gap: .75rem; margin: .5rem 0; font-s
    test asserts no credential field appears there, and an enumerated
    selector would trip it on the stylesheet alone. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]) {
-  padding: .5rem .6rem; width: 100%; max-width: 320px; box-sizing: border-box;
+  padding: .5rem .6rem; width: 24ch; max-width: 100%; box-sizing: border-box;
   color: #e7e9f0; background: #171923; border: 1px solid #33364a; border-radius: 6px;
 }
 input::placeholder { color: #5c6180; }
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])[type="number"] { width: 8ch; }
+input[type="email"] { width: 30ch; }
+.field-info { display: inline-block; margin: 0; position: relative; }
+.field-info summary { cursor: pointer; color: #9db4ec; }
+.field-info p { max-width: 44ch; font-size: .85rem; line-height: 1.5; }
+[data-save-status] { display: block; min-height: 1.5em; font-size: .82rem; color: #9aa0ba; }
 input[type="checkbox"] {
   width: 18px; height: 18px; accent-color: #5b7fd4; flex-shrink: 0; cursor: pointer;
 }
@@ -1402,16 +1544,17 @@ a:visited { color: #a48ce0; }
 table { border-collapse: collapse; width: 100%; margin: .5rem 0 1.5rem; }
 th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #21232f; font-size: .9rem; color: #ccd0e0; }
 th { color: #8890a6; font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
-.baseline-nav { display: flex; gap: 1.25rem; padding: .75rem 0 1rem; margin-bottom: 1rem; border-bottom: 2px solid #262838; font-size: .95rem; }
+.baseline-nav { display: flex; flex-wrap: wrap; gap: .75rem; padding: .75rem 0 1rem; margin-bottom: 1rem; border-bottom: 2px solid #262838; font-size: .95rem; }
 .baseline-nav a { color: #9aa0ba; text-decoration: none; padding: .25rem .1rem; }
 .baseline-nav a.active { color: #f2f3f8; font-weight: 700; border-bottom: 2px solid #5b7fd4; }
 """
 
 
 def _html(title: str, body: str) -> bytes:
+    import structured_controls
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{title}</title><style>{_PAGE_CSS}</style></head>
-<body><h1>Baseline settings</h1>{body}</body></html>""".encode()
+<body><h1>Baseline settings</h1>{body}{structured_controls.script()}</body></html>""".encode()
 
 
 def render_login_page(error: str = "") -> bytes:
@@ -1427,6 +1570,38 @@ def render_login_page(error: str = "") -> bytes:
 or change any current setting. Nothing here is reinstalled or wiped.</p>
 <p><a href="/setup">Set up a new account and build a fresh configuration instead &raquo;</a></p>
 """)
+
+
+_FIELD_CHOICES = {
+    'cpu_microcode_package': [('amd64-microcode','AMD microcode'),('intel-microcode','Intel microcode')],
+    'wifi_firmware_package': [('firmware-mediatek','MediaTek firmware'),('firmware-realtek','Realtek firmware'),('firmware-iwlwifi','Intel firmware')],
+    'smartd_auto_offline': [('on', 'Enabled'), ('off', 'Disabled')],
+    'smartd_attribute_autosave': [('on', 'Enabled'), ('off', 'Disabled')],
+    'smartd_selftest_schedule': [('', 'No scheduled tests'), ('S/../.././02', 'Short test daily at 02:00'),
+                               ('L/../../7/03', 'Long test Sundays at 03:00')],
+    'smartd_email_frequency': [('', 'Default'), ('once', 'Once per problem'), ('daily', 'Daily reminders'),
+                             ('diminishing', 'Increasing reminder intervals')],
+    'ethtool_autoneg': [('on', 'Automatic negotiation'), ('off', 'Manual speed and duplex')],
+    'ethtool_speed': [('', 'Leave speed unchanged'), ('10', '10 Mbps'), ('100', '100 Mbps'),
+                      ('1000', '1 Gbps'), ('2500', '2.5 Gbps'), ('5000', '5 Gbps'),
+                      ('10000', '10 Gbps'), ('25000', '25 Gbps'), ('40000', '40 Gbps'), ('100000', '100 Gbps')],
+    'ethtool_duplex': [('full', 'Full duplex'), ('half', 'Half duplex')],
+    'ethtool_wol': [('', 'Leave unchanged'), ('d', 'Disabled'), ('g', 'Magic packet'),
+                    ('p', 'Physical link activity'), ('u', 'Unicast packet'), ('m', 'Multicast packet'),
+                    ('b', 'Broadcast packet'), ('a', 'ARP packet')],
+}
+_FIELD_HELP = {
+    'smartd_auto_offline': 'Enables or disables automatic SMART offline data collection on drives that support it. This is separate from scheduled self-tests.',
+    'smartd_attribute_autosave': 'Controls whether supported drives save SMART attribute data across power cycles.',
+    'smartd_selftest_schedule': 'Schedules short or long SMART self-tests using host local time. Short tests are quicker; long tests inspect more of the drive. No schedule disables scheduled tests. Custom schedules use smartd syntax.',
+    'smartd_email': 'Email destination for SMART warnings. Delivery also requires a working host mail service. Blank disables email notifications.',
+    'smartd_email_frequency': 'Once sends one warning per problem. Daily repeats every day. Diminishing sends repeated warnings at increasing intervals. This applies only when a destination email is configured.',
+    'ethtool_interface': 'The network interface to configure. Select a currently detected physical interface. Applying changes can interrupt its network connection.',
+    'ethtool_autoneg': 'Automatic negotiation lets the adapter and its peer agree on link settings. Manual mode applies the selected speed and duplex; the peer must be compatible.',
+    'ethtool_speed': 'Requested link speed, applied only when automatic negotiation is disabled. Choices are standard speeds, not a claim that this adapter supports every speed. Unsupported requests report a real command error.',
+    'ethtool_duplex': 'Full duplex permits simultaneous sending and receiving. Half duplex shares the link in both directions. Applied only with automatic negotiation disabled.',
+    'ethtool_wol': 'Wake-on-LAN allows supported hardware to wake from selected network activity. Magic packet is the usual remote wake choice. Disabled turns it off; leave unchanged preserves the adapter setting. Hardware support varies.',
+}
 
 
 def render_field_input(name: str, value, *, options: list | None = None) -> str:
@@ -1448,6 +1623,24 @@ def render_field_input(name: str, value, *, options: list | None = None) -> str:
                  "float" if isinstance(value, float) else
                  "str" if isinstance(value, str) else "json")
     hidden = f'<input type="hidden" name="{name}__type" value="{type_name}">'
+    choices = _FIELD_CHOICES.get(name) if options is None else None
+    if choices is not None:
+        if not any(str(v) == str(value) for v, _ in choices):
+            choices = [(value, f'Current custom value: {value}'), *choices]
+        help_text = html.escape(_FIELD_HELP.get(name, ''), quote=True)
+        opts = ''.join(f'<option value="{html.escape(str(v), quote=True)}" '
+                       f'{"selected" if str(v) == str(value) else ""}>{html.escape(label)}</option>'
+                       for v, label in choices)
+        result = hidden + f'<select name="{html.escape(name, quote=True)}">{opts}</select>'
+        result += (f'<details class="field-info"><summary aria-label="About {html.escape(name, quote=True)}">ⓘ</summary>'
+                   f'<p>{help_text}</p></details>')
+        if name in ('smartd_selftest_schedule', 'ethtool_speed', 'ethtool_wol'):
+            result += (f'<details><summary>Advanced custom value</summary><label><input type="checkbox" '
+                       'onchange="this.closest(\'label\').nextElementSibling.disabled=!this.checked;'
+                       'this.closest(\'details\').previousElementSibling.previousElementSibling.disabled=this.checked">'
+                       'Override selection</label>'
+                       f'<input name="{html.escape(name, quote=True)}" value="{html.escape(str(value), quote=True)}" disabled></details>')
+        return result
     if type_name == "bool":
         checked = "checked" if value else ""
         return hidden + f'<input type="checkbox" name="{name}" value="true" {checked}>'
@@ -1458,8 +1651,12 @@ def render_field_input(name: str, value, *, options: list | None = None) -> str:
         step = "1" if type_name == "int" else "any"
         return hidden + f'<input type="number" name="{name}" value="{value}" step="{step}">'
     if type_name == "str":
-        return hidden + f'<input type="text" name="{name}" value="{value}">'
-    return hidden + f'<textarea name="{name}" rows="3">{json.dumps(value, indent=2)}</textarea>'
+        help_text = _FIELD_HELP.get(name)
+        info = (f'<details class="field-info"><summary aria-label="About {html.escape(name, quote=True)}">ⓘ</summary>'
+                f'<p>{html.escape(help_text)}</p></details>') if help_text else ''
+        return hidden + f'<input type="{"email" if name == "smartd_email" else "text"}" name="{html.escape(name, quote=True)}" value="{html.escape(value, quote=True)}">' + info
+    import structured_controls
+    return hidden + structured_controls.render(name, value)
 
 
 def reconstruct_typed_form_values(form_body: dict, field_names: list) -> dict:
@@ -1476,7 +1673,7 @@ def reconstruct_typed_form_values(form_body: dict, field_names: list) -> dict:
             result[name] = name in form_body
             continue
         raw = form_body.get(name)
-        if raw is None or raw == "":
+        if raw is None or (raw == "" and type_name != "str"):
             continue
         if type_name == "int":
             try:
@@ -1498,20 +1695,47 @@ def reconstruct_typed_form_values(form_body: dict, field_names: list) -> dict:
     return result
 
 
+def render_configuration_sections(settings: dict) -> str:
+    interface_choices = settings.get('_live_interfaces')
+    interface_error = ""
+    if isinstance(interface_choices,list):
+        interface_choices = [''] + [item['name'] for item in interface_choices if isinstance(item,dict) and isinstance(item.get('name'),str)]
+    elif isinstance(interface_choices,dict):
+        reason = interface_choices.get('reason')
+        if interface_choices.get('available') is False and isinstance(reason,str):
+            interface_error = ('<p role="alert">Live network interface choices are unavailable: '
+                               + html.escape(reason, quote=False) + '</p>')
+        interface_choices = None
+    else:
+        interface_choices = None
+    import settings_ui
+    return interface_error + settings_ui.render_sections(settings, render_field_input=render_field_input, field_choices=_FIELD_CHOICES, interface_choices=interface_choices)
+
+
+def render_iperf3_run_form(settings: dict) -> str:
+    options = (settings.get("diagnostics") or {}).get("iperf3") or {}
+    fields = {
+        "role": ("Role", options.get("role", "client")),
+        "peer_address": ("Peer address", options.get("peer_address", "")),
+        "port": ("Port", options.get("port", 5201)),
+        "bind_address": ("Local bind address (optional)", options.get("bind_address", "")),
+    }
+    controls = "".join(
+        f'<label>{label} {render_field_input(name, value, options=["client", "server"] if name == "role" else None)}</label>'
+        for name, (label, value) in fields.items())
+    return ('<h2>Optional network test</h2><p>Saving options does not run a test. '
+            'A client needs a peer running iperf3 on the chosen port. '
+            'A server waits for one client for up to 10 minutes.</p>'
+            '<form method="post" action="/diagnostics/iperf3/run">' + controls +
+            '<button type="submit">Run network test</button></form>')
+
+
 def render_settings_page(settings: dict, notice: str = "") -> bytes:
-    rows = "".join(
-        f"""<h2>{section}</h2>
-<form method="post" action="/settings/{section}">
-{"".join(f'<label>{key} {render_field_input(key, value)}</label>' for key, value in values.items())}
-<button type="submit">Save {section}</button>
-</form>"""
-        for section, values in settings.items() if not section.startswith("_")
-    )
+    rows = render_configuration_sections(settings) + render_iperf3_run_form(settings)
     notice_html = f'<p class="notice">{html.escape(notice, quote=False)}</p>' if notice else ""
     return _html("Settings", f"""
 {notice_html}
-<p>Every current setting is shown below. Change any section and save it -
-only that section is re-applied, nothing else is touched.</p>
+<p>Changes save automatically. Each section shows whether its latest change was saved or refused.</p>
 {rows}
 <p><a href="/logout">Log out</a> &middot; <a href="/setup">Start a fresh setup instead &raquo;</a></p>
 """)
@@ -1637,11 +1861,18 @@ def render_admin_page(settings: dict, notice: str = "", elevated: bool = False,
 passphrase from your login, matching real sudo's own short-lived cache.</p>"""
     import settings_store
     schema_options = {(s.group, s.key): s.options for s in settings_store.SCHEMA}
+    schema_help = {(s.group, s.key): s.description for s in settings_store.SCHEMA}
+    import drive_installer
+    for key in ('baseline_mode', 'installer_cache_mode', 'session_temp_mode'):
+        schema_options[('volumes', key)] = ('read-write', 'read-only', 'write-only')
+    schema_options[('startup', 'auto_start_persona')] = drive_installer.DEFAULT_PERSONAS
     sections = "".join(
         f"""<h2>{group}</h2>""" + "".join(
-            f"""<form method="post" action="/admin/settings/{group}/{key}">
+            f"""<form method="post" action="/admin/settings/{group}/{key}" data-autosave>
+<fieldset {"disabled" if not elevated else ""} style="border:0;padding:0;margin:0">
 <label>{key} {render_field_input("value", value, options=schema_options.get((group, key)))}</label>
-<button type="submit" {"disabled" if not elevated else ""}>Save</button>
+<details class="field-info"><summary aria-label="About {html.escape(key, quote=True)}">ⓘ</summary><p>{html.escape(schema_help.get((group, key), ''))}</p></details>
+</fieldset><span role="status" data-save-status aria-live="polite">{"Elevate to change this setting" if not elevated else ""}</span>
 </form>"""
             for key, value in values.items()
         )
@@ -1676,10 +1907,10 @@ touches your current running settings until you explicitly initiate a
 rebuild from it, and that rebuild is only ever allowed against a
 disposable target.</p>"""
     else:
-        body = """
+        body = f"""
 <form method="post" action="/setup/rebuild">
-  <label>Rebuild target (disposable path)
-  <input name="target" placeholder="/tmp/example-target.img"></label>
+  <p>The rebuild is tried on a new disposable image; no location is typed.</p>
+  <input type="hidden" name="target" value="/tmp/baseline-rebuild-{secrets.token_hex(6)}.img">
   <button type="submit" class="danger">Initiate rebuild</button>
 </form>
 <p class="hint">Only targets under a configured disposable prefix are

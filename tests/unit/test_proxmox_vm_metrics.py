@@ -3,6 +3,7 @@ stats via Proxmox's own pvesh CLI. Must behave cleanly with zero VMs
 (the common case before Track A4 creates any), matching diagnostics.py's
 established "absence is normal, not an error" discipline."""
 import json
+import pytest
 
 from fake_runner import FakeRunner, FakeProc
 
@@ -23,11 +24,11 @@ def test_list_vms_empty_when_no_vms_exist():
     assert result == []
 
 
-def test_list_vms_empty_when_pvesh_missing():
+def test_list_vms_reports_error_when_pvesh_missing():
     runner = FakeRunner()
     runner.command_responses = [(lambda a: a[:1] == ["pvesh"], FakeProc(127, "", "command not found"))]
-    result = pvm.list_vms(runner)
-    assert result == []
+    with pytest.raises(pvm.MetricsError, match="REAL-001"):
+        pvm.list_vms(runner)
 
 
 def test_list_vms_parses_real_qemu_entries():
@@ -75,8 +76,8 @@ def test_list_vms_tolerates_missing_optional_fields():
     ]
     result = pvm.list_vms(runner)
     assert result[0].name == ""
-    assert result[0].cpu == 0.0
-    assert result[0].mem == 0
+    assert result[0].cpu is None
+    assert result[0].mem is None
 
 
 def test_list_vms_uses_given_node():
@@ -94,11 +95,11 @@ def test_list_vms_uses_given_node():
 # vm_rrd_history
 # --------------------------------------------------------------------------
 
-def test_vm_rrd_history_empty_when_pvesh_fails():
+def test_vm_rrd_history_reports_error_when_pvesh_fails():
     runner = FakeRunner()
     runner.command_responses = [(lambda a: a[:1] == ["pvesh"], FakeProc(2, "", "no such VM"))]
-    result = pvm.vm_rrd_history(runner, "localhost", 100)
-    assert result == []
+    with pytest.raises(pvm.MetricsError, match="REAL-001"):
+        pvm.vm_rrd_history(runner, "localhost", 100)
 
 
 def test_vm_rrd_history_parses_real_samples():

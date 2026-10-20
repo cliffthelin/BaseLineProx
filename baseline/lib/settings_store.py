@@ -157,7 +157,7 @@ SCHEMA = (
     # beyond which drive to click.
     SettingDef("self_installer", "lvm_size_preset", "minimal",
                "Disk-space split for a self-installed machine (root/container-storage/swap sizing).",
-               options=("minimal", "small", "medium", "large")),
+               options=("minimal", "small", "medium", "large", "single-drive")),
     SettingDef("self_installer", "fqdn", "baseline.local",
                "Hostname the self-installed machine answers to.",
                options=("baseline.local", "baseline.home.arpa", "baseline.lan")),

@@ -52,6 +52,12 @@ def full_runner(package_install_ok=True, packages_installed=True, iperf_enabled=
     return r
 
 
+def _apt_installs(r):
+    """Every apt-get install the runner saw. The real argv starts with `env DEBIAN_FRONTEND=...`, so the old
+    check `c[:2] == ["apt-get", "install"]` could never match and silently passed whatever happened."""
+    return [c for c in r.calls if "apt-get" in c and "install" in c]
+
+
 # --------------------------------------------------------------------------
 # Successful completion, end to end
 # --------------------------------------------------------------------------
@@ -96,7 +102,7 @@ def test_declined_confirmation_makes_no_change_and_does_not_commit(tmp_path):
     assert result["action"] == "declined"
     assert not (tmp_path / "complete").exists()
     assert r.files["/etc/network/interfaces"] == FIXTURE_A_IPV6_ONLY
-    assert not any(c[:2] == ["apt-get", "install"] for c in r.calls)
+    assert not _apt_installs(r)
 
 
 def test_eof_on_stdin_never_treated_as_confirmation(tmp_path):
@@ -113,7 +119,7 @@ def test_no_safe_repair_candidate_refuses_without_any_prompt(tmp_path):
                       check_lifeline_fn=broken_facts_fixture_a)
     assert result["action"] == "refused"
     assert not (tmp_path / "complete").exists()
-    assert not any(c[:2] == ["apt-get", "install"] for c in r.calls)
+    assert not _apt_installs(r)
 
 
 # --------------------------------------------------------------------------
@@ -127,7 +133,7 @@ def test_network_verification_failure_blocks_package_installation(tmp_path):
     assert result["action"] == "network_failed"
     assert result["package_install_allowed"] is False
     assert not (tmp_path / "complete").exists()
-    assert not any(c[:2] == ["apt-get", "install"] for c in r.calls)
+    assert not _apt_installs(r)
     journal = json.loads((tmp_path / "journal.json").read_text())
     assert journal["state"] == "network_repair_failed"
     assert not any(e["state"] == "network_repaired" for e in journal["history"])
@@ -138,7 +144,7 @@ def test_network_apply_failure_blocks_package_installation(tmp_path):
     result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
                       check_lifeline_fn=broken_facts_fixture_a)
     assert result["action"] == "network_failed"
-    assert not any(c[:2] == ["apt-get", "install"] for c in r.calls)
+    assert not _apt_installs(r)
     journal = json.loads((tmp_path / "journal.json").read_text())
     assert journal["state"] == "network_repair_failed"
     assert not any(e["state"] == "network_repaired" for e in journal["history"])
@@ -192,7 +198,8 @@ def test_completion_marker_prevents_rerun(tmp_path):
 
     result2 = fsm.run(r, state_dir=tmp_path, print_fn=lambda *a: None)
     assert result2["action"] == "already_completed"
-    assert len(r.calls) == calls_before  # nothing was re-run
+    assert len(r.calls) > calls_before  # repeat boot re-enforces the firewall
+    assert not any(call[:2] == ['apt-get', 'install'] for call in r.calls[calls_before:])
 
 
 # --------------------------------------------------------------------------
@@ -435,7 +442,7 @@ def test_completion_marker_is_never_bypassed_by_a_corrupted_journal(tmp_path):
     r = full_runner()
     result = fsm.run(r, state_dir=tmp_path, print_fn=lambda *a: None)
     assert result["action"] == "already_completed"
-    assert r.calls == []  # the marker check happens before anything else, always
+    assert r.calls and all(call[0] == 'nft' for call in r.calls)  # enforce only firewall; never replay install
 
 
 # --------------------------------------------------------------------------
@@ -515,3 +522,192 @@ def test_malformed_config_file_never_blocks_or_fails_commit(tmp_path):
                       check_lifeline_fn=broken_facts_fixture_a)
     assert result["action"] == "committed"
     assert (tmp_path / "complete").exists()
+
+
+def test_healthy_resume_rechecks_missing_historical_evidence(tmp_path):
+    fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['NO\n']),
+            print_fn=lambda *a: None, check_lifeline_fn=healthy_facts)
+    path = tmp_path / 'journal.json'
+    journal = json.loads(path.read_text())
+    next(e for e in journal['history'] if e['state'] == 'discovered')['discovery'] = {
+        'lifeline_ok': True, 'facts': []}
+    path.write_text(json.dumps(journal))
+    result = fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['CONFIRM\n']),
+                     print_fn=lambda *a: None, check_lifeline_fn=healthy_facts)
+    assert result['action'] == 'committed'
+
+
+def test_healthy_resume_reports_current_failed_verification(tmp_path):
+    fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['NO\n']),
+            print_fn=lambda *a: None, check_lifeline_fn=healthy_facts)
+    result = fsm.run(full_runner(), state_dir=tmp_path, stdin=iter(['CONFIRM\n']),
+                     print_fn=lambda *a: None, check_lifeline_fn=lambda: [])
+    assert result['action'] == 'network_failed'
+    assert not (tmp_path / 'complete').exists()
+
+
+def test_completed_host_still_enforces_firewall(tmp_path, monkeypatch):
+    (tmp_path/'complete').write_text('completed')
+    calls=[]
+    monkeypatch.setattr(fsm,'apply_configurator_settings',lambda *a,**kw:calls.append(kw))
+    result=fsm.run(full_runner(),state_dir=tmp_path,print_fn=lambda *a:None)
+    assert result['action']=='already_completed'
+    assert calls[0]['enforce_lan_only'] is True
+
+
+# --------------------------------------------------------------------------
+# Offline commit from the drive's own verified repository (2026-10-10)
+# --------------------------------------------------------------------------
+
+def _offline_repo(tmp_path):
+    """A real repository on disk with a real manifest, the shape baseline-first-boot-install carries."""
+    import offline_cache
+    root = tmp_path / "baseline-cache"
+    (root / "apt").mkdir(parents=True)
+    (root / "apt" / "Packages").write_text("Package: lm-sensors\nVersion: 1:3.6.2-2\n")
+    (root / "apt" / "lm-sensors_3.6.2-2_amd64.deb").write_bytes(b"not really a deb, but real bytes")
+    (root / "MANIFEST.json").write_text(json.dumps(offline_cache.build_manifest(root)))
+    sources = tmp_path / "baseline-installer-cache.list"
+    sources.write_text(f"deb [trusted=yes] file:{root / 'apt'} ./\n")
+    return root, sources
+
+
+def _run_offline(tmp_path, r, root, sources, **kw):
+    state = tmp_path / "state"
+    return state, fsm.run(r, state_dir=state, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                          check_lifeline_fn=broken_facts_fixture_a, offline_root=root, offline_sources=sources, **kw)
+
+
+def test_an_intact_registered_repository_is_available(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    repo = fsm.offline_repository(root, sources)
+    assert repo["available"] is True and repo["files_verified"] == 2
+
+
+def test_a_repository_apt_does_not_know_about_is_not_available(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    sources.unlink()
+    assert fsm.offline_repository(root, sources)["available"] is False
+
+
+@pytest.mark.parametrize("tamper", ["modify", "add"])
+def test_a_repository_that_no_longer_matches_its_manifest_is_not_trusted(tmp_path, tamper):
+    root, sources = _offline_repo(tmp_path)
+    if tamper == "modify":
+        (root / "apt" / "lm-sensors_3.6.2-2_amd64.deb").write_bytes(b"altered after the manifest was made")
+    else:
+        (root / "apt" / "extra_1.0_amd64.deb").write_bytes(b"not in the manifest")
+    repo = fsm.offline_repository(root, sources)
+    assert repo["available"] is False and "does not verify" in repo["reason"]
+
+
+def test_network_failure_with_a_verified_repository_commits_offline_and_keeps_the_failure(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    r = full_runner(verify_ok=False)
+    state, result = _run_offline(tmp_path, r, root, sources)
+    assert result["action"] == "committed"
+    assert result["network_verified"] is False and result["package_source"] == "offline"
+    assert (state / "complete").exists()                     # what releases the kiosk gate
+    history = json.loads((state / "journal.json").read_text())["history"]
+    states = [e["state"] for e in history]
+    assert "network_repair_failed" in states                  # the failure is still on record
+    assert "network_repaired" not in states                   # and was never rewritten as success
+    assert history[-1]["network_verified"] is False
+
+
+def test_the_offline_install_never_consults_a_network_source(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    r = full_runner(verify_ok=False)
+    _run_offline(tmp_path, r, root, sources)
+    apt = [c for c in r.calls if "apt-get" in c]
+    assert apt, "the tools should have been installed offline"
+    for argv in apt:
+        assert f"Dir::Etc::SourceList={sources}" in argv
+        assert "Dir::Etc::SourceParts=-" in argv
+
+
+def test_network_failure_with_a_tampered_repository_still_refuses(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    (root / "apt" / "lm-sensors_3.6.2-2_amd64.deb").write_bytes(b"tampered")
+    r = full_runner(verify_ok=False)
+    state, result = _run_offline(tmp_path, r, root, sources)
+    assert result["action"] == "network_failed" and result["package_install_allowed"] is False
+    assert not _apt_installs(r)
+    assert not (state / "complete").exists()
+
+
+def test_a_resumed_network_failure_proceeds_offline_without_retrying_the_repair(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    r = full_runner(verify_ok=False)
+    _run_offline(tmp_path, r, root, sources.with_suffix(".absent"))   # first run: no repo yet -> refused
+    repair_calls = len([c for c in r.calls if "ifreload" in c or "ifup" in c])
+    state, result = _run_offline(tmp_path, r, root, sources)          # repo now present
+    assert result["action"] == "committed" and result["network_verified"] is False
+    assert len([c for c in r.calls if "ifreload" in c or "ifup" in c]) == repair_calls
+
+
+def test_an_offline_install_failure_does_not_commit(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    r = full_runner(verify_ok=False, package_install_ok=False)
+    state, result = _run_offline(tmp_path, r, root, sources)
+    assert result["action"] == "packages_failed"
+    assert not (state / "complete").exists()
+
+
+def test_a_verified_network_still_installs_from_the_network_and_records_it(tmp_path):
+    root, sources = _offline_repo(tmp_path)
+    r = full_runner()
+    state, result = _run_offline(tmp_path, r, root, sources)
+    assert result["action"] == "committed"
+    assert result["network_verified"] is True and result["package_source"] == "network"
+    for argv in [c for c in r.calls if "apt-get" in c and "install" in c]:
+        assert not any("Dir::Etc::SourceList" in a for a in argv)
+
+
+def test_the_confirm_screen_names_the_offline_source_only_when_one_is_present():
+    class D:
+        installed, evidence = True, []
+    diagnosis = {"needs_repair": False}
+    with_repo = fsm.format_full_proposal(D(), {}, diagnosis, offline_available=True)
+    without = fsm.format_full_proposal(D(), {}, diagnosis, offline_available=False)
+    assert "own verified package repository" in with_repo
+    assert "only after network verifies" in without and "repository" not in without
+
+
+# --------------------------------------------------------------------------
+# Proposal and the repair's own re-check agreeing (2026-10-10 rehearsal)
+# --------------------------------------------------------------------------
+
+def _facts_sequence(*fns):
+    """Discovery sees the first; every later lifeline check sees the next, then the last repeats."""
+    calls = iter(fns)
+    last = [fns[-1]]
+
+    def check():
+        fn = next(calls, last[0])
+        return fn()
+    return check
+
+
+def test_a_lifeline_that_heals_before_the_repair_is_verified_now_not_failed(tmp_path):
+    """Discovery (before CONFIRM) found it broken; the repair's own check then found it healthy and
+    refused. That used to be recorded as a network failure."""
+    r = full_runner()
+    check = _facts_sequence(broken_facts_fixture_a, healthy_facts, healthy_facts)
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                     check_lifeline_fn=check, offline_root=tmp_path / "none", offline_sources=tmp_path / "none.list")
+    assert result["action"] == "committed" and result["network_verified"] is True
+    entry = next(e for e in json.loads((tmp_path / "journal.json").read_text())["history"]
+                 if e["state"] == "network_repaired")
+    assert entry["verification"] and all(v is True for v in entry["verification"].values())
+    assert "verified now" in entry["network_detail"]
+
+
+def test_an_already_healthy_refusal_that_does_not_reverify_is_still_a_failure(tmp_path):
+    r = full_runner()
+    check = _facts_sequence(broken_facts_fixture_a, healthy_facts, broken_facts_fixture_a)
+    result = fsm.run(r, state_dir=tmp_path, stdin=iter(["CONFIRM\n"]), print_fn=lambda *a: None,
+                     check_lifeline_fn=check, offline_root=tmp_path / "none", offline_sources=tmp_path / "none.list")
+    assert result["action"] == "network_failed"
+    states = [e["state"] for e in json.loads((tmp_path / "journal.json").read_text())["history"]]
+    assert "network_repaired" not in states and states[-1] == "network_repair_failed"

@@ -8,6 +8,7 @@ registry. `manifest_entries` is what measured_boot hashes for this layer.
 from __future__ import annotations
 
 import gateway_config
+import references
 import registry
 
 TYPE_ID = "gateway_route"
@@ -23,6 +24,7 @@ def set_route(route_id: str, path: str, upstream: str) -> None:
     gateway_config._check_hostport(upstream, "upstream")
     _ensure_type()
     registry.upsert_entry(TYPE_ID, route_id, attributes={"path": path, "upstream": upstream}, scope=_SCOPE)
+    references.link(TYPE_ID, route_id, kind="substrate")
 
 
 def remove_route(route_id: str) -> None:

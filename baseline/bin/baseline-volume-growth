@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Timer entry point: extend any Baseline role volume that is nearly full (volume_growth.py)."""
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import repair  # noqa: E402
+import volume_growth  # noqa: E402
+
+if __name__ == "__main__":
+    for item in volume_growth.run_once(repair.RealRunner()):
+        print(f"extended {item['label']} by {item['add_gib']} GiB")

@@ -1,0 +1,18 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=PVE API Proxy Server
+ConditionPathExists=/usr/bin/pveproxy
+Wants=pve-cluster.service
+Wants=pvedaemon.service
+Wants=ssh.service
+Wants=pve-storage.target
+After=pve-storage.target
+After=pve-cluster.service
+After=pvedaemon.service
+After=ssh.service
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target

@@ -68,3 +68,22 @@ def test_no_deployed_files_means_no_hash_call_attempted():
     assert result["deployed_files"] == []
     assert result["deployed_file_sha256"] == {}
     assert not any(c[:1] == ["sha256sum"] for c in r.run_calls)
+
+
+def test_malformed_baseline_config_is_not_reported_as_an_empty_object():
+    r = FakeRunner()
+    r.dirs["/etc/baseline"] = ["settings.json"]
+    r.files["/etc/baseline/settings.json"] = "{broken json"
+    r.dirs["/var/lib/baseline"] = []
+    r.dirs["/opt/baseline/bin"] = []
+    r.dirs["/opt/baseline/lib"] = []
+    r.binaries["systemctl"] = "/usr/bin/systemctl"
+    r.script(lambda a: a[:2] == ["systemctl", "status"], CommandResult(ok=True, stdout="active"))
+
+    result = collect_baseline_config(r)
+
+    summary = result["config_key_summaries"]["settings.json"]
+    assert summary["keys"] is None
+    assert "invalid JSON" in summary["error"]
+    assert any(note["command"] == "parse /etc/baseline/settings.json"
+               for note in result["_collection_notes"])

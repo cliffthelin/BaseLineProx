@@ -1,0 +1,13 @@
+{
+  "verified_working_host_gui": false,
+  "verified_working_ubuntu_gui": false,
+  "browser_page_loaded": false,
+  "guest_booted": false,
+  "web_runtime_attempt": "python3 -m pytest -q tests/unit/test_vm_web.py --maxfail=1 --tb=short",
+  "web_runtime_result": "PermissionError: [Errno 1] Operation not permitted at socket.socket in HTTPServer initialization",
+  "chromium_runtime_attempt": "Playwright Chromium launch with a disposable profile and data-URL rendering check",
+  "chromium_runtime_result": "Chromium aborted before page creation: sandbox_host_linux.cc shutdown: Operation not permitted (1)",
+  "missing_runtime_devices": ["/dev/kvm", "/dev/dri", "/dev/net/tun"],
+  "native_proxmox_commands_available": false,
+  "physical_drive_changed": false
+}

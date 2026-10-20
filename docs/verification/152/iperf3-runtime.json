@@ -1,0 +1,12 @@
+{
+  "iperf3_version": "3.20",
+  "runner": "RealRunner",
+  "ready": "iperf3 listener verified on port 38583; baseline-iperf3-9d3fbd5590e14c4f93ef5b808aa1e99a.service is single-use and bounded to 10 minutes",
+  "conflict": "REAL-003: unit exited before readiness; unit stopped (verified); baseline-iperf3-232fef9d525e48a29803adf2963eefeb.service",
+  "loopback_bits_per_second": 50308944046.899734,
+  "single_use_exit": true,
+  "missing_binary_refused": "iperf3 server not started: Failed to find executable iperf3: No such file or directory",
+  "installed_without_peer": "iperf3 installed; no peer configured, so no test was run",
+  "invalid_inputs_refused": true,
+  "scope": "actual host systemd and iperf3, loopback; no Proxmox or physical-drive boot proof"
+}

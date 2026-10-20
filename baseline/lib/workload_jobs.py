@@ -55,7 +55,7 @@ class WorkloadJobs:
         if set(context)-{'backend','store','persistence_store','data_store'} or any(not isinstance(v,str) for v in context.values()):
             raise JobError('unsupported backend context')
         allowed = {'name','template','cache_storage','os_storage','disk_gb','memory_mb','cpus','recipe','homepage',
-                   'persistence_gb','iso','base','base_name','display','firmware','confirm','destination','backup_id','package'}
+                   'locale','persistence_gb','iso','os','base','base_name','display','firmware','confirm','destination','backup_id','package'}
         if not isinstance(params, dict) or set(params) - allowed or any(not isinstance(v, (str,int,float,bool)) for v in params.values()):
             raise JobError('unsupported workload job parameter')
         request_id = request_id or uuid.uuid4().hex
@@ -94,7 +94,7 @@ class WorkloadJobs:
                 with self.lock:
                     self.secrets[job_id] = {'password': password, 'username': result.get('username')}
                 result['login_available'] = True
-            result = {k:v for k,v in result.items() if k in ('ok','message','username','name','login_available','backup_id','capture_report')}
+            result = {k:v for k,v in result.items() if k in ('ok','message','username','name','login_available','backup_id','capture_report','configuration_report')}
             state = 'completed' if result.get('ok') else 'failed'
         except Exception:
             # Native exceptions can contain sensitive command output. Never persist it.
@@ -118,6 +118,13 @@ class WorkloadJobs:
         if row is None:
             raise JobError('unknown workload job')
         return self._public(row)
+
+    def parameters(self, job_id):
+        with self.connect() as db:
+            row = db.execute('SELECT params FROM jobs WHERE id=?', (job_id,)).fetchone()
+        if row is None:
+            raise JobError('unknown workload job')
+        return json.loads(row['params'])
 
     def listing(self):
         with self.connect() as db:

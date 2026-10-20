@@ -94,6 +94,15 @@ def test_handle_backup_list_returns_the_real_tar_contents():
     assert result.body["contents"] == ["USER/", "USER/doc.txt"]
 
 
+def test_handle_backup_list_reports_tar_failure_instead_of_empty_archive():
+    runner = FakeRunner(files={"/mnt/INSTALLER_CACHE/backups/x.tar.gz": ""}, command_responses=[
+        (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(2, "", "not a tar archive")),
+    ])
+    result = cpw.handle_backup_list(runner, archive="/mnt/INSTALLER_CACHE/backups/x.tar.gz")
+    assert result.outcome == "refused" and result.status == 422
+    assert "not a tar archive" in result.body["detail"]
+
+
 def test_handle_restore_runs_the_real_tar_extract():
     """An unconstrained restore (empty members) conservatively counts
     as touching USER (decision record 74) - needs a fresh
@@ -143,7 +152,7 @@ def test_handle_validate_drive_returns_the_real_validated_result():
             if argv[0] == "findmnt":
                 return "/dev/nvme0n1p2\n"
             if argv[0] == "lsblk":
-                return "nvme0n1\n"
+                return "nvme0n1\n" if argv[-1] == "/dev/nvme0n1p2" else ""
             raise AssertionError(argv)
 
         def lstat(self, path):
@@ -174,7 +183,7 @@ def test_handle_validate_drive_refuses_and_reports_the_real_reason():
             if argv[0] == "findmnt":
                 return "/dev/nvme0n1p2\n"
             if argv[0] == "lsblk":
-                return "nvme0n1\n"
+                return "nvme0n1\n" if argv[-1] == "/dev/nvme0n1p2" else ""
             raise AssertionError(argv)
 
         def lstat(self, path):

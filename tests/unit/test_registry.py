@@ -219,6 +219,14 @@ def test_read_only_listing_never_creates_a_missing_database(tmp_path, monkeypatc
     assert not path.parent.exists()
 
 
+def test_read_only_listing_does_not_treat_a_malformed_existing_database_as_empty(tmp_path, monkeypatch):
+    path = tmp_path / "malformed.db"
+    path.write_bytes(b"")
+    monkeypatch.setattr(reg, "GLOBAL_DB_PATH", str(path))
+    with pytest.raises(reg.RegistryReadError, match="no such table"):
+        reg.list_entries("anything", scope=reg.GLOBAL, read_only=True)
+
+
 def test_read_only_listing_creates_no_side_files(tmp_path, monkeypatch):
     """SQLite's mode=ro on a WAL database creates -shm/-wal; read-only
     must leave the directory exactly as it found it."""

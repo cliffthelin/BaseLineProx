@@ -1,0 +1,6 @@
+Full final unit suite: 3364 passed in 127.38s; no failures, skips or deselections.
+Focused affected HTTP/cache/base/deployment checks: 140 passed.
+Chromium: typed cache source selector, acquisition submit/status and actual-file link passed against test fixtures.
+Native integration: real qemu-img creation/conversion/check, base receipt verification, changed-base refusal, actual findmnt plain-directory cache refusal. Disposable files only; no guest or physical target.
+Canonical HTTPS checksum metadata observed live and matched existing Ubuntu image pin. Image download and detached signature not performed in this increment.
+Production web reload: PID1598679. Login HTTP200, Referrer-Policy same-origin.

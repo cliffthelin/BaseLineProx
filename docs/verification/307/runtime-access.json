@@ -1,0 +1,12 @@
+{
+  "observed_at": "2026-10-13T03:05:36.223576+00:00",
+  "lsblk_returncode": 0,
+  "lsblk_stdout": "sda      16.4T WDC WD180EDFZ-11AFWA0                 <attached drive serial>             0\nsdb      16.4T WDC WD180EDFZ-11AFWA0                 <attached drive serial>             0\nsdc       4.5T ST5000DM003-2FH18L                    <attached drive serial>             0\nsdd       4.5T ST5000DM003-2FH18L                    <attached drive serial>             0\nsdf       9.1T WDC WD100EMAZ-00WJTA0                 <attached drive serial>             0\nsdh     476.9G PC601 NVMe SK hynix 512GB             <PC601 drive serial>    0\nsdm     476.9G PC401 NVMe SK hynix 512GB             <PC401 drive serial>    0\nsdn       1.8T Samsung SSD 980 PRO with Heatsink 2TB <attached drive serial>      0\nnvme0n1   1.8T Corsair MP400                         <attached drive serial> 0\nnvme1n1 953.9G GIGABYTE GP-GSM2NE3100TNTD            <boot drive serial>       0\n",
+  "device_nodes": {
+    "/dev/sdm": false,
+    "/dev/sdh": false,
+    "/dev/kvm": false
+  },
+  "hardware_deployment_performed": false,
+  "native_boot_verified": false
+}

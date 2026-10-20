@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Timer entry point: compare this machine with the profiles the drive keeps and run the queued checks that are due (machine_check.py)."""
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import machine_check  # noqa: E402
+
+if __name__ == "__main__":
+    print(json.dumps(machine_check.run_once()))

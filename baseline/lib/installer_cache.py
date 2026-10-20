@@ -39,15 +39,25 @@ KIND_PACKAGE = "apt package"
 KIND_FIRMWARE = "driver / firmware"
 KIND_SCRIPT = "VM / LXC script"
 KIND_IMAGE = "container image"
+KIND_BASE = "ready-made OS base"
+KIND_KASM = "Kasm base"
+KIND_APP = "guest application"
+
+# What the build actually carries lives under one folder of the volume (the offline cache the installer expands): the apt packages (diagnostic tools, startup packages, firmware and microcode), the
+# five guest applications, the Kasm base and the ready-made OS bases. The OS images themselves sit in `isos`.
+BUILT = "installer/expanded/baseline-cache"
 
 # Subdirectory on the volume per kind. A self-replicating build reads
 # these by name, so they are part of the on-disk contract.
 SUBDIR = {
     KIND_ISO: "isos",
-    KIND_PACKAGE: "packages",
-    KIND_FIRMWARE: "firmware",
+    KIND_PACKAGE: f"{BUILT}/apt",
+    KIND_FIRMWARE: f"{BUILT}/apt",
     KIND_SCRIPT: "vm-scripts",
     KIND_IMAGE: "images",
+    KIND_BASE: f"{BUILT}/os-bases",
+    KIND_KASM: f"{BUILT}/kasm",
+    KIND_APP: f"{BUILT}/apps",
 }
 
 # Provenance states, weakest to strongest. Kept as distinct words because
@@ -132,6 +142,19 @@ class CacheReport:
         return sum(1 for r in self.rows if not r.present)
 
 
+class CacheScanError(RuntimeError):
+    """The cache could not be completely enumerated; absence is unknown."""
+
+    def __init__(self, message, *, mounted=None, mount_detail=""):
+        super().__init__(message)
+        self.mounted = mounted
+        self.mount_detail = mount_detail
+
+
+class CatalogDefinitionError(RuntimeError):
+    """A module that owns declared build inputs could not be read."""
+
+
 # -- Catalog ----------------------------------------------------------
 # Built from the modules that already own each list, so it cannot drift.
 
@@ -161,6 +184,10 @@ _FIRMWARE = (
     ("intel-microcode", "Intel CPU microcode", "drivers.cpu_microcode_package"),
     ("firmware-mediatek", "MediaTek Wi-Fi firmware", "drivers.wifi_firmware_package"),
     ("firmware-realtek", "Realtek Wi-Fi firmware", "drivers.wifi_firmware_package"),
+    # DR262: what the two named machines need (driver_profiles.py checks each name against Debian 13's file index)
+    ("firmware-iwlwifi", "Intel Wi-Fi and Bluetooth firmware", "drivers.wifi_firmware_package"),
+    ("firmware-intel-graphics", "Intel graphics firmware", "drivers (carried; installed when Intel graphics is detected)"),
+    ("wireless-regdb", "Wi-Fi regulatory database", "drivers (carried; installed with any Wi-Fi)"),
 )
 
 
@@ -205,20 +232,25 @@ _IMAGES = (
 )
 
 
+def firmware_packages() -> tuple:
+    """The driver and firmware packages the catalog declares (CPU microcode, Wi-Fi firmware)."""
+    return tuple(name for name, _label, _setting in _FIRMWARE)
+
+
 def _diagnostic_packages() -> tuple:
     try:
         import firstboot_statemachine as fsm
         return tuple(fsm.DIAGNOSTIC_PACKAGES)
-    except Exception:
-        return tuple(_DIAGNOSTIC_PURPOSE)
+    except Exception as exc:
+        raise CatalogDefinitionError(f"diagnostic package catalog unavailable: {exc}") from exc
 
 
 def _curated_scripts() -> tuple:
     try:
         import vm_scripts
         return tuple((s.script_id, s.description, s.path) for s in vm_scripts.list_scripts())
-    except Exception:
-        return ()
+    except Exception as exc:
+        raise CatalogDefinitionError(f"VM script catalog unavailable: {exc}") from exc
 
 
 def _script_origin() -> str:
@@ -226,8 +258,8 @@ def _script_origin() -> str:
         import vm_scripts
         return (f"github.com/{vm_scripts.UPSTREAM_SCRIPTS_REPO} "
                 f"@ {vm_scripts.PINNED_COMMIT[:12]} (sha256-pinned)")
-    except Exception:
-        return "community-scripts/ProxmoxVE (sha256-pinned)"
+    except Exception as exc:
+        raise CatalogDefinitionError(f"VM script origin unavailable: {exc}") from exc
 
 
 def catalog() -> list:
@@ -238,11 +270,20 @@ def catalog() -> list:
 
     entries.append(CatalogEntry(
         "proxmox-ve-source", "Proxmox VE (source ISO)", KIND_ISO,
-        origin="enterprise.proxmox.com official ISO (GPG + SHA256 verified by drive_setup_acquire.py)",
+        origin="enterprise.proxmox.com official ISO; publisher verification is not established by file presence",
         install_helper="self_installer.py -> drive_setup_install.py (answer-file auto-install)",
         config_section="self_installer (fqdn, lvm sizing, disk serial)",
         filename="proxmox-ve-source.iso",
         notes="The substrate OS. Located via self_installer._locate_proxmox_source_iso.",
+    ))
+
+    import ubuntu_environment as ue
+    entries.append(CatalogEntry(
+        "ubuntu_base", "Ubuntu 24.04 vanilla cloud image", KIND_ISO,
+        origin=ue.IMAGE_URL,install_helper="installer_sources.acquire_ubuntu (web job)",
+        config_section="Installer Plan / Ubuntu environment",filename=ue.BASE_NAME+".img",
+        digest="sha256:"+ue.IMAGE_SHA256,signature_verified=False,
+        notes="Publisher HTTPS and pinned SHA256; detached signature not verified. Source acquisition creates no VM.",
     ))
 
     for pkg in _diagnostic_packages():
@@ -277,6 +318,29 @@ def catalog() -> list:
 
     for image in _IMAGES:
         entries.append(image)
+
+    import os_list
+    import prebuilt_environment as pe
+    import kasm_setup
+    for system in sorted(pe.SYSTEMS):
+        entries.append(CatalogEntry(
+            f"{system}-base", f"{os_list.NAMES.get(system, system.title())} (ready-made base)", KIND_BASE,
+            origin="built by baseline-build-os-base (an unattended install of the vendor image, checked free of secrets)",
+            install_helper="prebuilt_environment.install_base / create (a VM made from it, owner set from the signed-in user)",
+            config_section="Environments / Launcher", filename=f"{system}-base.qcow2",
+            notes="Carried with its manifest; a VM made from it is ready with its owner and applications preset."))
+    entries.append(CatalogEntry(
+        "kasm-base", "Kasm Workspaces base", KIND_KASM,
+        origin="built by baseline-build-kasm-base (Debian + Docker + Kasm, the vendor's own installer)",
+        install_helper="kasm_setup.KasmSetup (the VM is built on an overlay of this read-only base)",
+        config_section="Workspaces", filename=kasm_setup.BASE_FILE, notes="Read-only; the persisted layers hold all configuration and data."))
+    for app in os_list.APPS:
+        entries.append(CatalogEntry(
+            app, f"{app} (guest application)", KIND_APP,
+            origin="the application's own vendor download, pinned and checked when the cache was built",
+            install_helper="application_bundle / the guest first-boot installer",
+            config_section="Installer Plan / guest applications", filename=f"{app}/source",
+            notes="Preset on every system's list of applications."))
 
     origin = _script_origin()
     for script_id, description, path in _curated_scripts():
@@ -315,22 +379,43 @@ def _listdir_with_sizes(runner, path: str) -> list:
     the Refresh-with-root path."""
     try:
         proc = runner.run(["ls", "-lA", "--time-style=+", path], timeout=20)
-    except Exception:
-        return []
-    if getattr(proc, "returncode", 1) != 0:
-        return []
+    except Exception as exc:
+        raise CacheScanError(f"could not enumerate {path}: {type(exc).__name__}: {exc}") from exc
+    code = getattr(proc, "returncode", 1)
+    if code != 0:
+        detail = getattr(proc, "stderr", "") or f"ls exited {code}"
+        # The kind subdirectory is created lazily. A confirmed missing
+        # directory means no artifacts of that kind have been cached yet;
+        # permission and command failures leave its contents unknown.
+        if "no such file or directory" in detail.lower():
+            parent = runner.run(["ls", "-ld", "--", path.rsplit("/", 1)[0]], timeout=20)
+            if getattr(parent, "returncode", 1) != 0:
+                parent_detail = getattr(parent, "stderr", "") or f"ls exited {parent.returncode}"
+                raise CacheScanError(f"could not verify cache parent directory for {path}: {parent_detail.strip()}")
+            return []
+        raise CacheScanError(f"could not enumerate {path}: {detail.strip()}")
+    text = getattr(proc, "stdout", None)
+    if not isinstance(text, str):
+        raise CacheScanError(f"could not enumerate {path}: ls output unavailable")
     out = []
-    for line in proc.stdout.splitlines():
-        parts = line.split(maxsplit=5)
-        if len(parts) < 6 or line.startswith("total "):
+    for line in text.splitlines():
+        if not line.strip():
             continue
+        if line.startswith("total "):
+            if not line[6:].strip().isdigit():
+                raise CacheScanError(f"malformed ls total row in {path}: {line!r}")
+            continue
+        parts = line.split(maxsplit=5)
+        if len(parts) != 6 or len(parts[0]) < 10 or not parts[4].isdigit():
+            raise CacheScanError(f"malformed ls entry in {path}: {line!r}")
         perms, size, name = parts[0], parts[4], parts[5].strip()
         if perms.startswith("d"):
             continue
-        try:
-            out.append((name, int(size)))
-        except ValueError:
-            continue
+        if not perms.startswith("-"):
+            raise CacheScanError(f"unsupported entry type in {path}: {name!r} ({perms[0]!r})")
+        if not name:
+            raise CacheScanError(f"malformed ls entry in {path}: missing file name")
+        out.append((name, int(size)))
     return out
 
 
@@ -339,6 +424,10 @@ def scan_cache(runner, root: str = DEFAULT_CACHE_ROOT) -> dict:
     found = {}
     for kind, subdir in SUBDIR.items():
         found[subdir] = _listdir_with_sizes(runner, f"{root}/{subdir}")
+    import os_list
+    apps = SUBDIR[KIND_APP]
+    for app in os_list.APPS:                                   # each application keeps its files in a folder of its own
+        found[apps] = found.get(apps, []) + [(f"{app}/{name}", size) for name, size in _listdir_with_sizes(runner, f"{root}/{apps}/{app}")]
     return found
 
 
@@ -359,11 +448,33 @@ def reconcile(runner, root: str = DEFAULT_CACHE_ROOT) -> CacheReport:
     result whether present or not; every real file not claimed by an
     entry appears as an extra."""
     mounted, mount_detail = mount_status(runner, root)
-    found = scan_cache(runner, root)
+    if not mounted:
+        return CacheReport(root=root, mounted=False, mount_detail=mount_detail,
+                           scanned_ok=False,
+                           scan_detail=(mount_detail + ". The cache volume is not mounted; "
+                                        "the fallback directory is not used as cache inventory."))
+    try:
+        found = scan_cache(runner, root)
+    except CacheScanError as exc:
+        exc.mounted = mounted
+        exc.mount_detail = mount_detail
+        raise
     report = CacheReport(root=root, mounted=mounted, mount_detail=mount_detail)
 
+    try:
+        catalog_entries = catalog()
+    except CatalogDefinitionError as exc:
+        raise CacheScanError(f"declared cache catalog unavailable: {exc}",
+                             mounted=mounted, mount_detail=mount_detail) from exc
+
+    # An OS image on the volume is cataloged by being there: it was carried with the build on purpose (the operating systems the machine offers), not an unexplained file.
+    known = {e.filename for e in catalog_entries if e.kind == KIND_ISO}
+    for name, _size in found.get(SUBDIR[KIND_ISO], []):
+        if name not in known:
+            catalog_entries.append(CatalogEntry(name, name, KIND_ISO, origin="carried with this build as an operating system image",
+                                                install_helper="the virtual machine creator (from this image)", config_section="Launcher / Environments", filename=name))
     claimed: set = set()
-    for entry in catalog():
+    for entry in catalog_entries:
         subdir = SUBDIR[entry.kind]
         hit = next((f for f in found.get(subdir, []) if _matches(entry, f[0])), None)
         if hit:

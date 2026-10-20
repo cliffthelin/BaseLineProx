@@ -1,0 +1,14 @@
+[
+ "build.cache.kasm_base",
+ "build.cache.offline",
+ "build.cache.os_bases",
+ "build.install.checkpoints",
+ "build.install.progress",
+ "build.install.rebuild",
+ "build.install.recovery",
+ "build.install.rehearse",
+ "build.install.wipe_install",
+ "build.iso",
+ "managed.mirror_history",
+ "managed.remote_rebuild"
+]

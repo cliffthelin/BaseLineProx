@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Keep what this system downloaded in the drive's own installer cache (see lib/cache_learn.py).
+
+Run by apt after every dpkg run (apt.conf.d/99baseline-cache-learn); also usable by hand:
+    baseline-cache-learn                       packages apt downloaded, from /var/cache/apt/archives
+    baseline-cache-learn app chrome DIR        an application prepared online (DIR: source.deb|tar.gz + recipe.json)
+Does nothing, successfully, on a system whose drive carries no installer cache.
+"""
+import sys
+
+from pathlib import Path
+
+CACHE = Path("/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache")
+ARCHIVES = Path("/var/cache/apt/archives")
+
+if __name__ == "__main__":
+    if not (CACHE / "MANIFEST.json").is_file():
+        sys.exit(0)
+    sys.path.insert(0, "/opt/baseline/lib")
+    import cache_learn
+    try:
+        if len(sys.argv) == 4 and sys.argv[1] == "app":
+            print(cache_learn.learn_app(CACHE, sys.argv[2], Path(sys.argv[3]), source="baseline-apps prepare (online)"))
+        else:
+            report = cache_learn.harvest(ARCHIVES, CACHE, source="apt download on this system")
+            for item in report["learned"]:
+                print(f"[baseline-cache-learn] kept {item['package']} {item['version']} in the installer cache")
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"[baseline-cache-learn] not kept: {exc}", file=sys.stderr)
+        sys.exit(1 if len(sys.argv) > 1 else 0)    # as an apt hook it never fails the package operation

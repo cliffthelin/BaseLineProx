@@ -1,10 +1,456 @@
 # Session handoff - moving to the "Baseline" Claude Project
 
+## PC401 → PC601 selective port review — 2026-10-17 (DR309)
+
+This is an isolated review checkout based on PC601 `b4e41ec`, branch
+`codex/pc601-backport-review`, not a deployed PC601 installation. It adds the
+PC401 reliability fixes while retaining PC601's newer Kasm/registry/OS-base
+architecture, swap schema, service-quiescence guard and PC601 installer UUID.
+Core checks: 258 passed; full self-installer/data-protection subset: 50 passed.
+These 308 focused tests include real-file/production-command and injected-unit
+evidence; no new QEMU or physical acceptance is claimed. Neither the shared
+checkout nor either physical drive was changed. See
+[DR309](design/decision-records/309-pc401-solutions-for-pc601-review.md)
+and [the comparison and port assessment](verification/309/README.md).
+Queue72/74/75/76/78 remain open pending installed-guest and physical acceptance.
+
+## DR242 incremental handoff — 2026-10-09
+
+Proxmox detection now records probe errors and returns `detection_unavailable`
+instead of interpreting failed probes as absence. Firstboot refuses to
+continue while Proxmox status is unknown and retries detection on a later run.
+Four pure gate/decision tests pass. Production read-only probes on the current
+development host confirm the fresh-host path; this does not verify a target
+drive or run installation. No FakeRunner/FakeProc used. See DR242.
+
+## DR241 incremental handoff — 2026-10-09
+
+Remote Access now returns probe errors, validates `ss` output shape, and
+reports `listening_available`; the page says the listener inventory is
+unavailable rather than rendering “none found” after a failed probe. Five pure
+parser/page cases pass. A read-only production collection found 46 listeners
+and an `sshd -T` missing-hostkeys error. This is current-host evidence only
+and does not verify Proxmox hardware. See DR241.
+
+## DR240 incremental handoff — 2026-10-09
+
+The inxi normalizer rejects malformed top-level data and missing/empty System
+or CPU sections. Optional hardware sections may remain empty. Seven pure schema
+contract tests pass; no FakeRunner/FakeProc or live hardware probe was used.
+Live host collection remains unverified. See DR240.
+
+## DR239 incremental handoff — 2026-10-09
+
+PCI, block-device, and network collectors now reject blank successful command
+output instead of returning an empty bus. Blank USB output is still permitted
+for no visible peripherals. Four pure tests pass; no FakeRunner/FakeProc or
+live hardware command was used. Real inventory completeness is unverified. See
+DR239.
+
+## DR238 incremental handoff — 2026-10-09
+
+All four web apps now use `web_request_json.read_json_object` for JSON POSTs.
+Invalid, oversized, incomplete, duplicate-key, non-standard, or non-object
+bodies return 400 before dispatch; form-encoded posts are unchanged. Twelve
+focused checks pass, including real local HTTP coverage for scripts inbox and
+Control Panel using production filesystem runners. Other endpoint-level body
+combinations are not individually verified. See DR238.
+
+## DR237 incremental handoff — 2026-10-09
+
+Scripts inbox POST parsing now rejects malformed/empty/oversized/non-object
+JSON with HTTP 400 instead of substituting `{}`. A real HTTP test reproduced
+the old 200 response and now verifies no file is written, using the
+production filesystem runner. No script execution occurred. Other web body
+parsers remain unaudited. See DR237.
+
+## DR236 incremental handoff — 2026-10-09
+
+Tether detection now reports `probe_error` when the kernel network-interface
+inventory is missing, rather than claiming there is no tether device. A
+readable empty inventory still means no candidate. The regression checks the
+public `auto_tether` result with no network command. The tether-truthfulness
+tests passed; physical tether/DHCP/internet remains unverified. See DR236.
+
+## DR235 incremental handoff — 2026-10-09
+
+`audit_view.read_tail` now raises on malformed JSONL, invalid UTF-8, empty or
+non-object records, and incomplete final records instead of hiding them. A
+corrupt configured log returns 503 in a real local `/audit` HTTP test. All 18
+audit/approvals tests pass; missing-file behavior remains an empty log. No
+physical host or drive was involved. See DR235.
+
+## DR234 incremental handoff — 2026-10-09
+
+Retained Baseline display scale can now be applied to Spotify, ChatGPT, and
+Claude data. `home/.baseline/BASELINE.json` is validated and atomically stored
+in the retained data volume, included in state backups, and read by capture and
+launch. The new regression failed before the change; 39 application-bundle
+tests and two catalog page tests pass. Actual GUI
+behavior, proprietary native preferences, package acquisition, and guest use
+remain unverified. See DR234.
+
+## DR233 incremental handoff — 2026-10-09
+
+Tasker catalog component revisions now include a SHA256 of the canonical
+loaded custom application definitions. A regression test failed before the
+change and passed afterward; all seven focused custom-application contract
+tests pass. No package, VM, physical drive, FakeRunner, or FakeProc was used.
+Installer Plan package acquisition and guest runtime proof remain open under
+row 76; persistent-mount survival is not proven. See DR233.
+
+## DR232 incremental handoff — 2026-10-09
+
+Custom app definitions now save atomically under the web server's configured
+state directory in the `application-definitions` namespace. The web shortcut
+catalog, `baseline-apps`, and `baseline-tasker` reload the same state catalog.
+The source tree is no longer the writable destination for user entries; DR231
+remains history for source URL/SHA256 and Debian package validation. Seven
+application-bundle tests and two shortcut-catalog tests passed, including one
+real HTTP catalog write/read; the real task catalog command also passed without
+FakeRunner/FakeProc. No package was downloaded or
+installed; actual USER_PERSISTENCE mount survival and guest runtime remain
+unverified. Installer Plan acquisition remains open under row 76. See DR232.
+
+## DR231 incremental handoff — 2026-10-09
+
+Custom application entries now require an exact credential-free HTTPS `.deb`
+URL and lowercase SHA256. The shared source-root loader registers the saved
+catalog for both the Installer Plan and `baseline-apps`; custom preparation
+checks the digest and Debian package name, architecture, and version before
+binding. Four focused contract tests and the real CLI help command passed; no
+FakeRunner/FakeProc was used. No third-party package was acquired or installed,
+and no guest or physical drive was accessed. Installer Plan input preparation
+still lacks custom app package acquisition and runtime proof remains open under
+queue item 76. See DR231.
+
+## DR230 incremental handoff — 2026-10-09
+
+Proxmox VM deletion now supports confirmed retirement with explicit warning
+that the retained home is erased. It validates the live cluster VMID/type,
+stopped state, Baseline VM name, disk attachments, configured storage IDs and
+paths, and regular volume files. A validated volume/path plan is saved before
+`qm destroy --purge`; retries act only on that recorded plan, verify the VM is
+gone, and use Proxmox volume cleanup for any remaining owned disks. Unexpected
+files and path drift stop cleanup. Seven pure contract/parser tests passed with
+no FakeRunner/FakeProc. `qm`, `pvesh`, and `pvesm` are absent on this host, so
+no live VM or physical disk deletion has been verified. Disposable native PVE
+retirement remains open under queue item 75; see DR230.
+
+## DR229 incremental handoff — 2026-10-09
+
+Local VM/base and Proxmox VM inventories now validate their required storage
+before returning a list. The local backend validates its VM store; Proxmox also
+validates the persistence store that owns VM records. Two real-path checks
+confirmed an INSTALLER_CACHE path raises an inventory error instead of looking
+empty. Four integration checks covered both cache and unmounted-volume cases.
+No fake runner/proc, fixture, Proxmox command, VM, or drive was used.
+Native mounts and VM lifecycle remain open under queue items 7, 72, and 75.
+See DR229.
+
+## DR228 incremental handoff — 2026-10-09
+
+VM and container storage settings now use defaults only when the file/key is
+absent; malformed or unreadable existing settings and invalid values raise a
+visible `VmError`. VM and container saves also refuse to overwrite unreadable config.
+The VM/container pages and workload routes preserve the failure instead of
+silently selecting default storage. Eight integration checks passed with
+`/proc/self/mounts`, `/etc`, the production host resolver, and unsafe path
+cases; no Proxmox command, VM, drive, FakeRunner, or FakeProc was used. Native lifecycle/storage proof remains open
+under queue items 7 and 75. See DR228.
+
+## DR227 incremental handoff — 2026-10-09
+
+Persistence discovery no longer treats `blkid -L` status 2 as confirmed
+absence. It validates a complete structured `lsblk` inventory, returns only a
+unique exact-label match, and stops local-volume fallback for malformed or
+duplicate-label inventory. Live RealRunner checks resolved `CACHE` and an
+absent audit label; no block was written or mounted. Native USER persistence
+installation remains open under queue items 7 and 26. See DR227.
+
+## DR226 incremental handoff — 2026-10-09
+
+Corrupt/unreadable recovery state no longer appears inactive. State reads now
+distinguish missing state from invalid or unavailable state; recovery handlers
+return a visible 503. Ten RealRunner checks passed against real procfs/fstab
+and process state without fixture files or FakeRunner/FakeProc. Native
+recovery remains open under queue items 7 and 26. See DR226.
+
+## DR225 incremental handoff — 2026-10-09
+
+The local QEMU host now requires a positive process ID and raises `VmError`
+when procfs state, PID-record, or command-line reads fail. ISO inventory errors
+on invalid paths or symlinked roots instead of reporting an empty catalogue.
+Five integration checks used real process state/files; PID 0, invalid ISO path, and corrupt PID
+record were regression cases. No FakeRunner/FakeProc or VM guest was used.
+Queue item 75 remains open for broader lifecycle/reconciliation proof. See
+DR225.
+
+## DR224 incremental handoff — 2026-10-09
+
+Recovery discovery and exit return HTTP 503 with the mount-table observation
+error; exit still requires positive read-write mount evidence. Four focused
+RealRunner integration checks passed. No FakeRunner/FakeProc, physical drive,
+or LVM metadata was used. Native recovery/persistence verification remains
+open under queue items 7 and 26. See DR224.
+
+## DR223 incremental handoff — 2026-10-09
+
+The harness registry now raises `HarnessAdapterError` if a harness marked
+implemented cannot import its module or the module violates the adapter
+contract. Status, console, and chat show the failure; unknown or deliberately
+unimplemented IDs remain unselected. The focused registry/adapter/streaming/
+Baseline web suite passed 126 tests with injected failures. No live harness or
+provider was invoked.
+
+## DR222 incremental handoff — 2026-10-09
+
+Retained-container backup listing now errors on redirected sets and invalid,
+unreadable, or malformed manifests; only a missing root or unpublished
+manifest is omitted. Restore shares manifest validation and verifies archive
+file type, size, and digest. The focused container/guest/distro, off-drive
+backup, and Operations suites passed 139 tests on disposable files and scripted
+runners. No real destination or live Proxmox container was accessed; queue
+items 56 and 59/60 remain open.
+
+## DR221 incremental handoff — 2026-10-09
+
+Off-drive backup inventory now distinguishes an unpublished manifest from a
+corrupt or unreadable one; only the former is omitted. Invalid verification
+markers are errors instead of silently hiding a backup. The focused backup,
+Operations, and audit/approval suites passed 105 tests with disposable files
+and scripted runners. No physical backup destination or archive was accessed.
+Live drive verification remains open under queue item 56.
+
+## DR220 incremental handoff — 2026-10-09
+
+Proxmox `vmbr0` homepage detection now raises on command, timeout, malformed
+JSON, and invalid address observations. A valid probe with no usable global
+IPv4 address remains an explicit manual-entry case. The VM page shows a probe
+failure next to the homepage setting without hiding VM management. Combined
+Proxmox/QEMU VM host, page, and web tests passed 93 with injected failures and a
+local HTTP fixture; no live bridge or guest was checked. See DR220.
+
+## DR219 incremental handoff — 2026-10-09
+
+Local QEMU VM inventory errors no longer silently drop broken managed records.
+Missing, unreadable and malformed `vm.json` cases are distinct; `/vms/status`
+returns 503/unknown, and `/vms` labels the inventory unavailable instead of
+claiming there are no VMs. VM host/web/page tests passed 68 with disposable
+records and a synthetic runner. No live VM or drive was accessed. REAL-013
+live lifecycle verification remains open.
+
+## DR218 incremental handoff — 2026-10-09
+
+USB tether discovery and bring-up now preserve probe/action errors instead of
+calling them no candidate, no carrier, or no DHCP offer. The ordinary Tether
+action also reports the structured result through the Textual notification and
+console before refreshing network state. The focused tether, configuration,
+network, web, and TUI suite passed 162 tests with injected failures; no live
+tether or network change was made. REAL-007 route preservation and rollback
+verification remain open.
+
+## DR217 incremental handoff — 2026-10-09
+
+Read-only registry listing no longer turns SQLite query errors on an existing
+database into an empty mapping. Missing database remains a valid empty result;
+existing but unreadable or malformed databases raise `RegistryReadError`. The
+registry and direct-consumer suite passed 489 tests on disposable databases
+and synthetic runners. No production registry or drive was touched.
+
+## DR216 incremental handoff — 2026-10-09
+
+The host-inventory Baseline config collector no longer treats malformed JSON,
+non-object roots, or failed reads as empty configuration. It records unknown
+keys, the diagnostic, and a collection note; confirmed empty JSON objects stay
+empty. The focused collector/manifest/validator suite passed 25 tests using the
+synthetic inventory runner. No host config files were read. Further REAL-006
+collector audits remain.
+
+## DR215 incremental handoff — 2026-10-09
+
+Audit log read failures now raise `AuditReadError`; only a genuinely missing
+file is an empty log. Audit responds with 503 and a diagnostic, Operations
+labels history unavailable, and `/operations/history` returns 503. The focused
+audit/approvals/operations suite passed 85 tests with injected read errors and
+local HTTP requests. No host audit log was read or changed. DR215 records the
+scope.
+
+## DR214 incremental handoff — 2026-10-09
+
+Drive enrollment registry errors now raise `DriveEnrollmentError` instead of
+becoming an empty enrolled-drive set. Action validation, candidate inventory,
+and off-drive backup validation preserve the failure. The focused enrollment,
+off-drive-backup, drive-admin, and web suite passed 394 tests with scripted
+runners/disposable registry files; no physical drive was inspected or changed.
+REAL-005 full storage-graph and hardware verification remains open.
+
+## DR213 incremental handoff — 2026-10-09
+
+The network dashboard no longer discards bridge-member enumeration errors. It
+uses `network._bridge_members()` and adds an Unknown row with the error while
+keeping the observed routed interface visible. The focused
+provider/harness/network/firstboot/readiness/Settings/TUI suite passed 210
+tests with injected observations and AST checks; no live bridge state or
+interactive Textual render was verified. REAL-007's route and rollback work
+remains open.
+
+## DR212 incremental handoff — 2026-10-09
+
+Provider discovery no longer turns credential-file read errors into
+"unconfigured," counts empty key assignments as configured, or claims that a
+configured Claude token was live-verified. Ollama TCP refusal is Unreachable;
+timeout and other socket errors are Unknown, and the dashboard preserves those
+states. The focused provider/harness/network/firstboot/readiness/Settings/TUI
+suite passed 209 tests with injected observations. No host credentials were
+read and no live provider service or external API was checked. DR212 records
+the scope.
+
+## DR211 incremental handoff — 2026-10-09
+
+The network connection modal now preserves unknown administrative state instead
+of defaulting to enabled. It disables the switch when flags cannot be read,
+shows udev identity errors, converts `ip link` exceptions into failure results,
+and verifies the requested state by reading it back. The focused
+network/firstboot/readiness/Settings/TUI suite passed 197 tests with injected
+observations. No live network state was queried or changed, and interactive
+Textual rendering remains unverified. REAL-007 route preservation and
+transactional rollback remain open. See DR211.
+
+## DR210 incremental handoff — 2026-10-09
+
+Network traffic counter read/parse failures now raise `NetworkProbeError`;
+the TUI shows the diagnostic instead of suppressing the detail as zero
+traffic. Confirmed zero counters still render quietly. The focused
+network/firstboot/readiness/Settings/TUI suite passed 190 tests with injected
+observations. No live traffic counters were read or network settings changed.
+REAL-007 route and rollback work remains open.
+
+## DR209 incremental handoff — 2026-10-09
+
+Network driver resolution now distinguishes a missing driver symlink from a
+read/resolve failure. `list_interfaces()` keeps failed driver and wired-medium
+state unknown with diagnostics; lifeline emits an unavailable driver fact, and
+the TUI shows Unknown rather than guessing the link status. The focused
+network/firstboot/readiness/Settings/TUI suite passed 187 tests with injected
+observations. No live network configuration was changed. REAL-007's route and
+rollback work remains open.
+
+## DR208 incremental handoff — 2026-10-09
+
+GPU mode detection no longer turns failed/malformed `sriov_totalvfs` reads into
+zero capability or treats an empty mdev-type directory as active support.
+`RealRunner` reports failed sysfs enumeration/path resolution explicitly. The
+41 GPU-admin tests and combined GPU/hardware-inventory/Quadlet suite (127 tests)
+pass with synthetic observations; no physical GPU state was read. REAL-006
+live capability/readback proof remains open.
+
+## DR207 incremental handoff — 2026-10-09
+
+Network sysfs inventory/carrier failures now stay unknown instead of becoming
+empty NIC state or “disconnected.” Lifeline emits explicit failed facts;
+`list_interfaces()` keeps carrier `None` plus its error, and the TUI displays
+Unknown. Settings now displays an alert for unavailable live interface choices.
+The combined network/firstboot/readiness/Settings/TUI suite passed 184 tests
+with injected observations; no real interface state was changed. REAL-007
+route-attribute and rollback work remains open.
+
+## DR206 incremental handoff — 2026-10-09
+
+Network lifeline route and IPv4 address checks now preserve `ip` command
+failures as `NetworkProbeError`; `check_lifeline()` reports the failed query
+instead of asserting there is no route/address. Successful empty observations
+remain distinct, malformed IPv4 output is rejected, gateway-less default routes
+still retain their interface for address checks, and bridge-member I/O errors
+no longer look like an empty bridge. 59 focused network/firstboot/
+readiness tests passed with scripted observations. No network settings were
+changed. REAL-007 still tracks route preservation and transaction rollback.
+
+## DR205 incremental handoff — 2026-10-09
+
+`gpu_admin.detect_gpus()` no longer converts a failed `lspci -Dmmnnk` command
+into an empty inventory. It raises `GpuInventoryError`; a successful scan with
+no GPU-class devices remains a valid empty result. The 37 GPU unit tests pass
+using scripted command/sysfs observations. No physical GPU probe was run. This
+reduces one REAL-006 false-empty path; malformed-output and live collector
+coverage remain open.
+
+## DR204 incremental handoff — 2026-10-09
+
+Drive Administration's former hard-coded `update_selected` failure now has a
+bounded implementation for cached Debian package/firmware `.deb` files:
+refresh APT indexes under the configured repository trust policy, compare
+candidate versions, download only into a verified `INSTALLER_CACHE`, and
+re-read package metadata before success. It does not install on the host, and
+the UI disables every other volume for this action. The 336-test focused suite
+uses scripted command responses; no real APT refresh or physical cache write
+was performed. REAL-010 remains open for ISO, OCI, and pinned-script updates.
+See DR204 and `docs/design/runtime-reality-tasks.md`.
+
+## DR203 incremental handoff — 2026-10-09
+
+The App Isolation route now checks the selected persona's labeled ext4 mount
+through its supplied runner and displays verified or failure status. The
+page's former statement that live mount checking was unimplemented was stale;
+it now distinguishes a verified mount from unapplied overlays and
+unverified process isolation. The focused suite passed 185 tests with
+scripted command responses. No physical volume was inspected or changed. See
+DR203; queue74/REAL-008 remains open.
+
+## DR202 incremental handoff — 2026-10-09
+
+The legacy Textual hardware modal no longer offers empty description,
+troubleshooting, logs, or configuration panes, nor a no-op save button. It
+shows only the real collected fields and Close. The AST-based regression
+passed in a 98-test focused run; the test runtime lacks Textual/Rich, so live
+rendering remains unverified. See DR202.
+
+## DR201 incremental handoff — 2026-10-09
+
+The chat selector contains only the two real adapters, Claude Code and
+OpenCode. The previous Hermes/Pi/DeepSeek/GrokBot entries either had no
+adapter or, for Hermes ACP, exposed a default tool surface inconsistent with
+Baseline's no-tools boundary. The focused registry regression was RED before
+the catalog correction and now passes; no model request or operator credential
+was used. A new backend needs a conforming adapter and permission review before
+it can be selectable. See DR201.
+
+## DR200 incremental handoff — 2026-10-09
+
+AppData has a read-only runtime preflight: `verify_appdata_mount` requires a
+known persona, that persona's labeled volume, an exact ext4 mount at the
+configured mountpoint, and matching resolved source identity. Missing or
+ambiguous state is an error rather than a substrate-directory fallback. The
+77 AppData unit tests passed with scripted command results. No physical drive
+was mounted or changed. This does not apply overlays or enforce sandbox access;
+queue74/REAL-008 remains open for Chromium-in-Ubuntu launch, sharing, migration,
+reset, recovery, and guest verification. See DR200 and
+`docs/design/runtime-reality-tasks.md`.
+
+## 2026-10-07 resumption — DR166
+
+DR165's completed KVM GUI/browser acceptance remains the latest runtime proof.
+Current INSTALL and installer checklist entries that still called it pending
+have been corrected; historical decision records are unchanged. Physical cold
+boot and production web Build/Rebuild execution remain open under rows72/78.
+
+REAL-006 now rejects malformed/partially parsed PCI, USB, whole-disk and network
+command output. Failed buses retain explicit errors alongside successful buses;
+confirmed empty output remains valid. Nine regressions failed before repair;
+66 focused hardware/runtime-error tests passed afterward using fakes. Actual
+read-only development-host PCI/USB/network output also parsed successfully
+(45/25/5 devices), without fakes; no block inventory, QEMU/native boot or drive
+write occurred. Unavailable driver metadata,
+missing stdout, real block-output compatibility and outer collector fallbacks remain
+open in the runtime register. Full unrestricted unit suite: **3425 passed**,
+no skips/deselections; git diff --check passed. Evidence and scope: DR166 and
+verification/166. Changes remain local; the production web service was not reloaded.
+
 > **Drive letters in this document are as of when it was written and are not stable.**
 > Identify drives by serial, never by `/dev/sdX`. As of 2026-09-30:
-> serial `FD01N6557110C271B` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
-> `MD89N41071210AP4E` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
-> `ls -l /dev/disk/by-id/ | grep -E 'FD01N6557110C271B|MD89N41071210AP4E'` (v0.2 rows 27-29).
+> serial `<PC601 drive serial>` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
+> `<PC401 drive serial>` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
+> `ls -l /dev/disk/by-id/ | grep -E '<PC601 drive serial>|<PC401 drive serial>'` (v0.2 rows 27-29).
 
 ## Current application-task handoff — 2026-10-03, DR134
 
@@ -26,7 +472,7 @@ worked; the console displayed Chromium's real Proxmox login. 2839 guarded unit
 tests passed. Evidence: [verification/117](verification/117/README.md).
 
 **No physical drive was modified and no bare-metal deployment was verified.**
-Source PC601 serial FD01N6557110C271B was read-only under a disposable /tmp
+Source PC601 serial <PC601 drive serial> was read-only under a disposable /tmp
 QEMU overlay. The other SK hynix drive was untouched. Current clone root was
 expanded to 24 GiB; the minimal new-install preset is now 16 GiB, not 5 GiB.
 Full provisioning, physical mounts/bind redirects/reboot/production kiosk gate,
@@ -297,6 +743,11 @@ before and after the fix.
 
 Full suite: 1497/1497 (was 1485). Import checker and persistence-typo
 guard both clean.
+
+The `update_selected` status above describes the 2026-09-29 implementation only
+and is superseded by DR204: cached Debian `.deb` artifacts now have a verified
+download-only APT update flow. ISO, OCI, and pinned-script update flows remain
+open under REAL-010.
 
 **Still pending from the ask below**: `apply_volume_mode`/
 `switch_persona` (real, tested functions) have no web-UI entry point
@@ -582,7 +1033,7 @@ Direct instruction: the configuration surface is going to grow to "everything an
 - Full suite: 1348/1348 (was 1339).
 
 **Not done / left for next session:**
-1. No real click-through of the corrected action against physical hardware yet this pass - the fix was found by code inspection (comparing what the JS sends to what the server required), not by re-running the failed attempt. `/dev/sdd` is still the real target (512GB SK Hynix, serial `FD01N6557110C271B`); `/dev/sdb` still has the empty `baseline_persist` LVM VG left over from the earlier "Install" mishap (harmless - drive was empty - but still real, current state).
+1. No real click-through of the corrected action against physical hardware yet this pass - the fix was found by code inspection (comparing what the JS sends to what the server required), not by re-running the failed attempt. `/dev/sdd` is still the real target (512GB SK Hynix, serial `<PC601 drive serial>`); `/dev/sdb` still has the empty `baseline_persist` LVM VG left over from the earlier "Install" mishap (harmless - drive was empty - but still real, current state).
 2. Real hardware needs a Proxmox source ISO at one of `DEFAULT_SOURCE_ISO_SEARCH_PATHS` in `self_installer.py`, or the action will now cleanly refuse ("no Proxmox source ISO found") instead of crashing - check that path exists on the actual box before the next click.
 3. QEMU SLIRP's `10.0.2.2` reaching the host-run `EphemeralAnswerServer` is still not empirically verified on this host - reasoned as correct, distinguished from the different, confirmed-broken `guestfwd` mechanism (decision records 15-16), but nobody has watched a real round-trip succeed yet.
 4. Work-queue item #18 (run `homeassistant-lxc`/`haos-vm` under real QEMU) still untouched.
@@ -674,7 +1125,7 @@ Full suite: **922/922 passing.** `docs/design/v0.1-work-queue.md` items #14 and 
 
 ### Right now, unfinished - a live disk-merge investigation, nothing executed yet
 
-User decided to **merge the two physical drives** from `docs/INSTALL.md`'s table (`sdd`, the Proxmox substrate, serial `FD01N6557110C271B`; `sdb`, the persistence backend, serial `MD89N41071210AP4E`) into one - "not the end result and doesn't need to be the journey," both currently connected via USB to the dev machine (this machine, **not** the laptop), neither currently in the laptop.
+User decided to **merge the two physical drives** from `docs/INSTALL.md`'s table (`sdd`, the Proxmox substrate, serial `<PC601 drive serial>`; `sdb`, the persistence backend, serial `<PC401 drive serial>`) into one - "not the end result and doesn't need to be the journey," both currently connected via USB to the dev machine (this machine, **not** the laptop), neither currently in the laptop.
 
 **Real facts gathered, read-only, both drives left exactly as found (mounted/activated then cleanly unmounted/deactivated afterward):**
 
@@ -1430,3 +1881,418 @@ actual isolated KVM boot reached the Proxmox menu. No physical writes. The real
 six-volume drive still lacks ready AppData targets. Applying mounts, migrating
 state, durable stage jobs and full firstboot remain open72/75/76. DR139 and
 other concurrent production audit edits remain separate, not published here.
+
+
+## 2026-10-04 — production reality audit (DR142)
+
+Read docs/design/runtime-reality-tasks.md before continuing runtime claim work.
+REAL-001 through REAL-012 name concrete repair/verification tasks, acceptance
+checks and existing queue rows. Failed metrics/config/hardware probes now
+report errors rather than empty/disabled data; error IDs reach settings and
+firstboot. Handoff category mapping is unavailable; full generic restore still
+exists. iperf server submission reports readiness unverified and may leave a
+bounded running unit. Network preference no longer invents a gateway and checks
+route mutation failures, but rollback is unfinished. Boot ancestry supports a
+single bounded chain, refusing branches/cycles; real Proxmox proof remains open.
+DR141's DHCP-schema finding was incorrect; the redundant patch is removed and
+this correction is documented by DR142. INSTALL.md and the queue are current.
+Final guarded suite:3241 passed in108.41s; imports/syntax/whitespace checks pass.
+Evidence lives in docs/verification/142. All this increment is synthetic/local
+boundary verification, no physical device/credential/Proxmox deployment work.
+Changes are uncommitted; inherited untracked DR139/tests and scratch artifacts
+remain untouched. Do not treat this first audit pass as full-project readiness.
+
+## 2026-10-04 — malformed observations and drive roles (DR143)
+
+REAL-001 rejects invented VM IDs and invalid measurements. REAL-002 rejects
+opaque smartd files; failed readback prevents partial updates overwriting them.
+Twelve new cases were confirmed failing before repair; 211 focused synthetic
+tests passed. This is not a fresh full-suite or live Proxmox result.
+Read-only metadata in docs/verification/143 confirms PC601 /dev/sdc3 holds
+Proxmox LVM (root, swap, thin storage); PC401 /dev/sdd holds six Baseline
+volumes. They currently serve different roles, and copying the latter layout
+over the former would replace the Proxmox installation. Root is 5 GiB and
+87% full. No physical writes or mounts occurred; inactive guest contents and
+free VG capacity were not established. INSTALL and layer docs are current.
+Continue from runtime-reality-tasks.md; changes remain local/uncommitted.
+
+## 2026-10-04 — placement direction (DR144)
+
+Operator requires configurable read/write destinations and predefined roles.
+If 512 GB storage cannot fit, evaluate slower enrolled drives and reassess
+occupants. REAL-013 tracks common capacity-aware policy and recoverable
+migration under rows 72/75/76. Documentation only; no production changes,
+physical operations or runtime proof.
+# 2026-10-04 — native restart request in the production web app (DR148)
+
+Restart host is now in the shared navigation, dispatched through authenticated
+POST /host/restart to the sole active local Ubuntu/GNOME desktop. It invokes
+gnome-session-quit --reboot as that desktop user, preserving native confirmation
+and inhibitors. The current desktop web process was reloaded with its existing
+configuration. 72 focused tests pass (synthetic command checks and real HTTP
+sockets); live /login answers and unauthenticated restart redirects to login.
+Actual native dialog/reboot is pending the operator's web click. No successful
+host restart or PC401 post-rename boot was observed. DR146/REAL-013 stays open;
+repeatable drive workflow integration is queued under v0.2 row78.
+
+## 2026-10-04 configuration-first web increment (DR149)
+
+Master Config reads current owner-backed sources, with one long searchable/filterable
+page. Settings/Admin edits retain their original real handlers and elevation.
+The wider UI changes and remaining work are recorded in
+`docs/design/configuration-web-checklist.md`. Physical PC401 boot remains unresolved.
+
+## 2026-10-04 — Durable configuration drafts (DR150)
+
+Resolved DR149's missing installer/recipe draft source. Production web state now
+includes owner-scoped `configuration-drafts.sqlite`; both editors load/autosave
+via authenticated routes with revision conflict handling. Master Config reads
+these same records. Real SQLite, local HTTP and isolated Chromium persistence
+checks passed; this does not install or verify any plan or alter the physical
+PC401 boot boundary. Remaining unrelated UI work stays in the checklist.
+
+## 2026-10-04 — Hardware categories and package associations (DR151)
+
+Hardware category tabs group inventory and driver controls. Drives open the
+matching eligible Drive Administration card by serial, with no fallback choice
+for an absent requested serial. Packages show observed installed versions and
+module file ownership; associated cache entries have direct anchors. Guest disk
+links remain VM configuration links. 320 Python checks and isolated Chromium
+navigation checks passed. Real host package observation was read-only; no module
+load, package installation, physical disk write or new boot verification.
+
+## 2026-10-04 — Real iperf3 verification (DR152)
+
+Operator required no FakeRunner and narrowed continuation to iperf3. Server
+requests now use unique single-use, 600-second services and verify active state
+plus a requested-port TCP socket owned by MainPID. Failed readiness stops only
+the new service and observes actual cleanup, including systemd collection.
+Optional explicit private/local binding and invalid-role refusal are supported.
+Actual Ubuntu host systemd/ss/iperf3 checks passed: loopback transfer, port
+conflict without stopping the original, listener exit, missing executable and
+invalid inputs. The real integration script and evidence live under
+tests/integration/verify_iperf3_runtime.py and docs/verification/152.
+Temporary downloaded/extracted packages were used; no host packages installed.
+No physical drive writes, Proxmox deployment or native boot proof. LAN/browser,
+delayed startup and cleanup-failure runtime checks remain REAL-003 follow-ups.
+No current web service reload or publication occurred; changes remain local.
+
+## 2026-10-04 — LAN discovery, physical blocker and real inventory (DR153)
+
+Operator delegated LAN endpoint discovery. Actual short iperf3 and unauthenticated
+Proxmox queries checked 253 addresses (physical 10.0.0.0/24 excluding both local
+addresses plus observed virtual neighbor); no working standard-port endpoint was
+found. Evidence: verification/153/lan-discovery.json. Multipass requires operator
+authentication, so no credential was used to access it. No LAN throughput or
+installed Proxmox workflow pass is claimed. PC401 read-only diagnosis confirms
+root is still open across 23 mount namespaces; serial/PV/VG identities match.
+No unmount, service restart, LVM deactivation, drive write or reboot occurred.
+
+Next independent REAL-006 work fixed missing MAC-less interfaces: actual
+collect_net omitted tailscale0 before repair and includes it afterward. Real
+command/sysfs checks pass for five interfaces, 45 PCI devices/driver bindings
+and 13 whole-disk entries, without FakeRunner. Malformed/partial-output and
+unknown driver readback remain open. Source inspection also found that partial
+Diagnostics server apply cannot reuse an already active firewall because the
+pipeline requires firewall apply in the same request; this REAL-003 fix/runtime
+verification remains pending. Current web service was not reloaded or published.
+
+
+## 2026-10-04 — Optional explicit network diagnostics (DR154)
+
+Standard ports were discovery defaults, not normal-use requirements. Diagnostics
+saves now persist real SQLite options without a test. apply_stored_config defaults
+run_active_diagnostics=False; only the explicit authenticated same-origin POST
+/diagnostics/iperf3/run opts in. Manual typed form is outside autosave. Missing
+client peers refuse. Server requests verify existing nft JSON private-source
+policy without rewriting it; failed requested firewall changes still block.
+Transient systemd servers join the caller network namespace; successful Run
+returns listener details or measured throughput.
+
+RED preceded GREEN. Five focused actual-state tests pass; actual HTTP verifies
+authentication/cross-site refusal, saving and typed-form/missing-peer refusal.
+Actual isolated nftables checks pass restrictive-policy acceptance and permissive,
+public-source and missing-policy refusal. Actual settings backend starts an owned
+listener on port 33275 and measures 60165 Mbit/s virtual local traffic. Host
+iperf3 regression also passes readiness, port-conflict cleanup and single-use
+exit. No FakeRunner proof or full fake suite run. Evidence: verification/154.
+No physical LAN throughput, native login, successful browser active test or
+installed Proxmox/native boot is claimed. No desktop firewall rewrite, permanent
+package install or drive change. Production web was not reloaded or published.
+
+REAL-003 optional diagnostic follow-ups are P2. PC401 mount recovery/installed
+boot remains important and open under DR146/queue78; core REAL-009 installer and
+firstboot/storage work remains open. DR153 remains history; living docs correct
+its broad endpoint-blocker framing and its now-resolved partial-firewall finding.
+
+## Standard throughput port — 2026-10-04 (DR155)
+
+Actual default-port server/client workflow passed on TCP 5201 without FakeRunner
+in an isolated Linux namespace; measured traffic was virtual local, not physical
+LAN. A temporary real host listener was observed at 10.0.0.231:5201, restricted
+to 10.0.0.0/24, for one client or up to ten minutes. It is not a persistent
+endpoint. Fresh discovery found no working peer among 253 private addresses.
+Physical LAN measurement remains open (REAL-003), as does PC401 boot (queue78).
+See DR155 and verification/155. No production web reload or Proxmox change.
+
+## Physical LAN throughput — 2026-10-04 (DR156)
+
+Resolved the unmeasured-physical-LAN finding: actual TCP 5201 transfers through
+Ethernet, the LAN/access point and Wi-Fi measured 189.4 Mbit/s Ethernet→Wi-Fi
+and 138.2 Mbit/s Wi-Fi→Ethernet (five seconds each). Separate endpoint isolation
+prevented local routing; hardware TX/RX counters corroborated the payload, and
+an actual loopback control was rejected. No FakeRunner or remote credential.
+This measures the same machine's two physical adapters through the network,
+not separate-host workflow or wired-only capacity. All temporary resources were
+independently observed removed; both links remain up. The earlier DR155 endpoint
+is stopped. See DR156 and verification/156. Separate-device/browser tests and
+PC401 installed Proxmox/native boot (DR146/queue78) remain open.
+
+## PC401 boot continuation — 2026-10-04 (DR157)
+
+Recovery/physical identity checks passed, but the guarded boot-only attempt
+stopped before VG deactivation/QEMU: root is held by 23 distinct mount namespaces
+across 45 processes. Ordinary namespace unmounts did not release it. Current
+GNOME shutdown inhibition requires the supported native-confirmed host lifecycle
+step before another boot attempt; no host restart or enclosure power-off occurred.
+Actual read-only ext4/LVM checks passed eight fstab role UUIDs, separate storage
+policy and marker identities, renamed GRUB root, nonempty kernel/initramfs files,
+enabled firstboot unit files and a 22-entry restoration manifest. This is physical
+configuration proof, not runtime services, post-rename QEMU boot or native cold
+boot. No FakeRunner. See DR157 and verification/157. Boot remains open under
+DR146/queue78; payload restoration hashes were not rechecked in this increment.
+
+## Installer input preparation — DR158
+
+Production web reloaded as PID1576009; login returned HTTP200 with same-origin
+Referrer-Policy. Installer Plan now offers Prepare installation inputs from the
+saved owned draft; actual immutable source/config snapshots and missing-input
+reports run as durable jobs. Source-only recovery and deduplication work; no
+Build/Rebuild execution. Final checklist: installer-acceptance-checklist.md.
+No physical target action in DR158. Concurrent DR157 physical read-only/boot-gate
+results remain separate and boot remains blocked; preserve PC601. See INSTALL
+for final unit/browser validation counts. No operator credential handled.
+
+## Application restart — 2026-10-04 (DR158)
+
+User explicitly requested restart through the application. Port8100 /login
+responds200; /drive-admin opened in the existing desktop browser on 127.0.0.1
+and localhost, but the browser shows Log in and exposes no Restart host control.
+Interactive operator sign-in requested; no credentials/cookies read or injected
+session created. No restart POST, native dialog or restart occurred. Continue
+with the actual authenticated button after user signs in, preserving native
+confirmation/inhibitors, then resume PC401 boot checks after host return.
+
+## Cache acquisition and base provenance — DR159
+
+Installer Cache supports authenticated durable native Ubuntu source acquisition,
+with a typed selector, actual download link, mounted cache UUID/label gate,
+pinned SHA256 and no replacement of corrupt bytes. Installer preparation consumes
+that actual source; VM preparation uses the same handler and checks base receipts.
+Full final units3364 passed (no skip/deselection), focused140, Chromium fixtures
+passed, native qemu-img/file checks passed. No physical target writes, actual
+publisher image download or boot. Web reloaded PID1598679, loginHTTP200.
+Other sources, target package closure and stage execution remain open. PC401
+native-confirmed host restart is still pending login per DR158 application handoff.
+
+## Restart authentication fixed — DR160
+
+Production web PID1624321 uses private HMAC-authenticated durable session records
+with token hashes. Login survives future web reloads until original expiry;
+logout revokes records. Existing discarded cookies need a fresh same-origin
+sign-in, then Restart host requests the native Ubuntu confirmation as before.
+Expired restart UI offers Sign in. Full3368/focused204 passed, no skips or
+selection; Chromium fixture check passed. No operator credentials/session tokens
+accessed and no host restart performed. PC401 queue78 remains open.
+
+## 2026-10-05 — GUI/browser and Ubuntu configuration overlays (DR163)
+
+Continue the operator's explicit request until BOTH the host GUI/browser and GUI
+Ubuntu with selected configuration overlays are working and tested. Do not stop
+at unit tests or treat historical DR117 screenshots as current acceptance.
+Implemented locale/desktop/homepage cloud-init overlays retained across OS rebuild,
+GUI controls and guarded Proxmox guest configuration verification. Host Chromium
+profile now uses verified APPDATA_ADMIN; kiosk requires pveproxy/storage gates.
+164 focused tests passed, plus native synthetic disk/seed continuity tests.
+Actual local HTTP and Playwright Chromium attempts were blocked by EPERM; /dev/kvm,
+/dev/dri and qm/pvesh are absent from this execution session. Current policy disallows
+sandbox overrides. Runtime-capable execution is required next; do not disguise or
+circumvent restrictions. No physical writes, native host restart or operator
+credentials handled. Next: current-source provisioning/firstboot on a disposable
+runtime target, real Cage/Chromium homepage, web-created Ubuntu Desktop login and
+Firefox rendering, effective configuration check, clean rebuild with retained user
+files, then physical cold boot. Evidence verification/163; queue72/74/75/76/78 open.
+
+## 2026-10-05 — DR165 live GUI completion
+
+Supersedes the in-progress status above. Both real virtual GUI/browser paths
+passed: shipped host cage/Chromium authenticated to Proxmox, and managed Ubuntu
+GDM/Firefox rendered and authenticated to the configured Proxmox endpoint. Two
+actual web-requested OS-overlay rebuilds retained login, document SHA256 and a
+Firefox-created bookmark; the OS-only marker disappeared. Read-only stopped-guest
+home inspection confirmed retention and clean unmount/NBD disconnect. Native
+configuration verification passed; GUI evidence remains separately observed.
+
+Production follow-up is implemented: new BASELINE profiles reserve 50 GiB,
+storage-policy v2 preserves v1 validation, and serial-validated native Proxmox
+storage reconciliation repairs only an absent old pve VG reference. Existing or
+foreign VGs fail explicitly. Shared Firefox policy construction aligns emitted
+seed and native verification; desktop autostart explicitly opens the homepage.
+These changes had confirmed failing regressions before fixes.
+
+Final full unit suite: **3412 passed**. An earlier run exceeded AF_UNIX path length;
+using a short temporary test directory passed without weakening or skipping tests.
+An orderly virtual host powerdown/relaunch also passed: all storage, firstboot,
+web and kiosk services active, globally visible /etc/baseline bind, and actual
+Chromium Proxmox rendering without repair. Evidence: docs/verification/165.
+
+Fixture limitations: browser recovery required Start New Session, and the
+disposable self-signed endpoint required certificate acceptance. A mistimed
+console input exposed only a generated disposable guest credential; it was
+rotated through the native reset-login workflow and temporary captures removed.
+No operator credentials were handled. Physical backing stayed explicitly
+read-only. Physical native cold boot remains unverified.
+
+
+## 2026-10-07 — DR167 installed-drive update continuation
+
+PC401 <PC401 drive serial> selected; preserve PC601 <PC601 drive serial>. Current native
+observations resolved these to /dev/sdc and /dev/sdb respectively; resolve afresh.
+Actual read-only LVM/debugfs inspection found idle PC401 volumes and matching
+independent marker/role fstab. BASELINE remains 8 GiB; no resize or physical write.
+Installer now has a reviewed existing-install update backed by the privileged
+private-namespace helper, captured source, recovery verification and durable jobs.
+No general Build/Rebuild completion or physical boot is claimed. New readiness
+checks verify actual HTTPS/firewall; repeat boot enforces the LAN-only policy.
+Real web server reloaded at localhost:8100; operator sign-in and fresh REDEPLOY /
+native confirmation are pending. Never obtain or type the operator's password.
+Tests/evidence and exact remaining boundaries: decision record167 and verification/167.
+
+## 2026-10-07 — DR168 grouped Installer workspace
+
+Automatic source preparation/review/native execution and phone-style shortcut
+groups are implemented. Chromium integration uses synthetic devices/executor;
+physical PC401 deployment, growth and boot remain unverified. Do not ask for the
+old manual Prepare/Review sequence again. Native PolicyKit remains mandatory.
+See DR168 and verification/168 for current results and remaining workload/driver
+requirements. PC601 remains protected by serial.
+
+## 2026-10-07 — DR169 additional display mode
+
+Both Current workspace and Phone desktop & taskbar are available. Layouts use
+owner-scoped installer-display drafts; do not merge them into installer/recipe
+documents or treat configured pages as running VMs. Corner swipe/hold, group
+editing/restoration/creation, Object Manager full/split, tabs/body swipes and
+configured-object copy/move passed real Chromium mouse/touch checks with
+synthetic workload executor/devices. 3454 full-suite passes, then 21 focused
+passes after the final UI controls. Physical status and queue72/74/75/76/78 stay
+open. DR169 documents the scope and screenshots.
+
+## 2026-10-07 — DR170 visible desktop entry
+
+The operator could not see the DR169 additions: fresh layouts used the old mode
+and collapsed taskbar. Defaults are now desktop/expanded, with a direct
+Installer desktop menu and ?display=desktop override. Explicit selector changes
+clear the override and save normally. 100 focused tests and the full mouse/touch
+browser interaction script passed with synthetic execution. Actual read-only
+discovery/autofill/catalog returned two drives and five applications. Real
+server reloaded; desktop URL opened. Do not claim operator-screen acceptance
+or physical deployment from that launch. Existing physical queues remain open.
+
+## 2026-10-08 — DR171 reference-matched Installer desktop
+
+Corrected the additional display mode after the operator showed that DR170's
+boxed workspace did not resemble the requested screen. The real Chromium
+renderer now fills the viewport with the left icon rail, wrapped icon/title
+taskbar, VM/container tabs, top-right remembered group, lower-left Edit dialog,
+and a Drivers Object Manager pane initially open. Apps/OS/drives are live
+catalog categories; configured VM/container pages remain configuration only.
+The Drivers view exposes a visible unavailable state and the real Hardware
+page because no verified universal package has been built.
+
+The old geometry assertion failed before the CSS/DOM correction. Current
+Chromium integration passed through browser screenshots, actual shortcut asset
+loads, narrow layout, display persistence, group gestures/editing, manager
+full/split, VM/container tabs, drag/drop and configured copy/move. Focused
+Installer/page tests passed 22; `git diff --check` passed. The screenshot in
+verification/171 is actual Chromium with synthetic device/executor fixtures.
+The live localhost server was relaunched from this checkout on loopback and its
+URL opened in the existing Chrome session. GNOME denied a live screenshot, so
+operator-window visual acceptance is still not claimed. No physical drive or
+Proxmox guest was touched. The universal driver package, machine profiles and
+physical PC401 install/boot/network/firewall remain open (queue72/74/75/76/78).
+DR170 is historical; INSTALL.md and the queue now state the corrected status.
+
+## 2026-10-08 — DR172 tab-free Installer environment desktop
+
+The operator rejected the visible environment tabs and text navigation in
+DR171. The desktop now uses an icon-and-title vertical rail for installer
+sections and active VM/container selection, a horizontal group shortcut strip,
+and six setup cards for drive assignment, Proxmox, OS, hardware, drivers and apps. Each VM/container has one modal collecting its related configuration; the default is the unprovisioned draft `testvm1`.
+The rail now omits unrelated admin/recovery links. Object Manager opens with
+all setup types grouped, avoiding the empty Drivers-only view. Advanced
+settings hold detailed controls. Apps are available-to-add catalog objects,
+not installed; no universal driver package exists, so its icon is grayed and
+explains the unavailable state. Real Chromium/HTTP checks pass, including
+phone-width overflow checks and copy/move. Focused Installer tests: 22 passed.
+Devices and privileged executor are synthetic; no physical drive, VM or
+Proxmox behavior was changed or verified. DR172 supersedes DR171's layout
+description. Physical setup and queue72/74/75/76/78 remain open.
+
+## 2026-10-08 — DR173 Installer desktop/build-plan wiring
+
+Chromium exposed that drive/OS/app desktop clicks only changed the presentation
+draft. Fixed the real mismatch: protected drive objects are disabled; selecting
+an eligible serial feeds the reviewed update target; OS selection writes the
+active environment name and variant to the canonical Installer Plan; app
+selection/configuration updates its saved build choices. Added integration
+assertions for the environment modal, draft name, protected-drive refusal,
+serial target, OS/app plan values and app configuration. Real Chromium/HTTP
+passed; focused Installer suite passed 22. All drive discovery and privileged
+execution in this browser test are synthetic. Current block inventory maps PC401
+and PC601 by serial but device nodes are absent in the execution namespace, so
+no physical operation was attempted. Full Build/Rebuild, multiple workload
+composition, PC401 boot/network/firewall, universal driver package and physical
+overlay/data proof remain open (queue72/74/75/76/78). See DR173 and
+`docs/design/decision-records/173-installer-desktop-build-plan-wiring.md`.
+
+## 2026-10-08 — PC601 selected; preserve existing Proxmox (DR174)
+
+The user selected PC601 serial `<PC601 drive serial>`. Host-visible read-only
+inspection in this continuation found the existing Debian 13/Proxmox system
+on the `pve` VG (`pve-root`, `pve-swap`, `pve-data`); package files and an
+enabled `pveproxy` unit are present. The root filesystem was about 87% used
+and the VG reported about 438.94 GiB free. The temporary `ro,noload` mount was
+unmounted successfully. No PC601 writes were made. Earlier DR173 wording about
+missing device nodes described only that turn's restricted namespace; it is
+superseded by this host-visible serial-based observation, not silently edited.
+Runtime boot, GUI reachability, LAN/internet, firewall, VM/container workload,
+driver install, and native persistence remain unverified. Do not overwrite the
+existing Proxmox layout with the Baseline drive installer. See DR174 and
+`docs/INSTALL.md`.
+
+## 2026-10-08 — Generated runtime artifact cleanup (DR175)
+
+Removed only completed/disposable outputs: the old DR133 pytest basetemp,
+DR140 generated ISO, DR146 failed QEMU `a/` attempt (its log shows QEMU failed
+before launch; its 512 GiB target was sparse/empty), and DR165 disposable QEMU
+overlay and local scratch. DR133/140/165 published verification artifacts
+remain. The DR165 allowlisted package proxy was promoted into `baseline/lib`
+with a failing-then-passing regression test before removing its temporary
+directory. PC401's separate 512 GiB recovery image remains untouched because
+The local 512 GiB raw copy was byte-identical to the independently mounted
+read-only recovery image; its SHA-256 matched the external manifest, so the
+redundant local copy was removed. The external `INCOMPLETE.json` predates the
+complete manifest; recovery verification accepts the complete hash-verified
+manifest and new snapshots now remove the stale marker. The physical PC401 and
+PC601 were untouched. The six runtime-proof directories totaled about 1.06 TiB
+apparent size but about 100 GiB allocated, chiefly because raw/qcow files are
+sparse. The final inventory has only `.runtime-proof146` and `.runtime-proof173`.
+`.runtime-proof146/physical-pc401-20261004T104517Z` retains 4.8 MB of root-owned
+staged package files after both normal and approved elevated cleanup returned
+permission errors; no permission/attribute workaround was used. The
+`.runtime-proof133` and `.runtime-proof138` directories also disappeared,
+although explicit cleanup commands did not name them. Their former large guest
+files were not found elsewhere under `/run/media/cane` or `/mnt`; Git marks the
+missing 138 worktrees prunable, with branch commits present and uncommitted
+worktree changes potentially lost. Cause is undetermined. See DR175.

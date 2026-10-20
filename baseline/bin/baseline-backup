@@ -28,7 +28,11 @@ def _create(args):
 
 
 def _list(args):
-    contents = backup_restore.list_backup_contents(RealRunner(), args.archive)
+    try:
+        contents = backup_restore.list_backup_contents(RealRunner(), args.archive)
+    except backup_restore.BackupReadError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     print("\n".join(contents))
     return 0
 

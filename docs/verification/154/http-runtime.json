@@ -1,0 +1,1 @@
+{"actual_http": true, "unauthenticated_refused": true, "cross_site_refused": true, "options_saved_without_test": true, "missing_peer_refused": true, "typed_manual_form_verified": true, "scope": "actual HTTP/session/SQLite contracts; no active test or physical deployment"}

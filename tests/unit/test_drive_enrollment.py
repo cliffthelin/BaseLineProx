@@ -13,8 +13,8 @@ import physical_device_safety as pds
 import registry
 from test_drive_admin import FakePdsRunner
 
-NEW = "S6WRNS0TA12638A"
-SK_HYNIX = "MD89N41071210AP4E"
+NEW = "SYNTHSATA000001"
+SK_HYNIX = "SYNTHDRIVEB00002"
 
 
 # --- the enrollment store ------------------------------------------------------------
@@ -38,19 +38,28 @@ def test_a_missing_or_malformed_serial_is_never_enrolled(serial):
     assert de.enrolled_serials() == frozenset()
 
 
-def test_an_unreadable_store_reads_as_nothing_enrolled(monkeypatch):
+def test_an_unreadable_store_is_not_reported_as_nothing_enrolled(monkeypatch):
     def broken(*a, **k):
         raise OSError("volume not mounted")
     monkeypatch.setattr(registry, "list_entries", broken)
-    assert de.enrolled_serials() == frozenset()
+    with pytest.raises(de.DriveEnrollmentError, match="volume not mounted"):
+        de.enrolled_serials()
+
+
+def test_allowed_target_inventory_propagates_enrollment_store_error(monkeypatch):
+    def broken(*a, **k):
+        raise OSError("registry database unreadable")
+    monkeypatch.setattr(registry, "list_entries", broken)
+    with pytest.raises(de.DriveEnrollmentError, match="registry database unreadable"):
+        da.allowed_target_serials()
 
 
 # --- drive_admin's gate now admits enrolled drives, and only those ----------------------
 
 def test_the_allowed_set_is_the_sk_hynix_drives_plus_enrolled_ones():
-    assert da.allowed_target_serials() == da.ALLOWED_TARGET_SERIALS
+    assert da.allowed_target_serials() == da.drive_guard.own_drive_serials()
     de.enroll(NEW, size_bytes=1, model="m", now=0.0)
-    assert da.allowed_target_serials() == da.ALLOWED_TARGET_SERIALS | {NEW}
+    assert da.allowed_target_serials() == da.drive_guard.own_drive_serials() | {NEW}
 
 
 def test_resolve_target_refuses_a_drive_until_it_is_enrolled():
@@ -126,9 +135,9 @@ def test_enrolling_an_already_allowed_drive_is_a_harmless_no_op():
 # --- discovery may list other drives, read-only and without detail ------------------------
 
 LSBLK = (
-    'NAME="sda" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" TRAN="sata" ROTA="1" SERIAL="WCV00YLT" TYPE="disk"\n'
-    'NAME="sdb" SIZE="476.9G" MODEL="PC401 NVMe SK hynix 512GB" TRAN="usb" ROTA="1" SERIAL="MD89N41071210AP4E" TYPE="disk"\n'
-    'NAME="nvme0n1" SIZE="953.9G" MODEL="GIGABYTE GP-GSM2NE3100TNTD" TRAN="nvme" ROTA="0" SERIAL="SN211808916391" TYPE="disk"\n'
+    'NAME="sda" SIZE="4.5T" MODEL="ST5000DM003-2FH18L" TRAN="sata" ROTA="1" SERIAL="SYNTHH01" TYPE="disk"\n'
+    'NAME="sdb" SIZE="476.9G" MODEL="PC401 NVMe SK hynix 512GB" TRAN="usb" ROTA="1" SERIAL="SYNTHDRIVEB00002" TYPE="disk"\n'
+    'NAME="nvme0n1" SIZE="953.9G" MODEL="GIGABYTE GP-GSM2NE3100TNTD" TRAN="nvme" ROTA="0" SERIAL="SYNTHBOOTNVME01" TYPE="disk"\n'
     'NAME="sdd" SIZE="14.9G" MODEL="Flash" TRAN="usb" ROTA="0" SERIAL="" TYPE="disk"\n'
 )
 
@@ -140,20 +149,29 @@ def _runner():
 
 def test_enrollable_drives_are_the_other_non_boot_drives_with_a_serial():
     runner = _runner()
-    drives = da.list_enrollable_drives(runner, pds_runner=FakePdsRunner(boot_serial="SN211808916391"))
-    assert [(d["path"], d["serial"]) for d in drives] == [("/dev/sda", "WCV00YLT")]
+    drives = da.list_enrollable_drives(runner, pds_runner=FakePdsRunner(boot_serial="SYNTHBOOTNVME01"))
+    assert [(d["path"], d["serial"]) for d in drives] == [("/dev/sda", "SYNTHH01")]
     assert set(drives[0]) == {"path", "serial", "model", "size"}
 
 
 def test_listing_enrollable_drives_only_reads_the_one_lsblk_listing():
     runner = _runner()
-    da.list_enrollable_drives(runner, pds_runner=FakePdsRunner(boot_serial="SN211808916391"))
+    da.list_enrollable_drives(runner, pds_runner=FakePdsRunner(boot_serial="SYNTHBOOTNVME01"))
     assert [c[0] for c in runner.calls] == ["lsblk"]
 
 
+def test_list_enrollable_drives_raises_when_drive_probe_fails():
+    from fake_runner import FakeProc, FakeRunner
+    runner = FakeRunner(command_responses=[
+        (lambda a: a[:1] == ["lsblk"], FakeProc(1, "", "lsblk denied")),
+    ])
+    with pytest.raises(da.DriveInventoryError, match="lsblk denied"):
+        da.list_enrollable_drives(runner, pds_runner=FakePdsRunner())
+
+
 def test_an_enrolled_drive_moves_to_the_candidate_list():
-    de.enroll("WCV00YLT", size_bytes=1, model="m", now=0.0)
-    pds_runner = FakePdsRunner(boot_serial="SN211808916391")
+    de.enroll("SYNTHH01", size_bytes=1, model="m", now=0.0)
+    pds_runner = FakePdsRunner(boot_serial="SYNTHBOOTNVME01")
     assert da.list_enrollable_drives(_runner(), pds_runner=pds_runner) == []
     assert "/dev/sda" in {d["path"] for d in da.list_candidate_drives(_runner(), pds_runner=pds_runner)}
 
@@ -162,3 +180,45 @@ def test_enrollment_is_confirmed_by_a_person_every_time_and_never_pre_approved()
     import hitl
     assert "enroll_drive" in hitl.CONFIRMED_ACTIONS
     assert "enroll_drive" in hitl.NEVER_PRE_APPROVED
+
+
+# --- every drive is shown, read-only, whether or not Baseline may act on it (operator 2026-10-14: "no drives found other than PC601") ---
+
+def test_every_drive_is_listed_with_why_baseline_will_or_will_not_act_on_it():
+    drives = da.list_all_drives(_runner(), pds_runner=FakePdsRunner(boot_serial="SYNTHBOOTNVME01"))
+    by_path = {d["path"]: d for d in drives}
+    assert set(by_path) == {"/dev/sda", "/dev/sdb", "/dev/nvme0n1", "/dev/sdd"}
+    assert by_path["/dev/nvme0n1"]["role"] == "boot"            # the drive this system is running from
+    assert by_path["/dev/sdb"]["role"] == "allowed"             # an SK hynix drive Baseline is set up with
+    assert by_path["/dev/sda"]["role"] == "not_enrolled"        # real, listed, and left alone until enrolled
+    assert by_path["/dev/sdd"]["role"] == "no_serial"           # cannot be enrolled: the serial is its identity
+
+
+def test_an_enrolled_drive_is_shown_as_allowed():
+    de.enroll("SYNTHH01", size_bytes=1, model="m", now=0.0)
+    drives = da.list_all_drives(_runner(), pds_runner=FakePdsRunner(boot_serial="SYNTHBOOTNVME01"))
+    assert {d["path"]: d["role"] for d in drives}["/dev/sda"] == "allowed"
+
+
+def test_listing_every_drive_reads_one_lsblk_listing_and_probes_nothing_else():
+    runner = _runner()
+    da.list_all_drives(runner, pds_runner=FakePdsRunner(boot_serial="SYNTHBOOTNVME01"))
+    assert [c[0] for c in runner.calls] == ["lsblk"]
+
+
+def test_listing_every_drive_does_not_widen_what_baseline_may_act_on():
+    pds_runner = FakePdsRunner(boot_serial="SYNTHBOOTNVME01")
+    da.list_all_drives(_runner(), pds_runner=pds_runner)
+    assert "/dev/sda" not in {d["path"] for d in da.list_candidate_drives(_runner(), pds_runner=pds_runner)}
+
+
+def test_the_drive_page_shows_every_drive_even_when_none_is_eligible():
+    import baseline_web
+    page = baseline_web.render_drive_admin_page(
+        drives=[], volumes=[], actions=da.describe_actions(),
+        all_drives=da.list_all_drives(_runner(), pds_runner=FakePdsRunner(boot_serial="SYNTHBOOTNVME01"))).decode()
+    assert "Drives found" in page
+    for text in ("SYNTHH01", "SYNTHDRIVEB00002", "SYNTHBOOTNVME01", "ST5000DM003-2FH18L"):
+        assert text in page
+    assert "running from" in page and "not enrolled" in page.lower()
+    assert "Every real, non-boot drive" not in page            # the old subtitle claimed more than the list held

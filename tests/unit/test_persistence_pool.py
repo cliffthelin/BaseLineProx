@@ -11,7 +11,7 @@ from fake_runner import FakeProc, FakeRunner
 import persistence_pool as pp
 
 
-VALIDATED = {"path": "/dev/sdb", "serial": "MD89N41071210AP4E", "size_bytes": 512110190592}
+VALIDATED = {"path": "/dev/sdb", "serial": "SYNTHDRIVEB00002", "size_bytes": 512110190592}
 
 
 # -- pure argv builders ---------------------------------------------------

@@ -47,6 +47,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+import references
 import registry
 
 ID_LENGTH = 9
@@ -253,6 +254,7 @@ def allocate(cluster: str, medium: str, subject: str, *, code: str | None = None
     registry.upsert_entry(REGISTRY_TYPE, value, scope=SCOPE, value={"retired": False},
                           attributes={"cluster": cluster, "medium": medium,
                                       "code": chosen, "subject": subject})
+    references.link_naming(value)      # DR255 backbone: the global reference for this local code (no-op without a host identifier)
     return value
 
 

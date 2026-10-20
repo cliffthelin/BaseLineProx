@@ -14,8 +14,7 @@ ReadOnlyPaths=/opt/baseline
 Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure
 RestartSec=5
-Environment=BASELINE_SCRIPTS_INBOX_DATA=/mnt/USER/scripts-inbox-auth/store.json
-Environment=BASELINE_SCRIPTS_INBOX_DIR=/mnt/USER/scripts_inbox
+Environment=BASELINE_SCRIPTS_INBOX_USE_ACTIVE_PERSISTENCE=1
 StandardOutput=journal
 StandardError=journal
 

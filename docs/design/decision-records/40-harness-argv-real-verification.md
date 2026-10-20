@@ -7,7 +7,7 @@ real binary, rather than left open pending real hardware.
 
 ## What made this possible
 
-This dev environment (`cane-System-Product-Name`) has no `qm`/`pct`/
+This dev environment (`<dev-host>`) has no `qm`/`pct`/
 `pvesh`/Docker daemon (decision record 36's blocker, unchanged - still
 true), but it does have a real, authenticated, working `claude` CLI
 installed (`claude --version` -> `2.1.226 (Claude Code)`). That's

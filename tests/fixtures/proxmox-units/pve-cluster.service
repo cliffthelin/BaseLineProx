@@ -1,0 +1,21 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=The Proxmox VE cluster filesystem
+ConditionFileIsExecutable=/usr/bin/pmxcfs
+Wants=corosync.service
+Wants=rrdcached.service
+Before=corosync.service
+Before=cron.service
+After=network.target
+After=sys-fs-fuse-connections.mount
+After=time-sync.target
+After=rrdcached.service
+DefaultDependencies=no
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target

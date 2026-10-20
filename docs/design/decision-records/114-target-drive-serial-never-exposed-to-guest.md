@@ -20,7 +20,7 @@ This was surprising: decision record 112's fix (`disk_serial=disk_serial`,
 not the shadowed `expected_serial`) was confirmed still present and
 correct in the code. The answer file's `filter.ID_SERIAL_SHORT` was
 genuinely being rendered with the real hardware serial
-(`FD01N6557110C271B`) this time - yet the installer still reported no
+(`<PC601 drive serial>`) this time - yet the installer still reported no
 matching device.
 
 ## Root cause
@@ -83,7 +83,7 @@ established pattern, never anything but the one intended command) and
 the result read back via screendump:
 
 - `udevadm info --query=property /dev/vda` on the real target disk
-  showed `ID_SERIAL=FD01N6557110C271B` present and correct, but **no**
+  showed `ID_SERIAL=<PC601 drive serial>` present and correct, but **no**
   `ID_SERIAL_SHORT` key at all anywhere in the full property listing.
 - To confirm this was a `virtio-blk` limitation and not something else,
   a second, entirely disposable test disk (a 1 MiB dummy file, never

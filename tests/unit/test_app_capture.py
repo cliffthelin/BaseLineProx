@@ -53,7 +53,9 @@ def test_inspection_is_available_as_a_durable_human_web_action(tmp_path):
 def test_inspection_submit_works_on_http_lan_without_secure_context_crypto():
     import subprocess
     import recipe_page
-    script=recipe_page.render().decode().split('<script>')[1].split('</script>')[0]
+    html=recipe_page.render().decode()
+    # Exercise the actual inspection handler independently of unrelated editor initialization.
+    script='async function inspectApp(){'+html.split('async function inspectApp(){',1)[1].split('function clear()',1)[0]
     harness="""const vm=require('vm');const fields={};let submitted=false;
 const context={document:{getElementById:id=>fields[id]||(fields[id]={value:id==='capture_vm'?'work':'bash',addEventListener(){}})},
 setTimeout,fetch:async(path,options)=>{submitted=JSON.parse(options.body).action==='inspect_app';return {ok:false,json:async()=>({message:'test refusal'})}}};
@@ -61,3 +63,15 @@ vm.createContext(context);vm.runInContext(SCRIPT,context);context.inspectApp().t
 """.replace('SCRIPT',__import__('json').dumps(script))
     result=subprocess.run(['node','-e',harness],capture_output=True,text=True)
     assert result.returncode==0,result.stderr
+
+
+def test_application_catalog_accepts_new_native_package_definition(monkeypatch):
+    import application_bundle as ab
+    monkeypatch.setattr(ab,'APPS',tuple(ab.APPS))
+    for name in ('PACKAGES','SOURCES','EXECUTABLES','APPLICATION_DEFINITIONS'):
+        monkeypatch.setattr(ab,name,dict(getattr(ab,name)))
+    ab.register_application({'id':'gimp','name':'GIMP','package':'gimp','executable':'usr/bin/gimp',
+        'source_url':'https://archive.ubuntu.com/ubuntu/pool/universe/g/gimp/gimp_3.0_amd64.deb','sha256':'a'*64})
+    recipe=ab.bind('gimp',{}, {'url':'https://archive.ubuntu.com/ubuntu/pool/universe/g/gimp/gimp_3.0_amd64.deb',
+        'sha256':'a'*64,'version':'3.0','package':'gimp','medium':'deb'}, {'os':'ubuntu','release':'24.04','arch':'amd64'})
+    assert recipe['app']=='gimp' and 'gimp' in ab.APPS

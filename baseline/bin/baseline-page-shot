@@ -1,0 +1,10 @@
+#!/bin/sh
+# baseline-page-shot PATH OUT [WIDTH HEIGHT [simple|advanced]]
+# A true desktop-size render of a page of the running preview (baseline-web-preview), drawn by headless Chrome with its scripts run, so layout is judged at the window sizes people really use.
+# It never touches a visible browser window. Needs the preview running and google-chrome installed; reads the preview's output file for its one throwaway session.
+OUT_FILE=${BASELINE_PREVIEW_OUT:-/tmp/baseline-preview.out}
+T=$(grep -o 'session=[^ ]*' "$OUT_FILE" | head -1 | cut -d= -f2)
+H=$(mktemp /tmp/baseline-shot-XXXXXX.html)
+curl -s -H "Cookie: session=$T" "http://127.0.0.1:${BASELINE_PREVIEW_PORT:-8190}$1" | sed "s/localStorage.getItem('baseline-mode')||'simple'/'${5:-simple}'/" > "$H"
+timeout 90 google-chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=4000 --window-size=${3:-1440},${4:-1000} --screenshot="$2" "file://$H" >/dev/null 2>&1
+rm -f "$H"

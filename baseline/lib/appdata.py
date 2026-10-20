@@ -264,10 +264,10 @@ class ContainerBind:
 
 # Persistent-data targets per application, by catalog id. A path here is a
 # real location that application writes to and that must therefore be
-# redirected onto AppData. An app absent from this map, or mapped to an
-# empty tuple, genuinely has no per-person data (a library, a one-shot
-# CLI) - recorded explicitly rather than guessed, so "no overlay" is a
-# stated finding and never an oversight.
+# redirected onto AppData. An explicitly empty tuple means the catalog
+# owner confirmed that a package has no per-person data (for example, a
+# library or one-shot CLI). A missing key is an unknown policy and must
+# never be treated as a stateless app.
 DATA_TARGETS: dict = {
     # --- deb packages ------------------------------------------------
     "chromium": ("~/.config/chromium", "~/.cache/chromium"),
@@ -315,9 +315,35 @@ class OverlayMount:
     upperdir: str        # the app's personal writable layer, on AppData
     workdir: str         # overlayfs scratch; must share a filesystem with upperdir
 
-    def mount_argv(self) -> list:
-        opts = f"lowerdir={self.lowerdir},upperdir={self.upperdir},workdir={self.workdir}"
-        return ["mount", "-t", "overlay", "overlay", "-o", opts, self.target]
+    def mount_argv(self, *, target_home: str | None = None) -> list:
+        """Build an executable mount command with no shell-style paths.
+
+        `mount` does not expand `~`; per-person targets therefore require
+        the actual home directory resolved for the target persona. Absolute
+        system targets need no home. Overlay option delimiters are rejected
+        because commas and colons have meaning to OverlayFS mount parsing.
+        """
+        def resolve(path: str) -> str:
+            if path.startswith("~/"):
+                if not target_home:
+                    raise ValueError("target_home is required to resolve a per-user overlay target")
+                if (not target_home.startswith("/") or target_home == "/"
+                        or posixpath.normpath(target_home) != target_home.rstrip("/")
+                        or any(char in target_home for char in ",:\\")
+                        or any(ord(char) < 32 or ord(char) == 127 for char in target_home)):
+                    raise ValueError("target_home must be a canonical absolute path without overlay delimiters")
+                return posixpath.join(target_home, path[2:])
+            return path
+
+        lowerdir = resolve(self.lowerdir)
+        upperdir = resolve(self.upperdir)
+        workdir = resolve(self.workdir)
+        target = resolve(self.target)
+        for path in (lowerdir, upperdir, workdir, target):
+            if not path.startswith("/") or any(char in path for char in ",:\\"):
+                raise ValueError("overlay mount paths must be absolute and cannot contain overlay delimiters")
+        opts = f"lowerdir={lowerdir},upperdir={upperdir},workdir={workdir}"
+        return ["mount", "-t", "overlay", "overlay", "-o", opts, target]
 
 
 @dataclass
@@ -329,6 +355,7 @@ class AppPlan:
     registry_db: str                # its own registry, not a shared one
     owner_user: str                 # its own uid/gid, derived from the identifier
     owner_group: str
+    owner_uid: int                   # deterministic and distinct for each persona/app pair
     mode: str                       # 0700 - no cross-app access
     alias: naming.AliasLink | None = None
     overlays: list = field(default_factory=list)
@@ -348,6 +375,76 @@ class AppPlan:
 APPDATA_PREFIX_MARKER = "/mnt/APPDATA_"
 APPDATA_MODE = "0700"
 APP_CLUSTER = "A"
+APP_UID_BASE = 100_000
+APP_UID_PERSONA_STRIDE = 70_000_000
+
+
+class AppDataRuntimeError(RuntimeError):
+    """AppData cannot safely use the configured persistence volume."""
+
+
+def verify_appdata_mount(runner, persona: str) -> str:
+    """Require the persona's labeled ext4 volume to be mounted at its root.
+
+    This function is intentionally read-only. It refuses a missing label,
+    an unmounted directory, a different filesystem, or a mount sourced from
+    any device other than the labeled volume.
+    """
+    import shlex
+    import drive_installer
+
+    if persona not in drive_installer.DEFAULT_PERSONAS:
+        raise ValueError(f"unknown AppData persona {persona!r}")
+
+    root = appdata_root(persona)
+    label = appdata_label(persona)
+    try:
+        device = runner.run(["blkid", "-L", label], timeout=10)
+        if device.returncode != 0 or not device.stdout.strip():
+            raise AppDataRuntimeError(f"AppData volume {label} is not present")
+        source = device.stdout.strip().splitlines()[0]
+
+        mounted = runner.run([
+            "findmnt", "--noheadings", "--output", "SOURCE,FSTYPE",
+            "--mountpoint", root,
+        ], timeout=10)
+        if mounted.returncode != 0 or not mounted.stdout.strip():
+            raise AppDataRuntimeError(f"AppData volume {label} is not mounted at {root}")
+        fields = shlex.split(mounted.stdout.strip())
+        if len(fields) != 2 or fields[1] != "ext4":
+            raise AppDataRuntimeError(f"AppData mount at {root} must be ext4")
+        mounted_source = fields[0]
+
+        expected_real = runner.run(["readlink", "-e", source], timeout=10)
+        actual_real = runner.run(["readlink", "-e", mounted_source], timeout=10)
+        if (expected_real.returncode != 0 or actual_real.returncode != 0
+                or not expected_real.stdout.strip()
+                or expected_real.stdout.strip() != actual_real.stdout.strip()):
+            raise AppDataRuntimeError(
+                f"mounted AppData source {mounted_source} does not match labeled volume {source}"
+            )
+    except AppDataRuntimeError:
+        raise
+    except Exception as exc:
+        raise AppDataRuntimeError(f"could not verify AppData volume {label}: {exc}") from exc
+    return root
+
+
+def owner_uid_for(persona: str, baseline_id: str) -> int:
+    """Map a persistent app identity to a stable host UID.
+
+    The ID code is unique within the app cluster. A disjoint range per
+    configured persona means the same catalog app in two personas never
+    shares an operating-system identity or AppData ownership.
+    """
+    import drive_installer
+    if persona not in drive_installer.DEFAULT_PERSONAS:
+        raise ValueError(f"unknown AppData persona {persona!r}")
+    parsed = naming.parse_id(baseline_id)
+    if parsed.cluster != APP_CLUSTER:
+        raise naming.NamingError("AppData owner IDs must belong to the application cluster")
+    code = int(parsed.code, 36)
+    return APP_UID_BASE + drive_installer.DEFAULT_PERSONAS.index(persona) * APP_UID_PERSONA_STRIDE + code
 
 
 def appdata_label(persona: str) -> str:
@@ -398,11 +495,16 @@ def _escape_target(target: str) -> str:
 def _skip_substrate_and_drivers(entry) -> bool:
     """Drivers are excluded by the instruction; the Proxmox source ISO is
     the substrate itself, not an application running on it. VM and LXC
-    installers are excluded as well: VMs and LXCs live on INSTALLER_CACHE (Proxmox
+    installers are excluded as well (and the ready-made OS bases, the Kasm base and the guest applications, which
+    carry their own data): VMs and LXCs live on INSTALLER_CACHE (Proxmox
     only needs to reach them, operator decision 2026-09-30), not in per-persona
     AppData."""
     import installer_cache as ic
-    return entry.kind in (ic.KIND_FIRMWARE, ic.KIND_ISO, ic.KIND_SCRIPT)
+    return entry.kind in (ic.KIND_FIRMWARE, ic.KIND_ISO, ic.KIND_SCRIPT, ic.KIND_BASE, ic.KIND_KASM, ic.KIND_APP)
+
+
+class DataTargetPolicyError(ValueError):
+    """A catalog application lacks an explicit persistent-data policy."""
 
 
 def installable_apps() -> list:
@@ -414,14 +516,23 @@ def installable_apps() -> list:
         if _skip_substrate_and_drivers(entry):
             continue
         if entry.kind == ic.KIND_PACKAGE:
+            if entry.entry_id not in DATA_TARGETS:
+                raise DataTargetPolicyError(
+                    f"{entry.entry_id}: no explicit AppData data-target policy; declare real targets or an empty tuple"
+                )
             kind = KIND_PACKAGE
         elif entry.kind == ic.KIND_IMAGE:
+            if entry.entry_id not in CONTAINER_BINDS:
+                raise DataTargetPolicyError(
+                    f"{entry.entry_id}: no explicit AppData container-bind policy; declare real binds or an empty tuple"
+                )
             kind = KIND_CONTAINER
         else:
             raise ValueError(f"catalog entry {entry.entry_id!r} has unmapped kind {entry.kind!r}")
         apps.append(AppSpec(
             app_id=entry.entry_id, name=entry.name, kind=kind, source=entry.origin,
-            data_targets=tuple(DATA_TARGETS.get(entry.entry_id, ())), notes=entry.notes,
+            data_targets=tuple(DATA_TARGETS[entry.entry_id]) if entry.kind == ic.KIND_PACKAGE else (),
+            notes=entry.notes,
             image_ref=entry.pinned_ref if entry.kind == ic.KIND_IMAGE else "",
         ))
     return apps
@@ -452,11 +563,12 @@ def plan_for(persona: str, app: AppSpec, assignment: naming.Assignment) -> AppPl
         raise naming.NamingError(f"{assignment.value} does not match {app.app_id} "
                                  f"(cluster {APP_CLUSTER}, medium {app.medium.letter})")
     home = naming.assert_canonical(app_home(persona, assignment.value))
-    owner = parsed.owner_name
+    owner = f"baseline-{persona}-{str(parsed).lower()}"
     alias = naming.alias_link(appdata_root(persona), app.app_id, assignment.value)
     common = dict(app=app, baseline_id=assignment.value, id_allocated=assignment.allocated,
                   home=home, registry_db=f"{home}/registry.db", owner_user=owner,
-                  owner_group=owner, mode=APPDATA_MODE, alias=alias)
+                  owner_group=owner, owner_uid=owner_uid_for(persona, assignment.value),
+                  mode=APPDATA_MODE, alias=alias)
 
     if app.kind == KIND_CONTAINER:
         binds = [ContainerBind(host=naming.assert_canonical(f"{home}/binds/{_escape_target(p)}"),

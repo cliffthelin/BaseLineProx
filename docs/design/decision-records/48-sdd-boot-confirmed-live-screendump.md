@@ -2,9 +2,9 @@
 
 > **Drive letters in this record are as of when it was written and are not stable.**
 > Identify drives by serial, never by `/dev/sdX`. As of 2026-09-30:
-> serial `FD01N6557110C271B` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
-> `MD89N41071210AP4E` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
-> `ls -l /dev/disk/by-id/ | grep -E 'FD01N6557110C271B|MD89N41071210AP4E'` (v0.2 rows 27-29).
+> serial `<PC601 drive serial>` (PC601, Proxmox install, `pve` VG) is `/dev/sdc`, and serial
+> `<PC401 drive serial>` (PC401, the Baseline drive) is `/dev/sdd`. Read the current mapping with
+> `ls -l /dev/disk/by-id/ | grep -E '<PC601 drive serial>|<PC401 drive serial>'` (v0.2 rows 27-29).
 
 
 Status: **confirmed, for real, with direct visual evidence** - the

@@ -11,7 +11,6 @@ config files found during the settings-to-SQL migration review.
 `load_preference`/`save_preference` keep their exact prior signatures
 and return shape so `bin/baseline` (the only real caller) needed no
 changes."""
-import ipaddress
 import subprocess
 
 import settings_store
@@ -40,24 +39,15 @@ def save_preference(primary=None, fallback=None):
 
 
 def _device_gateway(dev: str):
-    """This device's own gateway, from a route it already installed (its
-    own default route, if dhclient added one) or, failing that, the
-    first host address in its subnet as a best-effort fallback - not
-    always correct, but reasonable when nothing better is known."""
+    """Use an observed installed default route; never invent a gateway."""
     proc = subprocess.run(["ip", "-4", "route", "show", "dev", dev],
-                           capture_output=True, text=True)
-    for line in proc.stdout.splitlines():
-        if line.startswith("default via"):
-            return line.split()[2]
-
-    proc = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", dev],
-                           capture_output=True, text=True)
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
     for line in proc.stdout.splitlines():
         parts = line.split()
-        if "inet" in parts:
-            iface = ipaddress.ip_interface(parts[parts.index("inet") + 1])
-            hosts = list(iface.network.hosts())
-            return str(hosts[0]) if hosts else None
+        if len(parts) >= 3 and parts[:2] == ["default", "via"]:
+            return parts[2]
     return None
 
 
@@ -68,9 +58,11 @@ def apply_primary(dev: str):
     has to be manually re-added later."""
     gw = _device_gateway(dev)
     if not gw:
-        return False, f"could not determine {dev}'s own gateway"
+        return False, f"REAL-007: no observed default gateway for {dev}; route preference not applied"
 
     proc = subprocess.run(["ip", "-4", "route", "show", "default"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return False, "REAL-007: default route discovery failed; preference not applied"
     for line in proc.stdout.splitlines():
         parts = line.split()
         if "dev" not in parts:
@@ -79,9 +71,15 @@ def apply_primary(dev: str):
         if other_dev == dev:
             continue
         other_gw = parts[parts.index("via") + 1] if "via" in parts else None
-        subprocess.run(["ip", "route", "del", "default", "dev", other_dev], capture_output=True)
+        if not other_gw:
+            return False, "REAL-007: cannot demote a gateway-less route safely; no success claimed"
+        removed = subprocess.run(["ip", "route", "del", "default", "dev", other_dev], capture_output=True)
+        if removed.returncode != 0:
+            return False, "REAL-007: fallback route removal failed; preference not saved"
         if other_gw:
-            subprocess.run(["ip", "route", "add", "default", "via", other_gw, "dev", other_dev, "metric", "100"], capture_output=True)
+            added = subprocess.run(["ip", "route", "add", "default", "via", other_gw, "dev", other_dev, "metric", "100"], capture_output=True)
+            if added.returncode != 0:
+                return False, "REAL-007: fallback route re-add failed after removal; routes may be partially changed; preference not saved"
 
     result = subprocess.run(["ip", "route", "replace", "default", "via", gw, "dev", dev, "metric", "0"],
                              capture_output=True, text=True)

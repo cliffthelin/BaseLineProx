@@ -21,25 +21,62 @@ from pathlib import Path
 HARNESS_ENV_FILE = "/etc/baseline/harness.env"
 
 
-def _env_or_file(var_name: str) -> bool:
-    if os.environ.get(var_name):
+def _env_or_file(*var_names: str) -> bool:
+    """Whether any named credential is configured, preserving read errors.
+
+    An unreadable credential file is unknown, not evidence that no key is
+    configured. Environment values are checked first so an authoritative
+    process credential remains usable even if the optional file is unreadable.
+    """
+    if any(os.environ.get(name) for name in var_names):
         return True
-    if os.path.exists(HARNESS_ENV_FILE):
-        try:
-            for line in open(HARNESS_ENV_FILE):
-                if line.strip().startswith(f"{var_name}="):
-                    return True
-        except OSError:
-            pass
-    return False
+    import ai_provisioning
+    if ai_provisioning.configured(var_names):
+        return True
+    import vault                      # USER_PERSONAL's and USER_ADMIN's vaults (DR258); unreadable ones are skipped
+    if any(vault.lookup(name, environ={}) for name in var_names):
+        return True
+    try:
+        lines = Path(HARNESS_ENV_FILE).read_text().splitlines()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise RuntimeError(f"cannot inspect provider credential configuration: {exc}") from exc
+    configured = set()
+    for line in lines:
+        name, separator, value = line.partition("=")
+        if separator and name.strip() in var_names and value.strip():
+            configured.add(name.strip())
+    return bool(configured)
 
 
-def _tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
+def _configured_result(name: str, var_names: tuple[str, ...], provider: str) -> dict:
+    try:
+        configured = _env_or_file(*var_names)
+    except RuntimeError as exc:
+        return {"name": name, "state": "unknown", "detail": str(exc)}
+    if configured:
+        return {"name": name, "state": "available", "detail": f"{provider} credential configured; live access not checked"}
+    return {"name": name, "state": "unconfigured",
+            "detail": f"no {provider} credential configured - add it to {HARNESS_ENV_FILE}"
+                      + (" (run /opt/baseline/bin/baseline-auth-setup.sh)" if provider == "Claude" else "")}
+
+
+def display_status(state: str) -> str:
+    """Map provider observations to the dashboard without collapsing unknown."""
+    return {"reachable": "Reachable", "available": "Available",
+            "unreachable": "Unreachable", "unconfigured": "Not set up",
+            "unknown": "Unknown"}.get(state, "Unknown")
+
+
+def _tcp_probe(host: str, port: int, timeout: float = 1.0) -> tuple[str, str]:
     try:
         with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
+            return "reachable", f"TCP connection established to {host}:{port}"
+    except ConnectionRefusedError as exc:
+        return "unreachable", f"TCP connection refused by {host}:{port}: {exc}"
+    except (TimeoutError, OSError) as exc:
+        return "unknown", f"TCP probe to {host}:{port} could not determine service state: {exc}"
 
 
 def check_providers():
@@ -49,38 +86,24 @@ def check_providers():
     can run on every UI refresh without being slow."""
     results = []
 
-    if _env_or_file("CLAUDE_CODE_OAUTH_TOKEN"):
-        results.append({"name": "Claude Subscription", "state": "available", "detail": "token configured; verified live via harness.ask()"})
-    else:
-        results.append({"name": "Claude Subscription", "state": "unconfigured", "detail": "run baseline-auth-setup.sh"})
+    results.append(_configured_result("Claude Subscription", ("CLAUDE_CODE_OAUTH_TOKEN",), "Claude"))
 
-    if _tcp_open("127.0.0.1", 11434, timeout=0.5):
-        results.append({"name": "Ollama (local)", "state": "reachable", "detail": "responding on 127.0.0.1:11434"})
-    else:
-        results.append({"name": "Ollama (local)", "state": "unconfigured", "detail": "no local Ollama service on :11434"})
+    ollama_state, ollama_detail = _tcp_probe("127.0.0.1", 11434, timeout=0.5)
+    results.append({"name": "Ollama (local)", "state": ollama_state, "detail": ollama_detail})
 
-    if _env_or_file("OPENAI_API_KEY"):
-        results.append({"name": "OpenAI", "state": "available", "detail": "OPENAI_API_KEY configured"})
-    else:
-        results.append({"name": "OpenAI", "state": "unconfigured", "detail": "no OPENAI_API_KEY"})
+    results.append(_configured_result("OpenAI", ("OPENAI_API_KEY",), "OpenAI"))
 
-    if _env_or_file("GOOGLE_API_KEY") or _env_or_file("GEMINI_API_KEY"):
-        results.append({"name": "Google Gemini", "state": "available", "detail": "API key configured"})
-    else:
-        results.append({"name": "Google Gemini", "state": "unconfigured", "detail": "no GOOGLE_API_KEY/GEMINI_API_KEY"})
+    results.append(_configured_result("Google Gemini", ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "Google Gemini"))
 
-    if _env_or_file("OPENROUTER_API_KEY"):
-        results.append({"name": "OpenRouter", "state": "available", "detail": "OPENROUTER_API_KEY configured"})
-    else:
-        results.append({"name": "OpenRouter", "state": "unconfigured", "detail": "no OPENROUTER_API_KEY"})
+    results.append(_configured_result("OpenRouter", ("OPENROUTER_API_KEY",), "OpenRouter"))
 
     return results
 
 
 # Harnesses = the orchestration CLI, not the model/provider underneath it.
-# "implemented" means baseline/lib has a real HarnessAdapter for it -
-# selecting anything else in the TUI shows "not implemented" rather than
-# silently failing or faking a response.
+# This is the user-selectable set: every entry must have a real adapter.
+# Do not add a candidate CLI until its invocation and permission model are
+# verified and its adapter passes the HarnessAdapter contract.
 #
 # "adapter_module" names the importable module implementing the
 # HarnessAdapter contract (see harness_adapter.py) - harness_registry.py
@@ -94,8 +117,30 @@ def check_providers():
 HARNESSES = [
     {"id": "claude", "name": "Claude Code", "implemented": True, "adapter_module": "harness"},
     {"id": "opencode", "name": "OpenCode", "implemented": True, "adapter_module": "opencode_adapter"},
-    {"id": "hermes", "name": "Hermes", "implemented": False, "adapter_module": None},
-    {"id": "pi", "name": "Pi", "implemented": False, "adapter_module": None},
-    {"id": "deepseek", "name": "DeepSeek", "implemented": False, "adapter_module": None},
-    {"id": "grokbot", "name": "GrokBot", "implemented": False, "adapter_module": None},
+    {"id": "codex", "name": "OpenAI Codex", "implemented": True, "adapter_module": "codex_adapter"},
 ]
+
+# Each harness's command-line tool and the credential it needs, for the "is it there and set up" view (/ai-setup).
+HARNESS_REQUIREMENTS = {
+    "claude": {"binary": "claude", "credential": ("CLAUDE_CODE_OAUTH_TOKEN",)},
+    "opencode": {"binary": "opencode", "credential": ()},       # OpenCode brings its own provider login
+    "codex": {"binary": "codex", "credential": ("OPENAI_API_KEY",)},
+}
+
+
+def harness_status(which=None) -> list:
+    """[{id, name, installed, credential}] - credential is 'set', 'missing' or 'not needed'."""
+    import shutil
+    find = which or shutil.which
+    rows = []
+    for entry in HARNESSES:
+        need = HARNESS_REQUIREMENTS.get(entry["id"], {"binary": entry["id"], "credential": ()})
+        if need["credential"]:
+            try:
+                credential = "set" if _env_or_file(*need["credential"]) else "missing"
+            except RuntimeError:
+                credential = "unknown"
+        else:
+            credential = "not needed"
+        rows.append({"id": entry["id"], "name": entry["name"], "installed": bool(find(need["binary"])), "credential": credential})
+    return rows

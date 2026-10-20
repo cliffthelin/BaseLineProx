@@ -23,6 +23,7 @@ class AcpConnection:
         self.proc = subprocess.Popen(
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, bufsize=1,
+            env=__import__("ai_provisioning").client_environment("opencode"),
         )
 
     def send(self, message: dict) -> None:

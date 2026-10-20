@@ -1,0 +1,4 @@
+Command: baseline/bin/baseline-allscript-install --target PC401 --stage preflight
+Exit: 1
+Captured tool result: STOPPED, nothing claimed complete: [Errno 2] No such file or directory: /dev/sdm
+No install, recovery, formatting or disk writes were attempted.

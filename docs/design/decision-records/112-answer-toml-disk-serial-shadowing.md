@@ -19,7 +19,7 @@ did not match any device` / `Auto-installation failed (exit-code 1)`.
 serial early (`disk_serial = pds.get_device_serial(pds_runner,
 device_path)`, confirmed correct - `progress(f"Target confirmed:
 {device_path} (serial {disk_serial})")` already showed the real value,
-`FD01N6557110C271B`, in the progress console). But the answer file
+`<PC601 drive serial>`, in the progress console). But the answer file
 template rendering used `ANSWER_TEMPLATE.format(..., disk_serial=
 expected_serial, ...)` - `expected_serial` is a *different*, optional
 parameter (the human-override escape hatch decision record 86

@@ -20,6 +20,10 @@ SCHEMA_VERSION = 1
 KEY_RE = re.compile(r"^\d+#\d+#\d+#(.*)$")
 
 
+class HardwareInventoryError(ValueError):
+    """The collector returned data that cannot support the hardware schema."""
+
+
 def _clean_key(k: str) -> str:
     m = KEY_RE.match(k)
     return m.group(1) if m else k
@@ -38,12 +42,49 @@ def _section(raw, name):
     for entry in raw:
         for k, v in entry.items():
             if _clean_key(k) == name:
+                if not isinstance(v, list) or any(not isinstance(part, dict) for part in v):
+                    raise HardwareInventoryError(f"inxi {name} section has an invalid shape")
                 merged = {}
                 for part in v:
-                    if isinstance(part, dict):
-                        merged.update(part)
+                    merged.update(part)
                 return merged
     return {}
+
+
+# Sections normalize() folds into the Hardware Schema. Each must be a flat list of observation objects.
+_SCHEMA_SECTIONS = frozenset({"System", "Machine", "Memory", "CPU", "Graphics", "Network", "Drives"})
+
+
+def _valid_section_parts(name, parts) -> bool:
+    """Schema sections: a list of objects, nothing else. Any other section may also hold lists of strings,
+    because that is how inxi really groups lines: `Repos` (from -r) is objects for each sources file, each
+    followed by a list of that file's raw repository lines, e.g.
+    [{"Active apt repos in": "/etc/apt/sources.list.d/x.list"}, ["deb [trusted=yes] file:... ./"]].
+    Rejecting that rejected every machine with more than one apt source (seen on the 2026-10-10 rehearsal)."""
+    if not isinstance(parts, list):
+        return False
+    for part in parts:
+        if isinstance(part, dict):
+            continue
+        if (name not in _SCHEMA_SECTIONS and isinstance(part, list)
+                and all(isinstance(line, str) for line in part)):
+            continue
+        return False
+    return True
+
+
+def _validate_raw(raw):
+    if not isinstance(raw, list) or not raw or any(not isinstance(entry, dict) for entry in raw):
+        raise HardwareInventoryError("inxi inventory must be a nonempty list of section objects")
+    for entry in raw:
+        for name, parts in entry.items():
+            label = _clean_key(name) if isinstance(name, str) else repr(name)
+            if not isinstance(name, str) or not _valid_section_parts(label, parts):
+                raise HardwareInventoryError(f"inxi {label} section has an invalid shape")
+    for name in ("System", "CPU"):
+        section = _section(raw, name)
+        if not section:
+            raise HardwareInventoryError(f"inxi inventory is missing required {name} observations")
 
 
 def _explicit_tty_stdin():
@@ -68,11 +109,24 @@ def _explicit_tty_stdin():
         return None
 
 
+def _inxi_stdin():
+    """(fd, fds_to_close) giving inxi a terminal on stdin: our own controlling tty when there is one, otherwise a fresh pseudo-terminal, so
+    inxi also works from a service or an SSH command with no terminal (it otherwise refuses with the IRC-client message)."""
+    tty = _explicit_tty_stdin()
+    if tty is not None:
+        return tty, [tty]
+    try:
+        master, slave = os.openpty()
+    except OSError:
+        return None, []
+    return slave, [slave, master]
+
+
 def collect(timeout: int = 15):
     """Run inxi, return (cleaned_raw, error|None)."""
     fd, path = tempfile.mkstemp(prefix="baseline_hw_", suffix=".json")
     os.close(fd)
-    tty_fd = _explicit_tty_stdin()
+    tty_fd, to_close = _inxi_stdin()
     try:
         proc = subprocess.run(
             ["inxi", "-Fmrsiaxxxz", "--output", "json", "--output-file", path],
@@ -87,9 +141,9 @@ def collect(timeout: int = 15):
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return None, str(e)
     finally:
-        if tty_fd is not None:
+        for fd in to_close:
             try:
-                os.close(tty_fd)
+                os.close(fd)
             except OSError:
                 pass
         try:
@@ -100,11 +154,17 @@ def collect(timeout: int = 15):
         raw = json.loads(text)
     except json.JSONDecodeError as e:
         return None, f"bad inxi JSON: {e}"
-    return _clean(raw), None
+    cleaned = _clean(raw)
+    try:
+        _validate_raw(cleaned)
+    except HardwareInventoryError as e:
+        return None, f"invalid inxi inventory: {e}"
+    return cleaned, None
 
 
 def normalize(raw):
     """Fold cleaned inxi output into the Baseline Hardware Schema."""
+    _validate_raw(raw)
     system = _section(raw, "System")
     machine = _section(raw, "Machine")
     memory = _section(raw, "Memory")
@@ -177,10 +237,20 @@ def full_inventory(raw):
     adjacent items rather than one merged record per device - this stays
     faithful to that rather than guessing at how to re-pair them."""
     rows = []
+    repository_number = 0
     for entry in raw:
         for key, items in entry.items():
             group = _clean_key(key)
             for i, item in enumerate(items):
+                if group == "Repos" and isinstance(item, list):
+                    # inxi lists each apt sources file's raw repository lines as a nested list of strings (Repos, -r)
+                    for line in item:
+                        if not line:
+                            continue
+                        repository_number += 1
+                        rows.append({"group": group, "label": f"Repository {repository_number}", "detail": line,
+                                     "fields": {"repository": line}})
+                    continue
                 if not isinstance(item, dict):
                     continue
                 fields = _item_fields(item)

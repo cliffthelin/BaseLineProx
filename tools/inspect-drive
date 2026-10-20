@@ -1,0 +1,64 @@
+#!/bin/bash
+# Operator-run, READ-ONLY: report what an installed PC601 recorded about its own boot (network, first boot, identity) into a text file I can read.
+#
+#   sudo tools/inspect-drive PC601
+#
+# Mounts the drive's root filesystem read-only (no journal replay, so nothing is written), copies a fixed list of small status files into
+# /run/media/cane/CACHE/baseline-build/inspect/, unmounts and deactivates exactly the volume group it activated. Nothing on the drive changes.
+# Only PC601 is accepted. It never copies keys, passwords or hashes: the file list below is explicit.
+set -euo pipefail
+declare -A SERIALS=( [PC601]=SYNTHDRIVEA00001 )
+NAME="${1:-}"
+[ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: inspect-drive PC601   (only PC601 is accepted)" >&2; exit 2; }
+[ "$(id -u)" -eq 0 ] || { echo "needs root: run with sudo" >&2; exit 1; }
+SERIAL="${SERIALS[$NAME]}"
+OUTDIR=/run/media/cane/CACHE/baseline-build/inspect
+say() { echo "[inspect-drive] $*"; }
+
+mapfile -t FOUND < <(lsblk -dnpo PATH,SERIAL | awk -v s="$SERIAL" '$2 == s {print $1}')
+[ "${#FOUND[@]}" -eq 1 ] || { say "refusing: ${#FOUND[@]} disks carry serial $SERIAL"; exit 1; }
+DEV="${FOUND[0]}"
+LVMCFG="devices { filter = [ \"a|^${DEV}.*|\", \"r|.*|\" ] }"
+mapfile -t VGS < <(pvs --noheadings -o vg_name -S "vg_missing_pv_count=0" --config "$LVMCFG" 2>/dev/null | tr -d ' ' | sort -u | grep -v '^$' || true)
+[ "${#VGS[@]}" -eq 1 ] || { say "refusing: expected one complete volume group on $DEV, found ${#VGS[@]}"; exit 1; }
+VG="${VGS[0]}"
+[ ! -e "/dev/mapper/$VG-root" ] || { say "refusing: /dev/mapper/$VG-root already exists here"; exit 1; }
+
+MNT="$(mktemp -d /tmp/inspect-drive.XXXXXX)"
+cleanup() {
+  mountpoint -q "$MNT" && umount "$MNT" || true
+  rmdir "$MNT" 2>/dev/null || true
+  vgchange -an "$VG" --config "$LVMCFG" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+vgchange -ay "$VG" --config "$LVMCFG" >/dev/null
+mount -o ro,noload "/dev/mapper/$VG-root" "$MNT"
+install -d -m 755 "$OUTDIR"
+OUT="$OUTDIR/$NAME-$(date +%Y%m%dT%H%M%S).txt"
+{
+  section() { printf '\n===== %s =====\n' "$1"; }
+  show() { for f in "$@"; do if [ -f "$MNT/$f" ]; then section "$f"; head -c 20000 "$MNT/$f"; else section "$f (absent)"; fi; done; }
+  section "root listing"; ls -la --time-style=long-iso "$MNT/etc/baseline" "$MNT/var/lib/baseline" "$MNT/var/log/baseline" 2>&1 | head -80
+  show etc/baseline/host-id etc/hostname etc/network/interfaces etc/hosts
+  section "interfaces.d"; ls -la "$MNT/etc/network/interfaces.d" 2>&1 | head; for f in "$MNT"/etc/network/interfaces.d/*; do [ -f "$f" ] && { echo "--- $f"; head -c 4000 "$f"; }; done
+  section "development login: files, passwd entry, unit link"
+  ls -la "$MNT/etc/baseline-dev" 2>&1 | head; grep -E '^(baseline|root):' "$MNT/etc/passwd" 2>&1 | cut -d: -f1,3,4,6,7
+  ls -la "$MNT/etc/systemd/system/multi-user.target.wants/baseline-dev-user.service" "$MNT/usr/local/sbin/baseline-dev-user" 2>&1
+  section "bridge-port log and the interfaces backup files"; ls -la "$MNT"/etc/network/interfaces.baseline-bridge-port.* 2>&1 | head -3; cat "$MNT/var/log/baseline/bridge-port.log" 2>&1 | tail -5
+  section "pveproxy access log (login attempts) and auth log, tails"; tail -n 15 "$MNT/var/log/pveproxy/access.log" 2>&1; tail -n 15 "$MNT/var/log/auth.log" 2>&1
+  section "persistent journal present?"; ls -ld "$MNT/var/log/journal" 2>&1
+  if [ -d "$MNT/var/log/journal" ]; then
+    section "journal: boots"; journalctl --directory="$MNT/var/log/journal" --list-boots --no-pager 2>&1 | tail -8
+    for b in -1 0; do
+      section "journal boot $b: kernel network/link/driver lines"
+      journalctl --directory="$MNT/var/log/journal" -b "$b" -k --no-pager 2>&1 | grep -iE "renamed|link (is )?(up|down)|eth|enp|ens|eno|r8169|igc|e1000|iwlwifi|dhcp|carrier" | head -40
+      section "journal boot $b: networking, dhcp, ssh, smartmontools, baseline units"
+      journalctl --directory="$MNT/var/log/journal" -b "$b" --no-pager 2>&1 | grep -iE "networking|ifup|ifreload|dhcp|vmbr0|sshd|smartd|smartmontools|baseline" | head -80
+    done
+  fi
+  section "baseline logs (tail)"; for f in "$MNT"/var/log/baseline/*; do [ -f "$f" ] && { echo "--- $f"; tail -n 40 "$f"; }; done 2>&1 | head -240
+  section "first-boot state"; for f in "$MNT"/var/lib/baseline/first-boot*/* "$MNT"/var/lib/baseline/*.json; do [ -f "$f" ] && { echo "--- $f"; head -c 3000 "$f"; echo; }; done 2>&1 | head -120
+  section "enabled units mentioning baseline or network-retry"; ls "$MNT"/etc/systemd/system/*.wants 2>/dev/null | grep -iE "baseline|retry|smart|ssh" | head -30
+} > "$OUT" 2>&1
+chmod 644 "$OUT"
+say "wrote $OUT ($(wc -c < "$OUT") bytes); nothing on the drive was changed"

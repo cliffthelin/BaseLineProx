@@ -13,6 +13,32 @@ import subprocess
 import time
 from pathlib import Path
 
+
+class TetherProbeError(RuntimeError):
+    """A tether observation failed, so absence cannot be concluded."""
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        path.stat()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise TetherProbeError(f"cannot inspect {path}: {exc}") from exc
+
+def _read_carrier(path) -> str:
+    """The interface's carrier as "0" or "1". The kernel refuses the read with EINVAL while an interface is administratively down
+    (a phone plugged in but not yet brought up): that is "no carrier yet", not a probe failure (operator saw "Errno 22", 2026-10-12)."""
+    import errno
+    try:
+        return Path(path).read_text().strip()
+    except OSError as exc:
+        if exc.errno == errno.EINVAL:
+            return "0"
+        raise
+
+
 # Kernel drivers that specifically mean "this is a tethered phone," not a
 # permanent USB-attached NIC like a dock's Ethernet adapter (r8152) or a
 # WWAN modem. Identifying by driver, not "wasn't there at boot," since the
@@ -22,26 +48,34 @@ from pathlib import Path
 TETHER_DRIVERS = {"ipheth", "rndis_host", "cdc_ether", "cdc_ncm"}
 
 
-def _driver_name(ifname: str):
-    driver_link = Path("/sys/class/net") / ifname / "device" / "driver"
+def _driver_name(ifname: str, base=None):
+    driver_link = (Path("/sys/class/net") if base is None else Path(base)) / ifname / "device" / "driver"
     try:
-        return driver_link.resolve().name
-    except OSError:
+        return driver_link.resolve(strict=True).name
+    except FileNotFoundError:
         return None
+    except (OSError, RuntimeError) as exc:
+        raise TetherProbeError(f"cannot inspect driver for {ifname}: {exc}") from exc
 
 
-def find_tether_candidates(known_at_boot=frozenset()):
+def find_tether_candidates(known_at_boot=frozenset(), base=None):
     """Net interfaces bound to a known phone-tether driver. `known_at_boot`
     is accepted for backward compatibility but no longer used to exclude
     anything - driver identity is a reliable signal on its own."""
-    base = Path("/sys/class/net")
-    if not base.exists():
-        return []
+    base = Path("/sys/class/net") if base is None else Path(base)
+    if not _path_exists(base):
+        raise TetherProbeError(f"network interface inventory is unavailable at {base}")
     out = []
-    for entry in sorted(base.iterdir()):
-        if (entry / "bridge").exists():
+    try:
+        entries = sorted(base.iterdir())
+    except OSError as exc:
+        raise TetherProbeError(f"cannot enumerate network interfaces: {exc}") from exc
+    for entry in entries:
+        if not entry.is_dir():
+            continue  # bonding_masters is a plain file whenever the bonding module is loaded
+        if _path_exists(entry / "bridge"):
             continue
-        if _driver_name(entry.name) in TETHER_DRIVERS:
+        if _driver_name(entry.name, base) in TETHER_DRIVERS:
             out.append(entry.name)
     return out
 
@@ -57,20 +91,32 @@ def bring_up_tether(ifname: str, attempts: int = 5, attempt_timeout: int = 6):
     answered DHCP - almost always means the phone's hotspot isn't
     actually toggled on, not a Baseline problem), or "ok".
     """
-    subprocess.run(["ip", "link", "set", ifname, "up"], capture_output=True)
+    try:
+        proc = subprocess.run(["ip", "link", "set", ifname, "up"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "stage": "command_error", "detail": f"cannot bring {ifname} up: {exc}", "address": None}
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"ip exited {proc.returncode}").strip()
+        return {"ok": False, "stage": "command_error", "detail": f"cannot bring {ifname} up: {detail}", "address": None}
     time.sleep(1)
 
     carrier_path = Path("/sys/class/net") / ifname / "carrier"
     try:
-        has_carrier = carrier_path.read_text().strip() == "1"
-    except OSError:
-        has_carrier = False
+        carrier = _read_carrier(carrier_path)
+    except OSError as exc:
+        return {"ok": False, "stage": "probe_error", "detail": f"cannot read carrier for {ifname}: {exc}", "address": None}
+    if carrier not in {"0", "1"}:
+        return {"ok": False, "stage": "probe_error", "detail": f"invalid carrier value for {ifname}: {carrier!r}", "address": None}
+    has_carrier = carrier == "1"
     if not has_carrier:
         return {"ok": False, "stage": "no_carrier", "detail": f"{ifname} has no carrier - is a cable/phone actually connected?", "address": None}
 
     last_detail = ""
     for attempt in range(1, attempts + 1):
-        subprocess.run(["dhclient", "-r", ifname], capture_output=True)
+        try:
+            subprocess.run(["dhclient", "-r", ifname], capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"ok": False, "stage": "command_error", "detail": f"cannot release existing DHCP lease on {ifname}: {exc}", "address": None}
         # ISC dhclient has no "-timeout" flag of its own (that's a
         # dhclient.conf directive, not a CLI option) - bound the wall-clock
         # time with the external `timeout` command instead. Passing a
@@ -78,13 +124,27 @@ def bring_up_tether(ifname: str, attempts: int = 5, attempt_timeout: int = 6):
         # usage error, which looks exactly like "no DHCP offer" if you
         # don't read the output closely - a real bug hit while hardening
         # this, not a phone/hotspot problem.
-        proc = subprocess.run(
-            ["timeout", str(attempt_timeout + 2), "dhclient", "-1", ifname],
-            capture_output=True, text=True,
-        )
-        addr = _current_v4_address(ifname)
+        try:
+            proc = subprocess.run(
+                ["timeout", str(attempt_timeout + 2), "dhclient", "-1", ifname],
+                capture_output=True, text=True, timeout=attempt_timeout + 4,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"ok": False, "stage": "command_error", "detail": f"DHCP command failed on {ifname}: {exc}", "address": None}
+        if proc.returncode in {125, 126, 127}:
+            detail = (proc.stderr or proc.stdout or f"timeout/dhclient exited {proc.returncode}").strip()
+            return {"ok": False, "stage": "command_error", "detail": f"DHCP command could not run on {ifname}: {detail}", "address": None}
+        try:
+            addr = _current_v4_address(ifname)
+        except TetherProbeError as exc:
+            return {"ok": False, "stage": "probe_error", "detail": str(exc), "address": None}
         if addr:
             return {"ok": True, "stage": "ok", "detail": f"bound after {attempt} attempt(s)", "address": addr}
+        if proc.returncode != 0:
+            diagnostic = (proc.stderr or proc.stdout or "").strip().lower()
+            if not any(marker in diagnostic for marker in ("no lease", "no response", "timed out", "timeout", "no offer")):
+                detail = (proc.stderr or proc.stdout or f"dhclient exited {proc.returncode}").strip()
+                return {"ok": False, "stage": "command_error", "detail": f"DHCP client failed on {ifname}: {detail}", "address": None}
         last_detail = (proc.stderr or proc.stdout or "no response").strip().splitlines()[-1] if (proc.stderr or proc.stdout) else "no response"
         time.sleep(1)
 
@@ -100,31 +160,47 @@ def bring_up_tether(ifname: str, attempts: int = 5, attempt_timeout: int = 6):
 
 
 def _current_v4_address(ifname: str):
-    proc = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", ifname],
-                           capture_output=True, text=True)
+    try:
+        proc = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", ifname],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise TetherProbeError(f"cannot query IPv4 address for {ifname}: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"ip exited {proc.returncode}").strip()
+        raise TetherProbeError(f"cannot query IPv4 address for {ifname}: {detail}")
     for line in proc.stdout.splitlines():
         parts = line.split()
         if "inet" in parts:
-            return parts[parts.index("inet") + 1].split("/")[0]
+            import ipaddress
+            try:
+                return str(ipaddress.ip_interface(parts[parts.index("inet") + 1]).ip)
+            except (IndexError, ValueError) as exc:
+                raise TetherProbeError(f"invalid IPv4 address output for {ifname}: {line!r}") from exc
     return None
 
 
 def auto_tether(known_at_boot=frozenset()):
     """Find and bring up whatever tether-looking interface just appeared.
     Returns bring_up_tether()'s result dict, plus "candidates" tried."""
-    candidates = find_tether_candidates(known_at_boot)
+    try:
+        candidates = find_tether_candidates(known_at_boot)
+    except TetherProbeError as exc:
+        return {"ok": False, "stage": "probe_error", "detail": str(exc), "address": None, "candidates": []}
     if not candidates:
         return {"ok": False, "stage": "no_candidate", "detail": "no USB network interface found - plug in a phone with tethering enabled", "address": None, "candidates": []}
     # Prefer whichever candidate already has carrier, if any do.
     for name in candidates:
         try:
-            if (Path("/sys/class/net") / name / "carrier").read_text().strip() == "1":
-                result = bring_up_tether(name)
-                result["candidates"] = candidates
-                result["interface"] = name
-                return result
-        except OSError:
-            continue
+            carrier = _read_carrier(Path("/sys/class/net") / name / "carrier")
+        except OSError as exc:
+            return {"ok": False, "stage": "probe_error", "detail": f"cannot read carrier for {name}: {exc}", "address": None, "candidates": candidates, "interface": name}
+        if carrier not in {"0", "1"}:
+            return {"ok": False, "stage": "probe_error", "detail": f"invalid carrier value for {name}: {carrier!r}", "address": None, "candidates": candidates, "interface": name}
+        if carrier == "1":
+            result = bring_up_tether(name)
+            result["candidates"] = candidates
+            result["interface"] = name
+            return result
     result = bring_up_tether(candidates[0])
     result["candidates"] = candidates
     result["interface"] = candidates[0]

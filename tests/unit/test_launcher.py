@@ -72,6 +72,18 @@ def test_the_url_is_the_local_web_app_only():
     assert lc.URL == "http://127.0.0.1:8100/"
 
 
+def test_uninstalled_desktop_launch_binds_the_server_to_loopback():
+    calls = []
+    original = lc.subprocess.Popen
+    try:
+        lc.subprocess.Popen = lambda *args, **kwargs: calls.append((args, kwargs))
+        assert lc._run_app_directly()
+    finally:
+        lc.subprocess.Popen = original
+    env = calls[0][1]["env"]
+    assert env["BASELINE_WEB_BIND_HOST"] == "127.0.0.1"
+
+
 def test_the_entry_point_the_desktop_file_and_provisioning_agree():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]

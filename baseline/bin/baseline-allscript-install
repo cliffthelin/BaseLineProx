@@ -1,0 +1,994 @@
+#!/usr/bin/env python3
+"""Take one SK hynix drive from wipe to a working Baseline desktop by script only - no web UI in the install path.
+
+The installer is self-contained: the ISO carries Proxmox, the Baseline source and an offline package cache, and the
+installed system finishes its own installation on first boot with no internet and nothing attached but the ISO.
+This script only builds that installer and runs it against the chosen target drive under KVM:
+
+  preflight    read-only: target identity by serial, the other drive protected, cached Proxmox ISO, assistant, space
+  recovery     add-only, verified whole-drive image of the target in /mnt/10TB/backup   (drive_recovery)  [root]
+  cache        build the offline package cache once (baseline-build-offline-cache), verify its manifest
+  install      self_installer with the cache and first-boot hook: Proxmox installs onto the target, then its
+               first boot lays out storage, carries the ISO + environment onto INSTALLER_CACHE and provisions
+               offline; ends at the first-boot authorization screen                                    [root]
+  firstboot    type CONFIRM into that same session; ends when the kiosk browser shows Proxmox
+  kiosk        capture the kiosk screen and shut the target down cleanly
+
+Nothing reads console text automatically (no OCR, by design): the person or vision-capable agent watching
+<work>/session-latest.ppm records each checkpoint with the `touch` the script prints. The work folder is
+/run/media/cane/CACHE/baseline-build/allscript-<target> - on ext4, never inside the repo (which may be on an NTFS
+drive where screendumps and private-file modes fail), and one per target so two drives' runs never share progress.
+
+There is NO default target. Two SK hynix drives exist and two agents share this machine, each with its own drive
+(2026-10-10: Claude uses PC601, Codex uses PC401). Name the target with --target, or let an exact --confirm-wipe
+serial imply it; the OTHER drive is then protected for that run. Every destructive step re-validates the target
+through physical_device_safety.validate_target_device. The data-protection guard in self_installer is honoured,
+never bypassed: the target must be empty or carry an installer-made identity.
+
+    sudo baseline/bin/baseline-allscript-install --target PC601 --from recovery --confirm-wipe <the target's serial>
+    baseline/bin/baseline-allscript-install --target PC601 --stage preflight    # read-only, no root needed
+    baseline/bin/baseline-allscript-install --stage rehearse                    # sparse image, no real drive
+"""
+import argparse
+import json
+import os
+import re
+import secrets
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+def locate_assistant(candidates):
+    """The verified proxmox-auto-install-assistant: the copy on CACHE first, the older host location second."""
+    return next((c for c in candidates if Path(c).is_file()), Path(candidates[0]))
+
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "baseline/lib"))
+
+DRIVES_FILE = Path(os.environ.get("BASELINE_DRIVES_FILE") or "/run/media/cane/CACHE/baseline-build/drives.json")
+
+
+def load_drives(path=None) -> dict:
+    """target name -> hardware serial, from the operator's own file {"drives": {"NAME": "SERIAL", ...}}. The file is local operator data on the build volume, never in the repository: no serial is stored in
+    this code. A missing or malformed file means no targets, and the run says how to make one."""
+    import json
+    import re
+    try:
+        raw = json.loads(Path(path or DRIVES_FILE).read_text())["drives"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    return {str(n): s for n, s in raw.items() if re.fullmatch(r"[A-Za-z0-9_-]{1,20}", str(n)) and isinstance(s, str) and re.fullmatch(r"[A-Za-z0-9_.-]{8,64}", s)}
+
+
+os.environ.setdefault("BASELINE_OWN_DRIVES_FILE", str(DRIVES_FILE.with_name("own-drives")))   # this host's lane data (the drives it may act on, `disposable` ones reinstallable), beside drives.json
+DRIVES = load_drives()                  # every target is a drive the operator named in that file; with fewer than two the OTHER drive cannot be protected, so a drive run needs both
+SIZE = 512110190592
+REHEARSAL_DISK_BYTES = SIZE            # the mirror of the child drive: a sparse file of exactly the real drive's size, so a size-accurate build is tried on CACHE and only what is written takes space; the real drive is not rewritten to try a change
+REHEARSAL_MEMORY_MB = 16384           # Kasm's own VM runs inside it (nested), and Kasm setup refuses a host under 12 GiB
+REHEARSAL_LVM = dict(lvm_maxroot=16, lvm_maxvz=8, lvm_swapsize=2)   # leaves most of the 64 GiB free for first boot's Baseline volumes
+TARGET_NAME = None                    # chosen per run by select_target(); there is deliberately no default
+SERIAL = None                         # the chosen target's serial
+PROTECTED = None                      # the other drive's serial: never a target in this run
+DRIVE_STAGES = {"preflight", "recovery", "install", "firstboot", "kiosk", "identity", "update"}  # touch a real drive (rehearse does not)
+WORK = None                           # set by select_work(): BUILD/allscript-<target>
+SOURCE_ISO = Path("/run/media/cane/CACHE/baseline_iso/proxmox-ve_9.2-1.iso")
+_ASSISTANT_REL = "extracted/usr/bin/proxmox-auto-install-assistant"
+ASSISTANT_CANDIDATES = [Path("/run/media/cane/CACHE/baseline-build/assistant/acquire") / _ASSISTANT_REL,
+                        Path("/var/tmp/baseline-self-installer/acquire") / _ASSISTANT_REL]
+BACKUP_ROOT = Path("/mnt/10TB/backup")
+KASM_BASE = None                                           # a prepared Kasm base (baseline-build-kasm-base output folder) the cache must carry
+OS_BASES = None                                            # the ready-made VM bases (baseline-build-os-base output folder) the cache should carry
+OS_ISOS = Path(os.environ.get("BASELINE_OS_ISOS") or "/run/media/cane/CACHE/baseline-build/installer-cache/isos")     # vanilla installer ISOs on this machine: on CACHE, never the root drive
+ASSISTANT = locate_assistant(ASSISTANT_CANDIDATES)
+PROXY = REPO / "baseline/lib/installer_package_proxy.py"  # allowlisted package proxy, listens on 127.0.0.1:32165
+PROXY_PORT = 32165
+OPERATOR = "cane"                               # owner of the work directory, so the run can be followed
+
+BUILD = Path("/run/media/cane/CACHE/baseline-build")   # build workspace only; nothing installed depends on it
+CACHE_DIR = BUILD / "offline-cache"
+APPS_DIR = BUILD / "apps"                                 # the five applications, prepared on this machine
+OS_OFFER = None                                           # folder of OS images offered to the installer VM
+CURRENT_BUILD = None                                      # the source state the install stage records (set by main)
+INSTALL_VM = None                                         # the install stage's KVM session, continued by later stages
+OPENED_PATH = None                                        # the device node that session opened (a USB reset changes it)
+
+STAGES = ("preflight", "recovery", "cache", "install", "firstboot", "kiosk")
+OPTIONAL_STAGES = ("rehearse", "identity", "update")        # run explicitly: --stage rehearse, then --stage firstboot/kiosk in one go
+ROOT_STAGES = {"recovery", "update"}             # imaging needs a complete process-use inspection (drive_recovery.quiesce_source); install does not,
+                                       # once the drive carries no LVM volumes (see deactivate_target_vgs)
+
+
+# --- pure decisions (unit-tested) --------------------------------------------------------------
+
+def select_stages(stage, start):
+    if stage == "rehearse":
+        return ["rehearse", "firstboot", "kiosk"]           # one KVM session from install to kiosk
+    if stage is not None:
+        if stage not in STAGES + ("identity", "update"):
+            raise ValueError(f"unknown stage {stage!r}; stages are: {', '.join(STAGES)}, identity, update")
+        return [stage]
+    if start is not None:
+        if start not in STAGES:
+            raise ValueError(f"unknown stage {start!r}; stages are: {', '.join(STAGES)}")
+        return list(STAGES[STAGES.index(start):])
+    return list(STAGES)
+
+
+def target_for(target_arg, confirm_wipe, stages):
+    """(name, serial, protected_serial) for this run, or (None, None, None) when no stage touches a real drive.
+
+    Never defaults: two drives exist and each belongs to a different agent, so guessing would be a destructive
+    choice made for someone. An exact --confirm-wipe serial may imply the target; if both are given they must
+    agree."""
+    implied = next((name for name, serial in DRIVES.items() if serial == confirm_wipe), None)
+    if target_arg is not None and target_arg not in DRIVES:
+        raise ValueError(f"unknown target {target_arg!r}; targets are: {', '.join(DRIVES) or 'none (name them in ' + str(DRIVES_FILE) + ')'}")
+    if target_arg is not None and implied is not None and implied != target_arg:
+        raise ValueError(f"--target {target_arg} but --confirm-wipe names {implied}'s serial; refusing")
+    name = target_arg or implied
+    touches_drive = bool(set(stages) & DRIVE_STAGES) and "rehearse" not in stages
+    if name is None:
+        if touches_drive:
+            raise ValueError(f"stages {', '.join(sorted(set(stages) & DRIVE_STAGES))} touch a real drive: "
+                             f"name it with --target ({' or '.join(DRIVES)}); there is no default")
+        return None, None, None
+    import cardinality
+    protected = cardinality.at_most_one([serial for other, serial in DRIVES.items() if other != name], "other named drive to protect")   # two or more is refused, never "the first"
+    return name, DRIVES[name], protected
+
+
+def select_target(name, serial, protected):
+    global TARGET_NAME, SERIAL, PROTECTED
+    TARGET_NAME, SERIAL, PROTECTED = name, serial, protected
+
+
+def work_dir(name, stages):
+    """Per target, on ext4, never inside the repo."""
+    if name is not None:
+        return BUILD / f"allscript-{name}"
+    return BUILD / ("allscript-rehearsal" if "rehearse" in stages else "allscript-shared")
+
+
+def active_lvm_volumes(listing):
+    """Names of the LVM volumes this host currently has active on the drive, from `lsblk -J` output (readable without root)."""
+    found = []
+
+    def walk(nodes):
+        for node in nodes or []:
+            if node.get("type") == "lvm":
+                found.append(node["name"])
+            walk(node.get("children"))
+    walk(listing.get("blockdevices"))
+    return found
+
+
+def refresh_udev_view(device):
+    """Open `device` for writing and close it, writing nothing: udev's watch then re-probes it. Returns whether it could."""
+    try:
+        os.close(os.open(str(device), os.O_WRONLY))
+    except OSError:
+        return False
+    time.sleep(2)
+    return True
+
+
+def fqdn_for(target_name):
+    """Hostname for the install: named after the drive it goes on, so two efforts never share a name on one network."""
+    if target_name not in DRIVES:
+        raise ValueError(f"unknown target {target_name!r}")
+    return f"baseline-{target_name.lower()}.local"
+
+
+def identity_directory():
+    """The folder that holds this lane's pinned installer UUID (baseline/INSTALLER_UUID)."""
+    return REPO / "baseline"
+
+
+def vm_using(device, *, proc_root="/proc"):
+    """PID of a QEMU process that has `device` on its command line (read-only scan), or None."""
+    for entry in Path(proc_root).iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            argv = (entry / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if not argv or b"qemu" not in Path(argv[0].decode(errors="replace")).name.encode():
+            continue
+        wanted = str(device).encode()
+        # QEMU names the device inside a -drive option: file=/dev/sdb,format=raw,...  (or as a bare argument)
+        if any(arg == wanted or arg == b"file=" + wanted or arg.startswith(b"file=" + wanted + b",") for arg in argv):
+            return int(entry.name)
+    return None
+
+
+def child_identity_for(serial):
+    """The identity a drive with this serial must carry, derived from this lane's installer UUID (installer_identity)."""
+    import installer_identity as ii
+    return {"uuid": ii.child_uuid(ii.installer_id(identity_directory()), serial), "serial": serial}
+
+
+def finalize_target_identity():
+    """Once the installer's VM has exited: stamp the drive with its stable identity (installer UUID + serial) and register it.
+    Runs after a failed install too, so the data-protection guard recognises whatever partial install is on the drive."""
+    import installer_identity as ii
+    target = identify(runner())
+    pid = vm_using(target["path"])
+    if pid is not None:
+        say(f"not stamping {TARGET_NAME}: a VM (pid {pid}) still has {target['path']} open")
+        return None
+    installer = ii.installer_id(identity_directory())
+    already = (ii.probe_disk_guid(target["path"]) or "").lower() == ii.child_uuid(installer, SERIAL)
+    wanted = ii.stamp_child_identity(target["path"], SERIAL, installer)
+    refresh_udev_view(target["path"])
+    say(f"{TARGET_NAME} identity {wanted}  (installer {installer}, serial {SERIAL}); registered; "
+        + ("already set by first boot, nothing written" if already else "stamped by the host (first boot had not set it)"))
+    record("identity", uuid=wanted, installer=installer)
+    return wanted
+
+
+def root_required(stages):
+    return sorted(set(stages) & ROOT_STAGES)
+
+
+def cache_not_ready(message):
+    """Say why: a stale cache is named as stale, with what it lacks, instead of the generic 'run the cache stage'."""
+    import offline_cache
+    if (CACHE_DIR / "MANIFEST.json").is_file() and (CACHE_DIR / "apps").is_dir():
+        ok, why = offline_cache.cache_is_current(CACHE_DIR, REPO)
+        if not ok:
+            return f"the offline cache is stale ({why}); run the cache stage, which keeps it and rebuilds from it"
+    return message
+
+
+def cache_status(cache_dir, repo_root=None, kasm_base=None, os_bases=None):
+    """missing, built before the applications were carried (without_apps), stale (built for other packages than the code needs now, or without the
+    Kasm base when one is wanted), or complete. `repo_root` turns on the staleness check; every caller in this script passes it."""
+    cache_dir = Path(cache_dir)
+    if not (cache_dir / "MANIFEST.json").is_file():
+        return "missing"
+    if not (cache_dir / "apps").is_dir():
+        return "without_apps"
+    if kasm_base is not None and not (cache_dir / "kasm" / "KASM.json").is_file():
+        return "stale"
+    if os_bases is not None:
+        carried = {m.name: m for m in (cache_dir / "os-bases").glob("*-base.json")}
+        if not carried:
+            return "stale"                      # ready-made bases are wanted and the cache carries none
+        import json
+        for wanted in Path(os_bases).glob("*-base.json"):
+            try:
+                manifest = json.loads(wanted.read_text())
+                if manifest.get("holds_install_state_or_secrets") is not False:
+                    continue                    # one that cannot be carried is reported by the cache build, not a reason to rebuild forever
+                if wanted.name not in carried or json.loads(carried[wanted.name].read_text()).get("sha256") != manifest.get("sha256"):
+                    return "stale"              # a wanted base is missing from the cache, or the cache holds an older build of it
+            except (OSError, ValueError):
+                return "stale"
+    if repo_root is not None:
+        import offline_cache
+        if not offline_cache.cache_is_current(cache_dir, repo_root)[0]:
+            return "stale"
+    return "complete"
+
+
+def cache_seeds(installer_cache, earlier):
+    """What a cache build starts from before downloading anything: earlier caches, the volume's own package and
+    firmware folders (installer_cache.py's layout), and the cache this machine's own drive carried and learned."""
+    candidates = [*map(Path, earlier), Path(installer_cache) / "packages", Path(installer_cache) / "firmware",
+                  Path(installer_cache) / "installer/expanded/baseline-cache"]
+    return [p for p in candidates if p.is_dir()]
+
+
+def listed_os_images(available, listing=None):
+    """The images named by the operator's supported-OS list (DR261/262) that are on hand, in the list's order; [] when there is no list. An image the list
+    names but the cache lacks is reported, never silently dropped. Any file type the list names counts (FydeOS is an .ova)."""
+    import os_list
+    entries = os_list.load() if listing is None else listing
+    wanted = [e["iso"] for e in entries if e["iso"]]
+    missing = [n for n in wanted if n not in available]
+    if missing:
+        say("the supported-OS list names images that are not in", OS_ISOS, "-", ", ".join(missing))
+    return [n for n in wanted if n in available]
+
+
+def select_os_isos(requested, available, *, rehearsal, sizes=None, listed=()):
+    """Which OS install images the installer offers to the drive. Default: the operator's supported-OS list when there is one, else every .iso except
+    the Proxmox installer (already carried); the rehearsal defaults to the smallest one so it stays quick."""
+    candidates = sorted(n for n in available if n.endswith(".iso") and n != "proxmox-ve-source.iso")
+    if requested:
+        missing = [n for n in requested if n not in candidates]
+        if missing:
+            raise ValueError(f"not an OS image in {OS_ISOS}: {', '.join(missing)}")
+        return list(requested)
+    if rehearsal and candidates:
+        return [min(candidates, key=lambda n: (sizes or {}).get(n, 0))]
+    return list(listed) or candidates
+
+
+def confirmation_ok(typed, serial):
+    return isinstance(typed, str) and typed.strip() == f"WIPE {serial}"
+
+
+def refuse_protected(target, protected):
+    if PROTECTED is not None and target.get("serial") == PROTECTED:
+        raise RuntimeError("the other SK hynix drive is protected for this run and can never be its target")
+    if protected is not None and protected.get("path") == target.get("path"):
+        raise RuntimeError("the target resolves to the protected drive's device; refusing")
+
+
+def wipe_authorized(value):
+    """The run-time authorization to erase the chosen target: its exact serial, given on the command line."""
+    return SERIAL is not None and value == SERIAL
+
+
+# --- shared plumbing -----------------------------------------------------------------------------
+
+def say(*parts):
+    print("[allscript]", *parts, flush=True)
+
+
+def journal():
+    path = WORK / "progress.json"
+    data = json.loads(path.read_text()) if path.exists() else {"serial": SERIAL, "stages": {}}
+    if data.get("serial") != SERIAL:
+        raise RuntimeError("progress journal belongs to a different drive")
+    return data
+
+
+def record(stage, **facts):
+    data = journal()
+    data["stages"][stage] = dict(facts, finished=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    path = WORK / "progress.json"
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    _give_to_operator(path)
+
+
+def _give_to_operator(path):
+    if os.geteuid() == 0:
+        try:
+            shutil.chown(path, OPERATOR, OPERATOR)
+        except (LookupError, OSError):
+            pass
+
+
+def runner():
+    import repair
+
+    class RootRunner(repair.RealRunner):
+        def run(self, argv, timeout=10):
+            if list(argv[:2]) == ["sudo", "-n"]:
+                argv = argv[2:]
+            return super().run(argv, timeout=timeout)
+    return RootRunner()
+
+
+def identify(r):
+    """The serial-validated target and the protected drive's current device, re-resolved every time."""
+    import drive_recovery
+    import physical_device_safety as pds
+    disk = drive_recovery._offline_disk(r, SERIAL)
+    target = pds.validate_target_device(disk["name"], expected_serial=SERIAL, min_size_bytes=SIZE, max_size_bytes=SIZE)
+    try:
+        protected = {"path": drive_recovery._offline_disk(r, PROTECTED)["name"], "serial": PROTECTED}
+    except Exception:  # noqa: BLE001 - an absent protected drive cannot be confused with the target
+        protected = None
+    refuse_protected(target, protected)
+    return target
+
+
+def latest_verified_recovery(folders, verify):
+    """The newest recovery snapshot (by folder name, which starts with its UTC time) that verifies, or None."""
+    for folder in sorted(folders, reverse=True):
+        try:
+            verify(folder)
+            return folder
+        except Exception:                                   # noqa: BLE001 - a snapshot that does not verify is not used
+            continue
+    return None
+
+
+def parent_bluetooth_selected():
+    return journal()['stages'].get('parent-configuration-choice', {}).get('bluetooth_from_parent', False) is True
+
+
+def saved_ai_plan():
+    return {"host_configuration": {"ai_setup": journal()["stages"].get("ai-configuration-choice", {}).get("selection", {"mode": "none", "providers": [], "targets": [], "profile": "AI_SETUP_DEFAULT"})}}
+
+
+def transfer_parent_configuration(r):
+    """After the new install VM exits, use the same guarded backup/transfer/mirror path as a rebuild."""
+    import ai_provisioning
+    ai_plan = saved_ai_plan()
+    if not parent_bluetooth_selected() and ai_provisioning.choice(ai_plan)["mode"] == "none":
+        return
+    import rebuild_drive, managed_mode
+    extra = {"ai_plan": ai_plan} if ai_provisioning.choice(ai_plan)["mode"] != "none" else {}
+    result = rebuild_drive.rebuild(r, serial=SERIAL, bluetooth_from_parent=parent_bluetooth_selected(),
+                                   mirror_root=managed_mode.mirror_root(), allowed_serials=[SERIAL], **extra)
+    record('parent-configuration', result=result.get('bluetooth'), ai_setup=result.get('ai_setup'))
+
+
+def stage_update(r):
+    """Bring an existing build up to date in place: nothing is erased, only what differs is written (code, the cache and OS images, the mirror). Asks the system for root itself (the installer's own elevation)."""
+    import drive_recovery
+    import update_bundle
+    if not drive_has_build(r):
+        raise RuntimeError(f"{TARGET_NAME} carries no Baseline build, so there is nothing to update; install it first")
+    candidates = sorted(BACKUP_ROOT.glob("baseline-recovery-*")) if BACKUP_ROOT.is_dir() else []
+    recovery = latest_verified_recovery(candidates, lambda f: drive_recovery.verify_snapshot(r, f, expected_serial=SERIAL))
+    if recovery is None:
+        say("no verified recovery snapshot of", TARGET_NAME, "yet; making one (only what the drive uses is stored)")
+        stage_recovery(r)
+        recovery = Path(journal()["stages"]["recovery"]["folder"])
+    bundle = update_bundle.prepare_update_bundle(r, REPO, BUILD / "update-bundles", TARGET_NAME, known_targets=set(DRIVES))
+    say("updating", TARGET_NAME, "in place from", bundle.name, "with recovery snapshot", Path(recovery).name)
+    ai_plan_path = WORK / "ai-installer-plan.json"
+    ai_plan_path.write_text(json.dumps(saved_ai_plan()))
+    done = subprocess.run([sys.executable, str(REPO / "baseline/bin/baseline-rebuild-drive"), "--serial", SERIAL, "--input-bundle", str(bundle), "--recovery-folder", str(recovery), *(["--bluetooth-from-parent"] if parent_bluetooth_selected() else []), "--plan", str(ai_plan_path)],
+                          capture_output=True, text=True)
+    sys.stdout.write(done.stdout)
+    if done.returncode:
+        raise RuntimeError(f"the in-place update did not complete: {(done.stderr or done.stdout).strip()[-400:]}")
+    record("update", bundle=bundle.name, recovery=str(recovery), build=CURRENT_BUILD)
+
+
+def drive_has_build(r) -> bool:
+    """True when the target drive carries an installer-made identity (its disk GUID names the lane and its own serial), i.e. it already holds a Baseline build. Read from the partition table only, so a mounted or
+    active drive is still recognised. A drive that cannot be read is treated as having a build: nothing is erased on a guess."""
+    import identifiers
+    done = r.run(["lsblk", "-J", "-b", "-p", "-o", "NAME,TYPE,SERIAL,PTUUID"], timeout=30)
+    try:
+        disks = [d for d in json.loads(done.stdout)["blockdevices"] if d.get("type") == "disk" and d.get("serial") == SERIAL]
+    except (ValueError, KeyError, TypeError):
+        return True
+    if len(disks) != 1:
+        return True
+    return identifiers.stamped_lane(disks[0].get("ptuuid"), SERIAL) is not None
+
+
+def guarded(target):
+    import physical_device_safety as pds
+
+    def check():
+        fresh = pds.validate_target_device(target["path"], expected_serial=SERIAL, min_size_bytes=SIZE,
+                                           max_size_bytes=SIZE)
+        if fresh != target:
+            raise RuntimeError("target identity changed")
+    return check
+
+
+def sh(argv, *, check=True, timeout=600, env=None, input=None):
+    say("running:", " ".join(shlex.quote(str(a)) for a in argv))
+    return subprocess.run([str(a) for a in argv], check=check, timeout=timeout, env=env, input=input,
+                          text=True, capture_output=input is not None)
+
+
+def lvm_rows(r, pv):
+    import single_drive_storage as storage
+    report = storage._json_command(r, ["pvs", "--devices", pv, "--reportformat", "json", "-o",
+                                       "pv_name,pv_uuid,vg_name,vg_uuid"])
+    return report["report"][0]["pv"]
+
+
+def deactivate_target_vgs(r, target):
+    """Deactivate only the target's own VGs on this host, after confirming none of their LVs is mounted."""
+    pv = target["path"] + "3"
+    if not Path(pv).exists():
+        return []
+    if os.geteuid() != 0:
+        active = active_lvm_volumes(json.loads(subprocess.run(
+            ["lsblk", "-J", "-o", "NAME,TYPE", target["path"]], capture_output=True, text=True, check=True).stdout))
+        if active:
+            raise RuntimeError(
+                f"this host has {TARGET_NAME}'s LVM volumes active ({len(active)}: {', '.join(active[:3])}...); deactivating them "
+                "needs root. Either run once:  sudo vgchange --devices " + pv + " -an   (for each volume group on it), "
+                "or stop this host activating the drive's volumes at all with an LVM filter (see DR254).")
+        return []
+    rows = lvm_rows(r, pv)
+    for row in rows:
+        mapper = "/dev/mapper/" + row["vg_name"].replace("-", "--") + "-"
+        mounted = [line for line in Path("/proc/self/mountinfo").read_text().splitlines()
+                   if f" {mapper}" in line]
+        if mounted:
+            raise RuntimeError(f"{row['vg_name']} still has mounted volumes; unmount them first")
+        sh(["vgchange", "--devices", pv, "-an", row["vg_name"]], timeout=120)
+    return [row["vg_name"] for row in rows]
+
+
+# --- stages --------------------------------------------------------------------------------------
+
+def stage_preflight(r):
+    target = identify(r)
+    say("target:", target["path"], "serial", target["serial"], f"{target['size_bytes']} bytes")
+    lsblk = subprocess.run(["lsblk", "-o", "NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS", target["path"]],
+                           capture_output=True, text=True).stdout
+    print(lsblk, flush=True)
+    for need in (SOURCE_ISO, ASSISTANT, PROXY):
+        if not need.exists():
+            raise RuntimeError(f"missing: {need}")
+    free = shutil.disk_usage(BACKUP_ROOT).free
+    if free < 100 * 1024**3:
+        raise RuntimeError(f"less than 100 GiB free in {BACKUP_ROOT}")
+    isos = select_os_isos([], [p.name for p in OS_ISOS.iterdir() if p.is_file()] if OS_ISOS.is_dir() else [], rehearsal=False)
+    import drive_guard
+    refresh_udev_view(target["path"])
+    state = drive_guard.read_drive_state(target["path"])
+    formattable = (not state.has_data) or drive_guard.is_installer_uuid(state.ptuuid)
+    say("Proxmox source ISO:", SOURCE_ISO.name, "| assistant present | backup free:", f"{free // 1024**3} GiB")
+    say(f"OS ISOs to offer on {TARGET_NAME}:", ", ".join(isos) or "none")
+    say(f"data-protection guard would allow formatting {TARGET_NAME}:", "yes" if formattable else
+        f"NO - {TARGET_NAME} holds data whose disk identifier the installer registry does not know")
+    record("preflight", target=target["path"], formattable=formattable, os_isos=isos)
+
+
+def stage_recovery(r):
+    import drive_recovery
+    import drive_recovery_used
+    identify(r)
+    mounts = drive_recovery.quiesce_source(r, serial=SERIAL, allowed_serials=[SERIAL])
+    say("quiesced:", mounts)
+    folder = drive_recovery_used.create_snapshot_used(r, serial=SERIAL, destination=str(BACKUP_ROOT), allowed_serials=[SERIAL])      # only what is in use; never the empty space
+    manifest = drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
+    say("verified recovery image:", folder)
+    record("recovery", folder=str(folder), manifest=manifest)
+
+
+DEV_PASSWORD_FILE = Path("/run/media/cane/CACHE/baseline-build/dev-root-password")
+
+
+def dev_root_password():
+    """The root password for the installed system during development: read from a private file so it is the same on every rebuild and you
+    can read it (or replace it with one you choose). Created once, with a generated value, if absent; mode 0600 and never printed.
+    The finished product does not use this: it is the development-phase choice (the random one-time password blocked development)."""
+    import secrets
+    if not DEV_PASSWORD_FILE.is_file():
+        DEV_PASSWORD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DEV_PASSWORD_FILE.write_text(secrets.token_urlsafe(18) + "\n")
+        subprocess.run(["setfacl", "-b", str(DEV_PASSWORD_FILE)], capture_output=True)
+        DEV_PASSWORD_FILE.chmod(0o600)
+        say(f"created the development root password file (not shown): {DEV_PASSWORD_FILE}")
+    password = DEV_PASSWORD_FILE.read_text().strip()
+    if len(password) < 12 or any(c in password for c in "\r\n\x00"):
+        raise RuntimeError(f"{DEV_PASSWORD_FILE} must hold one line of at least 12 characters")
+    if DEV_PASSWORD_FILE.stat().st_mode & 0o077:
+        raise RuntimeError(f"{DEV_PASSWORD_FILE} is readable by others; run: chmod 600 {DEV_PASSWORD_FILE}")
+    say(f"using the development root password from {DEV_PASSWORD_FILE} (not shown)")
+    return password
+
+
+HOST_HASH_FILE = Path("/run/media/cane/CACHE/baseline-build/host-password-hash")
+
+
+def host_password_hash():
+    """The host account's password hash, if the operator exported it (one line, mode 0600): the installed root then accepts the password
+    they already use on this machine. Absent: None, and the development root password is used. Never printed.
+        sudo grep "^$USER:" /etc/shadow | cut -d: -f2 > /run/media/cane/CACHE/baseline-build/host-password-hash; chmod 600 <that file>"""
+    import self_installer as si
+    if not HOST_HASH_FILE.is_file():
+        return None
+    if HOST_HASH_FILE.stat().st_mode & 0o077:
+        raise RuntimeError(f"{HOST_HASH_FILE} is readable by others; run: chmod 600 {HOST_HASH_FILE}")
+    value = si.check_password_hash(HOST_HASH_FILE.read_text())
+    say(f"root on the installed system will accept this machine's own password (hash from {HOST_HASH_FILE.name}, not shown)")
+    return value
+
+
+DEV_USER_FILE = Path("/run/media/cane/CACHE/baseline-build/dev-user")
+
+
+def dev_user():
+    """A development login for the installed system as 'name:sha512crypt-hash', from the private file `name:password` (mode 600) if it
+    exists, else None. Only the hash travels (in the first-boot hook on the ISO); the password stays in the file. Development only."""
+    if not DEV_USER_FILE.is_file():
+        return None
+    if DEV_USER_FILE.stat().st_mode & 0o077:
+        raise RuntimeError(f"{DEV_USER_FILE} is readable by others; run: chmod 600 {DEV_USER_FILE}")
+    name, sep, password = DEV_USER_FILE.read_text().rstrip("\n").partition(":")
+    if not sep or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name) or len(password) < 4 or any(c in password for c in "\r\n\x00"):
+        raise RuntimeError(f"{DEV_USER_FILE} must be one line: name:password (name lower-case, password at least 4 characters)")
+    import drive_setup_answer as dsan
+    say(f"development login {name} will be created on the installed system (password not shown)")
+    return f"{name}:{dsan.hash_password_sha512crypt(password.encode(), secrets.token_hex(8))}"
+
+
+MONITOR_KEY = Path("/run/media/cane/CACHE/baseline-build/ssh/baseline-monitor.pub")
+
+
+def monitor_keys():
+    """The development monitoring key's public half, authorized for root on the installed system so a run can be watched over SSH from
+    another machine. Absent file: no key is added (nothing else changes). The private half never leaves the build folder."""
+    if not MONITOR_KEY.is_file():
+        return ()
+    say("authorizing the development monitoring key for root SSH:", MONITOR_KEY.name)
+    return (MONITOR_KEY.read_text().strip(),)
+
+
+def iw_port_of(device_path):
+    import install_watch as iw
+    try:
+        return iw.usb_port_of(os.path.realpath(f"/sys/block/{Path(device_path).name}"))
+    except OSError:
+        return None
+
+
+def require_stable_bridge(window_seconds=900, port=None):
+    """An install writes for an hour; a USB bridge that dropped off the bus a few minutes ago will do it again. Refuse to start until the
+    kernel has logged no USB disconnect for `window_seconds`, saying what it saw."""
+    import install_watch as iw
+    text = subprocess.run(["journalctl", "-k", "--since", "-30min", "--no-pager"], capture_output=True, text=True).stdout
+    seen = iw.usb_disconnects(text, year=time.localtime().tm_year, now_epoch=time.time(), window_seconds=window_seconds, port=port)
+    if seen:
+        raise RuntimeError(f"the kernel logged {seen} USB disconnect(s) in the last {window_seconds // 60} minutes; the drive's bridge is "
+                           f"unstable. Check the cable and port (or move to a USB 3 port that is not shared) and run again after it has been quiet")
+    say(f"USB bridge quiet: no disconnect in the last {window_seconds // 60} minutes")
+
+
+def stage_install(r):
+    import drive_recovery
+    import drive_setup_acquire as dsa
+    import drive_setup_answer as dsan
+    import drive_setup_install as dsi
+    import iso_builder as ib
+    import physical_device_safety as pds
+    import self_installer as si
+    folder = journal()["stages"].get("recovery", {}).get("folder")
+    if not folder:
+        raise RuntimeError(f"run the recovery stage first; nothing is written to {TARGET_NAME} without a verified image")
+    drive_recovery.verify_snapshot(r, folder, expected_serial=SERIAL)
+    target = identify(r)
+    require_stable_bridge(port=iw_port_of(target["path"]))
+    refresh_udev_view(target["path"])          # the guard reads udev's cache, which an earlier install's VM leaves stale
+    say("deactivated on this host:", deactivate_target_vgs(r, target))
+    # The authorization is the exact `--confirm-wipe <serial>` on the command line (checked in main), after a verified
+    # recovery image and under the serial lock: an interactive prompt on top of that only blocks unattended runs.
+    import device_wear
+    wear_before = device_wear.written_bytes(Path(target["path"]).name)
+    say(f"ERASING {TARGET_NAME} ({SERIAL}, {target['path']}); verified recovery image: {folder}")
+    if cache_status(CACHE_DIR, REPO, KASM_BASE, OS_BASES) != "complete":
+        raise RuntimeError(cache_not_ready("run the cache stage first; the installer must carry its own packages and applications"))
+    target = identify(r)
+    workspace = WORK / "installer"
+    result = si.build_and_write_self_installer(
+        device_path=target["path"], device_min_size_bytes=SIZE, expected_serial=SERIAL,
+        pds_runner=pds.Runner(), acquire_runner=dsa.RealAcquireRunner(), answer_runner=dsan.RealAnswerRunner(),
+        iso_builder_runner=ib.RealIsoBuilderRunner(), install_runner=dsi.RealInstallRunner(),
+        workspace=workspace, repo_root=REPO, assistant_binary=ASSISTANT, proxmox_source_iso=SOURCE_ISO,
+        fqdn=fqdn_for(TARGET_NAME), memory_mb=8192, on_progress=lambda line: say(line),
+        offline_cache=CACHE_DIR, os_share=OS_OFFER, child_identity=child_identity_for(SERIAL), root_ssh_keys=monitor_keys(), admin_password=dev_root_password(), admin_password_hash=host_password_hash(), dev_user=dev_user(),
+        **si.LVM_SIZE_PRESETS["single-drive"])
+    say(result.outcome + ":", result.detail)
+    if result.outcome != "applied" or result.qemu_process is None:
+        raise RuntimeError(f"the installer refused or did not launch; {TARGET_NAME} was not written by this stage")
+    global INSTALL_VM, OPENED_PATH
+    INSTALL_VM, OPENED_PATH = result.qemu_process, target["path"]
+    # Same KVM session, ISO still attached: Proxmox installs, reboots, its first boot runs the carried hook
+    # (storage, installer carried onto INSTALLER_CACHE, offline provision), then reboots into first-boot
+    # authorization. Nothing here reads console text (no OCR, by design): a person or vision-capable agent watches
+    # the screendump and records each checkpoint.
+    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)", opened_path=target["path"])
+    wear = device_wear.spent(wear_before, device_wear.written_bytes(Path(target["path"]).name))
+    say(f"this install wrote {device_wear.describe(wear)} to {TARGET_NAME}")
+    record("install", workspace=str(workspace), build=CURRENT_BUILD, bytes_written=wear)
+
+
+def clear_stale_checkpoint(path):
+    """A checkpoint left by an earlier run says nothing about this one; only a touch after the wait begins counts."""
+    Path(path).unlink(missing_ok=True)
+
+
+STAGE_LIMIT_MINUTES = {"firstboot-screen": 120, "kiosk": 45}
+HEARTBEAT_SECONDS = 60
+
+
+def device_now():
+    """Where the target drive is attached right now (by serial), or None. Re-read each tick: a USB bridge reset gives it a new node."""
+    out = subprocess.run(["lsblk", "-dn", "-o", "PATH,SERIAL"], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == SERIAL:
+            return parts[0]
+    return None
+
+
+def write_status(**fields):
+    """A small file an outside monitor can read without parsing the log: what the run is doing and when it last checked."""
+    path = WORK / "status.json"
+    path.write_text(json.dumps(dict(fields, updated=time.strftime("%H:%M:%S")), indent=1))
+
+
+def watch(checkpoint, description, *, opened_path=None, volume=None):
+    """Refresh the session screendump until the named checkpoint file is created by whoever is watching it. Every tick it checks the VM's own
+    state, that the target drive is still at the node QEMU opened, whether the screen is changing, and the stage's time limit; it prints a
+    heartbeat each minute and fails at once on anything fatal (a paused VM or a moved drive is not something to wait out)."""
+    import install_watch as iw
+    done = WORK / f"seen-{checkpoint}"
+    clear_stale_checkpoint(done)
+    shot = WORK / "session-latest.ppm"
+    say(f"waiting for {description}; screendump: {shot} - when it shows, run:  touch {done}")
+    started = time.monotonic()
+    stage = iw.StageWatch(stage=checkpoint, opened_path=opened_path or "", started=started,
+                          limit_seconds=STAGE_LIMIT_MINUTES.get(checkpoint, 60) * 60)
+    last_beat, last_bytes, last_bytes_time = -1e9, None, time.monotonic()
+    while not done.exists():
+        if INSTALL_VM.poll() is not None:
+            raise RuntimeError(f"the installation VM exited ({INSTALL_VM.poll()}) before: {description}")
+        now = time.monotonic()
+        try:
+            status = iw.parse_status(INSTALL_VM.send_monitor_command("info status"))
+            INSTALL_VM.send_monitor_command(f"screendump {shot}")
+        except (OSError, RuntimeError):
+            status = None
+        _give_to_operator(shot)
+        device = device_now() if opened_path else ""        # rehearsals run on an image file with no drive to watch
+        verdict = stage.tick(now, status=status, device_path=device, digest=iw.screen_digest(shot))
+        for alert in verdict.alerts:
+            hint = f"; if this is the prompt you are waiting for: touch {done}" if "screen" in alert else ""
+            say(f"ALERT [{checkpoint}] {alert}{hint}")
+        if now - last_beat >= HEARTBEAT_SECONDS:
+            last_beat = now
+            written = iw.bytes_written(volume or opened_path) if (volume or opened_path) else None
+            speed = iw.throughput_line(last_bytes, written, now - last_bytes_time)
+            last_bytes, last_bytes_time = written, now
+            say(f"[watch {checkpoint}] {int((now - started) // 60)} min, vm={status}, drive={device or opened_path or 'n/a'}, {speed}, "
+                f"screen {'changing' if now - stage.last_change < 60 else f'unchanged {int((now - stage.last_change) // 60)} min'}")
+            write_status(stage=checkpoint, vm=status, drive=device, minutes=int((now - started) // 60), waiting_for=str(done))
+        if verdict.fatal:
+            write_status(stage=checkpoint, fatal=verdict.fatal)
+            raise RuntimeError(f"ALERT [{checkpoint}] {verdict.fatal}")
+        time.sleep(10)
+
+
+def send_keys(text):
+    names = {"\n": "ret", " ": "spc", "-": "minus", ".": "dot", "/": "slash"}
+    for char in text:
+        key = names.get(char) or (f"shift-{char.lower()}" if char.isupper() else char)
+        INSTALL_VM.send_monitor_command(f"sendkey {key}")
+        time.sleep(0.05)
+
+
+def stage_cache(r):
+    status = cache_status(CACHE_DIR, REPO, KASM_BASE, OS_BASES)
+    if status == "stale":
+        import offline_cache
+        why = offline_cache.cache_is_current(CACHE_DIR, REPO)[1] or "it does not carry the Kasm base"
+        kept = CACHE_DIR.with_name(CACHE_DIR.name + "-before-" + time.strftime("%Y%m%d-%H%M%S"))
+        say("the existing cache is stale:", why, "- keeping it as", kept, "and rebuilding (seeded from it, so only what is missing is downloaded)")
+        CACHE_DIR.rename(kept)
+        status = "missing"
+    if status == "without_apps":
+        kept = CACHE_DIR.with_name(CACHE_DIR.name + "-before-apps")
+        if kept.exists():
+            raise RuntimeError(f"{kept} already exists; move it away so the older cache is never overwritten")
+        say("the existing cache carries no applications; keeping it as", kept, "and building a complete one")
+        CACHE_DIR.rename(kept)
+        status = "missing"
+    if status == "complete":
+        say("offline package cache already built:", CACHE_DIR)
+    else:
+        earlier = sorted(BUILD.glob(CACHE_DIR.name + "-before-*"))
+        seeds = cache_seeds(OS_ISOS.parent, earlier)
+        say("seeding the build from:", ", ".join(map(str, seeds)) or "nothing yet; everything is downloaded")
+        sh([REPO / "baseline/bin/baseline-build-offline-cache", "--source-iso", SOURCE_ISO, "--assistant", ASSISTANT,
+            "--workspace", BUILD / "cache-vm", "--output", CACHE_DIR, "--apps", APPS_DIR,
+            *(["--kasm-base", KASM_BASE] if KASM_BASE is not None else []),
+            *(["--os-bases", OS_BASES] if OS_BASES is not None else []),
+            *[arg for seed in seeds for arg in ("--seed", seed)]], timeout=14400)
+    import offline_cache
+    import application_bundle
+    count = offline_cache.verify_manifest(CACHE_DIR, json.loads((CACHE_DIR / "MANIFEST.json").read_text()))
+    apps = offline_cache.verify_app_bundle(CACHE_DIR, application_bundle.APPS)
+    record("cache", path=str(CACHE_DIR), files=count, apps={a["app"]: a["version"] for a in apps})
+
+
+def offer_os_isos(names):
+    """Hard-link the chosen images (plus sums) next to INSTALLER_CACHE/isos; the installer VM shares that folder."""
+    import os_isos
+    global OS_OFFER
+    OS_OFFER = os_isos.build_offer(OS_ISOS, names, OS_ISOS.parent / ".baseline-offer")
+    say("offering OS images to the installed system:", ", ".join(names))
+
+
+def withdraw_os_offer():
+    if OS_OFFER is not None:
+        shutil.rmtree(OS_OFFER, ignore_errors=True)
+
+
+def stage_rehearse(r):
+    """The same self-contained installer, run against a blank sparse disk the size of the SK hynix targets with NO network.
+
+    Built by the same functions as the real install (render_answer, first_boot_hook, prepare_iso_defensively,
+    iso_builder with the offline cache). Only the answer delivery differs: embedded in the ISO, which docs/INSTALL.md
+    accepts for disposable VMs only; the real install keeps the HTTP answer server. No root, no physical drive.
+    """
+    import drive_setup_answer as dsan
+    import drive_setup_install as dsi
+    import first_boot_hook as fbh
+    import iso_builder as ib
+    import self_installer as si
+    if cache_status(CACHE_DIR, REPO, KASM_BASE, OS_BASES) != "complete":
+        raise RuntimeError(cache_not_ready("run the cache stage first (the cache must carry the applications)"))
+    work = BUILD / "rehearsal"
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+    password = dev_root_password().encode()                # the development password, so the rehearsal VM is reachable like the real drive
+    answer = work / "answer.toml"
+    answer.write_text(si.render_answer(fqdn="baseline-rehearsal.local",
+                                       password_hash=dsan.hash_password_sha512crypt(password, secrets.token_hex(8)),
+                                       disk_serial="BLREHEARSAL01", first_boot=True, root_ssh_keys=monitor_keys(),
+                                       **REHEARSAL_LVM))
+    answer.chmod(0o600)                                    # holds the password hash; the build drive's ACLs widen it
+    hook = fbh.build_hook(REPO, work / "baseline-first-boot", child_identity=child_identity_for("BLREHEARSAL01"), dev_user=dev_user(), dev_ssh_keys=monitor_keys())
+    prepared = dsan.prepare_iso_defensively(
+        dsan.RealAnswerRunner(), binary=ASSISTANT, source_iso=SOURCE_ISO, answer_file=answer, fetch_from="iso",
+        output_path=work / "answer.iso", tmp_dir=work / "prep-tmp", workspace_root=work, expected_fetch_mode="iso",
+        min_size=1_000_000_000, max_size=3_000_000_000, forbidden_iso_strings=[],
+        extra_args=["--on-first-boot", str(hook)])
+    if not prepared.ok:
+        raise RuntimeError(f"prepare-iso failed: {[c for c in prepared.postconditions if not c.ok]}")
+    built = ib.build_current_iso(ib.RealIsoBuilderRunner(), source_iso=work / "answer.iso", repo_root=REPO,
+                                 output_iso=work / "installer.iso", workspace=work / "iso-build",
+                                 offline_cache=CACHE_DIR)
+    if not built.ok:
+        raise RuntimeError(f"ISO build failed: {[c for c in built.postconditions if not c.ok]}")
+    disk = work / "disk.raw"
+    with open(disk, "wb") as stream:
+        stream.truncate(REHEARSAL_DISK_BYTES)                  # sparse; only what the install writes takes space
+    invocation = dsi.build_sparse_install_invocation(
+        target_image=disk, prepared_iso=work / "installer.iso", mac="52:54:00:ba:5e:7e",
+        smbios_product="baseline-rehearsal", serial_log=work / "serial.log", memory_mb=REHEARSAL_MEMORY_MB, smp=6,
+        restrict_network=True, monitor_socket=work / "monitor.sock", target_serial="BLREHEARSAL01",
+        share_dir=OS_OFFER)
+    argv = invocation.argv + ["-display", "none"]
+    global INSTALL_VM
+    INSTALL_VM = dsi.RealInstallRunner().popen(argv, monitor_socket=work / "monitor.sock")
+    say("rehearsal installing with no network; root and the development login use the development passwords (not shown)")
+    watch("firstboot-screen", "the Baseline first-boot authorization screen (asking for CONFIRM)", volume=disk)
+    record("rehearse", workspace=str(work))
+
+
+def stage_session_firstboot(r):
+    if INSTALL_VM is None:
+        raise RuntimeError("firstboot continues the install stage's session; run them in one invocation")
+    send_keys("CONFIRM\n")
+    say("CONFIRM typed on the first-boot screen")
+    watch("kiosk", "the kiosk browser showing the Proxmox login", opened_path=OPENED_PATH)
+    record("firstboot")
+
+
+def stage_session_kiosk(r):
+    if INSTALL_VM is None:
+        raise RuntimeError("kiosk continues the install stage's session; run them in one invocation")
+    shot = WORK / "kiosk.ppm"
+    INSTALL_VM.send_monitor_command(f"screendump {shot}")
+    time.sleep(1)
+    from drive_setup_install import ppm_to_png
+    (WORK / "kiosk.png").write_bytes(ppm_to_png(shot.read_bytes()))
+    _give_to_operator(WORK / "kiosk.png")
+    INSTALL_VM.send_monitor_command("system_powerdown")
+    code = INSTALL_VM.wait(timeout=600)
+    say(f"{TARGET_NAME or 'the rehearsal VM'} shut down cleanly after the kiosk was shown; QEMU exit", code)
+    withdraw_os_offer()
+    record("kiosk", screenshot=str(WORK / "kiosk.png"), qemu_exit=code)
+    if code != 0:
+        raise RuntimeError("install VM did not exit cleanly; parent configuration was not transferred")
+    if TARGET_NAME:
+        transfer_parent_configuration(r)
+
+
+REQUIRED_EXPORTS = {"identifiers": ("host_id", "child_id", "mint", "IdentifierError"), "installer_identity": ("child_uuid", "installer_id"),
+                    "references": ("link", "current_host"), "machine_context": ("observe", "assess"), "install_watch": ("StageWatch",)}
+
+
+def self_check():
+    """Before anything slow or destructive: every library this run depends on imports and exports what it uses. A shared working tree can
+    be changed under a running session (on 2026-10-11 identifiers.py was replaced by a one-line stub, and the run only found out after
+    building the installer); this finds that in a second."""
+    import importlib
+    for module, names in REQUIRED_EXPORTS.items():
+        loaded = importlib.import_module(module)
+        missing = [n for n in names if not hasattr(loaded, n)]
+        if missing:
+            raise RuntimeError(f"{loaded.__file__} is missing {', '.join(missing)}: the working tree has been changed or is damaged; "
+                               f"compare it with git (git diff HEAD -- {Path(loaded.__file__).name}) before running")
+
+
+def main():
+    self_check()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--stage", help="run only this stage")
+    parser.add_argument("--from", dest="start", help="run this stage and every later one")
+    parser.add_argument("--target", choices=sorted(DRIVES),
+                        help="the drive this run may touch; the other is protected. No default.")
+    parser.add_argument("--os-iso", action="append", default=[], metavar="NAME",
+                        help="an image in /mnt/INSTALLER_CACHE/isos to carry onto the drive (repeatable); "
+                             "default: every .iso (the rehearsal: the smallest)")
+    parser.add_argument("--kasm-base", type=Path, metavar="DIR",
+                        help="a prepared Kasm base (the folder baseline-build-kasm-base wrote); the cache then carries it (about 15 GiB) so Kasm is built on the new setup")
+    parser.add_argument("--os-bases", type=Path, metavar="DIR",
+                        help="the folder baseline-build-os-base wrote; the cache then carries each ready-made VM base that passes its checks, so the listed systems can be created already set up")
+    parser.add_argument("--confirm-wipe", default="", metavar="SERIAL",
+                        help="authorize erasing the target (after its verified recovery image); its exact serial")
+    parser.add_argument("--plan", type=Path, help="saved installer plan, including optional parent Bluetooth transfer")
+    parser.add_argument("--bluetooth-from-parent", action=argparse.BooleanOptionalAction, default=None, help="copy parent Bluetooth pairings after a fresh build, or during update/rebuild (opt-in; choice saved per target)")
+    args = parser.parse_args()
+    global CONFIRMED_WIPE, WORK, KASM_BASE, OS_BASES, CURRENT_BUILD
+    CONFIRMED_WIPE = args.confirm_wipe
+    KASM_BASE = args.kasm_base
+    OS_BASES = args.os_bases
+    stages = select_stages(args.stage, args.start)
+    select_target(*target_for(args.target, CONFIRMED_WIPE, stages))
+    WORK = work_dir(TARGET_NAME, stages)
+    if TARGET_NAME:
+        say(f"target {TARGET_NAME} ({SERIAL}); protected for this run: {PROTECTED}; work folder {WORK}")
+    import bluetooth_transfer
+    selected = None
+    import ai_provisioning
+    ai_selection = None
+    if args.plan:
+        requested_plan = json.loads(args.plan.read_text())
+        selected = bluetooth_transfer.requested(requested_plan)
+        ai_selection = ai_provisioning.choice(requested_plan)
+    if args.bluetooth_from_parent is not None:
+        selected = args.bluetooth_from_parent
+    needs_root = root_required(stages)
+    if TARGET_NAME and 'kiosk' in stages and ((selected if selected is not None else parent_bluetooth_selected()) or (ai_selection or ai_provisioning.choice(saved_ai_plan()))['mode'] != 'none'):
+        needs_root.append('parent Bluetooth transfer')
+    if needs_root and os.geteuid() != 0:
+        import elevate
+        say("these stages need root; asking the system for it (a password prompt will appear)")
+        elevate.elevate_or_return([str(Path(__file__).resolve()), *sys.argv[1:]])
+        raise RuntimeError(f"stages {', '.join(needs_root)} need root: run with sudo")
+    WORK.mkdir(mode=0o750, parents=True, exist_ok=True)
+    _give_to_operator(WORK)
+    if selected is not None:
+        record('parent-configuration-choice', bluetooth_from_parent=selected)
+    if ai_selection is not None:
+        record('ai-configuration-choice', selection=ai_selection)
+    if {"install", "rehearse"} & set(stages):
+        available = [p.name for p in OS_ISOS.iterdir() if p.is_file()] if OS_ISOS.is_dir() else []
+        sizes = {n: (OS_ISOS / n).stat().st_size for n in available}
+        names = select_os_isos(args.os_iso, available, rehearsal="rehearse" in stages, sizes=sizes, listed=listed_os_images(available))
+        if names:
+            offer_os_isos(names)
+        else:
+            say("no OS images in", OS_ISOS, "- the drive will carry none")
+    r = runner()
+    if "install" in stages and TARGET_NAME:
+        import build_currency
+        CURRENT_BUILD = build_currency.source_state(r, REPO)
+        verdict = build_currency.assess(journal()["stages"].get("install", {}).get("build"), CURRENT_BUILD)
+        say(f"build check for {TARGET_NAME}: {verdict['action']} - {verdict['reason']}")
+        if "install" in journal()["stages"] or drive_has_build(r):
+            say(f"{TARGET_NAME} already carries a Baseline build ({verdict['reason']}). An existing build is only ever updated in place; "
+                "the installer never rewrites one and has no option to. Updating it now.")
+            stages = ["update"]
+    if "install" in stages and not wipe_authorized(CONFIRMED_WIPE):          # only a drive with no build can reach here: an existing build was switched to an in-place update above
+        raise RuntimeError(f"the install stage erases {TARGET_NAME}: add  --confirm-wipe {SERIAL}")
+    functions = {"preflight": stage_preflight, "recovery": stage_recovery, "cache": stage_cache,
+                 "rehearse": stage_rehearse, "install": stage_install, "firstboot": stage_session_firstboot,
+                 "kiosk": stage_session_kiosk, "identity": lambda r: finalize_target_identity(), "update": stage_update}
+    try:
+        for stage in stages:
+            say(f"=== {stage} ===")
+            functions[stage](r)
+    finally:
+        if "install" in stages and TARGET_NAME:
+            try:
+                finalize_target_identity()
+            except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+                say("the drive's identity was not stamped:", exc)
+    say("done:", ", ".join(stages))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        print(f"[allscript] STOPPED, nothing claimed complete: {exc}", file=sys.stderr)
+        sys.exit(1)

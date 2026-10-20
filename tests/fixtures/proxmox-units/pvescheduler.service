@@ -1,0 +1,14 @@
+# Ordering directives only, copied from Proxmox VE 9.2's package for this unit; [Service] is a stub.
+[Unit]
+Description=Proxmox VE scheduler
+ConditionPathExists=/usr/bin/pvescheduler
+Wants=pve-cluster.service
+After=pve-cluster.service
+After=pve-guests.service
+After=pve-storage.target
+
+[Service]
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target

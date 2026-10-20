@@ -65,8 +65,8 @@ OPERATIONS = {
         {"dry_run": False, "force": False}, True),
     "backup_guests": Operation(
         "backup_guests",
-        "Add a new set holding a vzdump backup of each Proxmox VM and container that has a disk on the PC601's "
-        "local-lvm (guests kept on the installer cache are already covered by the volume backup). Only ever adds "
+        "Add a new set holding a vzdump backup of each Proxmox VM and container that has a disk on the guest "
+        "storage (SESSION_TEMP). REAL-011: split/external guest storage and live disk recovery are not covered by this selector. Only ever adds "
         "files; deletes and overwrites nothing. `dry_run` lists what would be dumped without writing.",
         {"dry_run": False}, True),
     "backup_verify": Operation(
@@ -107,7 +107,7 @@ def _destination(get_setting, run):
     destination = get_setting("backups", "offdrive_destination")
     if not destination:
         raise offdrive_backup.BackupError("no backup destination is configured (backups.offdrive_destination)")
-    return offdrive_backup.resolve_destination(destination, run=run, allowed_serials=drive_admin.ALLOWED_TARGET_SERIALS,
+    return offdrive_backup.resolve_destination(destination, run=run, allowed_serials=drive_admin.allowed_target_serials(),
                                                boot_serial=offdrive_backup._boot_serial())
 
 
@@ -140,16 +140,36 @@ def _test_restore(origin, params, *, print_fn, get_setting, run) -> int:
     smallest = min(archives, key=lambda a: a.get("bytes", 0))
     label = smallest["name"].removesuffix(".tar.gz")
     scratch = tempfile.mkdtemp(prefix="baseline-test-restore-")
+    restored = 0
+    restore_error = None
+    cleanup_error = None
     try:
         offdrive_backup.restore_label(dest, newest.name, label, scratch)
         restored = sum(len(files) for _root, _dirs, files in os.walk(scratch))
-        if restored == 0:
-            print_fn(f"[FAILED] restoring {label} from {newest.name} produced no files")
-            return 1
-        print_fn(f"[ok] {newest.name}: {label} restored {restored} file(s) into a temporary folder, which was then removed")
-        return 0
+    except Exception as exc:
+        restore_error = f"{type(exc).__name__}: {exc}"
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)          # only the folder this function just made
+        try:
+            if os.path.lexists(scratch):
+                shutil.rmtree(scratch)
+            if os.path.lexists(scratch):
+                raise OSError("temporary restore directory still exists after cleanup")
+        except OSError as exc:
+            cleanup_error = exc
+    if cleanup_error:
+        detail = f"[FAILED] temporary restore cleanup failed at {scratch}: {cleanup_error}"
+        if restore_error:
+            detail += f"; restore also failed: {restore_error}"
+        print_fn(detail)
+        return 1
+    if restore_error:
+        print_fn(f"[FAILED] restoring {label} from {newest.name}: {restore_error}")
+        return 1
+    if restored == 0:
+        print_fn(f"[FAILED] restoring {label} from {newest.name} produced no files")
+        return 1
+    print_fn(f"[ok] {newest.name}: {label} restored {restored} file(s) into a temporary folder, which was then removed")
+    return 0
 
 
 def _list_sets(origin, params, *, print_fn, get_setting, run) -> int:

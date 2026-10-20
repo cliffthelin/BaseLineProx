@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Root service behind remote rebuild authorization (see rebuild_authority). It reads requests from an inbox the operator's account can write, keeps all state in its own root-only
+directory, and runs the installer (from its own root-owned snapshot of the source, so editing the working copy cannot change what runs as root) for a request that has been approved
+with its one-time code. Set up once with `sudo baseline/bin/baseline-rebuild-setup`."""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+CONFIG = Path(os.environ.get("BASELINE_REBUILD_CONFIG", "/etc/baseline-rebuild.json"))
+sys.path.insert(0, str(Path(os.environ.get("BASELINE_REBUILD_SRC", "/opt/baseline-rebuilder/src")) / "baseline/lib"))
+import rebuild_authority as ra  # noqa: E402
+import rebuild_policy as rp  # noqa: E402
+
+INBOX = Path("/run/baseline-rebuild")
+STATE = Path("/var/lib/baseline-rebuild")
+LOGS = Path("/var/log/baseline-rebuild")
+
+
+def live_drive(serial):
+    """(size in bytes) of the attached drive with this serial, or None."""
+    out = subprocess.run(["lsblk", "-dbn", "-o", "SERIAL,SIZE"], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == serial:
+            return int(parts[1])
+    return None
+
+
+def git(*args, cwd=None):
+    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=600)
+    if done.returncode:
+        raise rp.PolicyError(f"git {args[0]} failed: {done.stderr.strip()[-200:]}")
+    return done.stdout.strip()
+
+
+def prepare_request(cfg, target):
+    """Pin the source of a request: a root-owned checkout of the repository's current commit, its digest, and what changed since the last rebuild that was approved, all returned for the approver to see."""
+    repo = cfg["repo"]
+    commit = git("-C", repo, "rev-parse", "HEAD")
+    work = STATE / "src" / commit[:12]
+    if not work.exists():
+        work.parent.mkdir(parents=True, exist_ok=True)
+        git("clone", "-q", "--no-hardlinks", repo, str(work))
+        git("checkout", "-q", commit, cwd=str(work))
+    last = STATE / "last-approved-commit"
+    since = last.read_text().strip() if last.exists() else ""
+    changes = git("diff", "--stat", "--stat-width=100", since, commit, cwd=str(work)) if since else "no earlier approved rebuild to compare with"
+    return {"commit": commit, "subject": git("log", "-1", "--format=%s", commit, cwd=str(work)), "source_sha256": rp.source_digest(work),
+            "source_dir": str(work), "changes_since_last_approved": changes[-1500:]}
+
+
+def load_drives(path):
+    try:
+        return dict(json.loads(Path(path).read_text()).get("drives", {}))
+    except (OSError, ValueError):
+        return {}
+
+
+def handle(auth, msg, prepare=None):
+    op = msg.get("op")
+    if op == "request":
+        meta = prepare(str(msg.get("target", ""))) if prepare else None
+        return auth.request(str(msg.get("target", "")), msg.get("hours"), meta)
+    if op == "approve":
+        return auth.approve(str(msg.get("id", "")), str(msg.get("code", "")))
+    if op == "status":
+        return {"ok": True, "requests": auth.status()}
+    return {"ok": False, "error": "unknown operation"}
+
+
+def drain_inbox(auth, prepare=None):
+    for f in sorted(INBOX.glob("*.json")):
+        out = f.with_suffix(".out")
+        try:
+            reply = handle(auth, json.loads(f.read_text()), prepare)
+        except (OSError, ValueError):
+            reply = {"ok": False, "error": "unreadable message"}
+        out.write_text(json.dumps(reply))
+        out.chmod(0o644)
+        f.unlink(missing_ok=True)
+    for old in INBOX.glob("*.out"):
+        if time.time() - old.stat().st_mtime > 300:
+            old.unlink(missing_ok=True)
+
+
+def main():
+    import managed_mode
+    if not managed_mode.remote_rebuild_enabled():
+        raise SystemExit("remote rebuild is part of managed server mode and it is not enabled here (baseline-managed enable --remote-rebuild)")
+    cfg = json.loads(CONFIG.read_text())
+    for d in (INBOX, STATE, LOGS):
+        d.mkdir(parents=True, exist_ok=True)
+    os.chmod(STATE, 0o700)
+    os.chmod(INBOX, 0o770)
+    os.chown(INBOX, 0, int(cfg["gid"]))
+    os.chmod(LOGS, 0o755)
+    running = {}
+    while True:
+        try:
+            policy = rp.load_verified(cfg["policy_file"], cfg["policy_digest_file"])    # re-checked every pass: a changed policy stops everything
+        except rp.PolicyError as exc:
+            print("baseline-rebuild:", exc, file=sys.stderr, flush=True)
+            time.sleep(30)
+            continue
+        auth = ra.Authority(STATE, {n: None for n in policy["drives"]}, max_seconds=policy["max_approval_hours"] * 3600)
+        drain_inbox(auth, lambda target: prepare_request(cfg, target))
+        for rid, (proc, _) in list(running.items()):
+            if proc.poll() is not None:
+                auth.finish(rid, proc.returncode)
+                del running[rid]
+        req = auth.take_approved()
+        if req:
+            serial = load_drives(cfg["drives_file"]).get(req["target"], "")
+            try:
+                size = live_drive(serial)
+                if size is None:
+                    raise rp.PolicyError(f"{req['target']} is not attached")
+                work = req["source_dir"]
+                argv = rp.command_for(policy, target=req["target"], serial=serial, size_bytes=size, src=work, python=sys.executable, current_source=rp.source_digest(work), approved_source=req["source_sha256"])
+                (STATE / "last-approved-commit").write_text(req["commit"] + "\n")
+            except rp.PolicyError as exc:
+                auth.finish(req["id"], 126)
+                (LOGS / f"{req['id']}.log").write_text(f"refused: {exc}\n")
+            else:
+                env = dict(os.environ, BASELINE_DRIVES_FILE=cfg["drives_file"], HOME="/root")
+                if cfg.get("own_drives_file"):
+                    env["BASELINE_OWN_DRIVES_FILE"] = cfg["own_drives_file"]
+                log = open(LOGS / f"{req['id']}.log", "w")
+                running[req["id"]] = (subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT, env=env), log)
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    main()

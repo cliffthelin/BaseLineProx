@@ -6,10 +6,8 @@ down to GPU classes; `diagnostics.py` covers sensors/NVMe/SMART only.
 Neither answers "what is actually in this machine" - this module does,
 across all four real buses: PCI, USB, block, network.
 
-Every collector is Runner-injected (repair.Runner / FakeRunner, this
-project's established pattern) and never raises: a missing tool yields
-an empty list plus, per device, an honest `driver_status` rather than a
-blank field. A device with no driver bound is the single most useful
+Collectors use injectable runners. Failed commands raise InventoryError;
+collect_all retains successful observations and includes explicit errors. A device with no driver bound is the single most useful
 fact this page can surface for an installer operator, so it is stated
 explicitly, never rendered as absence.
 """
@@ -31,7 +29,7 @@ _LSUSB_LINE = re.compile(
 )
 
 _IP_LINK_LINE = re.compile(
-    r'^\d+:\s+(?P<name>[^:@]+)[:@].*?state (?P<state>\S+).*?link/(?P<kind>\S+)\s+(?P<mac>[0-9a-f:]{17})?',
+    r'^\d+:\s+(?P<name>[^:@]+)[:@].*?state (?P<state>\S+).*?link/(?P<kind>\S+)(?:\s+(?P<mac>[0-9a-f:]{17}))?',
     re.S,
 )
 
@@ -56,9 +54,12 @@ class PciDevice:
     model: str
     pci_id: str
     kernel_driver: str | None = None
+    driver_error: str | None = None
 
     @property
     def driver_status(self) -> str:
+        if self.driver_error:
+            return f"driver metadata unavailable: {self.driver_error}"
         return self.kernel_driver or "no driver bound"
 
 
@@ -86,47 +87,67 @@ class NetInterface:
     mac: str = ""
 
 
+class InventoryError(RuntimeError):
+    """REAL-006: hardware observation failed, not an empty bus."""
+
+
+def require_bus_output(bus: str, output: str, *, allow_empty=False) -> str:
+    """Reject blank command output where a running host must have devices."""
+    if not isinstance(output,str):
+        raise InventoryError(f"REAL-006: {bus} probe output unavailable")
+    if not allow_empty and not output.strip():
+        raise InventoryError(f"REAL-006: {bus} probe returned empty output")
+    return output
+
+
 def _run(runner, argv, timeout=15):
-    """Real output, or None if the tool is absent/failed. Never raises."""
     try:
         proc = runner.run(argv, timeout=timeout)
-    except Exception:
-        return None
-    return proc.stdout if getattr(proc, "returncode", 1) == 0 else None
+    except Exception as exc:
+        raise InventoryError(f"REAL-006: {argv[0]} probe unavailable") from exc
+    if getattr(proc, "returncode", 1) != 0:
+        raise InventoryError(f"REAL-006: {argv[0]} probe failed (exit {proc.returncode})")
+    output = getattr(proc, "stdout", None)
+    if not isinstance(output, str):
+        raise InventoryError(f"REAL-006: {argv[0]} output unavailable")
+    return output
 
 
-def _kernel_driver_for(runner, pci_address: str) -> str | None:
+def _kernel_driver_for(runner, pci_address: str) -> tuple[str | None, str | None]:
     """sysfs `uevent` carries `DRIVER=<name>` as plain text, so this
     needs only `read_text` - part of repair.Runner's own interface.
     The `driver` symlink would need `realpath`, which that interface
     does not define (it lives on physical_device_safety.Runner)."""
     try:
-        for line in runner.read_text(f"/sys/bus/pci/devices/{pci_address}/uevent").splitlines():
-            if line.startswith("DRIVER="):
-                return line[len("DRIVER="):].strip() or None
-    except Exception:
-        pass
-    return None
+        content = runner.read_text(f"/sys/bus/pci/devices/{pci_address}/uevent")
+    except Exception as exc:
+        return None, type(exc).__name__
+    for line in content.splitlines():
+        if line.startswith("DRIVER="):
+            return line[len("DRIVER="):].strip() or None, None
+    return None, None
 
 
 def collect_pci(runner) -> list:
     """Every PCI device, all classes - explicitly not gpu_admin's filter."""
-    out = _run(runner, ["lspci", "-Dmmnnk"])
-    if out is None:
-        return []
+    out = require_bus_output('PCI',_run(runner, ["lspci", "-Dmmnnk"]))
     devices = []
     for line in out.splitlines():
+        if not line.strip():
+            continue
         m = _LSPCI_LINE.match(line)
         if not m:
-            continue
+            raise InventoryError("REAL-006: lspci returned malformed device output")
         addr = m.group("addr")
+        driver, driver_error = _kernel_driver_for(runner, addr)
         devices.append(PciDevice(
             address=addr,
             pci_class=m.group("pci_class"),
             vendor=m.group("vendor").strip(),
             model=m.group("model").strip(),
             pci_id=f'{m.group("vendor_id").lower()}:{m.group("device_id").lower()}',
-            kernel_driver=_kernel_driver_for(runner, addr),
+            kernel_driver=driver,
+            driver_error=driver_error,
         ))
     return devices
 
@@ -149,14 +170,14 @@ def group_pci(devices: list) -> dict:
 def collect_usb(runner) -> list:
     """Real USB peripherals; root hubs are bus plumbing, not hardware
     an operator is looking for, so they are dropped."""
-    out = _run(runner, ["lsusb"])
-    if out is None:
-        return []
+    out = require_bus_output('USB',_run(runner, ["lsusb"]),allow_empty=True)
     devices = []
     for line in out.splitlines():
+        if not line.strip():
+            continue
         m = _LSUSB_LINE.match(line.strip())
         if not m:
-            continue
+            raise InventoryError("REAL-006: lsusb returned malformed device output")
         description = m.group("description").strip()
         if "root hub" in description.lower():
             continue
@@ -169,17 +190,20 @@ def collect_usb(runner) -> list:
 
 def collect_block(runner) -> list:
     """Whole disks only (-d): the drive inventory, not every partition."""
-    out = _run(runner, ["lsblk", "-d", "-P", "-o", "NAME,SIZE,MODEL,SERIAL,TRAN"])
-    if out is None:
-        return []
+    out = require_bus_output('block',_run(runner, ["lsblk", "-d", "-P", "-o", "NAME,SIZE,MODEL,SERIAL,TRAN"]))
     disks = []
     for line in out.splitlines():
         if not line.strip():
             continue
         try:
-            fields = dict(kv.split("=", 1) for kv in shlex.split(line) if "=" in kv)
-        except ValueError:
-            continue
+            pairs = [kv.split("=", 1) for kv in shlex.split(line)]
+            fields = dict(pairs)
+        except ValueError as exc:
+            raise InventoryError("REAL-006: lsblk returned malformed device output") from exc
+        if (len(fields) != len(pairs)
+                or set(fields) != {"NAME", "SIZE", "MODEL", "SERIAL", "TRAN"}
+                or not fields["NAME"] or not fields["SIZE"]):
+            raise InventoryError("REAL-006: lsblk returned malformed device output")
         name = fields.get("NAME", "")
         if not name or name.startswith("loop"):
             continue
@@ -193,14 +217,14 @@ def collect_block(runner) -> list:
 def collect_net(runner) -> list:
     """Real interfaces, loopback excluded - it is never what the
     operator is configuring."""
-    out = _run(runner, ["ip", "-o", "link", "show"])
-    if out is None:
-        return []
+    out = require_bus_output('network',_run(runner, ["ip", "-o", "link", "show"]))
     ifaces = []
     for line in out.splitlines():
+        if not line.strip():
+            continue
         m = _IP_LINK_LINE.match(line.strip())
         if not m:
-            continue
+            raise InventoryError("REAL-006: ip returned malformed device output")
         name = m.group("name").strip()
         if name == "lo":
             continue
@@ -209,11 +233,16 @@ def collect_net(runner) -> list:
 
 
 def collect_all(runner) -> dict:
-    """Every bus at once. A failing collector yields [] for its own
-    key and never hides the others."""
-    return {
-        "pci": collect_pci(runner),
-        "usb": collect_usb(runner),
-        "block": collect_block(runner),
-        "net": collect_net(runner),
-    }
+    """Keep successful bus results and explicitly report failed observations."""
+    results = {}
+    errors = []
+    for name, collector in (("pci", collect_pci), ("usb", collect_usb),
+                            ("block", collect_block), ("net", collect_net)):
+        try:
+            results[name] = collector(runner)
+        except InventoryError as exc:
+            results[name] = None
+            errors.append({"bus": name, "error": str(exc)})
+    if errors:
+        results["errors"] = errors
+    return results

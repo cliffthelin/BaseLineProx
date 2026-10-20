@@ -1,0 +1,734 @@
+#!/usr/bin/env python3
+"""Build a ready-made VM base for one listed operating system (DR258, DR267).
+
+Runs on the build machine, which has internet. Installs the system unattended in QEMU/KVM from the image the installer carries, with the applications, then looks inside it through the
+guest agent, makes it generic (no machine id, no host keys, no cloud-init state) and writes `<os>-base.qcow2` and `<os>-base.json`. The base holds NO account and NO secret: the first boot
+creates the person's account from a seed, so one base serves everyone.
+
+    baseline-build-os-base apps  --output DIR
+    baseline-build-os-base build --os debian --images /mnt/INSTALLER_CACHE/isos --apps DIR --output DIR
+"""
+import argparse
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "baseline/lib"))
+import os_build as ob  # noqa: E402
+
+OVMF_CODE, OVMF_VARS = "/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"
+INSTALL_TIMEOUT_S, STALL_S, AGENT_WAIT_S = 3 * 3600, 20 * 60, 600
+
+
+def say(*parts):
+    print("[os-base]", *parts, flush=True)
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def make_iso(label: str, folder: Path, out: Path) -> None:
+    subprocess.run(["xorriso", "-as", "mkisofs", "-quiet", "-iso-level", "3", "-follow-links", "-V", label, "-J", "-r", "-o", str(out), str(folder)], check=True)
+
+
+def prepare_apps(out: Path) -> dict:
+    """Fetch each application from its publisher through application_bundle (the SHA-256 comes from the publisher's own index) and record what was fetched."""
+    sys.path.insert(0, str(REPO / "baseline/lib"))
+    import application_bundle as ab
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    platform = {"arch": "amd64", "os": "debian", "release": "13"}
+    record = {}
+    for app in ab.APPS:
+        got = ab.prepare(app, {}, out / app, platform=platform)
+        source = got["recipe"]["source"]
+        archive = Path(got["archive"])
+        record[app] = {"file": archive.name, "medium": source["medium"], "version": source.get("version") or "", "sha256": source.get("sha256") or sha256(archive), "url": source["url"],
+                       "bytes": archive.stat().st_size}
+        say(f"{app} {record[app]['version']} ({record[app]['bytes'] // 1048576} MB)")
+    (out / "apps.json").write_text(json.dumps(record, indent=1))
+    return record
+
+
+def qemu_base(disk: Path, memory_mb=6144, cpus=6, vars_file=None):
+    return ["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", str(cpus), "-m", str(memory_mb), "-machine", "q35",
+            "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}", "-drive", f"if=pflash,format=raw,file={vars_file}",
+            "-drive", f"file={disk},if=virtio,format=qcow2", "-nic", "user,model=virtio-net-pci", "-display", "none"]
+
+
+def run_until_exit(argv, work: Path, disk: Path, timeout=INSTALL_TIMEOUT_S):
+    """Run QEMU in the background and wait for it to exit by itself (the installer powers off). A run whose disk stops growing for STALL_S is stopped: a question the answers did not cover."""
+    pidfile = work / "vm.pid"
+    pidfile.unlink(missing_ok=True)
+    subprocess.run(argv + ["-daemonize", "-pidfile", str(pidfile)], check=True)
+    pid = int(pidfile.read_text())
+    started, last_size, last_change = time.monotonic(), -1, time.monotonic()
+
+    def alive():
+        try:
+            Path(f"/proc/{pid}").stat()
+            return True
+        except OSError:
+            return False
+    while alive():
+        size = disk.stat().st_size
+        if size != last_size:
+            last_size, last_change = size, time.monotonic()
+        if time.monotonic() - last_change > STALL_S:
+            subprocess.run(["kill", str(pid)])
+            raise ob.BuildError(f"the install stopped making progress for {STALL_S // 60} minutes (see {work / 'serial.log'})")
+        if time.monotonic() - started > timeout:
+            subprocess.run(["kill", str(pid)])
+            raise ob.BuildError("the install did not finish in time")
+        time.sleep(10)
+
+
+def inspect_and_generalize(disk: Path, work: Path, checks: list, tidy: list, extra=()) -> dict:
+    """Boot the new system, run read-only checks through the guest agent, then make it generic and shut it down. Returns {check name: output}."""
+    import qga_client
+    sock = work / "qga.sock"
+    sock.unlink(missing_ok=True)
+    vars_file = work / "vars-verify.fd"
+    shutil.copy(OVMF_VARS, vars_file)
+    pidfile = work / "verify.pid"
+    argv = qemu_base(disk, vars_file=vars_file) + ["-chardev", f"socket,path={sock},server=on,wait=off,id=qga0", "-device", "virtio-serial", "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
+                                                   "-serial", f"file:{work / 'verify-serial.log'}", *extra, "-daemonize", "-pidfile", str(pidfile)]
+    subprocess.run(argv, check=True)
+    pid = int(pidfile.read_text())
+    client, end = None, time.monotonic() + AGENT_WAIT_S
+    while client is None and time.monotonic() < end:
+        try:
+            client = qga_client.QGA(str(sock), timeout=10)
+            client.sync(timeout=max(1, end - time.monotonic()))
+        except Exception:
+            client = None
+            time.sleep(5)
+    if client is None:
+        subprocess.run(["kill", str(pid)])
+        raise ob.BuildError("the new system did not answer through its guest agent")
+    results = {}
+    for name, command in checks:
+        code, out, err = client.exec("/bin/sh", ["-c", command], wait=1800)
+        results[name] = {"exit": code, "output": (out + err).strip()[-2000:]}
+    for command in tidy:
+        client.exec("/bin/sh", ["-c", command], wait=1800)
+    try:
+        client.exec("/bin/sh", ["-c", "systemctl poweroff"], wait=30)
+    except Exception:
+        pass
+    for _ in range(120):
+        try:
+            Path(f"/proc/{pid}").stat()
+            time.sleep(2)
+        except OSError:
+            break
+    else:
+        subprocess.run(["kill", str(pid)])
+    return results
+
+
+def boot_proof(disk: Path, work: Path, patterns: list, seconds: int = 240, extra=()) -> dict:
+    """For a system with no guest agent and no account to look in with: boot a THROWAWAY layer over the base (the base itself is never booted, so it stays exactly as installed) and report
+    which of the expected phrases appeared on the serial console."""
+    overlay, vars_file, serial, pidfile = work / "proof.qcow2", work / "vars-proof.fd", work / "proof-serial.log", work / "proof.pid"
+    for f in (overlay, serial):
+        f.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(disk.resolve()), "-F", "qcow2", str(overlay)], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    subprocess.run(qemu_base(overlay, vars_file=vars_file) + ["-serial", f"file:{serial}", *extra, "-daemonize", "-pidfile", str(pidfile)], check=True)
+    pid = int(pidfile.read_text())
+    found, end = {}, time.monotonic() + seconds
+    while time.monotonic() < end and len(found) < len(patterns):
+        text = serial.read_bytes().decode(errors="replace") if serial.exists() else ""
+        for pattern in patterns:
+            if pattern not in found and pattern in text:
+                found[pattern] = True
+        time.sleep(5)
+    subprocess.run(["kill", str(pid)])
+    overlay.unlink(missing_ok=True)
+    return {pattern: pattern in found for pattern in patterns}
+
+
+def inspect_overlay(base: Path, work: Path, checks: list, extra=(), seed_iso=None, wait=AGENT_WAIT_S) -> dict:
+    """Look inside a FINISHED base through the guest agent without touching it: a throwaway layer over it is booted, the checks run, and the layer is deleted. (Each check runs with the
+    usual system directories on PATH, which the agent's own environment lacks, especially on NixOS.)"""
+    import qga_client
+    overlay, vars_file, sock, pidfile = work / "look.qcow2", work / "vars-look.fd", work / "look.sock", work / "look.pid"
+    for f in (overlay, sock):
+        f.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(base.resolve()), "-F", "qcow2", str(overlay)], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    cdrom = ["-drive", f"file={seed_iso},media=cdrom,readonly=on"] if seed_iso else []
+    argv = qemu_base(overlay, vars_file=vars_file) + [*cdrom, *extra, "-chardev", f"socket,path={sock},server=on,wait=off,id=qga0", "-device", "virtio-serial",
+                                                      "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0", "-serial", f"file:{work / 'look-serial.log'}", "-daemonize", "-pidfile", str(pidfile)]
+    subprocess.run(argv, check=True)
+    pid = int(pidfile.read_text())
+    results, client, end = {}, None, time.monotonic() + wait
+    try:
+        while client is None and time.monotonic() < end:
+            try:
+                client = qga_client.QGA(str(sock), timeout=10)
+                client.sync(timeout=max(1, end - time.monotonic()))
+            except Exception:
+                client = None
+                time.sleep(5)
+        if client is None:
+            raise ob.BuildError("the system did not answer through its guest agent")
+        for name, command in checks:
+            code, out, err = client.exec("/bin/sh", ["-c", "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; " + command], wait=600)
+            results[name] = {"exit": code, "output": (out + err).strip()[-2000:]}
+    finally:
+        subprocess.run(["kill", str(pid)])
+        overlay.unlink(missing_ok=True)
+    return results
+
+
+def finalize(os_id: str, disk: Path, out: Path, manifest: dict) -> None:
+    final = out / f"{os_id}-base.qcow2"
+    say("compressing the finished base")
+    subprocess.run(["qemu-img", "convert", "-O", "qcow2", "-c", str(disk), str(final)], check=True)
+    manifest.update(base=final.name, bytes=final.stat().st_size, sha256=sha256(final), built=time.strftime("%Y-%m-%dT%H:%M:%S"), holds_install_state_or_secrets=False)
+    (out / f"{os_id}-base.json").write_text(json.dumps(manifest, indent=1))
+    say(f"done: {final} ({final.stat().st_size // 1048576} MB)")
+
+
+DEBIAN_CHECKS = [
+    ("prebuilt", f"cat {ob.PREBUILT_RECORD}"), ("os", "grep PRETTY_NAME /etc/os-release"),
+    ("packages", "dpkg-query -W -f='${Package} ${Version}\\n' cloud-init qemu-guest-agent google-chrome-stable spotify-client chatgpt claude-desktop gdm3 2>&1"),
+    ("code", "test -x /opt/vscode/code && echo present"),
+    ("login", "passwd -S baseline-admin; passwd -S root"),
+    ("failed-units", "systemctl --failed --no-legend | wc -l"),
+]
+DEBIAN_APPS_STEP = ("install-apps", "mkdir -p /mnt/payload && mount -t iso9660 -o ro /dev/vdb /mnt/payload && sh /mnt/payload/install-apps.sh > /var/log/baseline-apps.log 2>&1; rc=$?; umount /mnt/payload; echo exit=$rc; tail -n 3 /var/log/baseline-apps.log")
+DEBIAN_TIDY = ["sed -i '/^deb cdrom:/d; /^deb-src cdrom:/d' /etc/apt/sources.list || true", "cloud-init clean --logs --seed --machine-id || cloud-init clean --logs", "rm -f /etc/ssh/ssh_host_* /var/log/baseline-apps-failed", "apt-get clean", "rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*",
+               "truncate -s 0 /etc/machine-id", "rm -f /var/lib/dbus/machine-id", "fstrim -av || true", "sync"]
+
+
+def make_payload(apps_dir: Path, apps: dict, work: Path) -> Path:
+    """The drive the new system reads its applications from: each package beside the script that checks and installs it."""
+    payload = work / "payload"
+    shutil.rmtree(payload, ignore_errors=True)
+    payload.mkdir()
+    for app in apps:
+        (payload / app).mkdir()
+        for f in (apps_dir / app).iterdir():
+            try:
+                (payload / app / f.name).hardlink_to(f)
+            except OSError:
+                shutil.copy(f, payload / app / f.name)
+    (payload / "install-apps.sh").write_text(ob.debian_apps_script(apps))
+    make_iso(ob.APPS_LABEL, payload, work / "payload.iso")
+    return work / "payload.iso"
+
+
+def build_debian(args, work: Path, out: Path):
+    iso = args.images / "debian-13.7.0-amd64-DVD-1.iso"
+    apps = json.loads((args.apps / "apps.json").read_text())
+    say("extracting the installer kernel and initrd from the DVD")
+    subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", "/install.amd", str(work / "install.amd")], check=True, capture_output=True)
+    for p in (work / "install.amd").rglob("*"):
+        p.chmod(0o755 if p.is_dir() else 0o644)
+    payload_iso = make_payload(args.apps, apps, work)
+    preseed = ob.debian_preseed()
+    (work / "initrd-preseed.gz").write_bytes(ob.initrd_with((work / "install.amd" / "initrd.gz").read_bytes(), {"preseed.cfg": preseed.encode()}))
+    disk, vars_file = work / "disk.qcow2", work / "vars.fd"
+    disk.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", str(disk), f"{args.disk_gb}G"], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    argv = qemu_base(disk, vars_file=vars_file) + ["-drive", f"file={iso},media=cdrom,readonly=on",
+                                                   "-kernel", str(work / "install.amd" / "vmlinuz"), "-initrd", str(work / "initrd-preseed.gz"),
+                                                   "-append", "auto=true priority=critical console=ttyS0,115200", "-serial", f"file:{work / 'serial.log'}", "-no-reboot"]
+    say("installing Debian unattended (this takes a while)")
+    run_until_exit(argv, work, disk)
+    say("installing the applications in a second boot (the installer's own environment stalls on them)")
+    results = inspect_and_generalize(disk, work, [DEBIAN_APPS_STEP] + DEBIAN_CHECKS, DEBIAN_TIDY, extra=["-drive", f"file={payload_iso},if=virtio,format=raw,readonly=on"])
+    if results["prebuilt"]["exit"] != 0 or "chrome=" not in results["prebuilt"]["output"]:
+        raise ob.BuildError("the applications were not installed: " + json.dumps(results["prebuilt"]))
+    manifest = {"os": "debian-13", "source_image": iso.name, "source_sha256": sha256(iso), "apps": {a: apps[a]["version"] for a in apps}, "checks": results,
+                "first_boot": "cloud-init (NoCloud, a drive labelled cidata) creates the account, hostname and keys; the base has none"}
+    finalize("debian", disk, out, manifest)
+
+
+UBUNTU_CHECKS = [
+    ("prebuilt", f"cat {ob.PREBUILT_RECORD}"), ("os", "grep PRETTY_NAME /etc/os-release"),
+    ("packages", "dpkg-query -W -f='${Package} ${Version}\\n' cloud-init qemu-guest-agent google-chrome-stable spotify-client chatgpt claude-desktop ubuntu-desktop-minimal 2>&1"),
+    ("code", "test -x /opt/vscode/code && echo present"), ("login", "passwd -S root; getent passwd 1000 || true"),
+    ("failed-apps", "test ! -e /var/log/baseline-apps-failed && echo none"),
+]
+
+
+def verify_ubuntu_image(images: Path) -> Path:
+    """The signed SHA256SUMS (Canonical's cloud-image key) and then the image against it: both must hold."""
+    keyring = "/usr/share/keyrings/ubuntu-cloudimage-keyring.gpg"
+    subprocess.run(["gpgv", "--keyring", keyring, str(images / "ubuntu-resolute-SHA256SUMS.gpg"), str(images / "ubuntu-resolute-SHA256SUMS")], check=True, capture_output=True)
+    name = "ubuntu-26.04-server-cloudimg-amd64.img"
+    line = next(l for l in (images / "ubuntu-resolute-SHA256SUMS").read_text().splitlines() if l.endswith("*" + name))
+    expected = line.split()[0]
+    if sha256(images / name) != expected:
+        raise ob.BuildError(f"{name} does not match the signed checksum list")
+    return images / name
+
+
+def build_ubuntu(args, work: Path, out: Path):
+    image = verify_ubuntu_image(args.images)
+    apps = json.loads((args.apps / "apps.json").read_text())
+    payload_iso = make_payload(args.apps, apps, work)
+    seed = work / "seed"
+    shutil.rmtree(seed, ignore_errors=True)
+    seed.mkdir()
+    (seed / "user-data").write_text(ob.ubuntu_cloud_config())
+    (seed / "meta-data").write_text("instance-id: baseline-os-build\nlocal-hostname: ubuntu\n")
+    make_iso("cidata", seed, work / "seed.iso")
+    disk, vars_file = work / "disk.qcow2", work / "vars.fd"
+    disk.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "convert", "-O", "qcow2", str(image), str(disk)], check=True)
+    subprocess.run(["qemu-img", "resize", "-q", str(disk), f"{args.disk_gb}G"], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    argv = qemu_base(disk, vars_file=vars_file) + ["-drive", f"file={work / 'seed.iso'},media=cdrom,readonly=on", "-drive", f"file={payload_iso},media=cdrom,readonly=on",
+                                                   "-serial", f"file:{work / 'serial.log'}", "-no-reboot"]
+    say("building Ubuntu 26.04 (the desktop and the applications are installed on first boot of the cloud image)")
+    run_until_exit(argv, work, disk)
+    results = inspect_and_generalize(disk, work, UBUNTU_CHECKS, DEBIAN_TIDY + ["cloud-init clean --logs --seed --machine-id || true"])
+    if results["prebuilt"]["exit"] != 0 or "chrome=" not in results["prebuilt"]["output"]:
+        raise ob.BuildError("the applications were not installed: " + json.dumps(results["prebuilt"]))
+    manifest = {"os": "ubuntu-26.04", "source_image": image.name, "source_sha256": sha256(image), "signature": "Canonical cloud-image key, verified", "apps": {a: apps[a]["version"] for a in apps},
+                "desktop": "ubuntu-desktop-minimal", "checks": results, "first_boot": "cloud-init (NoCloud, a drive labelled cidata) creates the account, hostname and keys; the base has none"}
+    finalize("ubuntu", disk, out, manifest)
+
+
+NIX_CHECKS = [
+    ("os", "grep PRETTY_NAME /etc/os-release; nixos-version"), ("apps", "for c in code google-chrome-stable spotify; do command -v $c || echo missing:$c; done"),
+    ("cloud-init", "cloud-init --version 2>&1 | head -1"), ("login", "getent passwd | awk -F: '$3>=1000 && $3<65000' | wc -l"),
+]
+NIX_TIDY = ["nix-collect-garbage -d || true", "truncate -s 0 /etc/machine-id", "rm -f /etc/ssh/ssh_host_*", "sync"]
+
+
+def nix_boot_entry(iso: Path, work: Path) -> dict:
+    """The first (GNOME, long-term kernel) boot entry of the live ISO: its kernel and initrd are extracted, and its `init=` is kept, so the live system can be booted without a boot loader."""
+    subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", "/EFI/BOOT/grub.cfg", str(work / "iso-grub.cfg")], check=True, capture_output=True)
+    text = (work / "iso-grub.cfg").read_text()
+    block = text[text.index("menuentry 'NixOS"):]
+    kernel = re.search(r"^\s*linux (\S+) (.*)$", block, re.M)
+    initrd = re.search(r"^\s*initrd (\S+)", block, re.M)
+    init = re.search(r"init=\S+", kernel.group(2)).group(0)
+    for source, name in ((kernel.group(1), "bzImage"), (initrd.group(1), "initrd")):
+        subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", re.sub("/+", "/", source), str(work / name)], check=True, capture_output=True)
+        (work / name).chmod(0o644)
+    return {"init": init}
+
+
+def build_nixos(args, work: Path, out: Path):
+    import serial_shell
+    iso = next(args.images.glob("nixos-graphical-*.iso"))
+    entry = nix_boot_entry(iso, work)
+    disk, vars_file, sock = work / "disk.qcow2", work / "vars.fd", work / "serial.sock"
+    for f in (disk, sock):
+        f.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", str(disk), f"{args.disk_gb}G"], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    pidfile = work / "vm.pid"
+    argv = qemu_base(disk, memory_mb=8192, vars_file=vars_file) + ["-drive", f"file={iso},media=cdrom,readonly=on", "-kernel", str(work / "bzImage"), "-initrd", str(work / "initrd"),
+                                                                    "-append", f"{entry['init']} root=fstab loglevel=4 console=ttyS0,115200", "-chardev", f"socket,id=ser0,path={sock},server=on,wait=off,logfile={work / 'serial.log'}", "-serial", "chardev:ser0",
+                                                                    "-daemonize", "-pidfile", str(pidfile)]
+    say("booting the NixOS live image")
+    subprocess.run(argv, check=True)
+    pid = int(pidfile.read_text())
+    shell = serial_shell.SerialShell(str(sock), connect_timeout=120)
+    try:
+        shell.wait_ready(900)
+        for command in ob.NIX_PARTITION:
+            status, output = shell.run("sudo " + command, 300)
+            if status != 0:
+                raise ob.BuildError(f"{command}: {output}")
+        shell.write_file("/tmp/configuration.nix", ob.nix_configuration().encode())
+        shell.run("sudo cp /tmp/configuration.nix /mnt/etc/nixos/configuration.nix", 30)
+        say("installing NixOS (it downloads the desktop and the applications)")
+        status, output = shell.run("sudo nixos-install --no-root-passwd --root /mnt 2>&1 | tail -n 15; test ${PIPESTATUS[0]} -eq 0", INSTALL_TIMEOUT_S)
+        if status != 0:
+            raise ob.BuildError("nixos-install failed: " + output[-1500:])
+        shell.run("sudo sync; sudo umount -R /mnt", 120)
+        shell.sock.sendall(b"sudo poweroff\n")
+    finally:
+        shell.close()
+    for _ in range(180):
+        try:
+            Path(f"/proc/{pid}").stat()
+            time.sleep(2)
+        except OSError:
+            break
+    else:
+        subprocess.run(["kill", str(pid)])
+    results = inspect_and_generalize(disk, work, NIX_CHECKS, NIX_TIDY)
+    manifest = {"os": "nixos-26.05", "source_image": iso.name, "source_sha256": sha256(iso), "apps": {"vscode": "nixpkgs", "google-chrome": "nixpkgs", "spotify": "nixpkgs"},
+                "apps_needing_a_helper": list(ob.NIX_MISSING_APPS), "checks": results,
+                "first_boot": "cloud-init (NoCloud, a drive labelled cidata) creates the account, hostname and keys; the base has none"}
+    finalize("nixos", disk, out, manifest)
+
+
+OMARCHY_CHECKS = [
+    ("os", "grep PRETTY_NAME /etc/os-release"), ("packages", "pacman -Q omarchy omarchy-settings linux-omarchy qemu-guest-agent 2>&1"),
+    ("accounts", "getent passwd | awk -F: '$3>=1000 && $3<65000' | wc -l"), ("agent", "systemctl is-active qemu-guest-agent"),
+]
+ARCH_TIDY = ["truncate -s 0 /etc/machine-id", "rm -f /etc/ssh/ssh_host_*", "pacman -Scc --noconfirm || true", "sync"]
+
+
+def installer_boot_drives(disk: Path, iso: Path, extra_cdroms=()):
+    """The disk and the install image with the image first in the boot order: a blank disk has nothing to boot, and after the install the run is over (-no-reboot)."""
+    argv = ["-drive", f"file={iso},media=cdrom,readonly=on,if=none,id=cd0", "-device", "ide-cd,drive=cd0,bootindex=1", "-device", "virtio-blk-pci,drive=hd0,bootindex=2"]
+    for cdrom in extra_cdroms:
+        argv += ["-drive", f"file={cdrom},media=cdrom,readonly=on"]
+    return argv
+
+
+def inject_seed_runner(disk: Path, helper: Path, work: Path, *, partition="2") -> dict:
+    """Put the first-boot seed runner (and Omarchy's owner step) into a FINISHED Omarchy base. Omarchy has no guest agent and its installer has no hook, so a helper VM (any base that has one, here
+    Debian) opens the base's disk as a second drive, runs the install script in a chroot of the base's root filesystem, checks the result and unmounts. The base is never booted."""
+    import qga_client
+    script = ob.seed_runner_install_script((REPO / "baseline/lib/seed_runner.py").read_text(),
+                                           {"/etc/baseline-seed/omarchy_owner.py": (REPO / "baseline/lib/omarchy_owner.py").read_text()})
+    steps = ob.injection_steps(partition)
+    overlay, vars_file, sock, pidfile = work / "helper.qcow2", work / "helper-vars.fd", work / "helper-qga.sock", work / "helper.pid"
+    for f in (overlay, sock):
+        f.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", str(helper.resolve()), str(overlay)], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    argv = ["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", "4", "-m", "4096", "-machine", "q35", "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
+            "-drive", f"if=pflash,format=raw,file={vars_file}", "-drive", f"file={overlay},if=none,id=root,format=qcow2", "-device", "virtio-blk-pci,drive=root,bootindex=0",
+            "-drive", f"file={disk},if=none,id=tgt,format=qcow2", "-device", "virtio-blk-pci,drive=tgt", "-nic", "user,model=virtio-net-pci,restrict=on", "-display", "none",
+            "-chardev", f"socket,path={sock},server=on,wait=off,id=qga0", "-device", "virtio-serial", "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
+            "-serial", f"file:{work / 'helper-serial.log'}", "-daemonize", "-pidfile", str(pidfile)]
+    say("opening the finished base from a helper VM to install the seed runner")
+    subprocess.run(argv, check=True)
+    pid = int(pidfile.read_text())
+    client, end = None, time.monotonic() + AGENT_WAIT_S
+    try:
+        while client is None and time.monotonic() < end:
+            try:
+                client = qga_client.QGA(str(sock), timeout=10)
+                client.sync(timeout=max(1, end - time.monotonic()))
+            except Exception:
+                client = None
+                time.sleep(5)
+        if client is None:
+            raise ob.BuildError("the helper VM did not answer through its guest agent")
+        def step(command, stdin=b"", what=""):
+            code, out, err = client.exec("/bin/sh", ["-c", command], stdin=stdin, wait=900)
+            if code:
+                raise ob.BuildError(f"{what or command[:40]} failed in the helper: {(err or out).strip()[-300:]}")
+            return (out + err).strip()
+        step("cat > /tmp/inject.sh", script.encode(), "sending the install script")
+        step(steps["mount"], what="mounting the base's root filesystem")
+        step(steps["run"], what="running the install script in the base")
+        verified = step(steps["verify"], what="checking the installed files")
+        step(steps["unmount"], what="unmounting the base")
+        try:
+            client.exec("/bin/sh", ["-c", "systemctl poweroff"], wait=30)
+        except (OSError, ValueError):                                     # the agent goes away with the system it was asked to stop
+            pass
+        for _ in range(60):
+            try:
+                Path(f"/proc/{pid}").stat()
+                time.sleep(2)
+            except OSError:
+                break
+        return {"verified": verified}
+    finally:
+        try:
+            Path(f"/proc/{pid}").stat()
+            subprocess.run(["kill", str(pid)])
+        except OSError:
+            pass
+
+
+def build_omarchy(args, work: Path, out: Path):
+    iso = next(args.images.glob("omarchy-*.iso"))
+    disk, vars_file = work / "disk.qcow2", work / "vars.fd"
+    disk.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", str(disk), f"{args.disk_gb}G"], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    cidata = work / "cidata"
+    shutil.rmtree(cidata, ignore_errors=True)
+    cidata.mkdir()
+    for name, text in ob.omarchy_cidata(disk_bytes=args.disk_gb * 1024 ** 3).items():
+        (cidata / name).write_text(text)
+    make_iso("cidata", cidata, work / "cidata.iso")
+    base = ["qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", "6", "-m", "8192", "-machine", "q35", "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
+            "-drive", f"if=pflash,format=raw,file={vars_file}", "-drive", f"file={disk},if=none,id=hd0,format=qcow2", "-nic", "user,model=virtio-net-pci", "-display", "none"]
+    argv = base + installer_boot_drives(disk, iso, [work / "cidata.iso"]) + ["-serial", f"file:{work / 'serial.log'}", "-no-reboot"]
+    say("installing Omarchy unattended from the ISO's own cidata path (deferred account)")
+    run_until_exit(argv, work, disk)
+    say("checking the finished install on a throwaway layer (the base itself is not booted)")
+    results = boot_proof(disk, work, ["omarchy login:", "Omarchy provisioning first-boot user setup"])
+    if not all(results.values()):
+        raise ob.BuildError("the installed Omarchy did not reach its first-boot setup: " + json.dumps(results))
+    manifest = {"os": "omarchy-4.0.4", "source_image": iso.name, "source_sha256": sha256(iso), "install": "the ISO's cidata path with defer-provisioning (full disk, unencrypted)",
+                "apps_needing_a_helper": ["vscode", "spotify", "chrome", "chatgpt", "claude"], "checks": results,
+                "first_boot": "the owner is created at the first boot by Omarchy's own setup (omarchy-provision-owner); the base has no account"}
+    helper = Path(args.helper) if getattr(args, "helper", None) else out / "debian-base.qcow2"
+    if helper.is_file():
+        results["seed-runner"] = inject_seed_runner(disk, helper, work)
+        manifest["first_boot"] = ("the owner is made at the first boot from the seed disk by baseline-seed, through Omarchy's own provisioning (omarchy_owner); with no seed disk Omarchy's own "
+                                  "interactive setup runs; the base has no account")
+    else:
+        say(f"no helper base at {helper}: the seed runner is NOT installed, so VMs from this base ask for the owner on Omarchy's own first-boot screen")
+    finalize("omarchy", disk, out, manifest)
+
+
+def build_fydeos(args, work: Path, out: Path):
+    """Prepare a pristine appliance with its shipped VirtIO modules loaded before splash."""
+    import tarfile
+    ova = next(args.images.glob("FydeOS-*.ova"))
+    shutil.rmtree(work / "ova", ignore_errors=True)
+    (work / "ova").mkdir()
+    with tarfile.open(ova) as archive:
+        archive.extractall(work / "ova", filter="data")
+    manifest_file = next((work / "ova").glob("*.mf"))
+    vmdk = next((work / "ova").glob("*.vmdk"))
+    expected = next(l.split("= ")[1].strip() for l in manifest_file.read_text().splitlines() if vmdk.name in l)
+    if sha256(vmdk) != expected:
+        raise ob.BuildError("the disk in the appliance does not match its own manifest")
+    import fydeos_vm
+    raw = work / "fydeos.raw"
+    subprocess.run(["qemu-img", "convert", "-O", "raw", str(vmdk), str(raw)], check=True)
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="fydeos-patch-", dir=work) as scratch:
+        compatibility = fydeos_vm.patch_raw(raw, Path(scratch))
+    final = out / "fydeos-base.qcow2"
+    if final.exists():
+        raise ob.BuildError("FydeOS output already exists; use a new output directory")
+    subprocess.run(["qemu-img", "convert", "-c", "-O", "qcow2", str(raw), str(final)], check=True)
+    manifest = {"os": "fydeos-23.0-preview2", "source_image": ova.name,
+                "source_sha256": sha256(ova), "install": "vendor appliance with early shipped VirtIO GPU/network modules",
+                "virtualization": compatibility, "native_proxmox_verified": False,
+                "desktop_runtime_verified": False,
+                "needs": "host EGL render node and VirtIO 3D (virgl); owner completes FydeOS setup",
+                "first_boot": "FydeOS's own setup; entire writable disk is retained",
+                "base": final.name, "bytes": final.stat().st_size, "sha256": sha256(final),
+                "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "holds_install_state_or_secrets": False}
+    (out / "fydeos-base.json").write_text(json.dumps(manifest, indent=1))
+    say(f"prepared: {final}; runtime display verification is still required")
+
+
+BAZZITE_CHECKS = [
+    ("os", "grep PRETTY_NAME /etc/os-release"), ("deployment", "rpm-ostree status 2>&1 | head -8"), ("agent", "systemctl is-active qemu-guest-agent"),
+    ("accounts", "getent passwd | awk -F: '$3>=1000 && $3<65000' | wc -l"),
+    ("seed-runner", "test -f /etc/baseline-seed/seed_runner.py && echo present || echo absent-or-unreadable-by-the-agent"),
+]
+OSTREE_TIDY = ["truncate -s 0 /etc/machine-id", "rm -f /etc/ssh/ssh_host_*", "sync"]
+
+
+def build_bazzite(args, work: Path, out: Path):
+    iso = next(args.images.glob("bazzite-*.iso"))
+    for source, name in (("/images/pxeboot/vmlinuz", "vmlinuz"), ("/images/pxeboot/initrd.img", "initrd.img")):
+        subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", source, str(work / name)], check=True, capture_output=True)
+        (work / name).chmod(0o644)
+    (work / "initrd-ks.img").write_bytes(ob.initrd_with((work / "initrd.img").read_bytes(), {"ks.cfg": ob.bazzite_kickstart(runner=(REPO / "baseline/lib/seed_runner.py").read_text()).encode()}))
+    disk, vars_file = work / "disk.qcow2", work / "vars.fd"
+    disk.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", str(disk), f"{args.disk_gb}G"], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    argv = qemu_base(disk, memory_mb=8192, vars_file=vars_file) + ["-drive", f"file={iso},media=cdrom,readonly=on", "-kernel", str(work / "vmlinuz"), "-initrd", str(work / "initrd-ks.img"),
+                                                                    "-append", f"inst.stage2=hd:LABEL={ob.BAZZITE_LABEL} inst.ks=file:/ks.cfg inst.text inst.nosave=all console=ttyS0,115200",
+                                                                    "-serial", f"file:{work / 'serial.log'}", "-no-reboot"]
+    say("installing Bazzite with a kickstart (the image is on the ISO)")
+    run_until_exit(argv, work, disk)
+    results = inspect_and_generalize(disk, work, BAZZITE_CHECKS, OSTREE_TIDY)
+    manifest = {"os": "bazzite-stable", "source_image": iso.name, "source_sha256": sha256(iso), "install": "Anaconda kickstart (ostreecontainer from the ISO), no account",
+                "apps_needing_a_helper": ["vscode", "spotify", "chrome", "chatgpt", "claude"], "checks": results,
+                "first_boot": "the owner is made at the first boot from the seed disk by baseline-seed (baseline/lib/seed_runner.py, installed by the kickstart); the base has no account"}
+    finalize("bazzite", disk, out, manifest)
+
+
+CACHY_CHECKS = [
+    ("os", "grep PRETTY_NAME /etc/os-release"), ("packages", "pacman -Q cloud-init qemu-guest-agent linux-cachyos 2>&1"),
+    ("build-user", f"getent passwd {ob.CACHY_BUILD_USER} && echo PRESENT || echo absent"),
+]
+CACHY_TIDY = [f"userdel -r {ob.CACHY_BUILD_USER} || true", "passwd -l root", "truncate -s 0 /etc/machine-id", "rm -f /etc/ssh/ssh_host_*", "pacman -Scc --noconfirm || true", "sync"]
+
+
+def build_cachyos(args, work: Path, out: Path):
+    import secrets
+    import serial_shell
+    iso = next(args.images.glob("cachyos-*.iso"))
+    grub = work / "iso-grub.cfg"
+    subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", "/boot/grub/grub.cfg", str(grub)], check=True, capture_output=True)
+    entry = re.search(r"linux (/arch/boot/x86_64/vmlinuz-linux-cachyos) (archisobasedir=\S+ archisosearchuuid=\S+)", grub.read_text())
+    for source, name in ((entry.group(1), "vmlinuz"), ("/arch/boot/x86_64/initramfs-linux-cachyos.img", "initrd")):
+        subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", source, str(work / name)], check=True, capture_output=True)
+        (work / name).chmod(0o644)
+    disk, vars_file, sock = work / "disk.qcow2", work / "vars.fd", work / "serial.sock"
+    for f in (disk, sock):
+        f.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", str(disk), f"{args.disk_gb}G"], check=True)
+    shutil.copy(OVMF_VARS, vars_file)
+    pidfile = work / "vm.pid"
+    argv = qemu_base(disk, memory_mb=8192, vars_file=vars_file) + ["-drive", f"file={iso},media=cdrom,readonly=on", "-kernel", str(work / "vmlinuz"), "-initrd", str(work / "initrd"),
+                                                                    "-append", f"{entry.group(2)} cow_spacesize=10G copytoram=auto console=ttyS0,115200",
+                                                                    "-chardev", f"socket,id=ser0,path={sock},server=on,wait=off,logfile={work / 'serial.log'}", "-serial", "chardev:ser0", "-daemonize", "-pidfile", str(pidfile)]
+    say("booting the CachyOS live image")
+    subprocess.run(argv, check=True)
+    pid = int(pidfile.read_text())
+    shell = serial_shell.SerialShell(str(sock), connect_timeout=120)
+    try:
+        shell.wait_ready(900, login=("root", ""))
+        status, found = shell.run("command -v cachyos-installer", 30)
+        if status != 0:
+            raise ob.BuildError("the live image has no cachyos-installer")
+        shell.write_file("/root/settings.json", ob.cachyos_config(user_pass=secrets.token_urlsafe(24), root_pass=secrets.token_urlsafe(24)).encode())
+        shell.write_file("/root/post-install.sh", ob.cachyos_post_install().encode())
+        shell.run("chmod 700 /root/post-install.sh /root/settings.json", 30)
+        say("installing CachyOS headless (it downloads the desktop)")
+        status, output = shell.run("cachyos-installer --config /root/settings.json > /tmp/installer.log 2>&1; echo installer-exit=$?; tail -n 12 /tmp/installer.log; test -e /tmp/baseline-post-install-done", INSTALL_TIMEOUT_S)
+        if status != 0 or "installer-exit=0" not in output:
+            raise ob.BuildError("the installer or the post-install step failed: " + output[-1800:])
+        shell.run("shred -u /root/settings.json; sync", 120)
+        shell.sock.sendall(b"poweroff\n")
+    except Exception:
+        subprocess.run(["kill", str(pid)])
+        raise
+    finally:
+        shell.close()
+    for _ in range(180):
+        try:
+            Path(f"/proc/{pid}").stat()
+            time.sleep(2)
+        except OSError:
+            break
+    else:
+        subprocess.run(["kill", str(pid)])
+    results = inspect_and_generalize(disk, work, CACHY_CHECKS, CACHY_TIDY)
+    manifest = {"os": "cachyos-260809", "source_image": iso.name, "source_sha256": sha256(iso), "install": "the live image's cachyos-installer, headless (documented config); a throwaway user, removed after",
+                "apps_needing_a_helper": ["vscode", "spotify", "chrome", "chatgpt", "claude"], "checks": results,
+                "first_boot": "cloud-init (NoCloud, a drive labelled cidata) creates the account, hostname and keys; the base has none"}
+    finalize("cachyos", disk, out, manifest)
+
+
+def first_boot_check(args) -> int:
+    """Use a finished base the way a VM made from it would be: a throwaway layer over it, a seed that creates the owner's account (no password), and a look through the guest agent at whether that
+    account came to exist. Nothing is kept."""
+    import secrets
+    work = args.output / f"first-boot-{args.os}"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    base = args.base.resolve()
+    overlay = work / "overlay.qcow2"
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(base), "-F", "qcow2", str(overlay)], check=True)
+    seed = work / "seed"
+    seed.mkdir()
+    for name, text in ob.first_boot_seed(username="alex", hostname="firstboot", instance_id=f"first-boot-{args.os}").items():
+        (seed / name).write_text(text)
+    make_iso("cidata", seed, work / "seed.iso")
+    vars_file = work / "vars.fd"
+    shutil.copy(OVMF_VARS, vars_file)
+    import qga_client
+    sock = work / "qga.sock"
+    pidfile = work / "vm.pid"
+    argv = qemu_base(overlay, vars_file=vars_file) + ["-drive", f"file={work / 'seed.iso'},media=cdrom,readonly=on", "-chardev", f"socket,path={sock},server=on,wait=off,id=qga0",
+                                                      "-device", "virtio-serial", "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0", "-serial", f"file:{work / 'serial.log'}",
+                                                      "-daemonize", "-pidfile", str(pidfile)]
+    subprocess.run(argv, check=True)
+    pid = int(pidfile.read_text())
+    client, end = None, time.monotonic() + AGENT_WAIT_S
+    while client is None and time.monotonic() < end:
+        try:
+            client = qga_client.QGA(str(sock), timeout=10)
+            client.sync(timeout=max(1, end - time.monotonic()))
+        except Exception:
+            client = None
+            time.sleep(5)
+    ok = False
+    try:
+        if client is None:
+            say("the system did not answer through its guest agent")
+            return 1
+        time.sleep(20)                                           # cloud-init runs its modules after the agent is up
+        report = {}
+        for name, command in (("account", "id alex"), ("password-locked", "passwd -S alex"), ("sudo", "sudo -n -u alex sudo -n true && echo sudo-without-a-prompt"), ("cloud-init", "cloud-init status --long 2>&1 | head -5"), ("hostname", "hostname")):
+            code, out, err = client.exec("/bin/sh", ["-c", "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; " + command], wait=120)
+            report[name] = {"exit": code, "output": (out + err).strip()}
+        ok = report["account"]["exit"] == 0
+        say(json.dumps(report, indent=1))
+    finally:
+        subprocess.run(["kill", str(pid)])
+        shutil.rmtree(work, ignore_errors=True)
+    say("first boot made the account from the seed" if ok else "the account was NOT made from the seed")
+    return 0 if ok else 1
+
+
+def inject_existing(args) -> int:
+    """`inject`: the same helper-VM step as the build, on a base that is already built. The base file is changed in place and its manifest (checksum, size, first-boot note) rewritten."""
+    base, manifest_path = args.base.resolve(), args.base.resolve().with_suffix(".json")
+    if not base.is_file() or not manifest_path.is_file():
+        say("stopped: the base and its manifest (same name, .json) must both exist")
+        return 1
+    args.work.mkdir(parents=True, exist_ok=True)
+    try:
+        result = inject_seed_runner(base, args.helper, args.work)
+    except (ob.BuildError, subprocess.CalledProcessError) as exc:
+        say("stopped:", exc)
+        return 1
+    manifest = json.loads(manifest_path.read_text())
+    manifest.setdefault("checks", {})["seed-runner"] = result
+    manifest.update(bytes=base.stat().st_size, sha256=sha256(base), holds_install_state_or_secrets=False,
+                    first_boot=("the owner is made at the first boot from the seed disk by baseline-seed, through Omarchy's own provisioning (omarchy_owner); with no seed disk Omarchy's own "
+                                "interactive setup runs; the base has no account"))
+    manifest_path.write_text(json.dumps(manifest, indent=1))
+    say(f"done: seed runner installed in {base.name}; manifest updated")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    one = sub.add_parser("apps")
+    one.add_argument("--output", required=True, type=Path)
+    two = sub.add_parser("build")
+    two.add_argument("--os", required=True, choices=sorted(ob.METHODS))
+    two.add_argument("--images", required=True, type=Path)
+    two.add_argument("--apps", type=Path)
+    two.add_argument("--output", required=True, type=Path)
+    two.add_argument("--disk-gb", type=int, default=32)
+    two.add_argument("--helper", type=Path, help="a base with a guest agent (default: debian-base.qcow2 in the output folder) used to install the seed runner into Omarchy")
+    three = sub.add_parser("first-boot")
+    three.add_argument("--os", required=True)
+    three.add_argument("--base", required=True, type=Path)
+    three.add_argument("--output", required=True, type=Path)
+    four = sub.add_parser("inject", help="install the seed runner into an already finished Omarchy base (in place; the manifest is updated)")
+    four.add_argument("--base", required=True, type=Path)
+    four.add_argument("--helper", required=True, type=Path)
+    four.add_argument("--work", required=True, type=Path)
+    args = parser.parse_args()
+    if args.command == "inject":
+        return inject_existing(args)
+    if args.command == "first-boot":
+        return first_boot_check(args)
+    if args.command == "apps":
+        prepare_apps(args.output)
+        return 0
+    builders = {"debian": build_debian, "ubuntu": build_ubuntu, "nixos": build_nixos, "omarchy": build_omarchy, "fydeos": build_fydeos, "bazzite": build_bazzite, "cachyos": build_cachyos}
+    if args.os not in builders:
+        say(f"{args.os}: not built yet ({ob.METHODS[args.os]['method']})")
+        return 2
+    work = args.output / f"work-{args.os}"
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        builders[args.os](args, work, args.output)
+    except (ob.BuildError, subprocess.CalledProcessError) as exc:
+        say("stopped:", exc)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

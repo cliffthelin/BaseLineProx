@@ -1,0 +1,117 @@
+{
+ "format": "baseline.kasm-recipe/v1",
+ "kasm_version": "1.19.0",
+ "components": [
+  {
+   "id": "database",
+   "role": "db",
+   "images": [
+    "postgres"
+   ],
+   "state": "required",
+   "note": "Kasm's own Postgres: users, settings, workspaces and sessions."
+  },
+  {
+   "id": "application",
+   "role": "app",
+   "images": [
+    "api",
+    "manager"
+   ],
+   "state": "required",
+   "note": "The web API and the manager that schedules sessions."
+  },
+  {
+   "id": "agent",
+   "role": "agent",
+   "images": [
+    "agent"
+   ],
+   "state": "required",
+   "note": "Starts the workspace containers on this machine."
+  },
+  {
+   "id": "proxy",
+   "role": "proxy",
+   "images": [
+    "proxy"
+   ],
+   "state": "required",
+   "note": "The one HTTPS entrance."
+  },
+  {
+   "id": "server-connections",
+   "role": "guac",
+   "images": [
+    "kasm-guac",
+    "rdp-gateway",
+    "rdp-https-gateway"
+   ],
+   "state": "unused",
+   "note": "RDP, VNC and SSH to other machines. No workspace here uses it. Kasm's all-in-one install starts it, so it is carried; dropping it means installing the roles separately (db, app, agent, proxy), which is not built."
+  }
+ ],
+ "plugins": [
+  {
+   "id": "logging",
+   "image": "kasmweb/kasm-logging-plugin",
+   "tag": "1.1",
+   "state": "required",
+   "note": "Kasm's log driver."
+  },
+  {
+   "id": "network",
+   "image": "kasmweb/kasm-network-plugin",
+   "tag": "1.5",
+   "state": "unused",
+   "note": "The network sidecar (VPN and egress features). Nothing offered here uses it; the installer installs it regardless."
+  }
+ ],
+ "workspaces": [
+  {
+   "key": "browser-temporary",
+   "image": "chrome",
+   "friendly_name": "Browser (temporary)",
+   "persistent": false
+  },
+  {
+   "key": "browser-personal",
+   "image": "chrome",
+   "friendly_name": "Browser (personal)",
+   "persistent": true
+  },
+  {
+   "key": "development-desktop",
+   "image": "ubuntu-noble-desktop",
+   "friendly_name": "Development desktop",
+   "persistent": true
+  },
+  {
+   "key": "vs-code",
+   "image": "vs-code",
+   "friendly_name": "VS Code",
+   "persistent": true
+  },
+  {
+   "key": "firefox",
+   "image": "firefox",
+   "friendly_name": "Firefox",
+   "persistent": true
+  },
+  {
+   "key": "terminal",
+   "image": "terminal",
+   "friendly_name": "Terminal",
+   "persistent": false
+  }
+ ],
+ "settings": {},
+ "registry": {
+  "enabled": false,
+  "name": "Baseline",
+  "description": "Workspaces carried by this Baseline host.",
+  "list_url": "",
+  "sources": []
+ },
+ "_note": "Copy to config/local/kasm-recipe.json (git-ignored) and edit; the build then uses it. states: required (Kasm does not run without it), used, unused (carried because the all-in-one install starts it). settings: server settings to set at install (not secrets). registry: when enabled, Kasm is pointed at Baseline's own workspace registry (list_url empty means this host's own address). registry.sources: other registries whose NAMED workspaces are offered through it (kasm_sources.py): each workspace is pinned to the hash of the definition that was read (run the build once, read the report, copy the hash into reviewed) and each run-configuration property it adds must be accepted by name. These images are not carried: they are pulled from their own registry when first started (internet needed). Do not point a source at an image its maker has deprecated (LinuxServer's Kasm-tagged Chromium and Firefox are): it will never be patched. A Kasm entry in the supported-OS list may name the workspaces instead."
+}

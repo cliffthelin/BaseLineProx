@@ -1,0 +1,15 @@
+{
+  "state": "storage_verified",
+  "serial": "<PC401 drive serial>",
+  "roles": [
+    "APPDATA_ADMIN",
+    "APPDATA_PERSONAL",
+    "BASELINE",
+    "INSTALLER_CACHE",
+    "SESSION_TEMP",
+    "SUBSTRATE",
+    "USER_ADMIN",
+    "USER_PERSONAL"
+  ],
+  "boot_verified": false
+}

@@ -42,9 +42,9 @@ def facts_verification(facts: list) -> dict:
     "network_repaired" state - see that module's record_transition
     invariant."""
     fact_map = {f["fact"]: f for f in facts}
-    gw_ok = fact_map.get("gateway_reachable", {}).get("ok", True)
-    addr_ok = fact_map.get("address_assigned", {}).get("ok", True)
-    return {"address": bool(addr_ok), "gateway": bool(gw_ok)}
+    gw_ok = fact_map.get("gateway_reachable", {}).get("ok", False)
+    addr_ok = fact_map.get("address_assigned", {}).get("ok", False)
+    return {"address": addr_ok is True, "gateway": gw_ok is True}
 
 
 def discover(runner, check_lifeline_fn=None) -> dict:

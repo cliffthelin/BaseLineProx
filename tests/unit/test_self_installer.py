@@ -45,7 +45,7 @@ def _reset_active_answer_server():
 def test_answer_template_renders_lvm_sizes_as_real_numbers_not_quoted_strings():
     for preset in si.LVM_SIZE_PRESETS.values():
         rendered = si.ANSWER_TEMPLATE.format(
-            fqdn="baseline.local", password_hash="$6$x$y", disk_serial="ABC123", **preset,
+            fqdn="baseline.local", password_hash="$6$x$y", disk_serial="ABC123", root_ssh_keys="", **preset,
         )
         parsed = tomllib.loads(rendered)
         disk_setup = parsed["disk-setup"]
@@ -61,7 +61,7 @@ def test_lvm_size_presets_are_plain_numbers_not_g_suffixed_strings():
             assert isinstance(preset[key], (int, float)), f"{key} must be a real number, not {preset[key]!r}"
 
 
-REAL_SERIAL = "FD01N6557110C271B"
+REAL_SERIAL = "SYNTHDRIVEA00001"
 
 
 def _pds_runner_ok():
@@ -90,6 +90,16 @@ def _ready_kwargs(tmp_path, **overrides):
     )
     kwargs.update(overrides)
     return kwargs
+
+
+def test_single_drive_capacity_is_refused_before_workspace_or_credentials(tmp_path):
+    runner = _pds_runner_ok()
+    runner.sizes["sdd"] = 200 * 1024**3 // 512
+    kwargs = _ready_kwargs(tmp_path, pds_runner=runner, **si.LVM_SIZE_PRESETS["single-drive"])
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "refused"
+    assert "cannot fit" in result.detail
+    assert not (tmp_path / "ws").exists()
 
 
 def test_on_progress_receives_real_stage_descriptions(tmp_path):
@@ -418,6 +428,26 @@ def test_does_not_attempt_to_stop_anything_on_the_very_first_run(tmp_path, monke
     assert not any("previous run's answer server" in line.lower() for line in lines)
 
 
+def test_qemu_answer_server_listens_only_on_loopback(tmp_path, monkeypatch):
+    import iso_builder as ib
+    monkeypatch.setattr(dsan, "prepare_iso_defensively",
+        lambda *a, **k: dsan.PrepareIsoOutcome(ok=True, output_path=Path("/ws/answer.iso")))
+    monkeypatch.setattr(ib, "build_current_iso",
+        lambda *a, **k: ib.IsoBuildResult(ok=True, output_path=Path("/ws/final.iso")))
+    captured = {}
+    class Server(_FakeAnswerServer):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            super().__init__(**kwargs)
+    monkeypatch.setattr(dsan, "EphemeralAnswerServer", Server)
+    kwargs = _ready_kwargs(tmp_path)
+    kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached"
+    kwargs["install_runner"].scripted_popen_process = FakeInstallProcess()
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "applied"
+    assert captured["bind_host"] == "127.0.0.1"
+
+
 def test_on_progress_defaults_to_a_no_op_when_omitted(tmp_path):
     # Must not raise just because no callback was given.
     si.build_and_write_self_installer(**_ready_kwargs(tmp_path))
@@ -487,7 +517,10 @@ def test_refuses_when_the_selected_device_reports_no_hardware_serial(tmp_path):
     kwargs = _ready_kwargs(tmp_path, pds_runner=no_serial_pds, expected_serial=None)
     result = si.build_and_write_self_installer(**kwargs)
     assert result.outcome == "refused"
-    assert "no hardware serial" in result.detail
+    # The serial guard now refuses before the later answer-building stage.
+    assert "serial could not be read unambiguously; no override" in result.detail
+    assert result.qemu_process is None
+    assert not kwargs["workspace"].exists()
 
 
 def test_generates_its_own_cert_and_key_when_none_supplied(tmp_path):
@@ -520,3 +553,93 @@ def test_server_host_defaults_to_the_guestfwd_forwarded_address():
 
 def test_minimal_substrate_leaves_room_for_the_real_gui_browser_and_updates():
     assert si.LVM_SIZE_PRESETS["minimal"]["lvm_maxroot"] >= 16
+
+
+def test_stale_signatures_are_scrubbed_only_after_the_guard_passes_and_before_qemu_starts(tmp_path, monkeypatch):
+    """A drive that held an earlier Proxmox install must have its old LVM label cleared before the installer boots,
+    or the installer cannot create its own volume group (PC601, 2026-10-11). The scrub is the last step before QEMU and
+    can only be reached once the data-protection guard has passed for the device."""
+    import drive_guard
+    import drive_setup_install as dsi
+    import iso_builder as ib
+
+    class _StopAfterPopen(Exception):
+        pass
+
+    order = []
+    monkeypatch.setattr(drive_guard, "require_may_format", lambda *a, **k: order.append("guard"))
+    monkeypatch.setattr(dsan, "prepare_iso_defensively",
+                         lambda *a, **k: dsan.PrepareIsoOutcome(ok=True, output_path=Path("/ws/answer-embedded.iso")))
+    monkeypatch.setattr(ib, "build_current_iso",
+                         lambda *a, **k: ib.IsoBuildResult(ok=True, output_path=Path("/ws/final.iso")))
+    monkeypatch.setattr(dsi, "build_sparse_install_invocation",
+                         lambda **k: dsi.QemuInvocation(argv=["qemu-system-x86_64"]))
+    monkeypatch.setattr(dsan, "SessionState", lambda *a, **k: (_ for _ in ()).throw(_StopAfterPopen()))
+    kwargs = _ready_kwargs(tmp_path)
+    kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached-binary"
+    runner = kwargs["install_runner"]
+    runner.scripted_popen_process = FakeInstallProcess()
+    runner.scrub_signatures = lambda path, size: order.append(("scrub", path, size))
+    real_popen = runner.popen
+    runner.popen = lambda *a, **k: (order.append("qemu"), real_popen(*a, **k))[1]
+    with pytest.raises(_StopAfterPopen):
+        si.build_and_write_self_installer(**kwargs)
+    assert order[0] == "guard" and order[-1] == "qemu" and order[-2][0] == "scrub"
+    assert order[-2][1] == "/dev/sdd" and isinstance(order[-2][2], int) and order[-2][2] > 0
+
+
+def test_a_drive_the_guard_refuses_is_never_scrubbed(tmp_path, monkeypatch):
+    import drive_guard
+    calls = []
+    def refuse(*a, **k):
+        raise drive_guard.DataProtectionError("refused: holds data")
+    monkeypatch.setattr(drive_guard, "require_may_format", refuse)
+    kwargs = _ready_kwargs(tmp_path)
+    kwargs["install_runner"].scrub_signatures = lambda *a: calls.append(a)
+    result = si.build_and_write_self_installer(**kwargs)
+    assert result.outcome == "refused" and calls == []
+
+
+def test_the_child_identity_reaches_the_first_boot_hook(tmp_path, monkeypatch):
+    import first_boot_hook as fbh
+    seen = {}
+
+    def fake_build(repo_root, output, *, child_identity=None, dev_user=None):
+        seen["identity"] = child_identity
+        raise fbh.HookError("stop here: only the argument is being checked")
+    monkeypatch.setattr(fbh, "build_hook", fake_build)
+    kwargs = _ready_kwargs(tmp_path)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "MANIFEST.json").write_text("{}")
+    identity = {"uuid": "4af8c95a-dea0-0001-b1ae-f19827f945b7", "serial": "SYNTHDRIVEA00001"}
+    kwargs["acquire_runner"].files[str(kwargs["assistant_binary"])] = b"cached-binary"
+    si.build_and_write_self_installer(**kwargs, offline_cache=cache, child_identity=identity)
+    assert seen["identity"] == identity
+
+
+def test_the_answer_file_can_carry_root_ssh_public_keys_and_refuses_anything_else():
+    import pytest
+    import self_installer as si
+    key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOqk3x1nQ0m8c0o5v0y7m1o1pXk3d3lW5v2uYbq0aYtq baseline-monitor"
+    base = dict(fqdn="h.local", password_hash="$6$x", disk_serial="S1", lvm_maxroot=16, lvm_maxvz=30, lvm_swapsize=2)
+    assert "root-ssh-keys" not in si.render_answer(**base)
+    text = si.render_answer(**base, root_ssh_keys=[key])
+    assert f'root-ssh-keys = ["{key}"]' in text and text.index("root-ssh-keys") < text.index("[network]")
+    for bad in ("-----BEGIN OPENSSH PRIVATE KEY-----", "ssh-rsa AAAA" + "B" * 60, key + '"\n[x]', key + "\n" + key, ""):
+        with pytest.raises(ValueError):
+            si.render_answer(**base, root_ssh_keys=[bad])
+
+
+def test_only_one_real_crypt_hash_is_accepted_for_the_root_password():
+    import self_installer as si
+    sha512 = "$6$abcdefgh$" + "A" * 86
+    yescrypt = "$y$j9T$abcdefghijklmnop$" + "B" * 43
+    assert si.check_password_hash(sha512 + "\n") == sha512
+    assert si.check_password_hash(yescrypt) == yescrypt
+    for bad in ("", "plaintext-password", "cane:" + sha512, sha512 + '" \nroot-ssh-keys = ["x"]', "!", "*", "$1$weak$" + "C" * 22):
+        try:
+            si.check_password_hash(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted {bad!r}")

@@ -1,13 +1,13 @@
 [Unit]
 Description=Baseline web app (Settings/Admin/Recovery/Drive Administration/Master Config) - LAN-scoped, login-gated
-After=network-online.target baseline-firstboot.service baseline-persist-bind-mounts.service
+After=network-online.target pve-cluster.service pveproxy.service baseline-firstboot.service baseline-persist-bind-mounts.service
 Wants=network-online.target
 Requires=baseline-persist-bind-mounts.service
 
 [Service]
 Type=simple
 ExecStartPre=/opt/baseline/bin/baseline-settings-web-gate
-ExecStart=/opt/baseline/bin/baseline-web 8100
+ExecStart=/opt/baseline/bin/baseline-web ${BASELINE_WEB_PORT}
 # The installed code is mounted read-only for the service, so nothing it runs can rewrite
 # the code that decides who gets privileges. (No NoNewPrivileges: Drive Administration needs pkexec.)
 ReadOnlyPaths=/opt/baseline
@@ -15,6 +15,9 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure
 RestartSec=5
 Environment=BASELINE_SETTINGS_WEB_DATA=/var/lib/baseline/settings-web/store.json
+Environment=BASELINE_WEB_BIND_HOST=0.0.0.0
+Environment=BASELINE_WEB_PORT=8100
+EnvironmentFile=-/etc/baseline/web.env
 StandardOutput=journal
 StandardError=journal
 

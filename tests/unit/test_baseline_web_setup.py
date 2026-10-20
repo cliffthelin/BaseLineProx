@@ -52,7 +52,7 @@ def app():
     sessions = sw.SessionStore()
     token = sessions.create("root", now=1700000000.0).token
     c = _RealServerCase(_base_deps(
-        sessions=sessions, store=store, runner=FakeRunner(),
+        sessions=sessions, store=store, runner=FakeRunner(files={"/proc/self/mounts": "proc /proc proc rw 0 0\n"}),
         source=_Source(), elevation_store=admin_elevation.ElevationStore(),
         recovery_store=admin_elevation.ElevationStore(),
         recovery_verify_fn=sw.AnyCredentialVerifier(sw.MachinePassphraseVerifier(store), lambda s: False)))

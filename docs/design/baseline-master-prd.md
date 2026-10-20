@@ -140,7 +140,7 @@ Existing rows 23-39 (hardened appliance, audit fixes, carrier layout, label coll
 - Record 79: recurring backup does not yet target a separate physical device.
 - Record 99: "update selected" version logic is a placeholder.
 - Docs name drives by kernel letter; letters have shifted (audit A1, row 27).
-- The serial `MD89N41071210AP4E` history: INSTALL.md lists it as "persistence backend (`sdb`)"; the 2026-09-28 handoff says that drive was then being repurposed for an unrelated project; on 2026-09-30 the operator directed it be used for Baseline, and it was re-laid out with Baseline's volumes (PRD §15 of the hardened appliance doc). Its earlier role and this change should be reconciled in INSTALL.md (row 28).
+- The serial `<PC401 drive serial>` history: INSTALL.md lists it as "persistence backend (`sdb`)"; the 2026-09-28 handoff says that drive was then being repurposed for an unrelated project; on 2026-09-30 the operator directed it be used for Baseline, and it was re-laid out with Baseline's volumes (PRD §15 of the hardened appliance doc). Its earlier role and this change should be reconciled in INSTALL.md (row 28).
 - A copy of the hardened-appliance work sits on this drive's `BASELINE` volume and `INSTALLER_CACHE/seed/`. `BASELINE` is a class-1 disposable volume and `INSTALLER_CACHE` must stay vanilla; both placements are questionable under AGENTS.md storage rules and need your ruling (Q4).
 - Process failures this session (for N2): acted before reading AGENTS.md / `drive_installer`; wiped a drive with an improvised layout outside `physical_device_safety`; reported "needs root" without checking group access; discarded requested partitions when correcting; wrote no decision record.
 

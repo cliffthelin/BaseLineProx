@@ -1,0 +1,12 @@
+[Unit]
+Description=Baseline: ask the Kasm VM how it is doing and keep the answer
+ConditionPathExists=/var/lib/baseline-firstboot/complete
+After=baseline-kasm-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-kasm telemetry collect
+TimeoutStartSec=300
+Nice=10
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1

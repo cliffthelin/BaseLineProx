@@ -1,7 +1,7 @@
 """Web hardening shared by both web apps (baseline_web.py and the standalone settings_web.py).
 
 - Security headers on EVERY response: a content security policy (no framing, forms post only to
-  ourselves, no <base>), no MIME sniffing, no caching of what are often sensitive pages, no referrer.
+  ourselves, no <base>), no MIME sniffing, no caching of sensitive pages, no cross-origin referrer.
 - The session cookie is HttpOnly and SameSite=Strict, so a browser does not send it on a request that a
   page on another site triggers.
 - A POST must come from this site: its Origin (or Referer) has to match the Host. A POST that carries a
@@ -31,7 +31,9 @@ SECURITY_HEADERS = (
     ("Content-Security-Policy", CONTENT_SECURITY_POLICY),
     ("X-Content-Type-Options", "nosniff"),
     ("X-Frame-Options", "DENY"),
-    ("Referrer-Policy", "no-referrer"),
+    # no-referrer can make form POST Origin opaque ("null"), including login.
+    # Preserve same-origin request evidence while disclosing nothing off-site.
+    ("Referrer-Policy", "same-origin"),
     ("Cache-Control", "no-store"),
     ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
     ("Cross-Origin-Opener-Policy", "same-origin"),

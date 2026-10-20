@@ -106,7 +106,7 @@ S = {("backups", "offdrive_destination"): "/mnt/10TB/backup", ("backups", "offdr
 def test_main_passes_the_configured_destination_and_the_two_allowed_drives(monkeypatch):
     rc, seen, _ = _main(monkeypatch, settings=S)
     assert rc == 0 and seen["destination"] == "/mnt/10TB/backup"
-    assert seen["allowed_serials"] == frozenset({"MD89N41071210AP4E", "FD01N6557110C271B"})
+    assert seen["allowed_serials"] == frozenset({"SYNTHDRIVEB00002", "SYNTHDRIVEA00001"})
     assert seen["boot_serial"] == "BOOT-SERIAL" and seen["min_interval_hours"] == 168
     assert callable(seen["record_success"])
 

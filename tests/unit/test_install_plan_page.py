@@ -112,3 +112,135 @@ def test_real_discovery_adapter_refuses_unknown_boot_identity_before_listing(mon
     def forbidden(*args,**kwargs):raise AssertionError('unknown boot identity must stop discovery')
     monkeypatch.setattr(subprocess,'run',forbidden)
     with pytest.raises(ip.PlanError):page.discover_current()
+def test_single_drive_page_proposal_uses_explicit_enrolled_serial():
+    import install_plan_page as page
+    import test_install_plan as fixtures
+    found = fixtures.discover(fixtures.disk("sda", fixtures.PVE))
+    result = page.perform({"action": "single-drive", "serial": fixtures.PVE}, discovery_provider=lambda: found)
+    assert result["valid"] is True
+    assert result["executed"] is False
+    assert result["plan"]["storage"]["baseline"]["serial"] == fixtures.PVE
+
+
+def test_input_preparation_waits_for_saved_draft_and_exposes_real_job_report():
+    import install_plan_page as page
+    html=page.render().decode()
+    assert 'Prepare installation inputs' in html
+    assert 'await installerDraft.flush()' in html
+    assert '/install-plan/prepare-inputs' in html
+    assert '/install-plan/input-bundle' in html
+    assert 'request_id' in html
+    assert 'crypto.randomUUID()' not in html
+
+
+def test_workspace_exposes_current_drives_and_supported_recipes_over_http():
+    from test_baseline_web import _RealServerCase,_base_deps
+    found=discover(proxmox_disk(),baseline_disk())
+    case=_RealServerCase(_base_deps(install_plan_discovery=lambda:found))
+    try:
+        response=case.get('/install-plan/discovery')
+        assert response[0]==200
+        body=json.loads(response[2]) if len(response)>2 else json.loads(response[1])
+        assert body['drives']==found['drives']
+        assert body['os_choices']==['ubuntu-24.04']
+        assert 'chrome' in body['applications']
+    finally:case.close()
+
+
+def test_application_catalog_can_be_extended_through_authenticated_installer(tmp_path,monkeypatch):
+    import application_bundle as ab
+    from test_baseline_web import _RealServerCase,_base_deps
+    monkeypatch.setattr(ab,'APPS',tuple(ab.APPS))
+    for name in ('PACKAGES','SOURCES','EXECUTABLES','APPLICATION_DEFINITIONS'):
+        monkeypatch.setattr(ab,name,dict(getattr(ab,name)))
+    source=tmp_path/'source';source.mkdir()
+    definition={'id':'my-editor','name':'My editor','package':'my-editor','executable':'usr/bin/my-editor',
+        'source_url':'https://packages.example.org/editors/my-editor_2.4.1_amd64.deb','sha256':'a'*64}
+    catalog=source/'user-state/application-definitions'
+    case=_RealServerCase(_base_deps(installer_repo_root=source,application_catalog_root=catalog,
+        install_plan_discovery=lambda:discover(proxmox_disk(),baseline_disk())))
+    try:
+        status,result=case.post_json('/install-plan/catalog',{'definition':definition})
+        assert status==201 and result['installed'] is False
+        status,raw=case.get('/install-plan/discovery')
+        assert status==200 and any(app['id']=='my-editor' for app in json.loads(raw)['application_entries'])
+        assert (catalog/'my-editor.json').is_file()
+    finally:case.close()
+
+
+def test_shortcut_configuration_validates_before_it_can_be_saved():
+    from test_baseline_web import _RealServerCase,_base_deps
+    case=_RealServerCase(_base_deps())
+    try:
+        status,result=case.post_json('/install-plan/app-config',{'app':'chrome','configuration':{'scale':1.25,'homepage':'https://www.proxmox.com/'}})
+        assert status==200 and result['configuration']['scale']==1.25 and result['applied'] is False
+        status,_=case.post_json('/install-plan/app-config',{'app':'chrome','configuration':{'scale':99}})
+        assert status==400
+    finally:case.close()
+
+
+def test_workspace_uses_desktop_wallpaper_and_phone_icon_groups():
+    import install_plan_page as page
+    html = page.render().decode()
+    assert 'desktop-wallpaper' in html
+    assert 'icon-folder' in html
+    assert 'backdrop-filter:blur(' in html
+    assert 'contextmenu' in html
+    assert 'prefers-reduced-motion' in html
+
+
+def test_application_shortcut_catalog_reads_custom_definitions_from_persistent_state(tmp_path,monkeypatch):
+    import application_bundle as ab
+    import install_plan_page as page
+    monkeypatch.setattr(ab,'APPS',tuple(ab.APPS))
+    for name in ('PACKAGES','SOURCES','EXECUTABLES','APPLICATION_DEFINITIONS'):
+        monkeypatch.setattr(ab,name,dict(getattr(ab,name)))
+    definition={'id':'catalog-editor','name':'Catalog editor','package':'catalog-editor',
+        'executable':'usr/bin/catalog-editor',
+        'source_url':'https://packages.example.org/catalog/catalog-editor_1.2_amd64.deb',
+        'sha256':'b'*64}
+    catalog=ab.application_catalog_directory(state_dir=tmp_path/'user-state')
+    ab.save_application_definition(catalog,definition)
+    entries=page.catalog_entries(catalog_directory=catalog)
+    assert any(entry['id']=='catalog-editor' and entry['name']=='Catalog editor'
+               for entry in entries)
+
+
+def test_authenticated_web_catalog_writes_and_reads_configured_state_without_command_fakes(tmp_path):
+    import threading,time,urllib.request,json
+    import baseline_web as bw
+    import settings_web as sw
+    import application_bundle as ab
+    state=tmp_path/'user-state';catalog=ab.application_catalog_directory(state_dir=state)
+    now=time.time();sessions=sw.SessionStore();session=sessions.create('catalog-owner',now=now)
+    server=bw.make_server(deps={'sessions':sessions,'clock':lambda:time.time(),
+        'application_catalog_root':catalog,'installer_repo_root':None},host='127.0.0.1',port=0)
+    port=server.server_address[1]
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    definition={'id':'web-editor','name':'Web editor','package':'web-editor',
+        'executable':'usr/bin/web-editor',
+        'source_url':'https://packages.example.org/web/web-editor_1.0_amd64.deb',
+        'sha256':'c'*64}
+    def post(path,payload):
+        url=f'http://127.0.0.1:{port}{path}'
+        request=urllib.request.Request(url,data=json.dumps(payload).encode(),method='POST',
+            headers={'Content-Type':'application/json','Cookie':'session='+session.token,'Origin':f'http://127.0.0.1:{port}'})
+        with urllib.request.urlopen(request,timeout=5) as response:return response.status,json.loads(response.read())
+    try:
+        status,result=post('/install-plan/catalog',{'definition':definition})
+        assert status==201 and result['registered'] is True and result['installed'] is False
+        status,result=post('/install-plan/app-config',{'app':'web-editor','configuration':{'scale':1.25}})
+        assert status==200 and result['configuration']=={'scale':1.25}
+        assert (catalog/'web-editor.json').read_text()==json.dumps(definition,sort_keys=True,indent=2)+'\n'
+        assert (catalog/'web-editor.json').stat().st_mode&0o777==0o600
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=5)
+
+
+def test_installer_offers_saved_parent_bluetooth_choice_outside_advanced_controls():
+    import install_plan_page as page
+    html = page.render().decode()
+    assert 'id="bluetooth-from-parent"' in html
+    assert 'Copy parent Bluetooth devices and pairings' in html
+    assert html.index('id="bluetooth-from-parent"') < html.index('id="advanced-installer"')
+    assert 'plan.host_configuration.bluetooth_from_parent' in html

@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Quiesce and add a verified whole-drive recovery image. Never restores/formats."""
+from pathlib import Path
+import argparse
+import json
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+from repair import RealRunner
+import drive_admin
+import lane_files
+lane_files.apply_defaults(__import__('os').environ)      # a build host's lane data, found as the installer finds it
+import drive_recovery
+import drive_recovery_used
+import offdrive_backup
+import physical_device_safety
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("serial")
+    parser.add_argument("destination")
+    parser.add_argument("--quiesce", action="store_true", help="normally unmount the validated source if no processes use it")
+    args = parser.parse_args()
+    runner = RealRunner()
+    allowed = drive_admin.allowed_target_serials()
+    try:
+        if args.quiesce:
+            mounts = drive_recovery.quiesce_source(runner, serial=args.serial, allowed_serials=allowed)
+            print(json.dumps({"quiesced_serial": args.serial, "unmounted": mounts}), flush=True)
+        folder = drive_recovery_used.create_snapshot_used(runner, serial=args.serial,
+                                                destination=args.destination, allowed_serials=allowed)
+        manifest = drive_recovery.verify_snapshot(runner, folder, expected_serial=args.serial)
+        print(json.dumps({"snapshot": str(folder), "manifest": manifest}, indent=2), flush=True)
+    except (drive_recovery.RecoveryError, offdrive_backup.BackupError,
+            physical_device_safety.PhysicalDeviceSafetyError, OSError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

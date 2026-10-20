@@ -77,8 +77,8 @@ def find_missing_lib_dependencies(repo_root: Path) -> list:
     needed = set()
     for bin_name in copied_bin:
         bin_path = bin_dir / bin_name
-        if not bin_path.exists():
-            continue
+        if not bin_path.exists() or "python" not in (bin_path.read_text().split("\n", 1)[0] or ""):
+            continue                                              # a shell script has no Python imports to follow
         entry_mods = _imports_of(bin_path, local_modules)
         needed |= _transitive_closure(entry_mods, lib_dir, local_modules)
 

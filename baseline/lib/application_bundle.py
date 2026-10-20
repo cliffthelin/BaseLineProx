@@ -15,6 +15,160 @@ import environment_recipes as er
 import vscode_capture as vc
 
 APPS=('vscode','spotify','chrome','chatgpt','claude')
+APPLICATION_DEFINITIONS={}
+
+
+def validate_application_definition(definition, *, require_new=True):
+    """Extend native package recipes with a checksum-locked Debian source.
+
+    Registration alone does not claim acquisition, installation or runtime proof.
+    Normal SHA256, package identity, platform and private-home checks still apply.
+    """
+    required={'id','name','package','executable','source_url','sha256'}
+    if not isinstance(definition,dict) or set(definition)!=required:
+        raise er.RecipeError('application definition requires id, name, package, executable, exact package URL and SHA256')
+    app=definition['id'];package=definition['package'];executable=definition['executable']
+    if not isinstance(app,str) or not re.fullmatch(r'[a-z][a-z0-9-]{1,47}',app):
+        raise er.RecipeError('invalid application identity')
+    if require_new and app in APPS:
+        raise er.RecipeError('application identity already registered')
+    if not isinstance(definition['name'],str) or not 1<=len(definition['name'])<=80:
+        raise er.RecipeError('invalid application display name')
+    if not isinstance(package,str) or not re.fullmatch(r'[a-z][a-z0-9+.-]{1,79}',package):
+        raise er.RecipeError('invalid native package name')
+    if (not isinstance(executable,str) or executable.startswith('/')
+            or not re.fullmatch(r'[A-Za-z0-9._+/-]{1,200}',executable)
+            or any(part in ('','..','.') for part in executable.split('/'))):
+        raise er.RecipeError('native executable must be a safe relative payload path')
+    source_url=definition['source_url']
+    if not isinstance(source_url,str):raise er.RecipeError('invalid publisher package URL')
+    parsed=urlsplit(source_url)
+    if (parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or not parsed.path.endswith('.deb')
+            or any(part in ('.','..') for part in parsed.path.split('/'))
+            or any(ord(char)<33 for char in source_url) or len(source_url)>2048):
+        raise er.RecipeError('package source must be an exact credential-free HTTPS .deb URL')
+    if not isinstance(definition['sha256'],str) or not re.fullmatch('[0-9a-f]{64}',definition['sha256']):
+        raise er.RecipeError('application package requires an exact lowercase SHA256')
+    return dict(definition)
+
+
+def custom_application_source(definition):
+    """Return the immutable package source declared by a validated catalog entry."""
+    checked=validate_application_definition(definition,require_new=False)
+    return {'url':checked['source_url'],'sha256':checked['sha256'],
+            'package':checked['package'],'medium':'deb'}
+
+
+def custom_package_version(control_fields, package):
+    """Validate native Debian control metadata and return its exact version."""
+    if not isinstance(control_fields,str) or not isinstance(package,str):
+        raise er.RecipeError('custom package metadata is unavailable')
+    fields={}
+    for line in control_fields.splitlines():
+        if not line or line[0].isspace() or ': ' not in line:
+            continue
+        key,value=line.split(': ',1)
+        if key in fields:
+            raise er.RecipeError('custom package metadata contains duplicate fields')
+        fields[key]=value
+    version=fields.get('Version','')
+    if (fields.get('Package')!=package or fields.get('Architecture')!='amd64'
+            or not re.fullmatch(r'[A-Za-z0-9.+:~_-]{1,128}',version)):
+        raise er.RecipeError('custom package identity or architecture does not match its catalog entry')
+    return version
+
+
+def register_application(definition):
+    global APPS
+    definition=validate_application_definition(definition)
+    app=definition['id']
+    PACKAGES[app]=definition['package'];EXECUTABLES[app]=definition['executable']
+    SOURCES[app]=re.escape(definition['source_url'])
+    APPLICATION_DEFINITIONS[app]=definition
+    APPS=(*APPS,app)
+
+
+def application_catalog_directory(*,state_dir=None,env=None,system_dir=Path('/var/lib/baseline'),writable=None):
+    """Resolve the custom-app catalog inside Baseline's persistent control state."""
+    env=os.environ if env is None else env
+    if state_dir is None:
+        configured=env.get('BASELINE_STATE_DIR')
+        if configured:
+            state_dir=Path(configured)
+        else:
+            writable=writable or (lambda path: os.access(path,os.W_OK) if path.exists() else os.access(path.parent,os.W_OK))
+            if writable(Path(system_dir)):
+                state_dir=Path(system_dir)
+            else:
+                state_dir=Path(env.get('HOME') or os.path.expanduser('~'))/'.local/share/baseline'
+    return Path(state_dir)/'application-definitions'
+
+
+def load_application_catalog(folder):
+    """Load validated custom definitions from a durable application catalog directory."""
+    folder=Path(folder)
+    if folder.is_symlink():raise er.RecipeError('application catalog directory cannot be a symbolic link')
+    if not folder.exists():return []
+    if not folder.is_dir():raise er.RecipeError('application catalog path is not a directory')
+    loaded=[]
+    for path in sorted(folder.glob('*.json')):
+        if path.is_symlink() or not path.is_file() or path.stat().st_size>65536:
+            raise er.RecipeError('application catalog entry is redirected or exceeds 64 KiB')
+        definition=validate_application_definition(er.read_document(path.read_text()),require_new=False)
+        if path.stem!=definition['id']:
+            raise er.RecipeError('application catalog filename does not match its application ID')
+        app=definition['id']
+        if app in APPS:
+            if APPLICATION_DEFINITIONS.get(app)!=definition:
+                raise er.RecipeError('application catalog conflicts with an already registered identity')
+        else:
+            register_application(definition)
+        loaded.append(definition)
+    return loaded
+
+
+def load_application_definitions(root):
+    """Load any source-packaged definitions retained for compatible deployments."""
+    return load_application_catalog(Path(root)/'packaging/application-definitions')
+
+
+def save_application_definition(folder,definition):
+    """Atomically save one validated user definition without overwriting an ID."""
+    import tempfile
+    definition=validate_application_definition(definition)
+    folder=Path(folder)
+    if folder.is_symlink():raise er.RecipeError('application catalog directory cannot be a symbolic link')
+    folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+    if folder.is_symlink() or not folder.is_dir():raise er.RecipeError('application catalog path is not a real directory')
+    target=folder/(definition['id']+'.json')
+    if target.exists() or target.is_symlink():raise er.RecipeError('application identity already exists in the saved catalog')
+    fd,temporary=tempfile.mkstemp(prefix='.application-',dir=folder)
+    staged=Path(temporary)
+    try:
+        os.fchmod(fd,0o600)
+        with os.fdopen(fd,'wb') as stream:
+            stream.write((json.dumps(definition,sort_keys=True,indent=2)+'\n').encode('utf-8'))
+            stream.flush();os.fsync(stream.fileno())
+        try:os.link(staged,target)
+        except FileExistsError:raise er.RecipeError('application identity already exists in the saved catalog') from None
+        directory=os.open(folder,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+    finally:
+        try:staged.unlink()
+        except FileNotFoundError:pass
+    return definition
+
+
+def load_deployed_application_definitions(module_path):
+    """Load the saved catalog using the same source-root resolution as the installer."""
+    import installer_inputs
+    try:
+        root=installer_inputs.source_root(module_path)
+    except installer_inputs.InputError as exc:
+        raise er.RecipeError('application catalog source tree is unavailable') from exc
+    return load_application_definitions(root)
 
 
 def _app(app):
@@ -42,6 +196,10 @@ def capture(app,text):
             if type(value) not in (float,int) or not .75<=value<=2:raise er.RecipeError('unsupported display scale')
             approved[key]=value
         elif app=='chrome' and key=='homepage':approved[key]=_homepage(value)
+        elif key=='arguments' and app not in ('vscode','spotify','chrome','chatgpt','claude'):
+            if not isinstance(value,list) or len(value)>16 or any(not isinstance(v,str) or len(v)>512 or '\x00' in v for v in value):
+                raise er.RecipeError('invalid native application arguments')
+            approved[key]=list(value)
     return {'app':app,'configuration':approved,'excluded_count':len(doc)-len(approved)}
 
 PACKAGES={'chrome':'google-chrome-stable','spotify':'spotify-client','claude':'claude-desktop','chatgpt':'chatgpt','vscode':'code'}
@@ -260,8 +418,12 @@ def prepare(app,configuration,destination,*,platform=None,opener=None):
             if subprocess.run(['dpkg','--compare-versions',candidate['Version'],'gt',chosen['Version']],capture_output=True).returncode==0:chosen=candidate
         source={'url':base+chosen.get('Filename',''),'sha256':chosen.get('SHA256',''),'version':chosen['Version'],'package':PACKAGES[app],'medium':'deb'}
         bind(app,configuration,source,platform)
-    else:
+    elif app=='chatgpt':
         source={'url':'https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb','package':'chatgpt','medium':'deb'}
+    elif app in APPLICATION_DEFINITIONS:
+        source=custom_application_source(APPLICATION_DEFINITIONS[app])
+    else:
+        raise er.RecipeError('application has no registered native source adapter')
     destination.mkdir(mode=0o700);archive=destination/('source.tar.gz' if app=='vscode' else 'source.deb')
     sha=_download(source['url'],archive,opener,source.get('sha256'))
     if app=='chatgpt':
@@ -269,6 +431,9 @@ def prepare(app,configuration,destination,*,platform=None,opener=None):
         fields=dict(line.split(': ',1) for line in text.splitlines() if ': ' in line and not line.startswith(' '))
         if fields.get('Package')!='chatgpt' or fields.get('Architecture')!='amd64':raise er.RecipeError('publisher download has wrong package identity')
         source.update({'sha256':sha,'version':fields['Version']})
+    elif app in APPLICATION_DEFINITIONS:
+        text=subprocess.check_output(['dpkg-deb','-f',str(archive)],text=True,timeout=30)
+        source['version']=custom_package_version(text,source['package'])
     return {'recipe':bind(app,configuration,source,platform),'archive':str(archive),
             'trust':'publisher HTTPS plus SHA256; no detached signature','runtime_verified':False}
 
@@ -390,18 +555,24 @@ def launch(generation,data,*,shared=None,proxy=None,login_browser=None):
         raise er.RecipeError('platform, recipe or retained identity changed')
     if _path(generation/'DBUS-SESSION.conf').read_text()!=PRIVATE_DBUS_CONFIG:
         raise er.RecipeError('private session policy changed; new installation required')
-    native='/app/root/'+EXECUTABLES[recipe['app']]
-    argv=[native,'--disable-gpu','--disable-dev-shm-usage']
-    if recipe['app']=='vscode':argv+=['--user-data-dir','/home/baseline/.config/Code','--extensions-dir','/home/baseline/extensions']
-    elif recipe['app']=='chrome':argv+=['--user-data-dir=/home/baseline/.config/google-chrome','--no-first-run','--no-default-browser-check']
-    if proxy is not None:
-        _homepage(proxy);argv+=['--proxy-server='+proxy]
-    if 'scale' in recipe['configuration']:argv+=['--force-device-scale-factor='+str(recipe['configuration']['scale'])]
-    argv=['/usr/bin/dbus-run-session','--config-file','/app/DBUS-SESSION.conf','--']+argv
     with (data/'RUN.lock').open('a') as lock:
         os.chmod(data/'RUN.lock',0o600)
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise er.RecipeError('application already running with this retained profile') from None
+        configuration=dict(recipe['configuration'])
+        configuration.update(_read_runtime_configuration(data,recipe['app']))
+        native='/app/root/'+EXECUTABLES[recipe['app']]
+        argv=[native]
+        if recipe['app'] in ('vscode','spotify','chrome','chatgpt','claude'):
+            argv+=['--disable-gpu','--disable-dev-shm-usage']
+        else:
+            argv+=recipe['configuration'].get('arguments',[])
+        if recipe['app']=='vscode':argv+=['--user-data-dir','/home/baseline/.config/Code','--extensions-dir','/home/baseline/extensions']
+        elif recipe['app']=='chrome':argv+=['--user-data-dir=/home/baseline/.config/google-chrome','--no-first-run','--no-default-browser-check']
+        if proxy is not None:
+            _homepage(proxy);argv+=['--proxy-server='+proxy]
+        if 'scale' in configuration:argv+=['--force-device-scale-factor='+str(configuration['scale'])]
+        argv=['/usr/bin/dbus-run-session','--config-file','/app/DBUS-SESSION.conf','--']+argv
         if login_browser is not None:configure_uri_handler(data,recipe['app'])
         if recipe['app']=='chrome':
             # Crash recovery may suppress Chrome's configured startup pages.
@@ -494,6 +665,40 @@ def restore_state(archive,manifest,target):
 RUNTIME_HELPER='/opt/baseline/libexec/baseline-app-bwrap'
 
 
+def _read_runtime_configuration(data,app):
+    path=_path(data/'home/.baseline/BASELINE.json')
+    if not path.exists():return {}
+    document=er.read_document(path.read_text())
+    if (not isinstance(document,dict) or set(document)!={'format','configuration'}
+            or document['format']!='baseline.app-settings/v1'
+            or not isinstance(document['configuration'],dict)):
+        raise er.RecipeError('invalid retained Baseline application settings')
+    checked=capture(app,json.dumps(document['configuration']))
+    if checked['excluded_count'] or set(checked['configuration'])-{'scale'}:
+        raise er.RecipeError('retained Baseline settings contain unsupported launch options')
+    return checked['configuration']
+
+
+def _save_runtime_configuration(data,configuration):
+    import tempfile
+    settings_dir=_path(data/'home/.baseline')
+    settings_dir.mkdir(mode=0o700,parents=True,exist_ok=True)
+    fd,name=tempfile.mkstemp(prefix='.baseline-settings-',dir=settings_dir)
+    staged=Path(name)
+    try:
+        os.fchmod(fd,0o600)
+        with os.fdopen(fd,'w') as stream:
+            json.dump({'format':'baseline.app-settings/v1','configuration':configuration},stream,sort_keys=True,indent=2)
+            stream.flush();os.fsync(stream.fileno())
+        os.replace(staged,settings_dir/'BASELINE.json')
+        directory=os.open(settings_dir,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+    finally:
+        try:staged.unlink()
+        except FileNotFoundError:pass
+
+
 def runtime_plan(platform):
     if platform.get('arch')!='amd64' or (platform.get('os'),platform.get('release')) not in (('ubuntu','24.04'),('ubuntu','26.04'),('debian','13')):
         raise er.RecipeError('unsupported runtime platform')
@@ -553,7 +758,7 @@ def capture_installed(generation,data):
         os.chmod(data/'RUN.lock',0o600)
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise er.RecipeError('stop application before capture') from None
-        app=recipe['app'];configuration=dict(recipe['configuration']);excluded=0
+        app=recipe['app'];configuration=dict(recipe['configuration']);configuration.update(_read_runtime_configuration(data,app));excluded=0
         paths={'vscode':'.config/Code/User/settings.json','chrome':'.config/google-chrome/Default/Preferences'}
         coverage='Baseline launch options only; native preference extraction not implemented for this adapter'
         if app in paths:
@@ -579,6 +784,17 @@ def apply_configuration(data,configuration):
         raise er.RecipeError('invalid retained identity')
     app=identity['app'];approved=capture(app,json.dumps(configuration))
     if approved['excluded_count']:raise er.RecipeError('unapproved native configuration')
+    runtime_configuration={key:value for key,value in approved['configuration'].items() if key=='scale'}
+    native_configuration={key:value for key,value in approved['configuration'].items() if key!='scale'}
+    if app not in ('vscode','chrome'):
+        if not runtime_configuration or native_configuration:
+            raise er.RecipeError('this application supports retained Baseline display scale only')
+        with (data/'RUN.lock').open('a') as lock:
+            os.chmod(data/'RUN.lock',0o600)
+            try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:raise er.RecipeError('stop application before apply') from None
+            _save_runtime_configuration(data,runtime_configuration)
+        return {'app':app,'changed_keys':sorted(runtime_configuration),'native_file_updated':False,'runtime_verified':False}
     if app not in ('vscode','chrome') or (app=='chrome' and set(configuration)-{'homepage'}):
         raise er.RecipeError('native apply supports VS Code settings and Chrome homepage; launch options require a new generation')
     relative='.config/Code/User/settings.json' if app=='vscode' else '.config/google-chrome/Default/Preferences'

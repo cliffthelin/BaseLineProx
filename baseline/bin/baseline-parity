@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""List what the console carries of the TUI and the installer, and what is still a gap."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import parity_manifest as pm
+
+if __name__ == "__main__":
+    print(pm.report())

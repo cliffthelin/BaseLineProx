@@ -10,7 +10,45 @@ import pytest
 
 import install_plan as ip
 
-PVE, BASE, EMPTY, OTHER, BOOT = "FD01N6557110C271B", "MD89N41071210AP4E", "S6WRNS0TA12638A", "WCV00YLT", "SN2118"
+
+def test_single_drive_cli_selects_the_requested_enrolled_serial():
+    output = []
+    rc = ip.main(["single-drive", PVE], read_listing=lambda: lsblk(disk("sda", PVE)),
+                 boot_serial=BOOT, allowed_serials=ALLOWED, print_fn=output.append)
+    assert rc == 0
+    plan = json.loads(output[0])
+    assert plan["storage"]["substrate"]["serial"] == PVE
+    assert plan["storage"]["baseline"]["action"] == "provision_lvm"
+
+
+def test_single_drive_provisioning_requires_a_fresh_substrate_install():
+    found = discover(proxmox_disk())
+    plan = ip.autofill_single_drive(found, PVE)
+    plan["storage"]["substrate"]["action"] = "keep"
+    assert any("fresh substrate" in error for error in ip.validate(plan, found))
+
+
+def test_independent_single_drive_plan_uses_one_serial_for_boot_and_all_roles():
+    found = discover(disk("sda", PVE))
+    plan = ip.autofill_single_drive(found, PVE)
+    assert ip.validate(plan, found) == []
+    stages = ip.compile_plan(plan, found)
+    assert stages["substrate"]["params"]["lvm_size_preset"] == "single-drive"
+    assert stages["baseline_drive"]["action"] == "provision_lvm"
+    assert stages["baseline_drive"]["expected_serial"] == PVE
+    assert stages["baseline_drive"]["params"]["reserve_bytes"] > 512_110_190_592 // 5
+    assert stages["executed"] is False
+
+
+def test_single_drive_stage_uses_the_identity_bound_executor_and_requires_measurement():
+    found = discover(disk("sda", PVE))
+    stages = ip.compile_plan(ip.autofill_single_drive(found, PVE), found)
+    stage = stages["baseline_drive"]
+    assert stage["module"] == "single_drive_storage"
+    assert stage["function"] == "provision_target"
+    assert stage["requires"] == ["offline_root_mount", "measured_role_bytes", "verified_recovery"]
+
+PVE, BASE, EMPTY, OTHER, BOOT = "SYNTHDRIVEA00001", "SYNTHDRIVEB00002", "SYNTHSATA000001", "SYNTHH01", "SN2118"
 ALLOWED = frozenset({PVE, BASE, EMPTY, OTHER})
 INSTALLER_GUID = "8afe8468-ea73-4944-8842-0cbbe4a82d16"
 
@@ -401,3 +439,26 @@ def test_the_command_refuses_a_plan_file_that_is_not_json(tmp_path):
 def test_the_discover_command_prints_what_it_found(tmp_path):
     code, text = run_main(["discover"], tmp_path, *STANDARD)
     assert code == 0 and {d["serial"] for d in json.loads(text)["drives"]} == {PVE, BASE}
+
+
+def test_application_shortcut_settings_survive_validated_compilation():
+    found=discover(proxmox_disk(),baseline_disk())
+    plan=ip.autofill(found)
+    plan['applications']['configurations']={'chrome':{'scale':1.25,'homepage':'https://www.proxmox.com/'}}
+    assert ip.validate(plan,found)==[]
+    compiled=ip.compile_plan(plan,found)
+    assert compiled['applications']['configurations']['chrome']['scale']==1.25
+
+
+def test_bluetooth_transfer_is_opt_in_validated_and_compiled_for_any_build():
+    found = discover(disk('sda', PVE))
+    plan = ip.autofill_single_drive(found, PVE)
+    assert plan['host_configuration']['bluetooth_from_parent'] is False
+    assert ip.compile_plan(plan, found)['host_configuration']['bluetooth_from_parent'] is False
+    plan['host_configuration']['bluetooth_from_parent'] = True
+    assert ip.validate(plan, found) == []
+    assert ip.compile_plan(plan, found)['host_configuration']['bluetooth_from_parent'] is True
+    plan['host_configuration']['bluetooth_from_parent'] = 'false'
+    assert any('Bluetooth' in e for e in ip.validate(plan, found))
+    del plan['host_configuration']
+    assert ip.validate(plan, found) == []  # existing saved plans remain opt-out

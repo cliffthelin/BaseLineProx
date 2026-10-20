@@ -26,9 +26,11 @@ DEPLOYED_UNITS = ("baseline.service", "baseline-additive-dhcp-reapply.service",
 def _extract_json_keys(text):
     try:
         data = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        return []
-    return sorted(data.keys()) if isinstance(data, dict) else []
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"invalid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("expected a JSON object")
+    return sorted(data.keys())
 
 
 def collect_baseline_config(runner):
@@ -40,10 +42,20 @@ def collect_baseline_config(runner):
         if not name.endswith(".json"):
             continue
         content = runner.read_text(f"/etc/baseline/{name}")
-        config_key_summaries[name] = {"keys": _extract_json_keys(content.stdout) if content.ok else []}
         n = _note(content, f"read /etc/baseline/{name}")
         if n:
             collection_notes.append(n)
+        if not content.ok:
+            config_key_summaries[name] = {"keys": None, "error": content.reason or "configuration read failed"}
+            continue
+        try:
+            keys = _extract_json_keys(content.stdout)
+        except ValueError as exc:
+            config_key_summaries[name] = {"keys": None, "error": str(exc)}
+            collection_notes.append({"command": f"parse /etc/baseline/{name}",
+                                     "status": "malformed", "reason": str(exc)})
+        else:
+            config_key_summaries[name] = {"keys": keys}
 
     var_lib = runner.walk_bounded("/var/lib/baseline", MAX_WALK_DEPTH, MAX_WALK_ENTRIES)
     collection_notes += _notes((var_lib, "walk_bounded /var/lib/baseline"))

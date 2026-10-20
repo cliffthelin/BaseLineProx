@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Update an existing Baseline build's files in place without root, using only the commands the operator's sudoers file allows without a password.
+
+    baseline-update-drive-rootless PC601 [--cache-from DIR] [--dry-run]
+
+Deploys the committed code (as provision.sh would place it) and brings INSTALLER_CACHE up to date with the built offline cache and OS images, writing only files that differ and never deleting. Whatever
+cannot be done this way (growing the cache volume, installing packages) is printed with the exact command. Idempotent: run it again after growing the volume and only the rest is written.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import lane_files  # noqa: E402
+
+lane_files.apply_defaults(os.environ)
+import cache_sync  # noqa: E402
+import identifiers  # noqa: E402
+import rootless_update as ru  # noqa: E402
+
+GIB = 1024 ** 3
+SUDO = ["sudo", "-n"]
+
+
+def out(argv):
+    done = subprocess.run(argv, capture_output=True, text=True)
+    if done.returncode:
+        raise SystemExit(f"{argv[0]} failed: {(done.stderr or done.stdout).strip()[-300:]}")
+    return done.stdout
+
+
+def target_volume_group(serial):
+    """The volume group on the drive with this serial, checked three ways: the disk's serial, that its GUID names an installer lane (it carries a build), and that the group is not the running system's own."""
+    listing = json.loads(out(["lsblk", "-J", "-b", "-p", "-o", "NAME,TYPE,SERIAL,PTUUID"]))
+    disks = [d for d in listing["blockdevices"] if d.get("type") == "disk" and d.get("serial") == serial]
+    if len(disks) != 1:
+        raise SystemExit(f"{len(disks)} drives carry that serial; refusing")
+    disk = disks[0]
+    if identifiers.stamped_lane(disk.get("ptuuid"), serial) is None:
+        raise SystemExit("the drive does not carry an installer-made identity, so it has no build to update")
+    pvs = out([*SUDO, "pvs", "--noheadings", "-o", "pv_name,vg_name,vg_uuid", "--separator", "|"])
+    rows = [[x.strip() for x in line.split("|")] for line in pvs.splitlines() if line.strip()]
+    mine = [r for r in rows if r[0].startswith(disk["name"])]
+    if len(mine) != 1:
+        raise SystemExit("the drive's volume group is not exactly one; refusing")
+    name, uuid = mine[0][1], mine[0][2]
+    root_source = out(["findmnt", "-n", "-o", "SOURCE", "--mountpoint", "/"]).strip()
+    if root_source.startswith(f"/dev/mapper/{name}") or f"/{name}/" in root_source:
+        raise SystemExit("that volume group is the running system's own; refusing")
+    if not re.fullmatch(r"[A-Za-z0-9_+.-]+", name):
+        raise SystemExit("unexpected volume group name")
+    return name, uuid
+
+
+def main(argv):
+    args = [a for a in argv[1:] if not a.startswith("--")]
+    dry = "--dry-run" in argv
+    if len(args) != 1:
+        print(__doc__)
+        return 2
+    drives_file = Path(os.environ["BASELINE_DRIVES_FILE"])
+    drives = json.loads(drives_file.read_text())["drives"]
+    if args[0] not in drives:
+        raise SystemExit(f"{args[0]} is not a drive this machine builds for")
+    serial = drives[args[0]]
+    build = drives_file.parent
+    cache_from = Path(argv[argv.index("--cache-from") + 1]) if "--cache-from" in argv else build
+    bundles = sorted((build / "update-bundles").glob(f"{args[0].lower()}-*"))
+    if not bundles:
+        raise SystemExit("no update bundle: run baseline-prepare-update-bundle first")
+    payload = bundles[-1] / "payload"
+    vg, vg_uuid = target_volume_group(serial)
+    print(f"target {args[0]}: volume group {vg}; bundle {bundles[-1].name}")
+    base = Path(f"/tmp/baseline-rootless-{os.getpid()}")
+    plan = ru.deploy_plan((payload / "boot/provision.sh").read_text())
+    report = {"target": args[0], "bundle": bundles[-1].name, "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    subprocess.run([*SUDO, "vgchange", "-ay", "--select", f"vg_uuid={vg_uuid}"], check=True, capture_output=True)
+    try:
+        with ru.Volume(f"/dev/{vg}/baseline_substrate", base, "substrate") as substrate:       # the drive's own storage policy names the drive it belongs to
+            import storage_policy
+            policy = storage_policy.validate_policy(json.loads((substrate / "storage-policy.json").read_text()))
+            if policy.get("serial") != serial:
+                raise SystemExit("the drive's storage policy names a different drive; refusing")
+        with ru.Volume(f"/dev/{vg}/root", base, "root") as root:
+            if dry:
+                report["code"] = {"dry_run": True, "plan": {k: len(v) for k, v in plan.items()}}
+            else:
+                # the update's source tree, then the deployment
+                for tree in ("baseline", "boot", "automation", "packaging", "docs", "tests"):
+                    ru.write_once.copy_changed(payload / tree, root / "opt/baseline-src" / tree, ru.shutil.ignore_patterns("__pycache__", "*.pyc"))
+                report["code"] = ru.apply_plan(plan, payload, root)
+            print("code layer:", {k: v for k, v in report["code"].items() if k not in ("missing_source", "skipped_dest", "needs_root")})
+        with ru.Volume(f"/dev/{vg}/baseline_installer_cache", base, "cache") as cache:
+            stat = os.statvfs(cache)
+            free = stat.f_bavail * stat.f_frsize
+            units = []
+            oc = cache_from / "offline-cache"
+            dest = "installer/expanded/baseline-cache"
+            if oc.is_dir():
+                units += [(f"offline-cache/{n}", oc / n, f"{dest}/{n}") for n in ("apps", "apt", "npm-cache", "kasm")]
+                bases = oc / "os-bases"
+                units += [(f"os-bases/{p.stem}", bases, f"{dest}/os-bases", p.stem) for p in sorted(bases.glob("*.json"))] if bases.is_dir() else []
+            isos = cache_from / "installer-cache" / "isos"
+            units += [(f"isos/{p.name}", p, f"isos/{p.name}") for p in sorted(isos.iterdir())] if isos.is_dir() else []
+            if oc.is_dir():                                                    # the manifest that says what the cache holds goes last, after what it names is there
+                units += [("offline-cache/MANIFEST", oc, dest, "MANIFEST")]
+            copied, waiting, remaining = [], [], free - 2 * GIB
+            for unit in units:
+                name, src, rel = unit[0], unit[1], unit[2]
+                if name == "offline-cache/MANIFEST" and waiting:                # the manifest says the cache is complete: only written when everything it names is there
+                    waiting.append((name, 0))
+                    continue
+                if len(unit) == 4:                                              # a named part of a folder (an OS base's two files, or the manifest files)
+                    stem = unit[3]
+                    parts = [p for p in Path(src).iterdir() if p.is_file() and (p.stem == stem or p.name.startswith(stem + "."))] if stem != "MANIFEST" else [p for p in Path(src).iterdir() if p.is_file() and p.name in ("MANIFEST.json", "BUILT_FOR.json")]
+                    need = sum(p.stat().st_size for p in parts if not (cache / rel / p.name).is_file() or (cache / rel / p.name).stat().st_size != p.stat().st_size)
+                    if need > remaining:
+                        waiting.append((name, need))
+                        continue
+                    if not dry:
+                        for p in parts:
+                            d = cache / rel / p.name
+                            d.parent.mkdir(parents=True, exist_ok=True)
+                            if not (d.is_file() and d.stat().st_size == p.stat().st_size and d.stat().st_mtime_ns == p.stat().st_mtime_ns):
+                                subprocess.run(["rsync", "-a", "--inplace", "--no-whole-file", "--modify-window=-1", str(p), str(d)], check=True)
+                    copied.append(name)
+                    remaining -= need
+                    continue
+                src = Path(src)
+                target = cache / rel
+                if src.is_file():
+                    need = 0 if (target.is_file() and target.stat().st_size == src.stat().st_size and target.stat().st_mtime_ns == src.stat().st_mtime_ns) else src.stat().st_size
+                    if need > remaining:
+                        waiting.append((name, need))
+                        continue
+                    if need and not dry:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        subprocess.run(["rsync", "-a", "--inplace", "--no-whole-file", "--modify-window=-1", str(src), str(target)], check=True)
+                    copied.append(name)
+                    remaining -= need
+                    continue
+                target.mkdir(parents=True, exist_ok=True)
+                measured = cache_sync.measure(type("R", (), {"run": staticmethod(lambda a, timeout=None: subprocess.run(a, capture_output=True, text=True))})(), src, target)
+                if measured["bytes_sent"] > remaining:
+                    waiting.append((name, measured["bytes_sent"]))
+                    continue
+                if measured["files_changed"] and not dry:
+                    subprocess.run([*cache_sync.FLAGS, str(src) + "/", str(target) + "/"], check=True, capture_output=True)
+                copied.append(name)
+                remaining -= measured["bytes_sent"]
+            report["cache"] = {"free_gib_before": round(free / GIB, 1), "done": copied, "waiting_for_room": [(n, round(b / GIB, 1)) for n, b in waiting]}
+            print("cache:", json.dumps(report["cache"]))
+            if waiting:
+                need_gib = int(sum(b for _, b in waiting) * 1.08 / GIB) + 2
+                print(f"\nTO FINISH (needs root once: the cache volume is full):\n  sudo lvextend -r -L +{need_gib}G /dev/{vg}/baseline_installer_cache\nthen run this command again: only the rest is written.")
+                report["finish_with"] = f"sudo lvextend -r -L +{need_gib}G /dev/{vg}/baseline_installer_cache"
+    finally:
+        subprocess.run([*SUDO, "vgchange", "-an", "--select", f"vg_uuid={vg_uuid}"], capture_output=True)
+        os.sync()
+    reports = build / "update-reports"
+    reports.mkdir(exist_ok=True)
+    report["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    (reports / f"{args[0].lower()}-{time.strftime('%Y%m%dT%H%M%S')}.json").write_text(json.dumps(report, indent=1) + "\n")
+    print("\nroot-only things this update did not do:", json.dumps(report["code"].get("needs_root", [])[:6]), "...")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

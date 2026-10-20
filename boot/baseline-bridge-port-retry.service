@@ -1,0 +1,9 @@
+[Unit]
+Description=Baseline: give the bridge its port when a cable is plugged in after boot (ADR 0001)
+After=networking.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-bridge-port --retry
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1

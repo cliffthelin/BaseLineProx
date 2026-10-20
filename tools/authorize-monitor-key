@@ -1,0 +1,131 @@
+#!/bin/bash
+# One-time, operator-run: add the development monitoring SSH key to PC601's installed root, so a run can be watched over SSH.
+#
+#   sudo tools/authorize-monitor-key PC601            # adds the key
+#   sudo tools/authorize-monitor-key PC601 --with-password   # also sets root's password to the development one (see below)
+#   tools/authorize-monitor-key PC601 --dry-run       # shows what it would do; needs no root and changes nothing
+#
+# Why this exists: reading or writing the installed system needs its LVM volume group activated, which needs root. The installer now
+# carries the same key (answer file `root-ssh-keys`), so after the next rebuild this is not needed. It touches only PC601 (serial below),
+# only the one root filesystem on it, /etc/baseline-dev/monitor_authorized_keys and one sshd drop-in (Proxmox's own authorized_keys is a symlink into its cluster filesystem and is left alone), then unmounts and
+# deactivates exactly the volume group it activated. PC401 is not accepted.
+set -euo pipefail
+
+declare -A SERIALS=( [PC601]=SYNTHDRIVEA00001 )
+NAME="${1:-}"; MODE="${2:-}"
+[ -n "${SERIALS[$NAME]:-}" ] || { echo "usage: authorize-monitor-key PC601 [--dry-run]   (only PC601 is accepted)" >&2; exit 2; }
+[ -z "$MODE" ] || [ "$MODE" = "--dry-run" ] || [ "$MODE" = "--with-password" ] || { echo "unknown option $MODE" >&2; exit 2; }
+PWFILE=/run/media/cane/CACHE/baseline-build/dev-root-password
+DEVUSER=/run/media/cane/CACHE/baseline-build/dev-user
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+SERIAL="${SERIALS[$NAME]}"
+KEY_FILE=/run/media/cane/CACHE/baseline-build/ssh/baseline-monitor.pub
+say() { echo "[authorize-monitor-key] $*"; }
+
+[ -f "$KEY_FILE" ] || { say "refusing: $KEY_FILE does not exist"; exit 1; }
+KEY="$(cat "$KEY_FILE")"
+case "$KEY" in ssh-ed25519\ *) ;; *) say "refusing: $KEY_FILE is not an ed25519 public key"; exit 1;; esac
+[ "$(printf '%s\n' "$KEY" | wc -l)" -eq 1 ] || { say "refusing: the key file must be a single line"; exit 1; }
+
+mapfile -t FOUND < <(lsblk -dnpo PATH,SERIAL | awk -v s="$SERIAL" '$2 == s {print $1}')
+[ "${#FOUND[@]}" -eq 1 ] || { say "refusing: ${#FOUND[@]} disks carry serial $SERIAL"; exit 1; }
+DEV="${FOUND[0]}"
+say "$NAME is $DEV (serial $SERIAL)"
+
+if [ "$MODE" = "--dry-run" ]; then
+  say "dry run: would find the LVM volume group whose physical volumes are all on $DEV, activate it, mount its 'root' volume at a temporary"
+  say "directory, append the key ($(printf '%s' "$KEY" | cut -d' ' -f1,3-)) to /root/.ssh/authorized_keys if absent, unmount, deactivate the group."
+  exit 0
+fi
+[ "$(id -u)" -eq 0 ] || { say "needs root: run with sudo (or use --dry-run)"; exit 1; }
+
+# LVM is told to look at this device only. Another volume group on this machine can share the name `pve` (an image file attached as a loop
+# device does), and with the whole system visible LVM warns about duplicates and cannot say which is which; with the filter it sees one.
+LVMCFG="devices { filter = [ \"a|^${DEV}.*|\", \"r|.*|\" ] }"
+mapfile -t VGS < <(pvs --noheadings -o vg_name -S "vg_missing_pv_count=0" --config "$LVMCFG" 2>/dev/null | tr -d ' ' | sort -u | grep -v '^$' || true)
+[ "${#VGS[@]}" -eq 1 ] || { say "refusing: expected one complete volume group on $DEV, found ${#VGS[@]} (${VGS[*]:-none})"; exit 1; }
+VG="${VGS[0]}"
+say "volume group $VG (seen only through $DEV)"
+[ ! -e "/dev/mapper/$VG-root" ] || { say "refusing: /dev/mapper/$VG-root already exists here; something has a volume group named $VG active"; exit 1; }
+
+MNT="$(mktemp -d /tmp/authorize-monitor-key.XXXXXX)"
+cleanup() {
+  mountpoint -q "$MNT" && umount "$MNT" || true
+  rmdir "$MNT" 2>/dev/null || true
+  vgchange -an "$VG" --config "$LVMCFG" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+vgchange -ay "$VG" --config "$LVMCFG" >/dev/null
+mount "/dev/mapper/$VG-root" "$MNT"
+[ -x "$MNT/usr/bin/pvesh" ] || { say "refusing: $VG/root does not look like a Proxmox root (no usr/bin/pvesh)"; exit 1; }
+# Read-only look first: /root must be a real directory on this filesystem. If it is a symlink (or missing) writing "through" it would land
+# somewhere else on this machine or in a place the installed system never reads, so show what is there and stop.
+diagnose() {
+  say "$1"
+  say "--- $MNT/root and its surroundings (read-only) ---"
+  ls -ld "$MNT/root" "$MNT/root/.ssh" 2>&1 | sed 's/^/    /'
+  [ -L "$MNT/root" ] && say "    /root is a symlink to: $(readlink "$MNT/root")"
+  [ -L "$MNT/root/.ssh" ] && say "    /root/.ssh is a symlink to: $(readlink "$MNT/root/.ssh")"
+  ls -la "$MNT/root" 2>&1 | head -20 | sed 's/^/    /'
+  say "--- fstab lines mentioning root, home, persist, USER ---"
+  grep -iE "root|home|persist|USER" "$MNT/etc/fstab" 2>&1 | sed 's/^/    /' | head -12
+  findmnt -no TARGET,SOURCE,OPTIONS "$MNT" 2>&1 | sed 's/^/    /'
+  exit 1
+}
+[ -d "$MNT/root" ] && [ ! -L "$MNT/root" ] || diagnose "refusing: /root on the installed system is not a plain directory"
+[ ! -L "$MNT/root/.ssh" ] || diagnose "refusing: /root/.ssh is a symlink"
+# On Proxmox /root/.ssh/authorized_keys is a symlink to /etc/pve/priv/authorized_keys, a path that exists only while Proxmox's cluster
+# filesystem is running, so offline it dangles and cannot be written. The key therefore goes in a file of its own that sshd is told
+# to read in addition (a drop-in; the Debian sshd_config includes sshd_config.d first). The Proxmox file is left exactly as it is.
+KEYS_REL=etc/baseline-dev/monitor_authorized_keys      # not /etc/baseline: persistent storage is mounted over that path at boot and would hide this file
+install -d -m 755 -o root -g root "$MNT/etc/baseline-dev"
+# files an earlier version of this tool left under /etc/baseline (hidden at boot, so useless): remove only those two
+rm -f "$MNT/etc/baseline/monitor_authorized_keys" "$MNT/etc/baseline/dev-user.hash"
+if grep -qxF "$KEY" "$MNT/$KEYS_REL" 2>/dev/null; then
+  say "the key is already authorized; nothing to do"
+else
+  printf '%s\n' "$KEY" >> "$MNT/$KEYS_REL"
+  chown root:root "$MNT/$KEYS_REL"; chmod 644 "$MNT/$KEYS_REL"
+  say "key added to /$KEYS_REL"
+fi
+[ -d "$MNT/etc/ssh/sshd_config.d" ] || { say "refusing: no /etc/ssh/sshd_config.d on the installed system"; exit 1; }
+grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$MNT/etc/ssh/sshd_config" || { say "refusing: sshd_config does not include sshd_config.d/*.conf"; exit 1; }
+printf '%s\n' '# Baseline development monitoring key (authorize-monitor-key). The Proxmox authorized_keys file stays as it is.' \
+  'AuthorizedKeysFile .ssh/authorized_keys /etc/baseline-dev/monitor_authorized_keys' > "$MNT/etc/ssh/sshd_config.d/10-baseline-monitor.conf"
+chmod 644 "$MNT/etc/ssh/sshd_config.d/10-baseline-monitor.conf"
+say "sshd drop-in written; sshd settings that matter here:"
+grep -hiE '^[[:space:]]*(PermitRootLogin|PubkeyAuthentication|AuthorizedKeysFile|StrictModes)' "$MNT/etc/ssh/sshd_config" "$MNT"/etc/ssh/sshd_config.d/*.conf | sed 's/^/    /'
+say "/root/.ssh/authorized_keys on the installed system: $(readlink "$MNT/root/.ssh/authorized_keys" 2>/dev/null || echo 'not a symlink')"
+if [ "$MODE" = "--with-password" ]; then
+  [ -f "$PWFILE" ] || { say "refusing: $PWFILE does not exist (the installer creates it; or create it with one line of 12+ characters, mode 600)"; exit 1; }
+  [ "$(stat -c %a "$PWFILE")" = "600" ] || { say "refusing: $PWFILE must be mode 600"; exit 1; }
+  [ "$(wc -l < "$PWFILE")" -le 1 ] && [ "$(wc -c < "$PWFILE")" -ge 13 ] || { say "refusing: $PWFILE must be one line of at least 12 characters"; exit 1; }
+  HASH="$(openssl passwd -6 -stdin < "$PWFILE")"
+  printf 'root:%s\n' "$HASH" | chpasswd -R "$MNT" -e
+  say "root password on the installed system set from $PWFILE (not shown)"
+fi
+if [ "$MODE" = "--with-password" ] && [ -f "$DEVUSER" ]; then
+  [ "$(stat -c %a "$DEVUSER")" = "600" ] || { say "refusing: $DEVUSER must be mode 600"; exit 1; }
+  [ "$(wc -l < "$DEVUSER")" -le 1 ] || { say "refusing: $DEVUSER must be one line, name:password"; exit 1; }
+  DNAME="$(head -n 1 "$DEVUSER")"; DNAME="${DNAME%%:*}"; DPASS="$(head -n 1 "$DEVUSER")"; DPASS="${DPASS#*:}"
+  [[ "$DNAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] && [ "${#DPASS}" -ge 4 ] || { say "refusing: $DEVUSER must be name:password (name lower-case, password 4+ characters)"; exit 1; }
+  DHASH="$(printf '%s' "$DPASS" | openssl passwd -6 -stdin)"
+  install -d -m 755 "$MNT/etc/baseline-dev" "$MNT/usr/local/sbin" "$MNT/etc/systemd/system/multi-user.target.wants"
+  ( umask 077; printf '%s:%s\n' "$DNAME" "$DHASH" > "$MNT/etc/baseline-dev/dev-user.hash" )
+  chmod 600 "$MNT/etc/baseline-dev/dev-user.hash"
+  install -m 755 "$REPO/baseline/bin/baseline-dev-user" "$MNT/usr/local/sbin/baseline-dev-user"
+  install -m 644 "$REPO/boot/baseline-dev-user.service" "$MNT/etc/systemd/system/baseline-dev-user.service"
+  ln -sf /etc/systemd/system/baseline-dev-user.service "$MNT/etc/systemd/system/multi-user.target.wants/baseline-dev-user.service"
+  say "development login '$DNAME' set up: it is created on the drive's next boot as a Linux user and a Proxmox Administrator (realm: Linux PAM)"
+fi
+if [ "$MODE" = "--with-password" ]; then
+  # the network step (ADR 0001): a bridge whose NIC does not exist on the machine the drive is booted on is pointed at the NIC that does
+  install -d -m 755 "$MNT/opt/baseline/bin" "$MNT/opt/baseline/lib" "$MNT/etc/systemd/system/sysinit.target.wants"
+  install -m 755 "$REPO/baseline/bin/baseline-bridge-port" "$MNT/opt/baseline/bin/baseline-bridge-port"
+  install -m 644 "$REPO/baseline/lib/bridge_port.py" "$MNT/opt/baseline/lib/bridge_port.py"
+  install -m 644 "$REPO/boot/baseline-bridge-port.service" "$MNT/etc/systemd/system/baseline-bridge-port.service"
+  ln -sf /etc/systemd/system/baseline-bridge-port.service "$MNT/etc/systemd/system/sysinit.target.wants/baseline-bridge-port.service"
+  say "network step installed: on the next boot a bridge whose NIC is missing is pointed at the one wired NIC with a link"
+  say "bridge-ports now in the installed config:"; grep -n "bridge-ports" "$MNT/etc/network/interfaces" | sed 's/^/    /'
+fi
+say "monitor keys now:"; cut -d' ' -f1,3- "$MNT/$KEYS_REL"

@@ -144,6 +144,15 @@ def test_guest_homepage_is_supplied_by_the_host_even_when_the_browser_is_local(e
     assert 'name="homepage"' in page and 'value="https://192.168.20.5:8006"' in page
 
 
+def test_guest_homepage_probe_failure_is_shown_next_to_the_setting(env):
+    f, _ = env
+    page = vp.render_vms_page(store=str(f.host.store), free_gb=10, kvm_ok=True, isos=[],
+                              bases=[], vms=[], notice="", notice_ok=None, default_display="vnc",
+                              homepage_error="ip command permission denied").decode()
+    assert "Proxmox address detection failed" in page
+    assert "ip command permission denied" in page
+
+
 def test_requested_distros_are_shown_with_honest_vm_and_emulator_status():
     page = vp.render_vms_page(store='/os', free_gb=20, kvm_ok=True, isos=[], bases=[], vms=[],
                              notice='', notice_ok=None, default_display='vnc').decode()
@@ -166,3 +175,42 @@ def test_overlay_creation_honors_requested_retained_disk_size(env):
     assert do(env, 'freeze', name='gold', base_name='installed', confirm='yes')['ok']
     assert do(env, 'create_overlay', name='desktop', base='installed', memory_mb='4096', cpus='2', persistence_gb='64')['ok']
     assert env[0].host._spec('desktop')['persistence_gb'] == 64
+
+
+def test_ubuntu_builder_includes_locale_selection(env):
+    f,_=env
+    page=vp.render_vms_page(store=str(f.host.store),free_gb=10,kvm_ok=True,isos=[],
+        bases=[],vms=[],notice='',notice_ok=None,default_display='vnc').decode()
+    assert 'name="locale"' in page
+    assert 'en_GB.UTF-8' in page
+
+
+def test_ubuntu_configuration_verification_is_a_real_native_action(env,monkeypatch):
+    import ubuntu_environment as ue
+    observed=[]
+    monkeypatch.setattr(ue,'verify_configuration',lambda host,name:observed.append(name) or
+        {'ok':False,'message':'Guest checks failed'})
+    result=do(env,'verify_ubuntu',name='desktop')
+    assert observed==['desktop']
+    assert not result['ok']
+
+
+def test_creating_from_a_carried_base_installs_it_and_makes_the_vm_for_the_signed_in_user_with_no_separate_login(tmp_path):
+    import hashlib
+    import json
+    import vm_page
+    from test_vm_host import FakeHost
+    f = FakeHost(tmp_path / "os")
+    folder = tmp_path / "bases"
+    folder.mkdir()
+    (folder / "debian-base.qcow2").write_bytes(b"base")
+    (folder / "debian-base.json").write_text(json.dumps({"base": "debian-base.qcow2", "sha256": hashlib.sha256(b"base").hexdigest(), "holds_install_state_or_secrets": False}))
+    got = vm_page.perform(f.host, "create_prebuilt", {"name": "work", "os": "debian", "memory_mb": "4096", "cpus": "2"}, iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
+    assert got["ok"] is True and got["owner"] == "cliff" and "password" not in got and "password" not in got["message"].lower()
+    assert f.host._spec("work")["base"] == "debian-base" and f.host._spec("work")["persistence_gb"] == 32       # the standard home disk
+    sized = vm_page.perform(f.host, "create_prebuilt", {"name": "small", "os": "debian", "memory_mb": "4096", "cpus": "2", "persistence_gb": "4"}, iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
+    assert sized["ok"] is True and f.host._spec("small")["persistence_gb"] == 4                                  # a chosen home-disk size is honoured
+    for bad in ({"name": "x", "os": "windows"}, {"name": "x", "os": "ubuntu"}):
+        refused = vm_page.perform(f.host, "create_prebuilt", dict(bad, memory_mb="4096", cpus="2"), iso_dir=tmp_path / "isos", os_bases_dir=folder, owner="cliff")
+        assert refused["ok"] is False                                              # an unknown system, or a base this machine does not carry
+    assert vm_page.perform(f.host, "create_prebuilt", {"name": "y", "os": "debian", "memory_mb": "4096", "cpus": "2"}, iso_dir=tmp_path / "isos", owner="cliff")["ok"] is False   # no folder configured

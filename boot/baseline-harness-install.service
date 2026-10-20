@@ -1,0 +1,9 @@
+[Unit]
+Description=Baseline: install harness CLIs the offline cache did not carry (once online)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baseline/bin/baseline-harness-install
+ReadOnlyPaths=/opt/baseline
+Environment=PYTHONDONTWRITEBYTECODE=1

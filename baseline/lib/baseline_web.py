@@ -31,14 +31,18 @@ the operator a script to run in a terminal themselves.
 from __future__ import annotations
 
 import html
+import hashlib
 import http.server
 import json
+import sqlite3
 import os
+import shutil
+import re
 import threading
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, quote
 
 import control_panel_web as cpw
 import drive_admin as da
@@ -56,39 +60,116 @@ import vm_page
 import workload_jobs
 import workload_page
 import web_gate as wg
+import subprocess
 import web_security as ws
 
 from repair import Runner
 
 
-NAV_TABS = (
-    ("/settings", "Settings"),
-    ("/admin", "Admin"),
-    ("/recovery", "Recovery"),
-    ("/drive-admin", "Drive Administration"),
-    ("/operations", "Operations"),
-    ("/operators", "Operators"),
-    ("/approvals", "Approvals"),
-    ("/audit", "Audit"),
-    ("/remote-access", "Remote access"),
-    ("/vms", "Virtual machines"),
-    ("/containers", "Distro containers"),
-    ("/hardware", "Hardware"),
-    ("/installer-cache", "Installer Cache"),
-    ("/app-isolation", "App Isolation"),
-    ("/recipes", "Environment recipes"),
-    ("/install-plan", "Installer plan"),
-    ("/workloads", "Workload jobs"),
-    ("/master-config", "Master Config"),
-)
+import nav_tree
+
+NAV_TABS = nav_tree.flatten()          # every page, from the nested tree in nav_tree.py
+
+
+def _both(entry):
+    """The entry's name in both modes; the page shows the one for the chosen mode."""
+    adv, simple = html.escape(entry.advanced), html.escape(entry.simple or entry.advanced)
+    return f'<span class="m-adv">{adv}</span><span class="m-simple">{simple}</span>' if adv != simple else adv
+
+
+def _nav_entries(entries, active_path):
+    out = []
+    for e in entries:
+        hide = "" if e.simple is not None and (nav_tree.is_page(e) or any(nav_tree._visible(i, nav_tree.SIMPLE) for i in e.items)) else " adv"
+        if nav_tree.is_page(e):
+            title = f' title="{html.escape(e.blurb)}"' if e.blurb else ""
+            out.append(f'<a href="{e.path}" class="{"active" if active_path.startswith(e.path) else ""}{hide}"{title}>{_both(e)}</a>')
+        else:
+            out.append(f'<span class="nav-sub{hide}"><span class="nav-sub-label">{_both(e)}</span>{_nav_entries(e.items, active_path)}</span>')
+    return "".join(out)
 
 
 def render_nav(active_path: str) -> str:
+    current = nav_tree.active_group(active_path)
     links = "".join(
-        f'<a href="{path}" class="{"active" if active_path.startswith(path) else ""}">{label}</a>'
-        for path, label in NAV_TABS
+        f'<details class="nav-group{"" if nav_tree._visible(g, nav_tree.SIMPLE) else " adv"}"{" open" if g.advanced == current else ""}><summary>{_both(g)}</summary>'
+        f'<div class="nav-items">{_nav_entries(g.items, active_path)}</div></details>'
+        for g in nav_tree.TREE
     )
-    return f'<nav class="baseline-nav">{links} <a href="/logout">Log out</a></nav>'
+    links += ('<span class="nav-status" id="baseline-status" role="status" aria-live="polite"></span>'
+              '<button type="button" id="baseline-refresh" title="Refresh this page now">Refresh now</button>')
+    links += ('<span class="mode-switch" role="group" aria-label="Detail level">'
+              '<button type="button" data-mode="simple">Simple</button><button type="button" data-mode="advanced">Advanced</button></span>')
+    return (f'<nav class="baseline-nav">{links} <a href="/logout">Log out</a>'
+            '<form method="post" action="/host/restart" onsubmit="return baselineRequestRestart(event)">'
+            '<button type="submit">Restart host</button><span role="status"></span></form></nav>'
+            '''<script>(function(){var d=document.documentElement,m='simple';try{m=localStorage.getItem('baseline-mode')||'simple'}catch(e){}d.setAttribute('data-mode',m);
+var st=document.getElementById('baseline-status');if(st){fetch('/status',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){st.innerHTML='';st.append(j.network);var a=document.createElement('span');a.className='adv';a.textContent=' | '+j.network_detail+' | '+j.assistant;st.append(a)}).catch(function(){})}
+var rf=document.getElementById('baseline-refresh');if(rf)rf.addEventListener('click',function(){location.reload()});
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.mode-switch button');if(!b)return;m=b.getAttribute('data-mode');d.setAttribute('data-mode',m);try{localStorage.setItem('baseline-mode',m)}catch(x){}});})();</script>
+<script>
+async function baselineRequestRestart(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button');
+  const status = form.querySelector('[role="status"]');
+  button.disabled = true;
+  status.textContent = 'Requesting restart confirmation…';
+  try {
+    const response = await fetch(form.action, {
+      method: 'POST', credentials: 'same-origin', referrerPolicy: 'same-origin',
+      headers: {'Content-Type': 'application/json'}, body: '{}'
+    });
+    if (!(response.headers.get('Content-Type') || '').includes('application/json')) {
+      throw new Error(await response.text());
+    }
+    const result = await response.json();
+    if (response.status === 401) {
+      status.textContent = 'Your login expired. Sign in, then select Restart host again.';
+      const link = document.createElement('a'); link.href = '/login'; link.textContent = 'Sign in';
+      status.append(' ', link); return;
+    }
+    status.textContent = result.detail || result.error || 'Restart request failed';
+  } catch (error) {
+    status.textContent = 'Restart request failed: ' + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+</script>''')
+
+
+_STATUS_CACHE = {"at": 0.0, "value": None}
+
+
+def _status_line(deps, *, now=None) -> dict:
+    """The TUI's header and status bar as data: whether the lifeline is up, and the assistant session line. Cached for 30 seconds: it probes the network."""
+    import time
+    clock = time.monotonic() if now is None else now
+    if _STATUS_CACHE["value"] is not None and clock - _STATUS_CACHE["at"] < 30:
+        return _STATUS_CACHE["value"]
+    import network
+    import status_bar
+    detail = ""
+    try:
+        facts = network.check_lifeline()
+        if facts and facts[-1]["ok"]:
+            online, detail = "You are online", "online - lifeline up"
+        elif facts:
+            online, detail = "You are offline", f"offline - stopped at {facts[-1]['fact']}"
+        else:
+            online, detail = "Connection not checked yet", "network state unknown"
+    except (OSError, network.NetworkProbeError) as exc:
+        online, detail = "Connection could not be checked", f"network state unknown ({exc})"
+    try:
+        import harness_registry
+        adapter = harness_registry.get_adapter("claude")
+        desc = adapter.describe_session(adapter.new_session()) if adapter is not None else "no harness adapter selected"
+    except Exception as exc:                                            # noqa: BLE001 - a status line never breaks a page
+        desc = f"assistant status unavailable: {exc}"
+    value = {"network": online, "network_detail": detail, "assistant": status_bar.format_status_bar(desc)}
+    _STATUS_CACHE.update(at=clock, value=value)
+    return value
 
 
 def _with_nav(body_bytes: bytes, active_path: str) -> bytes:
@@ -96,10 +177,17 @@ def _with_nav(body_bytes: bytes, active_path: str) -> bytes:
     tag of an existing rendered page, without touching the already-
     tested render functions that produced it."""
     html = body_bytes.decode()
+    import console_theme
+    shell = console_theme.style_tag()
+    html = html.replace('</head>', shell + '</head>', 1)
     marker = "<body>"
     idx = html.find(marker)
     if idx == -1:
-        return body_bytes
+        if "<body" in html or "<html" in html.lower() or "<" not in html:          # a page with its own attributes on <body>, or not markup at all: left as it is
+            return body_bytes
+        # a bare fragment (no document around it) gets one, so the menu is on every page
+        html = f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Baseline</title>{shell}</head><body>{html}</body></html>'
+        idx = html.find(marker)
     insert_at = idx + len(marker)
     return (html[:insert_at] + render_nav(active_path) + html[insert_at:]).encode()
 
@@ -181,9 +269,33 @@ h2.section-title { font-size: .78rem; text-transform: uppercase; letter-spacing:
 """
 
 
+_DRIVE_ROLE_TEXT = {
+    "boot": "the drive this system is running from - never offered as a target",
+    "allowed": "a drive Baseline is set up with or you enrolled - it appears below",
+    "not_enrolled": "not enrolled - Baseline leaves it alone (enroll it to let Baseline act on it)",
+    "no_serial": "reports no serial number - it cannot be enrolled, because the serial is its identity",
+}
+
+
+def _all_drives_html(all_drives, error: str = "") -> str:
+    if error:
+        return '<p class="empty-note"><strong>Drive list failed:</strong> ' + html.escape(error, quote=False) + '</p>'
+    if not all_drives:
+        return '<p class="empty-note">The machine reported no drives.</p>'
+    rows = "".join(
+        "<tr><td>{p}</td><td>{m}</td><td>{s}</td><td>{sz}</td><td>{t}</td><td>{r}</td></tr>".format(
+            p=html.escape(d["path"]), m=html.escape(d["model"]), s=html.escape(d["serial"] or "none"), sz=html.escape(d["size"]),
+            t=html.escape(d.get("transport") or ""), r=html.escape(_DRIVE_ROLE_TEXT.get(d["role"], d["role"])))
+        for d in all_drives)
+    return ('<table class="drives-found"><thead><tr><th>Device</th><th>Model</th><th>Serial</th><th>Size</th><th>Bus</th><th>Baseline</th></tr>'
+            f"</thead><tbody>{rows}</tbody></table>")
+
+
 def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notice: str = "",
                              notice_ok: bool | None = None, acted_on_path: str | None = None,
-                             daily_ok: bool = False) -> bytes:
+                             daily_ok: bool = False, selected_serial: str = "",
+                             volume_error: str = "", drive_error: str = "", all_drives: list | None = None,
+                             all_drives_error: str = "") -> bytes:
     """`notice_ok`: `True` (real success), `False` (real refusal/
     failure), or `None` (no action just ran - e.g. a plain page load).
     A prior version rendered every notice with the same quiet blue
@@ -217,6 +329,11 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
         # is_default card as visually "selected" would lie about which
         # one the browser really checks.
         default_path = next((d["path"] for d in drives if d.get("is_default")), drives[0]["path"])
+        if selected_serial:
+            default_path = next((d['path'] for d in drives if d.get('serial') == selected_serial), None)
+            if default_path is None:
+                notice_html += '<p role="alert">The requested drive is no longer available or eligible. No other drive has been selected.</p>'
+
 
         def _drive_card(d: dict) -> str:
             missing = d.get("missing_baseline_volumes") or []
@@ -232,6 +349,7 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
   {'<span class="acted-on-pill">last action</span>' if d['path'] == acted_on_path and notice_ok is not None else ''}
   <div class="drive-name">{d.get('model', 'Unknown model')}</div>
   <div class="drive-path">{d['path']}</div>
+  <div class="detail-row"><span>Serial</span><span>{html.escape(d.get('serial') or 'not reported')}</span></div>
   <div class="detail-row"><span>Size</span><span>{d.get('size', '—')}</span></div>
   <div class="detail-row"><span>Partitions</span><span>{d.get('partition_count') if d.get('partition_count') is not None else '—'}</span></div>
   <div class="detail-row"><span>Data</span><span>{d.get('usage_text', 'unknown')}</span></div>
@@ -253,10 +371,16 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
             if baseline_drives:
                 drive_cards += '<h3 class="drive-group-title">Other Drives</h3>'
             drive_cards += '<div class="drive-grid">' + "".join(_drive_card(d) for d in other_drives) + "</div>"
+    elif drive_error:
+        drive_cards = ('<p class="empty-note"><strong>Drive inventory failed:</strong> '
+                       + html.escape(drive_error, quote=False) + '</p>')
     else:
-        drive_cards = '<p class="empty-note">No real candidate drives found (or the enumeration failed) - nothing selectable right now.</p>'
+        drive_cards = '<p class="empty-note">No eligible drives were found.</p>'
 
-    if volumes:
+    if volume_error:
+        volumes_html = ('<p class="empty-note"><strong>Volume inventory failed:</strong> '
+                        + html.escape(volume_error, quote=False) + '</p>')
+    elif volumes:
         def _usage_text(v: dict) -> str:
             if v.get("total_bytes") and v.get("used_bytes") is not None:
                 pct = v.get("percent_used") or 0
@@ -269,9 +393,16 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
                 return f"{v['lv_name']} - {size} allocated"
             return f"{v['lv_name']} - not created yet"
 
+        def _update_checkbox(v: dict) -> str:
+            label = html.escape(str(v["label"]), quote=True)
+            if v["label"] == "INSTALLER_CACHE":
+                return f'<input type="checkbox" class="volume-select" value="{label}">'
+            return (f'<input type="checkbox" class="volume-select" value="{label}" disabled '
+                    'title="Only INSTALLER_CACHE stores updateable Debian package artifacts">')
+
         volume_rows = "".join(f"""
 <tr class="volume-row" data-volume-idx="{i}">
-  <td><input type="checkbox" class="volume-select" value="{v['label']}"></td>
+  <td>{_update_checkbox(v)}</td>
   <td>{v['label']}</td><td class="mono">{v['mountpoint']}</td><td class="mono">{_usage_text(v)}</td>
 </tr>
 <tr class="volume-detail-row" data-volume-idx="{i}" hidden>
@@ -281,7 +412,7 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
 <tr><th><input type="checkbox" id="volumeSelectAll"></th><th>Volume</th><th>Mountpoint</th><th>Used</th></tr>{volume_rows}</table>
 <p class="hint">Click a row to see its real partition (LVM logical volume) name and allocated size.</p>"""
     else:
-        volumes_html = '<p class="empty-note">No volumes planned, or the real enumeration failed.</p>'
+        volumes_html = '<p class="empty-note">No volume records were returned.</p>'
 
     action_cards = "".join(f"""
 <div class="action-card {'danger' if 'PERMANENTLY ERASE' in a['description'] else ''}" data-action-card-id="{a['action_id']}"
@@ -289,20 +420,24 @@ def render_drive_admin_page(*, drives: list, volumes: list, actions: list, notic
   <div class="action-id">{a['action_id']}</div>
   <div class="action-desc">{a['description']}</div>
   <button type="button" class="drive-admin-action" data-action-id="{a['action_id']}" data-description="{a['description']}">Run&hellip;</button>
-</div>""" for a in actions)
+</div>""" for a in actions if a['action_id'] != 'update_installed_drive')
+    action_cards += '<p><a href="/install-plan">Review and update an existing installation</a></p>'
 
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>Drive Administration</title><style>{_DRIVE_ADMIN_CSS}</style></head>
 <body>
 <h1>Drive Administration</h1>
-<p class="subtitle">Every real, non-boot drive attached to this machine. The pre-authorized drive is selected by default - pick any other to target it instead.</p>
+<p class="subtitle">The drives Baseline may act on (below) are the ones it is set up with, plus any you enroll. Every drive the machine reports is listed under Drives found, so nothing is hidden - the rest are left alone.</p>
 {notice_html}
 
-<h2 class="section-title">Physical drives</h2>
+<h2 class="section-title">Drives found</h2>
+{_all_drives_html(all_drives, all_drives_error)}
+
+<h2 class="section-title">Drives Baseline can act on</h2>
 {drive_cards}
 
 <h2 class="section-title">Volumes</h2>
-<p class="subtitle">Select one or more volumes here, then use the Update action to check for and apply updates. Update only appears when a Baseline drive is selected above.</p>
+<p class="subtitle">Select INSTALLER_CACHE to refresh newer Debian package archives. Other volumes hold the operating system or user data and are not package caches. Update only appears when a Baseline drive is selected above.</p>
 {volumes_html}
 
 <h2 class="section-title">Live install screen</h2>
@@ -364,7 +499,7 @@ document.querySelectorAll(".volume-row").forEach(row => {{
 const volumeSelectAll = document.getElementById("volumeSelectAll");
 if (volumeSelectAll) {{
   volumeSelectAll.addEventListener("change", () => {{
-    document.querySelectorAll(".volume-select").forEach(cb => {{ cb.checked = volumeSelectAll.checked; }});
+    document.querySelectorAll(".volume-select:not(:disabled)").forEach(cb => {{ cb.checked = volumeSelectAll.checked; }});
   }});
 }}
 
@@ -399,7 +534,7 @@ function deviceSelectHtml(selectedPath) {{
 }}
 
 function selectedVolumeLabels() {{
-  return Array.from(document.querySelectorAll(".volume-select:checked")).map(cb => cb.value);
+  return Array.from(document.querySelectorAll(".volume-select:checked:not(:disabled)")).map(cb => cb.value);
 }}
 
 // Technical override fields - direct instruction: "should not be
@@ -432,15 +567,20 @@ function overridesHtml() {{
 
 function updateSelectedParamsHtml() {{
   const selected = selectedVolumeLabels();
-  const selectedText = selected.length ? selected.join(", ") : "(none selected above)";
-  return `<p>Checking for updates on: ${{selectedText}}</p>`;
+  const selectedText = selected.length ? "INSTALLER_CACHE" : "(select INSTALLER_CACHE above)";
+  return `<p>Refresh newer Debian package archives in: ${{selectedText}}</p><p class="hint">APT verifies downloads using the host's configured repository trust policy. Packages are added to the cache; they are not installed on this host.</p>`;
 }}
 
 function mountVolumeParamsHtml() {{
   return `<label>Logical volume name (as it exists in the drive's real volume group)
       <input id="paramLvName" value="root"></label>
-    <label>Mountpoint (leave blank for the default: /mnt/&lt;vg&gt;-&lt;lv&gt;-inspect)
-      <input id="paramMountpoint" placeholder="/mnt/pve-root-inspect"></label>`;
+    <p class="muted">It is mounted read-only at its own inspection folder; no location is typed.</p>`;
+}}
+
+function partitionUnmountParamsHtml() {{
+  return `<label>Mounted partition
+      <select id="paramPartitionMountpoint"><option value="">Loading the mounted partitions...</option></select></label>
+    <p class="muted">The app checks that this mount belongs to the selected drive before unmounting it.</p>`;
 }}
 
 let pendingActionId = null;
@@ -452,10 +592,19 @@ document.querySelectorAll(".drive-admin-action").forEach(btn => {{
     if (pendingActionId === "build_self_installer") extra = overridesHtml();
     else if (pendingActionId === "update_selected") extra = updateSelectedParamsHtml();
     else if (pendingActionId === "mount_volume" || pendingActionId === "unmount_volume") extra = mountVolumeParamsHtml();
+    else if (pendingActionId === "unmount_partition") extra = partitionUnmountParamsHtml();
     document.getElementById("driveAdminModalParams").innerHTML =
       requiresDeviceById[pendingActionId]
         ? deviceSelectHtml(currentlySelectedDrivePath()) + extra
         : extra;
+    if (pendingActionId === "unmount_partition") {{
+      fetch("/drive-admin/mounted", {{credentials: "same-origin"}}).then(r => r.json()).then(list => {{
+        const sel = document.getElementById("paramPartitionMountpoint");
+        sel.replaceChildren();
+        if (!list.length) {{ const o = document.createElement("option"); o.value = ""; o.textContent = "None found"; sel.append(o); return; }}
+        list.forEach(m => {{ const o = document.createElement("option"); o.value = m.target; o.textContent = m.target + "  (" + m.source + ")"; sel.append(o); }});
+      }});
+    }}
     const consoleEl = document.getElementById("driveAdminModalConsole");
     consoleEl.textContent = "";
     consoleEl.hidden = true;
@@ -491,7 +640,30 @@ async function pollJobLog(jobId, consoleEl) {{
 // A drive action never runs on request: a person must confirm that exact request, each time, by typing the
 // phrase shown and entering this machine's root password or passphrase. Everything is added with textContent.
 const DAILY_OK = {"true" if daily_ok else "false"};
+function askForNativePolicyKit(challenge) {{
+  return new Promise((resolve) => {{
+    const box=document.createElement("div"); box.id="hitlBox";
+    const summary=document.createElement("pre"); summary.textContent=challenge.summary;
+    const lead=document.createElement("p"); lead.textContent="Continue to the Ubuntu permission prompt. The action runs only if PolicyKit authorizes it.";
+    const msg=document.createElement("p"); msg.id="hitlMsg";
+    const ok=document.createElement("button"); ok.type="button"; ok.disabled=true;
+    const cancel=document.createElement("button"); cancel.type="button"; cancel.textContent="Cancel";
+    let wait=challenge.min_wait; ok.textContent="Continue ("+wait+")";
+    const timer=setInterval(()=>{{wait-=1;if(wait<=0){{clearInterval(timer);ok.disabled=false;ok.textContent="Continue to Ubuntu prompt";}}else ok.textContent="Continue ("+wait+")";}},1000);
+    ok.addEventListener("click",async()=>{{
+      ok.disabled=true;
+      const res=await fetch("/drive-admin/execute-native",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{challenge_id:challenge.id}})}});
+      const body=await res.json();
+      if(body.job_id){{clearInterval(timer);box.remove();resolve(body);}}
+      else{{msg.textContent=body.detail||body.error||"PolicyKit action was refused.";ok.disabled=false;}}
+    }});
+    cancel.addEventListener("click",()=>{{clearInterval(timer);box.remove();resolve({{detail:"Cancelled: nothing was run."}});}});
+    box.append(summary,lead,msg,ok,cancel); (document.querySelector("#driveAdminModal .modal-body")||document.getElementById("driveAdminModal")).appendChild(box);
+  }});
+}}
+
 function askForConfirmation(challenge) {{
+  if (pendingActionId === "unmount_partition") return askForNativePolicyKit(challenge);
   return new Promise((resolve) => {{
     const modal = document.getElementById("driveAdminModal");
     const box = document.createElement("div");
@@ -567,9 +739,10 @@ document.getElementById("driveAdminModalConfirm").addEventListener("click", asyn
   }}
   if (pendingActionId === "mount_volume" || pendingActionId === "unmount_volume") {{
     const lvName = document.getElementById("paramLvName");
-    const mountpoint = document.getElementById("paramMountpoint");
     if (lvName && lvName.value.trim() !== "") params.lv_name = lvName.value.trim();
-    if (mountpoint && mountpoint.value.trim() !== "") params.mountpoint = mountpoint.value.trim();
+  }}
+  if (pendingActionId === "unmount_partition") {{
+    params.partition_mountpoint = document.getElementById("paramPartitionMountpoint").value.trim();
   }}
   const consoleEl = document.getElementById("driveAdminModalConsole");
   consoleEl.textContent = "";
@@ -602,6 +775,10 @@ document.getElementById("driveAdminModalConfirm").addEventListener("click", asyn
 </body></html>""".encode()
 
 
+class DriveInventoryError(RuntimeError):
+    """Drive enumeration was unavailable; it is not an empty drive list."""
+
+
 def real_drive_state(runner, *, pds_runner=None) -> list:
     """Every real, non-boot candidate drive - reuses
     `drive_admin.list_candidate_drives` directly, never a second,
@@ -610,8 +787,13 @@ def real_drive_state(runner, *, pds_runner=None) -> list:
     selectable too - "not locked to just that drive" (direct
     instruction)."""
     if runner is None:
-        return []
-    return da.list_candidate_drives(runner, pds_runner=pds_runner)
+        raise DriveInventoryError("drive inventory runner unavailable")
+    try:
+        return da.list_candidate_drives(runner, pds_runner=pds_runner)
+    except Exception as exc:
+        if isinstance(exc, DriveInventoryError):
+            raise
+        raise DriveInventoryError(f"drive inventory failed: {exc}") from exc
 
 
 def real_volume_state(runner) -> list:
@@ -622,11 +804,11 @@ def real_volume_state(runner) -> list:
     Includes each volume's real LVM identity (name, real allocated
     size) alongside its live usage when mounted."""
     if runner is None:
-        return []
+        raise VolumeInventoryError("volume inventory runner unavailable")
     try:
         details = drive_installer.collect_volume_details(runner)
-    except Exception:
-        return []
+    except Exception as exc:
+        raise VolumeInventoryError(f"volume inventory failed: {exc}") from exc
     return [{
         "label": d.label, "mountpoint": d.mountpoint, "lv_name": d.lv_name,
         "lv_exists": d.lv_exists, "lv_size_bytes": d.lv_size_bytes,
@@ -634,92 +816,122 @@ def real_volume_state(runner) -> list:
     } for d in details]
 
 
-def _collect_system_info(runner) -> dict:
-    """Read CPU, memory, kernel from /proc and uname."""
-    info = {}
+class VolumeInventoryError(RuntimeError):
+    """The volume state could not be observed; it is not an empty plan."""
+
+
+def _collect_system_info(runner) -> tuple[dict, list]:
+    """Collect host facts without substituting generic Linux defaults."""
+    info, errors = {}, []
+
+    def failed(source, detail):
+        errors.append({"source": source, "error": detail})
+
     try:
         proc = runner.run(["uname", "-r"], timeout=5)
-        info["kernel"] = proc.stdout.strip() if proc.returncode == 0 else "Linux"
-    except Exception:
-        info["kernel"] = "Linux"
+        if proc.returncode == 0 and proc.stdout.strip():
+            info["kernel"] = proc.stdout.strip()
+        else:
+            failed("kernel", proc.stderr.strip() or f"uname exited {proc.returncode}")
+    except Exception as exc:
+        failed("kernel", f"probe raised {type(exc).__name__}")
     try:
-        info["distro"] = runner.read_text("/etc/os-release").split("PRETTY_NAME=")[1].split("\n")[0].strip('"')
-    except Exception:
-        info["distro"] = "Linux"
+        release = runner.read_text("/etc/os-release")
+        pretty = next((line.split("=", 1)[1].strip().strip('"') for line in release.splitlines()
+                       if line.startswith("PRETTY_NAME=")), None)
+        if pretty:
+            info["distro"] = pretty
+        else:
+            failed("distribution", "PRETTY_NAME is missing from /etc/os-release")
+    except Exception as exc:
+        failed("distribution", f"/etc/os-release read raised {type(exc).__name__}")
     try:
         cpuinfo = runner.read_text("/proc/cpuinfo")
-        for line in cpuinfo.splitlines():
-            if line.startswith("model name"):
-                info["cpu_model"] = line.split(":", 1)[1].strip()
-                break
-        cores = sum(1 for l in cpuinfo.splitlines() if l.startswith("processor"))
-        info["cpu_cores"] = str(cores)
-    except Exception:
-        pass
+        model = next((line.split(":", 1)[1].strip() for line in cpuinfo.splitlines()
+                      if line.startswith("model name") and ":" in line), None)
+        cores = sum(1 for line in cpuinfo.splitlines() if line.startswith("processor"))
+        if model:
+            info["cpu_model"] = model
+        if cores:
+            info["cpu_cores"] = str(cores)
+        if not model or not cores:
+            failed("processor", "model or logical-processor count is missing from /proc/cpuinfo")
+    except Exception as exc:
+        failed("processor", f"/proc/cpuinfo read raised {type(exc).__name__}")
     try:
         meminfo = runner.read_text("/proc/meminfo")
+        found = set()
         for line in meminfo.splitlines():
-            if line.startswith("MemTotal:"):
-                kb = int(line.split()[1])
-                info["mem_total"] = f"{kb // 1048576} GiB ({kb // 1024} MiB)"
-            elif line.startswith("MemAvailable:"):
-                kb = int(line.split()[1])
-                info["mem_available"] = f"{kb // 1048576} GiB ({kb // 1024} MiB)"
-    except Exception:
-        pass
+            key, separator, value = line.partition(":")
+            if separator and key in ("MemTotal", "MemAvailable"):
+                fields = value.split()
+                if fields and fields[0].isdigit():
+                    kb = int(fields[0])
+                    info["mem_total" if key == "MemTotal" else "mem_available"] = f"{kb // 1048576} GiB ({kb // 1024} MiB)"
+                    found.add(key)
+        if found != {"MemTotal", "MemAvailable"}:
+            failed("memory", "MemTotal or MemAvailable is missing from /proc/meminfo")
+    except Exception as exc:
+        failed("memory", f"/proc/meminfo read raised {type(exc).__name__}")
     try:
         proc = runner.run(["ip", "-o", "route", "show", "default"], timeout=5)
-        if proc.returncode == 0 and "dev " in proc.stdout:
-            info["default_iface"] = proc.stdout.split("dev ")[1].split()[0]
-    except Exception:
-        pass
-    return info
+        if proc.returncode != 0:
+            failed("default route", proc.stderr.strip() or f"ip route exited {proc.returncode}")
+        else:
+            route = next((line for line in proc.stdout.splitlines() if "default" in line.split()), None)
+            fields = route.split() if route else []
+            if "dev" in fields and fields.index("dev") + 1 < len(fields):
+                info["default_iface"] = fields[fields.index("dev") + 1]
+            else:
+                failed("default route", "no default route interface was observed")
+    except Exception as exc:
+        failed("default route", f"probe raised {type(exc).__name__}")
+    return info, errors
 
 
 def real_hardware_state(runner) -> dict:
     """Real dependency-check results plus real sensor/NVMe/SMART
     facts and system info from /proc."""
-    if runner is None:
-        return {"dependency_results": [], "sensors": None, "nvme": None, "smart": None,
-                "sysinfo": {}, "inventory": {}}
+    from repair import RealRunner
+    runner = runner or RealRunner()
     import dependencies as dep
     import diagnostics
     import hardware_inventory as hwinv
+    errors = []
+
+    def collect(source, function, *args, fallback=None, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except Exception as exc:
+            errors.append({"source": source, "error": f"probe failed ({type(exc).__name__})"})
+            return fallback
+
     try:
         dep_results = [{"id": r.id, "ok": r.ok, "detail": r.detail} for r in dep.run_checks(phase=dep.ADHOC)]
-    except Exception:
+    except Exception as exc:
         dep_results = []
-    try:
-        sensors = diagnostics.collect_sensors(runner)
-    except Exception:
-        sensors = None
-    try:
-        nvme = diagnostics.collect_nvme(runner)
-    except Exception:
-        nvme = None
-    try:
-        smart = diagnostics.collect_smart(runner)
-    except Exception:
-        smart = None
-    sysinfo = _collect_system_info(runner)
-    try:
-        inventory = hwinv.collect_all(runner)
-    except Exception:
-        inventory = {}
+        errors.append({"source": "dependencies", "error": f"probe failed ({type(exc).__name__})"})
+    sensors = collect("sensors", diagnostics.collect_sensors, runner)
+    nvme = collect("nvme", diagnostics.collect_nvme, runner)
+    smart = collect("smart", diagnostics.collect_smart, runner)
+    sysinfo, system_errors = _collect_system_info(runner)
+    errors.extend(system_errors)
+    inventory = collect("hardware inventory", hwinv.collect_all, runner)
     return {"dependency_results": dep_results, "sensors": sensors, "nvme": nvme,
-            "smart": smart, "sysinfo": sysinfo, "inventory": inventory}
+            "smart": smart, "sysinfo": sysinfo, "inventory": inventory, "errors": errors}
 
 
 def render_app_isolation_page(persona: str, plans: list, *,
-                              leaks: list, conflicts: list, formats: list) -> bytes:
+                              leaks: list, conflicts: list, formats: list,
+                              runner=None) -> bytes:
     """Per-application AppData isolation (appdata.py), shown rather than
     asserted only in tests: every app's own data tree, registry, owner
     and overlays, plus what each package format does and does not
     provide on its own.
 
-    This page is read-only by construction - appdata.py plans, it never
-    mounts. Applying a plan is privileged and belongs behind an explicit
-    operator-authorized action, not a page view."""
+    This page is read-only: it verifies the selected volume's live mount
+    identity, but never mounts or changes files. Applying overlays requires
+    a separate runtime implementation and remains outside this page."""
     import appdata
 
     with_data = [p for p in plans if p.app.has_persistent_data or p.overlays or p.binds]
@@ -737,6 +949,20 @@ def render_app_isolation_page(persona: str, plans: list, *,
         f'This must be empty before any plan is applied.</div>'
     )
 
+    if runner is None:
+        mount_status = ('<div class="ic-banner warn" role="status"><strong>Volume identity not checked.</strong> '
+                        'No runtime command runner was supplied.</div>')
+    else:
+        try:
+            mount_root = appdata.verify_appdata_mount(runner, persona)
+            mount_status = (f'<div class="ic-banner ok" role="status"><strong>'
+                            f'{html.escape(appdata.appdata_label(persona))} mount verified.</strong> '
+                            f'{html.escape(mount_root)} is backed by '
+                            f'{html.escape(appdata.appdata_label(persona))}.</div>')
+        except appdata.AppDataRuntimeError as exc:
+            mount_status = (f'<div class="ic-banner warn" role="alert"><strong>AppData volume check failed.</strong> '
+                            f'{html.escape(str(exc))}</div>')
+
     stats = (
         f'<div class="ic-stats">'
         f'<div class="ic-stat"><span class="n">{len(plans)}</span><span class="l">applications</span></div>'
@@ -748,21 +974,22 @@ def render_app_isolation_page(persona: str, plans: list, *,
     )
 
     app_rows = []
+    app_records = []
     for plan in sorted(plans, key=lambda p: (not (p.overlays or p.binds), p.app.app_id)):
         if plan.binds:
             overlay_html = "<br>".join(
-                f'<span class="ov-upper">{b.host}</span>'
+                f'<span class="ov-upper">{html.escape(str(b.host))}</span>'
                 f'<span class="ov-arrow"> &rArr; </span>'
-                f'<span class="ov-target">{b.container}</span>'
+                f'<span class="ov-target">{html.escape(str(b.container))}</span>'
                 f'{" <span class=ov-none>(read-only)</span>" if b.read_only else ""}'
                 for b in plan.binds
             ) + (f'<br><span class="ov-none">bind mounts into the container &middot; '
-                 f'image {plan.app.image_ref or "NOT PINNED"}</span>')
+                 f'image {html.escape(plan.app.image_ref or "NOT PINNED")}</span>')
         elif plan.overlays:
             overlay_html = "<br>".join(
-                f'<span class="ov-target">{o.target}</span>'
+                f'<span class="ov-target">{html.escape(str(o.target))}</span>'
                 f'<span class="ov-arrow"> &rarr; </span>'
-                f'<span class="ov-upper">{o.upperdir}</span>'
+                f'<span class="ov-upper">{html.escape(str(o.upperdir))}</span>'
                 for o in plan.overlays
             )
         else:
@@ -770,13 +997,16 @@ def render_app_isolation_page(persona: str, plans: list, *,
                             'no overlay (stated, not assumed). Unlisted data paths are not audited.</span>')
         app_rows.append(
             "<tr>"
-            f"<td>{plan.app.app_id}</td>"
-            f"<td>{plan.app.kind}</td>"
+            f"<td>{html.escape(str(plan.app.app_id))}</td>"
+            f"<td>{html.escape(str(plan.app.kind))}</td>"
             f"<td>{overlay_html}</td>"
-            f"<td>{plan.registry_db}</td>"
-            f"<td>{plan.owner_user}<br><span class='ov-none'>mode {plan.mode}</span></td>"
+            f"<td>{html.escape(str(plan.registry_db))}</td>"
+            f"<td>{html.escape(str(plan.owner_user))}<br><span class='ov-none'>mode {html.escape(str(plan.mode))}</span></td>"
             "</tr>"
         )
+        app_records.append({'id':plan.app.app_id,'kind':plan.app.kind,'row':app_rows[-1]})
+
+    app_data = json.dumps(app_records).replace('<', '\\u003c')
 
     fmt_rows = "".join(
         "<tr>"
@@ -829,16 +1059,26 @@ overlays on {appdata.appdata_root(persona)}</p>
 </div>
 
 {verdict}
+{mount_status}
 <p class="hw-note"><strong>Runtime isolation has not been applied or verified.</strong> These checks compare declared paths only; overlays do not by themselves confine a running application.</p>
 {stats}
 
 <h2 class="section-title">Applications <span class="ic-count">{len(plans)}</span></h2>
-<p class="hw-note">Planned, not applied. The intended overlay redirects writes at declared paths to AppData.
-The lower-layer snapshot, launch sandbox and live mount verification are not implemented. Applying these mounts is privileged and is not done from this page.</p>
-<table class="hw-table"><thead><tr><th>Application</th><th>Kind</th>
+<div role="tablist" aria-label="Application isolation views">
+<button role="tab" aria-selected="true" data-isolation-tab="applications">Applications</button>
+<button role="tab" aria-selected="false" data-isolation-tab="storage">Storage and overlays</button>
+<button role="tab" aria-selected="false" data-isolation-tab="permissions">Identity and permissions</button>
+<button role="tab" aria-selected="false" data-isolation-tab="formats">Package formats</button></div>
+<section id="isolation-browser"><label for="isolation-search">Find application</label><input id="isolation-search" type="search" placeholder="Name or package type">
+<p id="isolation-count" role="status"></p><div id="application-tree" aria-label="Applications grouped by package type"></div>
+<button type="button" id="isolation-previous">Previous</button><button type="button" id="isolation-next">Next</button>
+<p class="hw-note">Overlay specs are plans; this page verifies the selected AppData volume but does not apply overlays or confine running applications.</p>
+<h3 id="isolation-selected">Select an application</h3><p id="isolation-installer"></p>
+<table class="hw-table" id="isolation-details"><thead><tr><th>Application</th><th>Kind</th>
 <th>Overlay (target &rarr; personal writable layer)</th><th>Own registry</th>
-<th>Owner / mode</th></tr></thead><tbody>{''.join(app_rows)}</tbody></table>
+<th>Owner / mode</th></tr></thead><tbody></tbody></table></section>
 
+<section id="isolation-formats" hidden>
 <h2 class="section-title">Package formats</h2>
 <p class="hw-note">Baseline never duplicates a sandbox a format already provides &mdash;
 two permission models that can disagree is worse than one. Where a format brings its
@@ -846,7 +1086,39 @@ own confinement, only AppData placement is added; where it brings none, Baseline
 supplies the whole gap.</p>
 <table class="hw-table"><thead><tr><th>Format</th><th>Own sandbox</th>
 <th>Isolation mechanism</th><th>Per-app data convention</th>
-<th>Baseline must supply</th></tr></thead><tbody>{fmt_rows}</tbody></table>
+<th>Baseline must supply</th></tr></thead><tbody>{fmt_rows}</tbody></table></section>
+<script id="isolation-data" type="application/json">{app_data}</script>
+<script>
+const applications=JSON.parse(document.getElementById('isolation-data').textContent),pageSize=50;
+let appPage=0,activeIsolationTab='applications',selectedApplication=null;
+function selectApplication(app){{selectedApplication=app;document.getElementById('isolation-selected').textContent=app.id;
+ const body=document.querySelector('#isolation-details tbody');body.innerHTML=app.row;
+ const installer=document.getElementById('isolation-installer');installer.replaceChildren();
+ const link=document.createElement('a');link.href='/installer-cache?entry='+encodeURIComponent(app.id);link.textContent='Installer files and updates';installer.append(link);
+ for(const row of document.querySelectorAll('#isolation-details tr'))Array.from(row.children).forEach((cell,index)=>{{cell.hidden=activeIsolationTab==='storage'&&index>2||activeIsolationTab==='permissions'&&index===2;}});
+}}
+function showApplications(){{
+ const query=document.getElementById('isolation-search').value.toLowerCase();
+ const filtered=applications.filter(app=>(app.id+' '+app.kind).toLowerCase().includes(query));
+ appPage=Math.min(appPage,Math.max(0,Math.ceil(filtered.length/pageSize)-1));
+ const tree=document.getElementById('application-tree');tree.replaceChildren();const groups=new Map();
+ for(const app of filtered.slice(appPage*pageSize,(appPage+1)*pageSize)){{
+  if(!groups.has(app.kind)){{const group=document.createElement('details'),summary=document.createElement('summary');summary.textContent=app.kind;group.open=true;group.append(summary);tree.append(group);groups.set(app.kind,group);}}
+  const button=document.createElement('button');button.type='button';button.textContent=app.id;button.onclick=()=>selectApplication(app);groups.get(app.kind).append(button);
+ }}
+ document.getElementById('isolation-count').textContent=filtered.length+' matching applications; page '+(appPage+1)+' of '+Math.max(1,Math.ceil(filtered.length/pageSize));
+ document.getElementById('isolation-previous').disabled=appPage===0;document.getElementById('isolation-next').disabled=(appPage+1)*pageSize>=filtered.length;
+}}
+document.getElementById('isolation-search').oninput=()=>{{appPage=0;showApplications();}};
+document.getElementById('isolation-previous').onclick=()=>{{appPage--;showApplications();}};
+document.getElementById('isolation-next').onclick=()=>{{appPage++;showApplications();}};
+for(const button of document.querySelectorAll('[data-isolation-tab]'))button.onclick=()=>{{
+ activeIsolationTab=button.dataset.isolationTab;for(const tab of document.querySelectorAll('[data-isolation-tab]'))tab.setAttribute('aria-selected',String(tab===button));
+ document.getElementById('isolation-browser').hidden=activeIsolationTab==='formats';document.getElementById('isolation-formats').hidden=activeIsolationTab!=='formats';
+ if(selectedApplication)selectApplication(selectedApplication);
+}};
+showApplications();
+</script>
 </body></html>""".encode()
 
 
@@ -861,6 +1133,17 @@ def render_installer_cache_page(report, *, elevated: bool = False) -> bytes:
     no catalog entry claims are listed too - both directions of the gap
     matter to anyone trusting a self-replicating build."""
     import installer_cache as ic
+
+    if not report.scanned_ok:
+        return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Installer Cache inventory error</title><style>{_DRIVE_ADMIN_CSS}
+.ic-banner.warn {{ padding:.8rem 1rem;border:1px solid #6b4a1f;background:#2a1f14;color:#f0d5a8;border-radius:10px; }}
+</style></head><body><h1>Installer Cache</h1>
+<div class="ic-banner warn" role="alert"><strong>Cache inventory failed.</strong>
+The cache contents were not verified, so no artifacts are marked present or missing.</div>
+<p>{html.escape(report.scan_detail or 'The cache listing was incomplete.')}</p>
+<a href="/installer-cache?root=1">Retry with system permission</a>
+</body></html>""".encode()
 
     if report.mounted:
         banner = (f'<div class="ic-banner ok"><strong>Volume mounted.</strong> '
@@ -889,13 +1172,13 @@ def render_installer_cache_page(report, *, elevated: bool = False) -> bytes:
                 f"<br><span class='prov-meta'>v{entry.version} &middot; pinned {entry.observed_at}"
                 f" &middot; registry publishes {', '.join(entry.attachments)}</span>")
 
-    for kind in (ic.KIND_ISO, ic.KIND_IMAGE, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT):
+    for kind in (ic.KIND_ISO, ic.KIND_BASE, ic.KIND_KASM, ic.KIND_APP, ic.KIND_IMAGE, ic.KIND_PACKAGE, ic.KIND_FIRMWARE, ic.KIND_SCRIPT):
         rows = [r for r in report.rows if r.entry.kind == kind]
         if not rows:
             continue
         present = sum(1 for r in rows if r.present)
         body = "".join(
-            "<tr>"
+            f'<tr id="cache-entry-{quote(r.entry.entry_id, safe="")}">'
             f'<td>{"<span class=\'drv-ok\'>on volume</span>" if r.present else "<span class=\'drv-none\'>missing</span>"}</td>'
             f"<td>{r.entry.name}</td>"
             f"<td>{_origin_cell(r.entry)}</td>"
@@ -977,13 +1260,38 @@ and whether it is on {report.root} right now</p>
   {elevated_note}
 </div>
 
+<section aria-labelledby="source-heading"><h2 id="source-heading">Acquire a pinned installer source</h2>
+<label for="source-choice">Source</label><select id="source-choice"><option value="ubuntu_base">Ubuntu 24.04 vanilla cloud image</option></select>
+<p>Download or verify the existing publisher-pinned file on the mounted INSTALLER_CACHE volume. Corrupt existing files are refused. This creates no VM and does not install or rebuild a drive. HTTPS and SHA256 checks do not prove a detached signature.</p>
+<button type="button" id="source-acquire">Acquire / verify selected source</button>
+<a href="/installer-cache/source?source=ubuntu_base">Download the verified source file</a>
+<p id="source-status" role="status" aria-live="polite"></p><a href="/workloads">Source job history and recovery</a>
+</section>
+<script>
+const sourceButton=document.getElementById('source-acquire'),sourceStatus=document.getElementById('source-status');
+sourceButton.onclick=async()=>{{
+ sourceButton.disabled=true;
+ try{{
+  const response=await fetch('/installer-cache/acquire',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{source:document.getElementById('source-choice').value,request_id:'source-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}})}});
+  const submitted=await response.json();if(!response.ok)throw Error(submitted.message||'Acquisition refused');
+  sourceStatus.textContent='Source acquisition job '+submitted.job_id+'. Reconnect through Source job history.';
+  for(;;){{
+   const response=await fetch('/workloads/job?job_id='+encodeURIComponent(submitted.job_id),{{cache:'no-store'}});
+   const job=await response.json();if(!response.ok)throw Error(job.message||'Job unavailable');
+   if(['completed','failed','interrupted'].includes(job.state)){{sourceStatus.textContent=job.state+': '+((job.result||{{}}).message||'Inspect the source job; no installation inferred.');break;}}
+   await new Promise(resolve=>setTimeout(resolve,1000));
+  }}
+ }}catch(error){{sourceStatus.textContent=error.message;}}
+ finally{{sourceButton.disabled=false;}}
+}};
+</script>
 {banner}
 {stats}
 {''.join(sections)}
 </body></html>""".encode()
 
 
-def _render_inventory(inventory: dict) -> str:
+def _render_inventory(inventory: dict, *, host_drive_links=True) -> str:
     """Every real device on every bus, grouped - the Hardware tab's
     primary content (direct instruction, 2026-09-30: "All hardware must
     show, its not a cpu memory dashboard"). Driver status is shown per
@@ -996,7 +1304,9 @@ def _render_inventory(inventory: dict) -> str:
                 '<span class="value">Not available</span></div>'
                 '<p class="hw-setting">Device enumeration did not run (no runner configured).</p></div>')
 
-    parts = []
+    import html
+    parts = [f'<div class="hw-card unavailable">{html.escape(item["bus"])}: '
+             f'{html.escape(item["error"])}</div>' for item in inventory.get("errors", [])]
 
     def _rows(header: list, rows: list) -> str:
         head = "".join(f"<th>{h}</th>" for h in header)
@@ -1011,8 +1321,8 @@ def _render_inventory(inventory: dict) -> str:
             parts.append(f'<h3 class="hw-group">{group_name} <span class="count">{len(devices)}</span></h3>')
             parts.append(_rows(
                 ["Address", "Device", "Vendor", "Driver"],
-                [[d.address, d.model, d.vendor,
-                  f'<span class="{"drv-none" if d.kernel_driver is None else "drv-ok"}">{d.driver_status}</span>']
+                [[html.escape(d.address), html.escape(d.model), html.escape(d.vendor),
+                  f'<span class="{"drv-none" if d.kernel_driver is None else "drv-ok"}">{html.escape(d.driver_status)}</span>']
                  for d in devices],
             ))
 
@@ -1020,8 +1330,10 @@ def _render_inventory(inventory: dict) -> str:
     if block:
         parts.append(f'<h2 class="section-title">Storage Devices ({len(block)})</h2>')
         parts.append(_rows(
-            ["Device", "Size", "Bus", "Model", "Serial"],
-            [[f"/dev/{d.name}", d.size, d.transport or "-", d.model or "-", d.serial or "-"] for d in block],
+            ["Device", "Size", "Bus", "Model", "Serial", "Configuration"],
+            [[html.escape('/dev/'+d.name), html.escape(d.size), html.escape(d.transport or '-'), html.escape(d.model or '-'), html.escape(d.serial or '-'),
+              '<a href="/drive-admin?serial='+quote(d.serial,safe='')+'">Drive Administration</a>' if host_drive_links and d.serial else
+              '<a href="/vms">Virtual disk configuration</a>' if not host_drive_links else 'No serial available; use Drive Administration for inspection'] for d in block],
         ))
 
     net = inventory.get("net") or []
@@ -1029,9 +1341,9 @@ def _render_inventory(inventory: dict) -> str:
         parts.append(f'<h2 class="section-title">Network Interfaces ({len(net)})</h2>')
         parts.append(_rows(
             ["Interface", "State", "MAC"],
-            [[n.name,
-              f'<span class="{"drv-ok" if n.state == "UP" else "drv-none"}">{n.state}</span>',
-              n.mac or "-"] for n in net],
+            [[html.escape(n.name),
+              f'<span class="{"drv-ok" if n.state == "UP" else "drv-none"}">{html.escape(n.state)}</span>',
+              html.escape(n.mac or "-")] for n in net],
         ))
 
     usb = inventory.get("usb") or []
@@ -1039,22 +1351,20 @@ def _render_inventory(inventory: dict) -> str:
         parts.append(f'<h2 class="section-title">USB Devices ({len(usb)})</h2>')
         parts.append(_rows(
             ["Bus:Dev", "ID", "Description"],
-            [[f"{d.bus}:{d.device}", d.usb_id, d.description or "-"] for d in usb],
+            [[html.escape(f"{d.bus}:{d.device}"), html.escape(d.usb_id), html.escape(d.description or "-")] for d in usb],
         ))
 
     return "".join(parts)
 
 
 def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, smart=None,
-                         sysinfo=None, inventory=None) -> bytes:
-    """Real, direct-report page - no button, no action, just current
-    state (direct instruction: run_health_check's dependency results
-    plus real hardware facts, always shown, not triggered).
+                         sysinfo=None, inventory=None, configuration_html='', target_html='', category_html=None,
+                         errors=None) -> bytes:
+    """Configuration categories with secondary observed health results.
 
-    A collector that is absent or reports `available=False` is stated
-    as "Not available" with the real reason it gave - never silently
-    dropped, which would read as "this machine has no NVMe" when the
-    truth is "nvme-cli isn't installed"."""
+    Unavailable collectors retain their actual failure reason. Device and
+    package controls are supplied by the selected host/guest's native runner.
+    """
     sysinfo = sysinfo or {}
     dep_html = "".join(
         f'<div class="action-card {"danger" if not r["ok"] else ""}">'
@@ -1075,6 +1385,12 @@ def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, s
                 f'<p class="hw-setting">{reason or f"{tool} reported nothing usable"}</p></div>')
 
     hw_html_parts = []
+    if errors:
+        rows = "".join(f'<li><strong>{html.escape(str(item.get("source", "observation")))}:</strong> '
+                       f'{html.escape(str(item.get("error", "probe failed")))}</li>'
+                       for item in errors if isinstance(item, dict))
+        if rows:
+            hw_html_parts.append(f'<div class="hw-card unavailable" role="alert"><strong>Hardware observations incomplete</strong><ul>{rows}</ul></div>')
 
     hw_html_parts.append('<h2 class="section-title">System</h2><div class="hw-card">')
     hw_html_parts.append(_hw_detail("Kernel", sysinfo.get("kernel")))
@@ -1084,7 +1400,7 @@ def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, s
     hw_html_parts.append('<h2 class="section-title">Processor (CPU)</h2><div class="hw-card">')
     hw_html_parts.append(_hw_detail("Model", sysinfo.get("cpu_model")))
     hw_html_parts.append(_hw_detail("Cores", sysinfo.get("cpu_cores")))
-    hw_html_parts.append('<p class="hw-setting">📦 <strong>Setting:</strong> CPU microcode auto-installed during setup</p>')
+    hw_html_parts.append('<p class="hw-setting">📦 <strong>Setting:</strong> CPU microcode choice is configured on the Configuration tab; installed packages are shown under System and other</p>')
     hw_html_parts.append('</div>')
 
     hw_html_parts.append('<h2 class="section-title">Memory (RAM)</h2><div class="hw-card">')
@@ -1115,7 +1431,7 @@ def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, s
                 hw_html_parts.append(_hw_detail("Temperature", f'{health["temperature"]} K'))
             if health.get("percent_used") is not None:
                 hw_html_parts.append(_hw_detail("Wear", f'{health["percent_used"]}% used'))
-            hw_html_parts.append('<p class="hw-setting">🔍 <strong>Settings:</strong> SMART monitoring (device, test schedule), health checks enabled</p>')
+            hw_html_parts.append('<p class="hw-setting">🔍 <strong>Settings:</strong> SMART monitoring and test schedules are configured on the Configuration tab</p>')
             hw_html_parts.append('</div>')
     else:
         hw_html_parts.append(_unavailable("NVMe Storage", nvme, "nvme-cli"))
@@ -1178,7 +1494,6 @@ def render_hardware_page(*, dependency_results: list, sensors=None, nvme=None, s
     else:
         hw_html_parts.append(_unavailable("System Sensors (lm-sensors)", sensors, "lm-sensors"))
 
-    hw_html_parts.append(_render_inventory(inventory or {}))
 
     hw_section = ''.join(hw_html_parts)
 
@@ -1212,12 +1527,16 @@ h3.hw-group .count {{ color: #5c6180; font-weight: 400; }}
 </style></head>
 <body>
 <h1>Hardware</h1>
-<p class="subtitle">Detected system hardware and applicable Baseline settings</p>
+<p class="subtitle">Hardware, driver choices and applied configuration</p>
+{target_html}
+{category_html if category_html is not None else configuration_html + _render_inventory(inventory or {})}
+<details><summary>Observed health and diagnostics</summary>
 
 <h2 class="section-title">Health Checks</h2>
 <div class="action-grid">{dep_html}</div>
 
 {hw_section}
+</details>
 </body></html>""".encode()
 
 
@@ -1298,20 +1617,359 @@ def _run_operation_job(job_id: str, op_id: str, params: dict, origin, deps: dict
     except Exception as exc:  # noqa: BLE001 - must reach the operator, not hang the poll
         with _JOBS_LOCK:
             _JOBS[job_id].update(done=True, outcome="error", detail=f"{type(exc).__name__}: {exc}")
+    finally:
+        with _JOBS_LOCK:
+            record = dict(_JOBS[job_id])
+        if deps.get('audit'):
+            deps['audit']({'event':'operation_finished','job_id':job_id,'op':op_id,
+                           'source':origin.kind,'ts':deps['clock'](),
+                           'outcome':record['outcome'],'detail':record['detail']})
 
 
 def _start_operation_job(deps: dict, op_id: str, params: dict, origin) -> str:
     job_id = uuid.uuid4().hex
     with _JOBS_LOCK:
-        _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
+        _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None,
+                         "op": op_id, "source": origin.kind, "started": deps['clock']()}
+    if deps.get('audit'):
+        deps['audit']({'event':'operation_started','job_id':job_id,'op':op_id,
+                       'source':origin.kind,'ts':deps['clock']()})
     threading.Thread(target=_run_operation_job, args=(job_id, op_id, params, origin, deps), daemon=True).start()
     return job_id
+
+
+def operation_history(deps):
+    if not deps.get('audit_log_path'):
+        raise audit_view.AuditReadError("audit log path is not configured")
+    records = audit_view.read_tail(deps['audit_log_path'])
+    runs = {}
+    for event in reversed(records):
+        if event.get('event') not in ('operation_started', 'operation_finished'):
+            continue
+        job_id = event.get('job_id')
+        if not job_id:
+            continue
+        run = runs.setdefault(job_id, {'job_id':job_id,'op':event.get('op',''),
+            'source':event.get('source','unknown'),'started':None,
+            'outcome':'completion unknown','detail':''})
+        if event['event'] == 'operation_started':
+            run['started'] = event.get('ts')
+        else:
+            run.update(outcome=event.get('outcome','completion unknown'),detail=event.get('detail',''))
+    with _JOBS_LOCK:
+        for job_id, job in _JOBS.items():
+            if 'op' in job:
+                runs[job_id] = {'job_id':job_id,'op':job['op'],'source':job['source'],
+                    'started':job['started'],'outcome':job['outcome'] if job['done'] else 'running',
+                    'detail':job['detail'] or ''}
+    return sorted(runs.values(),key=lambda r:r.get('started') or 0,reverse=True)[:100]
 
 
 DEFAULT_STATE_DIR = Path("/var/lib/baseline")     # audit log, signing key and schedules (root-only, mode 0600)
 
 # The only routes reachable without a session: the login screen itself.
-_PUBLIC_PATHS = frozenset({"/", "/login", "/logout"})
+# /console only acts for a request from this machine itself (console_switch.is_local), so it needs no login: the person is at the screen.
+_PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/console", "/console/switch"})
+# The Kasm workspace registry (DR260): the one deliberate read-only exception to "nothing without a login". Kasm's own servers fetch these two files and cannot sign in; they list
+# only workspace names and images. GET only, exactly these paths, from one folder; nothing else under the prefix exists.
+_REGISTRY_FILES = {"/kasm-registry/versions.txt": ("versions.txt", "text/plain; charset=utf-8"), "/kasm-registry/1.1/list.json": ("1.1/list.json", "application/json")}
+DEFAULT_KASM_REGISTRY_DIR = "/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/kasm/registry"
+DEFAULT_KASM_ICONS_DIR = "/mnt/APPDATA_ADMIN/kasm/registry-icons"
+_REGISTRY_ICON = __import__("re").compile(r"^/kasm-registry/1\.1/icons/([a-z0-9][a-z0-9-]{0,40}\.(png|svg))$")
+
+
+def _console_context(deps: dict):
+    """The Console/Chat command context (console_commands.Context), built once per server; tests inject `console_context`."""
+    if deps.get("console_context") is None:
+        import console_commands
+        import hardware
+        import harness_registry
+        import network
+        import tether
+        snapshot_path = Path("/var/lib/baseline/hardware_snapshot.json")
+
+        def read():
+            try:
+                return json.loads(snapshot_path.read_text())
+            except (OSError, ValueError):
+                return None
+
+        def write(data):
+            try:
+                snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+                snapshot_path.write_text(json.dumps(data, indent=2))
+            except OSError:
+                pass
+        deps["console_context"] = console_commands.Context(
+            hardware=hardware, network=network, tether=tether, harness_registry=harness_registry, sessions={},
+            snapshot={"read": read, "write": write}, now=deps.get("clock", __import__("time").time))
+    return deps["console_context"]
+
+
+def _shell_run(deps: dict, line: str, harness_id: str) -> list:
+    import console_commands
+    if len(line) > 1000:
+        return ["line too long (limit 1000 characters)"]
+    try:
+        return console_commands.run(line, _console_context(deps), harness=harness_id)
+    except Exception as exc:                           # a failing probe or harness is reported in the transcript, not a 500
+        return [f"[{line.split()[0] if line.split() else 'command'}] failed: {exc}"]
+
+
+def _vault_roots(deps=None):
+    import vault
+    if deps and deps.get("vault_roots"):
+        return tuple(deps["vault_roots"])
+    try:
+        admin, personal = vault.build_aware_roots()
+    except vault.VaultError:
+        admin, personal = vault.ADMIN_VAULT, vault.PERSONAL_VAULT
+    return (("USER_ADMIN", "admin", admin), ("USER_PERSONAL", "personal", personal))
+
+
+def _vault_root_available(deps: dict, root: str) -> bool:
+    if deps.get("vault_roots"):
+        return True
+    import vault
+    return vault.root_available(root)
+
+
+def _vault_states(deps: dict) -> list:
+    import vault
+    out = []
+    for label, _scope, root in _vault_roots(deps):
+        if not _vault_root_available(deps, root):
+            out.append({"label": label, "available": False, "has_passphrase": False, "count": 0, "unlocked": False})
+            continue
+        store = vault.Vault(root)
+        try:
+            out.append({"label": label, "available": True, "has_passphrase": store.has_passphrase(), "count": len(store.names()),
+                        "unlocked": bool(deps.get("vault_passphrase")) and store.has_passphrase()})
+        except (vault.VaultError, OSError):
+            out.append({"label": label, "available": False, "has_passphrase": False, "count": 0, "unlocked": False})
+    return out
+
+
+def _vault_secrets(deps: dict) -> list:
+    """What the Vault page lists: every secret in both vaults by name, length and fingerprint (never the value)."""
+    import vault
+    out = []
+    for label, scope, root in _vault_roots(deps):
+        if not _vault_root_available(deps, root):
+            continue
+        try:
+            out += [dict(item, scope=scope, label=label) for item in vault.Vault(root).status()]
+        except (vault.VaultError, OSError):
+            pass
+    return out
+
+
+def _vault_store(deps: dict, scope: str):
+    import vault
+    for _label, key, root in _vault_roots(deps):
+        if key == scope:
+            if not _vault_root_available(deps, root):
+                raise vault.VaultError(f"{key.upper()} storage is not mounted")
+            return _vault_for(deps, root) if deps.get("vault_passphrase") else vault.Vault(root)
+    raise ValueError("unknown vault")
+
+
+def _vault_grants_path(deps: dict) -> str:
+    return deps.get("vault_grants_path") or "/mnt/USER_ADMIN/vault-grants.json"
+
+
+def _vault_targets(deps: dict) -> list:
+    """Where a secret can be granted: Kasm, and each virtual machine this host manages."""
+    out = [{"target": "kasm", "label": "Kasm workspaces"}]
+    try:
+        out += [{"target": f"vm:{vm['name']}", "label": f"Virtual machine {vm['name']}"} for vm in _vm_host_for(deps).list_vms()]
+    except (vh.VmError, OSError, ValueError, AttributeError):
+        pass
+    return out
+
+
+def _vault_places(deps: dict) -> list:
+    import vault_grants
+    grants = _vault_grants_path(deps)
+    return [dict(place, granted=vault_grants.granted(grants, place["target"])) for place in _vault_targets(deps)]
+
+
+def _vault_push_for(deps: dict, target: str):
+    """The function that runs a command inside the guest with the value on stdin: the guest agent of that VM, or of the Kasm machine."""
+    if deps.get("vault_push"):
+        return lambda argv, data: deps["vault_push"](target, argv, data)
+    if target.startswith("vm:"):
+        host = _vm_host_for(deps)
+        return lambda argv, data: host.guest_exec(target[3:], argv, data)
+    if target.startswith("ct:"):
+        host = _container_host_for(deps)
+        if host is None:
+            raise OSError("native container management is unavailable")
+        return lambda argv, data: host.guest_exec(target[3:], argv, data)
+    if target.startswith("kasm:"):
+        workspace = target[5:]
+        if not __import__("re").fullmatch(r"[a-f0-9]{12,64}", workspace):
+            raise ValueError("Kasm workspace target requires its Docker container ID")
+        server_push = _vault_push_for(deps, "kasm")
+        def workspace_push(argv, data):
+            server_push(["docker", "exec", workspace, "test", "-d", "/dockerstartup"], b"")
+            return server_push(["docker", "exec", "-i", "--user", "0", workspace, *argv], data)
+        return workspace_push
+    if target == "kasm":
+        import kasm_setup
+        import proxmox_vm_host
+        vmid = (deps.get("kasm_machine") or kasm_setup.KasmSetup()).existing_vmid()
+        if vmid is None:
+            raise OSError("the Kasm machine does not exist yet")
+        def push(argv, data):
+            rc, out, _err = proxmox_vm_host._input(["qm", "guest", "exec", str(vmid), "--pass-stdin", "1", "--synchronous", "1", "--timeout", "60", "--", *argv], data)
+            try:
+                result = json.loads(out)
+            except (ValueError, TypeError):
+                result = {}
+            if rc or not isinstance(result, dict) or result.get("exited") not in (True, 1) or isinstance(result.get("exitcode"), bool) or result.get("exitcode") != 0:
+                raise OSError("the Kasm machine's guest agent did not accept the secret (is it running?)")
+            return result
+        return push
+    raise OSError("that place cannot receive secrets")
+
+
+def _ai_draft(deps, owner):
+    drafts = deps.get('draft_store')
+    if drafts is None:
+        raise ValueError('Installer draft storage is unavailable')
+    return drafts, drafts.get(owner, 'installer')
+
+
+def _ai_config(deps, owner):
+    import ai_provisioning as ai
+    path = Path(deps.get('ai_config_path') or '/mnt/USER_ADMIN/ai-setup.json')
+    if path.is_file() and not path.is_symlink():
+        return ai.choice({'host_configuration': {'ai_setup': json.loads(path.read_text())}})
+    _drafts, draft = _ai_draft(deps, owner)
+    return ai.choice(draft['document'] if draft else {})
+
+
+def _ai_activate(deps, owner, target, account=None):
+    import ai_provisioning as ai
+    import ai_runtime
+    config = _ai_config(deps, owner)
+    if target == 'kasm':
+        grant_target = 'kasm:server'
+    else:
+        grant_target = target
+    if config['mode'] == 'none' or not ai._TARGET.fullmatch(grant_target) or not ai.permitted(config, grant_target):
+        raise ai.SetupError('AI setup was not granted to this target')
+    # Read only the admin profile, never an identically named personal secret.
+    store = _vault_store(deps, 'admin')
+    profile = ai.selected_profile(ai.load_profile(getattr(store, '_vault', store),
+        passphrase=deps.get('vault_passphrase')), config)
+    if target in ('substrate', 'baseline'):
+        result = ai_runtime.install(profile, account=account or 'root', source=Path(ai_runtime.__file__).read_text(),
+            runtime=deps.get('ai_runtime_root', ai_runtime.RUNTIME),
+            launcher=deps.get('ai_launcher_path', '/opt/baseline/bin/baseline-ai-run'),
+            history_root='/mnt/APPDATA_ADMIN/claude-code/.claude' if config.get('claude_history') else None)
+    else:
+        argv, data = ai.delivery(profile, account=account or ('root' if target == 'kasm' else None))
+        _vault_push_for(deps, target)(argv, data)
+        result = {'installed': True, 'providers': sorted(profile['providers']), 'authenticated': False}
+    return result
+
+
+def _vault_reader(deps: dict):
+    import vault
+    def read(name):
+        for _label, scope, _root in _vault_roots(deps):
+            try:
+                value = _vault_store(deps, scope).get(name)
+            except (vault.VaultLocked, vault.WrongPassphrase):
+                import vault_grants
+                raise vault_grants.Unavailable("the vault is locked; unlock it first")
+            except (vault.VaultError, OSError):
+                continue
+            if value:
+                return value
+        return None
+    return read
+
+
+def _turnkey_marker(deps: dict) -> Path:
+    return Path(deps.get("turnkey_marker") or "/mnt/USER_ADMIN/turnkey.json")
+
+
+def _turnkey_job(deps: dict, username: str) -> dict:
+    """Create the signed-in user's carried systems and apps. Credential grants remain a separate explicit operator action."""
+    import os_list
+    import turnkey
+    host = _vm_host_for(deps)
+    entries = os_list.load() or os_list.derive_from_cache(deps.get("installer_cache_root") or "/mnt/INSTALLER_CACHE")
+    return turnkey.run(host, username, entries, _carried_bases(deps), str(deps.get("os_bases_dir") or DEFAULT_OS_BASES_DIR),
+                       vault_names=(), grants_path=_vault_grants_path(deps))
+
+
+def _safe_vault_names(vault, root):
+    try:
+        return vault.Vault(root).names()
+    except (vault.VaultError, OSError):
+        return []
+
+
+def _turnkey_start(deps: dict, username: str, *, force: bool = False) -> bool:
+    """Starts the setup in the background unless it already ran for this machine (or is running); the result is kept beside the other administration data."""
+    import threading
+    state = deps.setdefault("turnkey_state", {"running": False})
+    lock = deps.setdefault("turnkey_lock", threading.Lock())
+    marker = _turnkey_marker(deps)
+    if deps.get("turnkey_marker") is None and not Path("/mnt/USER_ADMIN").is_mount():
+        state.update(running=False, report=None, error="Waiting for USER_ADMIN to be mounted before turnkey setup")
+        return False
+    with lock:
+        if state["running"] or (marker.exists() and not force):
+            return False
+        state.update(running=True, report=None, error=None, user=username)
+
+    def work():
+        try:
+            report = _turnkey_job(deps, username)
+            state["report"] = report
+            try:
+                if report.get("needs_owner"):                      # not finished: it asks for the account name and runs again, so nothing is recorded as done
+                    return
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({"user": username, "report": report}, indent=1))
+            except OSError:
+                pass
+        except Exception as exc:                                   # shown on the page, never fatal to the console
+            state["error"] = str(exc)[:300]
+        finally:
+            state["running"] = False
+    if deps.get("turnkey_inline"):
+        work()
+    else:
+        threading.Thread(target=work, daemon=True).start()
+    return True
+
+
+def _signin_store(deps: dict):
+    import signin_share
+    import vault
+    sealed = any(_safe_has_passphrase(vault, root) for _label, _scope, root in _vault_roots(deps))
+    passphrase = deps.get("vault_passphrase") or None
+    return signin_share.Store(deps.get("signins_dir") or "/mnt/USER_PERSONAL/signins", passphrase=passphrase, must_seal=sealed)
+
+
+def _safe_has_passphrase(vault, root) -> bool:
+    try:
+        return vault.Vault(root).has_passphrase()
+    except (vault.VaultError, OSError):
+        return False
+
+
+def _vault_for(deps: dict, root: str):
+    """The vault bound to the passphrase held in this server's memory, or the plain vault when none is set."""
+    import vault
+    store = vault.Vault(root)
+    return vault.Unlocked(store, deps["vault_passphrase"]) if store.has_passphrase() and deps.get("vault_passphrase") else store
 
 
 def _vm_host_for(deps: dict) -> vh.VmHost:
@@ -1322,9 +1980,119 @@ def _vm_host_for(deps: dict) -> vh.VmHost:
     import shutil
     import proxmox_vm_host
     engine = proxmox_vm_host.ProxmoxVmHost if shutil.which("qm") and shutil.which("pvesh") else vh.VmHost
+    persistence_default = vh.default_persistence_store()
     return engine(vm_page.load_store(cfg, default=str(vh.DEFAULT_STORE)) if cfg else vh.DEFAULT_STORE,
-                  persistence_store=vm_page.load_persistence_store(cfg, default=str(vh.DEFAULT_PERSISTENCE_STORE))
-                  if cfg else vh.DEFAULT_PERSISTENCE_STORE)
+                  persistence_store=vm_page.load_persistence_store(cfg, default=str(persistence_default))
+                  if cfg else persistence_default,
+                  grow_volume=_grow_role_volume if shutil.which("lvextend") else None)
+
+
+def _grow_role_volume(label: str, needed_bytes: int):
+    """Extend a Baseline role volume so a VM disk fits (volumes start small and grow when actually needed)."""
+    import repair
+    import volume_growth
+    return volume_growth.ensure_room(repair.RealRunner(), label, needed_bytes)
+
+
+_LAUNCHER_PERSONA = "personal"      # guest overlays are the person's, never USER_ADMIN (DR257, DR259)
+
+
+def _settings_error(message: str):
+    import layered_settings
+    return layered_settings.SettingsError(message)
+
+
+def _swap_runner(deps: dict):
+    """The runner and volume group for host swap changes: injected in tests, the real root runner and the running root's group otherwise."""
+    import repair
+    import volume_growth
+    runner = deps.get("swap_runner") or repair.RealRunner()
+    return runner, (deps.get("swap_vg") or volume_growth.volume_group(runner))
+
+
+def _launcher_roots(deps: dict):
+    import layered_settings
+    return deps.get("launcher_roots") or layered_settings.default_roots(_LAUNCHER_PERSONA)
+
+
+def _launcher_ids():
+    import naming
+    return (lambda vm: naming.allocate("O", "V", "vm:" + vm["name"])), (lambda key: naming.allocate("A", "D", "guest-app:" + key))
+
+
+def _launcher_state(deps: dict) -> dict:
+    import socket
+    import launcher_state
+    host = _vm_host_for(deps)
+    os_id_for, app_id_for = _launcher_ids()
+    containers, containers_error = (), ""
+    try:                      # containers are optional: a problem listing them is shown as a notice and never hides the VMs
+        container_host = _container_host_for(deps)
+        if container_host is not None:
+            containers = container_host.list_containers()
+    except (vh.VmError, OSError, ValueError, KeyError) as exc:
+        containers_error = str(exc)
+    import naming
+    vms = host.list_vms()
+    available, notices = _launcher_available(deps, host, vms)
+    state = launcher_state.collect(vms, node=socket.gethostname().split(".")[0], roots=_launcher_roots(deps),
+                                  os_id_for=os_id_for, app_id_for=app_id_for, containers=containers,
+                                  container_id_for=lambda ct: naming.allocate("O", "L", "ct:" + ct["name"]),
+                                  containers_error=containers_error, available=available)
+    state["notices"] = state["notices"] + notices
+    return state
+
+
+def _launcher_available(deps: dict, host, vms: list) -> tuple:
+    """(entries, notices): the operating systems the supported-OS list asks for that are not built yet. A list that cannot be read is a notice, never a
+    reason to hide the tiles; no list means no entries."""
+    import launcher_model
+    import os_list
+    try:
+        listing = os_list.load(deps.get("os_list_path")) if deps.get("os_list_path") is not None else os_list.load()
+    except (os_list.OsListError, OSError) as exc:
+        return [], [f"The supported-OS list could not be used: {exc}"]
+    try:
+        isos = [i["name"] if isinstance(i, dict) else str(i) for i in vm_page.available_isos(host, deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)]
+    except (vh.VmError, OSError, ValueError):
+        isos = []
+    if not any(e["kind"] != "kasm" for e in listing):
+        listing = listing + os_list.derived(_carried_bases(deps), isos)      # nobody has to write a list: what the machine carries is what it offers
+        if not any(e["kind"] != "kasm" for e in listing):
+            return [], []
+    import os_profiles
+    host_mb = deps["host_memory_mb"]() if deps.get("host_memory_mb") else os_profiles.host_memory_mb()
+    return launcher_model.available_to_create(listing, isos, [{"name": v.get("name")} for v in vms], host_mb, bases=_carried_bases(deps)), []
+
+
+DEFAULT_OS_BASES_DIR = "/mnt/INSTALLER_CACHE/installer/expanded/baseline-cache/os-bases"
+
+
+def _carried_bases(deps: dict) -> set:
+    """The ids of the ready-made VM bases this machine carries (each has a manifest saying it is free of secrets); none when the folder is absent."""
+    folder = Path(deps.get("os_bases_dir") or DEFAULT_OS_BASES_DIR)
+    found = set()
+    try:
+        manifests = sorted(folder.glob("*-base.json"))
+    except OSError:
+        return found
+    for manifest in manifests:                      # one unreadable manifest does not hide the others
+        try:
+            if (folder / json.loads(manifest.read_text())["base"]).is_file():
+                found.add(manifest.name[:-len("-base.json")])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    if not deps.get('os_bases_dir'):
+        import prebuilt_environment as pe
+        source = pe.source_for('fydeos', folder)
+        if source != folder:
+            try:
+                manifest = pe.read_manifest(source, 'fydeos')
+                if (source / manifest['base']).is_file():
+                    found.add('fydeos')
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+    return found
 
 
 def _kvm_ok(deps: dict) -> bool:
@@ -1376,6 +2144,60 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _serve_kasm_registry(self, deps, path: str) -> None:
+        """The two static registry files. `list_url` in the list is set to the address the client actually used (its Host header, checked), so the registry is correct
+        whatever address this host has; a missing file, a link, or a malformed list is a plain 404, never a stack trace."""
+        import re as _re
+        relative, content_type = _REGISTRY_FILES[path]
+        target = Path(deps.get("kasm_registry_dir") or DEFAULT_KASM_REGISTRY_DIR) / relative
+        try:
+            if target.is_symlink() or not target.is_file():
+                raise FileNotFoundError
+            text = target.read_text()
+            if relative.endswith("list.json"):
+                host = self.headers.get("Host", "")
+                document = json.loads(text)
+                if _re.fullmatch(r"[A-Za-z0-9.:\[\]-]{1,100}", host):
+                    document["list_url"] = f"http://{host}/kasm-registry/"
+                text = json.dumps(document, indent=1) + "\n"
+        except (OSError, ValueError, TypeError):
+            body = b"not found\n"
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        body = text.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()                       # the server's own end_headers adds Cache-Control: no-store to every response
+        self.wfile.write(body)
+
+    def _serve_kasm_icon(self, deps, name: str) -> None:
+        """One registry icon, by an exact file name from one folder (no link followed, nothing else in the folder reachable); anything else is a plain 404."""
+        # the thumbnails copied from the running Kasm first, then those carried with the registry (the icons of workspaces taken from other registries)
+        folders = (Path(deps.get("kasm_registry_icons_dir") or DEFAULT_KASM_ICONS_DIR), Path(deps.get("kasm_registry_dir") or DEFAULT_KASM_REGISTRY_DIR) / "1.1" / "icons")
+        try:
+            target = next((f / name for f in folders if (f / name).is_file() and not (f / name).is_symlink()), None)
+            if target is None:
+                raise FileNotFoundError
+            body = target.read_bytes()
+        except OSError:
+            body = b"not found\n"
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png" if name.endswith(".png") else "image/svg+xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, fmt, *args):  # noqa: A002 - stdlib signature
         pass
 
@@ -1387,11 +2209,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _read_json_body(self) -> dict:
-        raw = self._read_body_bytes()
-        try:
-            return json.loads(raw.decode()) if raw else {}
-        except ValueError:
-            return {}
+        from web_request_json import read_json_object
+        return read_json_object(self.headers,self.rfile)
 
     def _read_form_body(self) -> dict:
         raw = self._read_body_bytes().decode()
@@ -1418,6 +2237,24 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                                              {"action_id": action_id, "params": params}, deps["clock"]())
         except wg.NotFromWebApp as exc:
             return self._json(403, {"outcome": "refused", "detail": f"refused: {exc}"})
+        if action_id == 'update_installed_drive':
+            jobs=deps.get('workload_jobs')
+            if jobs is None:
+                return self._json(503, {'outcome':'refused','detail':'Durable installer jobs unavailable'})
+            owner=deps['sessions'].get(self._cookie_token(),deps['clock']()).username
+            request=hashlib.sha256(json.dumps({'owner':owner,'params':params},sort_keys=True).encode()).hexdigest()
+            def update_installed(report):
+                result=da.perform_action(pkexec_runner,action_id,params,on_progress=report,
+                    pds_runner=deps.get('pds_runner'),authorization=authorization,hitl_store=store,origin=origin)
+                return {'ok':result.ok,'message':result.detail}
+            try:
+                job=jobs.submit('installer','update_installed_drive',
+                    {'name':params['device_path'],'backup_id':params['input_bundle'],
+                     'destination':params['recovery_folder']},update_installed,
+                    request_id='installed-update:'+request,with_progress=True)
+                return self._json(200,{'outcome':'started','job_id':job['id'],'durable':True})
+            except workload_jobs.JobError as exc:
+                return self._json(409,{'outcome':'refused','detail':str(exc)})
         job_id = uuid.uuid4().hex
         with _JOBS_LOCK:
             _JOBS[job_id] = {"lines": [], "done": False, "outcome": None, "detail": None}
@@ -1510,17 +2347,30 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         path = parsed.path
 
+        if path in _REGISTRY_FILES:
+            return self._serve_kasm_registry(deps, path)
+        icon = _REGISTRY_ICON.match(path)
+        if icon:
+            return self._serve_kasm_icon(deps, icon.group(1))
+
         if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path):
             return
 
         if path in ("/", "/login"):
             session = deps["sessions"].get(self._cookie_token(), now)
             if session is not None:
-                return self._redirect("/operations" if session.role == "operator" else "/settings")
+                return self._redirect("/home")
             return self._html_response(200, sw.render_login_page())
 
         if path == "/logout":
+            deps["sessions"].revoke(self._cookie_token())
             return self._redirect("/login", set_cookie=ws.clear_session_cookie())
+
+        if path == "/console":
+            import console_switch
+            if not console_switch.is_local(self.client_address[0]):
+                return self._html_response(403, console_switch.refused_page())
+            return self._html_response(200, console_switch.page())
 
         if path == "/settings":
             result = sw.handle_settings_view(deps["sessions"], deps["source"], self._cookie_token(), now,
@@ -1567,9 +2417,413 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._html_response(result.status, _with_nav(sw.render_recovery_page({}, result.body.get("reason", "")), path))
             return self._html_response(200, _with_nav(sw.render_recovery_page(result.body), path))
 
+        if path in ('/install-plan/draft', '/recipes/draft', '/install-plan/display'):
+            store = deps.get('draft_store')
+            if store is None:
+                return self._json(503, {'ok':False, 'message':'Durable configuration draft storage unavailable'})
+            kind = 'installer-display' if path == '/install-plan/display' else 'installer' if path.startswith('/install-plan') else 'recipe'
+            session = deps['sessions'].get(self._cookie_token(), now)
+            try:
+                return self._json(200, {'ok':True, 'draft':store.get(session.username, kind)})
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                return self._json(503, {'ok':False, 'message':'Draft could not be read: ' + str(exc)})
+
+        if path == '/install-plan/input-bundle':
+            import installer_inputs
+            jobs=deps.get('workload_jobs')
+            if jobs is None or not deps.get('installer_bundle_root'):
+                return self._json(503,{'message':'Installer bundle storage unavailable'})
+            try:
+                job=jobs.get(qs.get('job_id',[''])[0])
+                if job['kind']!='installer' or job['action']!='prepare_inputs':
+                    raise installer_inputs.InputError('Not an installer input preparation job')
+                owner=deps['sessions'].get(self._cookie_token(),now).username
+                folder=Path(deps['installer_bundle_root'])/hashlib.sha256(owner.encode()).hexdigest()/job['name']
+                return self._json(200,installer_inputs.verify(folder))
+            except (installer_inputs.InputError,workload_jobs.JobError,OSError) as exc:
+                return self._json(409,{'message':str(exc),'ready':False,'executed':False})
+
+        if path == "/installation-readiness":
+            import installation_readiness
+            report=installation_readiness.collect(deps["runner"])
+            return self._html_response(200, _with_nav(installation_readiness.render(report).encode(), path))
+
         if path == "/install-plan":
             import install_plan_page
             return self._html_response(200, _with_nav(install_plan_page.render(), path))
+
+        if path in ("/launcher", "/launcher/state"):
+            import launcher_page
+            try:
+                state = _launcher_state(deps)
+            except (vh.VmError, OSError, ValueError) as exc:
+                message = f"VM inventory unavailable: {exc}"
+                if path == "/launcher/state":
+                    return self._json(503, {"error": message})
+                return self._html_response(200, _with_nav(launcher_page.render(
+                    {"host": "", "tiles": [], "apps": [], "schema": {"os": {}, "app": {}}}, message), path))
+            if path == "/launcher/state":
+                return self._json(200, state)
+            return self._html_response(200, _with_nav(launcher_page.render(state), path))
+
+        if path == "/memory":
+            import cardinality
+            import layered_settings
+            import memory_page
+            import swap_config
+            import volume_growth
+            try:
+                runner, vg = _swap_runner(deps)
+                current = swap_config.current(runner, vg)
+            except (swap_config.SwapError, RuntimeError, OSError, volume_growth.GrowthError, cardinality.CardinalityError) as exc:
+                runner = vg = None
+                current, notice = {"kind": None, "gib": 0, "names": []}, "Swap could not be read: " + str(exc)
+            else:
+                notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            try:
+                recorded = layered_settings.read_layer(_launcher_roots(deps), "admin")
+            except layered_settings.SettingsError:
+                recorded = {}
+            return self._html_response(200, _with_nav(memory_page.render(current, recorded, notice), path))
+
+        if path == "/workspaces":
+            import kasm_page
+            import kasm_setup
+            try:
+                machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+                status = machine.status()
+                report = machine.telemetry_report() if hasattr(machine, "telemetry_report") else None
+                notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                status, report, notice = {"present": False, "installed": False}, None, "Kasm's state could not be read: " + str(exc)
+            return self._html_response(200, _with_nav(kasm_page.render(status, notice, report), path))
+
+        if path in ("/workspaces/settings", "/workspaces/settings/advanced", "/workspaces/settings/customize"):
+            import kasm_settings_ui
+            import kasm_setup
+            machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+            notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            try:
+                live = machine.read_settings()
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                live = {"ok": False, "reason": str(exc)}
+            if not live["ok"]:
+                return self._html_response(200, _with_nav(kasm_settings_ui.render_unavailable(live["reason"]), "/workspaces"))
+            shown = machine.read_view()
+            if path.endswith("/advanced"):
+                return self._html_response(200, _with_nav(kasm_settings_ui.render_advanced(live["settings"], notice, qs.get("q", [""])[0][:100]), "/workspaces"))
+            if path.endswith("/customize"):
+                return self._html_response(200, _with_nav(kasm_settings_ui.render_customize(live["settings"], kasm_settings_ui.default_shown() if shown is None else shown, notice), "/workspaces"))
+            return self._html_response(200, _with_nav(kasm_settings_ui.render_simple(live["settings"], notice, shown), "/workspaces"))
+
+        if path == "/workspaces/suggestions":
+            import kasm_advice
+            import kasm_advice_page
+            import kasm_setup
+            advice = deps.get("kasm_advice") or kasm_advice.Advice(deps.get("kasm_machine") or kasm_setup.KasmSetup())
+            notice = qs.get("notice", [""])[0][:300].replace("+", " ")
+            try:
+                overview = advice.overview()
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                return self._html_response(200, _with_nav(kasm_advice_page.ui.render_unavailable(str(exc)), "/workspaces"))
+            return self._html_response(200, _with_nav(kasm_advice_page.render(overview, notice), "/workspaces"))
+
+        if path == "/power":
+            import power_control
+            return self._html_response(200, _with_nav(power_control.render(qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
+        if path == "/audio":
+            import audio_bluetooth
+            import repair
+            data = audio_bluetooth.collect(deps.get("audio_runner") or repair.RealRunner(), which=deps.get("audio_which") or __import__("shutil").which)
+            return self._html_response(200, _with_nav(audio_bluetooth.render(
+                data, qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
+        if path == "/ceph":
+            import ceph_setup
+            job = deps.get("ceph_job")
+            state = job.state() if job is not None else {"phase": "idle", "message": ""}
+            installed = ceph_setup.is_installed(deps.get("ceph_runner"))
+            refresh = "<meta http-equiv='refresh' content='5'>" if state["phase"] == "running" else ""
+            body = (f"<!doctype html><html><head><meta charset='utf-8'><title>Ceph</title>{refresh}</head><body><h1>Ceph</h1>"
+                    f"<p>Ceph packages: <b>{'installed' if installed else 'not installed'}</b></p>"
+                    f"<p>{html.escape(state['message'])}</p>"
+                    + ("" if installed else '<form method="post" action="/ceph/install"><button type="submit">Install Ceph packages</button>'
+                       "</form><p>Needs the internet (Proxmox's repository). Creating monitors and OSDs is done in Proxmox "
+                       "(node &gt; Ceph) once you decide which drives to give it.</p>")
+                    + "</body></html>").encode()
+            return self._html_response(200, _with_nav(body, path))
+
+        if path == "/security":
+            import ai_setup_page
+            pending = {u: (v[0], v[1]) for u, v in deps.get("tfa_pending", {}).items()}
+            return self._html_response(200, _with_nav(ai_setup_page.render_security(
+                pending, qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
+        if path == "/vault":
+            import ai_setup_page
+            import vault
+            return self._html_response(200, _with_nav(ai_setup_page.render_vault(
+                _vault_states(deps), qs.get("notice", [""])[0][:200].replace("+", " "), _vault_secrets(deps),
+                _vault_places(deps)), path))
+
+        if path == '/ai-setup/installer':
+            import ai_installer_page
+            return self._html_response(200, _with_nav(ai_installer_page.render(), '/ai-setup'))
+
+        if path == '/ai-setup/installer-state':
+            import ai_provisioning as ai
+            try:
+                owner = deps['sessions'].get(self._cookie_token(), now).username
+                _drafts, draft = _ai_draft(deps, owner)
+                store = _vault_store(deps, 'admin')
+                return self._json(200, {'ok': True, 'revision': draft['revision'] if draft else 0,
+                    'selection': ai.choice(draft['document'] if draft else {}),
+                    'parent': ai.discover(deps.get('ai_parent_home') or Path.home(), deps.get('ai_parent_environ')),
+                    'prepared': ai.PROFILE in store.names()})
+            except (ValueError, OSError, __import__('vault').VaultError):
+                return self._json(409, {'ok': False, 'message': 'AI setup state unavailable; check USER_ADMIN vault and installer draft storage'})
+
+        if path in ("/ai-setup", "/ai-setup/claude"):
+            import ai_setup_page
+            import providers
+            import vault
+            if path == "/ai-setup/claude":
+                session = deps.get("claude_setup")
+                state = session.state() if session is not None else {"phase": "idle", "url": None,
+                                                                  "message": "no sign-in is in progress"}
+                return self._html_response(200, _with_nav(ai_setup_page.render_claude(state), "/ai-setup"))
+            status = []
+            for label, root in (("USER_ADMIN", vault.ADMIN_VAULT), ("USER_PERSONAL", vault.PERSONAL_VAULT)):
+                try:
+                    status += [dict(s, name=f"{s['name']} ({label})") for s in vault.Vault(root).status()]
+                except (vault.VaultError, OSError):
+                    pass
+            notice = qs.get("notice", [""])[0][:200]
+            return self._html_response(200, _with_nav(ai_setup_page.render_overview(
+                providers.check_providers(), status, [notice] if notice else [], providers.harness_status()), "/ai-setup"))
+
+        if path == "/drive-names":
+            import drive_names
+            import repair
+            drives_file = deps.get("drives_file") or drive_names.default_path()
+            return self._html_response(200, _with_nav(drive_names.render(
+                drive_names.attached(deps.get("runner") or repair.RealRunner()), drive_names.load(drives_file),
+                qs.get("notice", [""])[0][:200].replace("+", " ")), path))
+
+        if path == "/home":
+            import home_page
+            return self._html_response(200, _with_nav(home_page.render(), path))
+
+        if path == "/environments":
+            import environments
+            import os_list
+            notes = b""
+            try:
+                host = _vm_host_for(deps)
+                isos = [i["name"] if isinstance(i, dict) else str(i)
+                        for i in vm_page.available_isos(host, deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR)]
+                vms = host.list_vms()
+            except (vh.VmError, OSError, ValueError) as exc:
+                isos, vms = [], []
+                notes += ("<p role='alert'>Inventory unavailable: " + html.escape(str(exc)) + "</p>").encode()
+            vm_rows = [{"name": getattr(v, "name", None) or (v.get("name") if isinstance(v, dict) else None)} for v in vms]
+            try:
+                listing = os_list.load(deps.get("os_list_path")) if deps.get("os_list_path") is not None else os_list.load()
+            except (os_list.OsListError, OSError) as exc:
+                listing = []
+                notes += ("<p role='alert'>The supported-OS list could not be used (" + html.escape(str(exc)) + "); showing every carried image instead.</p>").encode()
+            rows = environments.listed_catalogue(listing, isos, vm_rows, _carried_bases(deps)) if any(e["kind"] != "kasm" for e in listing) else environments.catalogue(isos, vm_rows)
+            return self._html_response(200, _with_nav(environments.render(rows).replace(b"<table>", notes + b"<table>", 1), path))
+
+        if path == "/shell":
+            import chat_page
+            import providers
+            return self._html_response(200, _with_nav(chat_page.render_shell(
+                deps.setdefault("shell_transcript", []), [(h["id"], h["name"]) for h in providers.HARNESSES]), path))
+
+        if path == "/chat":
+            import chat_page
+            import providers
+            return self._html_response(200, _with_nav(chat_page.render(
+                deps.setdefault("chat_history", []), [(h["id"], h["name"]) for h in providers.HARNESSES],
+                qs.get("notice", [""])[0][:200]), path))
+
+        if path == "/network":
+            import network
+            import network_view
+            import providers
+            try:
+                facts = network.check_lifeline()
+            except (OSError, network.NetworkProbeError) as exc:       # a failed probe is reported, never a blank 500
+                facts = [{"fact": "interface_inventory", "ok": False, "detail": f"network probe failed: {exc}"}]
+            try:
+                interfaces = network.list_interfaces()
+            except (OSError, network.NetworkProbeError) as exc:
+                interfaces = []
+                facts.append({"fact": "interface_inventory", "ok": False, "detail": str(exc)})
+            show_ids = qs.get("ids", [""])[0] == "1"
+            page = network_view.render(network_view.build_rows(facts, interfaces, providers.check_providers(), network, show_ids))
+            notice = html.escape(qs.get("notice", [""])[0][:200].replace("+", " "))
+            links = "".join(f'<li><a href="/network/connection?dev={html.escape(i["name"])}">{html.escape(i["friendly"])}: name, power and role</a></li>' for i in interfaces)
+            extra = (f"<p>{notice}</p>" if notice else "") + ('<form method="post" action="/network/tether">'
+                                                              '<button type="submit">Connect a USB tether</button></form>') + (f"<h2>Connections</h2><ul>{links}</ul>" if links else "") + ('<p><a href="/network">Hide hardware IDs</a></p>' if show_ids else '<p><a href="/network?ids=1">Show hardware IDs</a></p>')
+            return self._html_response(200, _with_nav(page.replace(b"</body>", extra.encode() + b"</body>"), path))
+
+        if path == "/status":
+            return self._json(200, _status_line(deps))
+
+        if path in ("/fs/browse", "/fs/validate"):
+            import path_picker
+            wanted = qs.get("path", [""])[0]
+            allowed = path_picker.roots(deps.get("fs_roots") or ())
+            return self._json(200, path_picker.list_dirs(wanted, allowed) if path == "/fs/browse" else path_picker.validate(wanted, allowed))
+
+        if path == "/network/connection":
+            import network, netpref, network_connection, network_connection_page
+            ifname = qs.get("dev", [""])[0]
+            try:
+                known = {i["name"]: i for i in network.list_interfaces()}
+            except (OSError, network.NetworkProbeError):
+                known = {}
+            if ifname not in known:
+                return self._json(404, {"message": "no such network connection"})
+            details = network.device_details(ifname)
+            try:
+                admin_up = network.is_admin_up(ifname)
+            except network.NetworkProbeError:
+                admin_up = None
+            identity = [f"Device: {ifname}"] + [f"{k}: {details[k]}" for k in ("manufacturer", "model", "connection", "driver") if details.get(k)]
+            try:
+                facts = network.check_lifeline()
+            except (OSError, network.NetworkProbeError):
+                facts = []
+            active = any(f["fact"] == "nic_detected" and ifname in str(f.get("detail", "")) for f in facts)
+            return self._html_response(200, _with_nav(network_connection_page.render(
+                ifname, known[ifname]["friendly"], identity, "", network.load_aliases().get(ifname, ""), admin_up, netpref.load_preference(),
+                network_connection.lifeline_text(facts, active), is_active=active), path))
+
+        if path == "/sensors":
+            import diagnostics
+            import repair
+            import sensors_view
+            try:
+                rows = sensors_view.collect_rows(deps.get("runner") or repair.RealRunner(), diagnostics)
+            except (OSError, ValueError, KeyError, AttributeError) as exc:
+                rows = [("error", "sensor collection failed", str(exc), "")]
+            import sensors_collect
+            history = sensors_view.hottest_history(rows, db_path=deps.get("sensors_db") or sensors_collect.DB_PATH, window_s=3600)
+            return self._html_response(200, _with_nav(sensors_view.render(rows, history), path))
+
+        if path == "/turnkey":
+            import html as _h
+            state = deps.get("turnkey_state") or {}
+            marker = _turnkey_marker(deps)
+            report = state.get("report")
+            if report is None and marker.exists():
+                try:
+                    report = json.loads(marker.read_text()).get("report")
+                except (OSError, ValueError):
+                    report = None
+            if state.get("running"):
+                status = "<p role='status'>Setting everything up for you…</p><meta http-equiv='refresh' content='10'>"
+            elif state.get("error"):
+                status = f"<p class='bad'>Setup stopped: {_h.escape(state['error'])}</p>"
+            else:
+                status = "<p>Machines and applications below are set up. Review credential access separately.</p>" if report else "<p>Not run yet.</p>"
+            rows = ""
+            for key, label in (("created", "Machines made"), ("already_there", "Already there"), ("granted_to", "Secrets explicitly granted to"), ("not_carried", "Not on this build")):
+                items = (report or {}).get(key) or []
+                rows += f"<tr><td>{label}</td><td>{_h.escape(', '.join(items)) or '-'}</td></tr>"
+            if (report or {}).get("vault_grants"):
+                rows += f"<tr><td>Credential access</td><td>{_h.escape(report['vault_grants'])}</td></tr>"
+            for key, label in (("failed", "Could not make"), ("apps_skipped", "Applications not available")):
+                for name, why in ((report or {}).get(key) or {}).items():
+                    rows += f"<tr><td>{label}: {_h.escape(name)}</td><td>{_h.escape(str(why))}</td></tr>"
+            if (report or {}).get("needs_owner"):
+                status = ("<section><h2>What should your account be called?</h2><p>Your sign-in name (root) cannot be a person's account on the machines, and Baseline will not make a "
+                          "generic one. Choose your own name; every machine gets your account with it, no password.</p>"
+                          "<form method='post' action='/turnkey/owner'><input name='name' pattern='[a-z_][a-z0-9_-]{0,31}' placeholder='your name, lowercase' required> "
+                          "<button type='submit'>Use this name and set everything up</button></form></section>")
+            page = ("<!doctype html><html><head><meta charset='utf-8'><title>Set up</title></head><body><h1>Set up for you</h1>" + status +
+                    f"<table><tbody>{rows}</tbody></table><p><a href='/vault'>Choose credentials for each machine in Credential Vault</a></p>"
+                    "<form method='post' action='/turnkey/run'><button type='submit'>Run the setup again</button></form></body></html>")
+            return self._html_response(200, _with_nav(page.encode(), path))
+
+        if path == "/signins":
+            import html as _h
+            import signin_share
+            store = _signin_store(deps)
+            try:
+                saved = {}
+                for app in store.apps():
+                    try:
+                        bundle = store.load(app)
+                        saved[app] = f"saved from {bundle['from']} on {bundle['at'][:10]}"
+                    except signin_share.SigninError:
+                        saved[app] = "saved (sealed: unlock the vault to see more)"
+            except OSError:
+                saved = {}
+            try:
+                running = [vm["name"] for vm in _vm_host_for(deps).list_vms() if vm.get("running")]
+            except (vh.VmError, OSError, ValueError, AttributeError):
+                running = []
+            options = "".join(f"<option>{_h.escape(n)}</option>" for n in running) or "<option value=''>No machine is running</option>"
+            rows = "".join(
+                f"<tr><td>{_h.escape(label)}</td><td>{_h.escape(saved.get(app, 'not saved yet'))}</td><td><form data-capture='{app}'><select name='vm'>{options}</select> "
+                f"<button type='submit'>Save sign-in from this machine</button></form></td>"
+                f"<td>{'<button type=button data-forget=' + app + '>Forget</button>' if app in saved else ''}</td></tr>" for app, label in signin_share.LABELS.items())
+            note = qs.get("notice", [""])[0][:300]
+            page = ("<!doctype html><html><head><meta charset='utf-8'><title>Sign-ins</title></head><body><h1>Sign in once, signed in everywhere</h1>"
+                    "<p>Sign in to Chrome or Claude on one machine, save it here, and every other machine you run gets it without asking you again. They are kept with your other secrets "
+                    "(sealed when the vault has a passphrase) and never overwrite a machine that is already signed in. Websites such as Google can still ask for their own check on a new machine; "
+                    "only you can answer that.</p>" + (f"<p role='status'>{_h.escape(note)}</p>" if note else "") +
+                    f"<table><thead><tr><th>Application</th><th>State</th><th>Save</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
+                    "<p><button type='button' id='send'>Send to every running machine now</button> <span id='out' role='status'></span></p><script>"
+                    "async function call(p,b){const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json();}"
+                    "document.addEventListener('submit',async e=>{const f=e.target.closest('form[data-capture]');if(!f)return;e.preventDefault();"
+                    "const j=await call('/signins/capture',{app:f.dataset.capture,vm:f.vm.value});alert(j.message);if(j.ok)location.reload();});"
+                    "document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;"
+                    "if(b.dataset.forget){if(confirm('Forget the saved sign-in?')){await call('/signins/forget',{app:b.dataset.forget});location.reload();}}"
+                    "if(b.id==='send'){document.getElementById('out').textContent='Sending…';const j=await call('/signins/apply',{});document.getElementById('out').textContent=j.message;}});"
+                    "</script></body></html>")
+            return self._html_response(200, _with_nav(page.encode(), path))
+
+        if path == "/files":
+            import file_manager
+            import path_picker
+            allowed = path_picker.roots(deps.get("fs_roots") or ())
+            return self._html_response(200, _with_nav(file_manager.render(file_manager.listing(qs.get("path", [""])[0], allowed), allowed), path))
+
+        if path == "/files/download":
+            import file_manager
+            import path_picker
+            try:
+                real, size = file_manager.open_for_download(qs.get("path", [""])[0], path_picker.roots(deps.get("fs_roots") or ()))
+                handle = open(real, "rb")
+            except (file_manager.FileManagerError, OSError):
+                return self._html_response(404, b"<p>That file is not available.</p>")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(os.path.basename(real)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            with handle:
+                shutil.copyfileobj(handle, self.wfile)
+            return
+
+        if path.startswith("/tools/") and path[7:] in __import__("tool_runner").TOOLS:
+            import tool_runner
+            name = path[7:]
+            action = qs.get("action", [""])[0]
+            spec = tool_runner.TOOLS[name]["actions"].get(action)
+            result = tool_runner.run(name, action, qs.get("value", [""])[0]) if spec and not spec.get("post") else None
+            return self._html_response(200, _with_nav(tool_runner.render(name, result), "/tools"))
+
+        if path == "/tools":
+            import tools_page
+            return self._html_response(200, _with_nav(tools_page.render(deps.get("tools_results") or tools_page.gather()), path))
 
         if path == "/recipes":
             import recipe_page
@@ -1585,7 +2839,29 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 persona, plans,
                 leaks=appdata.cross_app_leaks(plans),
                 conflicts=appdata.target_conflicts(plans),
-                formats=appdata.supported_formats()), path))
+                formats=appdata.supported_formats(), runner=deps["runner"]), path))
+
+        if path == '/installer-cache/source':
+            import installer_sources,installer_cache
+            if qs.get('source',[''])[0]!='ubuntu_base':return self._json(400,{'message':'Unsupported source'})
+            try:
+                root=deps.get('installer_cache_root',installer_cache.DEFAULT_CACHE_ROOT)
+                lock=installer_sources.locks(deps['runner'],root).get('ubuntu_base')
+                if lock is None:raise installer_sources.SourceError('Pinned Ubuntu installer file has not been acquired')
+                with Path(lock['path']).open('rb') as stream:
+                    self.connection.settimeout(30)
+                    self.send_response(200);self.send_header('Content-Type','application/octet-stream')
+                    self.send_header('Content-Length',str(os.fstat(stream.fileno()).st_size))
+                    self.send_header('Content-Disposition','attachment; filename="'+Path(lock['path']).name+'"')
+                    self.end_headers()
+                    try:
+                        while chunk:=stream.read(1024*1024):self.wfile.write(chunk)
+                    except OSError:
+                        self.close_connection=True
+                        return
+                return
+            except (installer_sources.SourceError,OSError,KeyError) as exc:
+                return self._json(409,{'message':str(exc)})
 
         if path == "/installer-cache":
             # "Refresh with Root": the unprivileged scan can miss a
@@ -1602,20 +2878,45 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             if scan_runner is None:
                 report = ic.CacheReport(root=ic.DEFAULT_CACHE_ROOT, mounted=False,
                                         mount_detail="no runner configured - cannot read the volume",
-                                        scanned_ok=False)
+                                        scanned_ok=False,
+                                        scan_detail="no inventory runner is configured")
             else:
-                report = ic.reconcile(scan_runner)
+                try:
+                    report = ic.reconcile(scan_runner)
+                except ic.CacheScanError as exc:
+                    report = ic.CacheReport(root=ic.DEFAULT_CACHE_ROOT,
+                                            mounted=bool(exc.mounted),
+                                            mount_detail=exc.mount_detail,
+                                            scanned_ok=False, scan_detail=str(exc))
             return self._html_response(200, _with_nav(
                 render_installer_cache_page(report, elevated=elevated), path))
 
         if path == "/audit":
-            return self._html_response(200, _with_nav(
-                operations_page.render_audit_page(audit_view.read_tail(deps["audit_log_path"], 200) if deps.get("audit_log_path") else []),
-                path))
+            try:
+                audit = operations_page.render_audit_page(audit_view.read_tail(deps["audit_log_path"], 200)
+                                                          if deps.get("audit_log_path") else [], error=None if deps.get("audit_log_path") else "audit log path is not configured")
+                status = 200 if deps.get("audit_log_path") else 503
+            except audit_view.AuditReadError as exc:
+                audit = operations_page.render_audit_page([], error=str(exc))
+                status = 503
+            return self._html_response(status, _with_nav(audit, path))
+
+        if path == "/web-address":
+            import web_address, web_address_page
+            return self._html_response(200, _with_nav(web_address_page.render(web_address.read(deps.get("web_env_file") or web_address.ENV_FILE), web_address.local_addresses(deps["runner"]) if deps.get("runner") else []), path))
+
+        if path == "/managed-mode":
+            import managed_mode, managed_mode_page
+            try:
+                mounts = Path("/proc/mounts").read_text()
+            except OSError:
+                mounts = ""
+            return self._html_response(200, _with_nav(managed_mode_page.render(managed_mode.load(deps.get("managed_file")), managed_mode.candidate_folders(mounts)), path))
 
         if path == "/remote-access":
             status = deps["remote_status"]() if deps.get("remote_status") else remote_access.collect(deps["runner"])
-            return self._html_response(200, _with_nav(operations_page.render_remote_access_page(status), path))
+            configuration = deps['source'].current_settings() if deps.get('source') else None
+            return self._html_response(200, _with_nav(operations_page.render_remote_access_page(status, configuration=configuration), path))
 
         if path == "/approvals":
             return self._html_response(200, _with_nav(
@@ -1639,11 +2940,24 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             except workload_jobs.JobError as exc:
                 return self._json(404,{"error":str(exc)})
 
+        if path == '/operations/history':
+            try:
+                return self._json(200, {'runs':operation_history(deps)})
+            except audit_view.AuditReadError as exc:
+                return self._json(503, {'error': str(exc)})
+
         if path == "/operations":
             scheduler = deps.get("scheduler")
+            try:
+                history = operation_history(deps)
+                history_error = None
+            except audit_view.AuditReadError as exc:
+                history = []
+                history_error = str(exc)
             return self._html_response(200, _with_nav(
                 operations_page.render_operations_page(ops.OPERATIONS, scheduler.listing() if scheduler else [],
-                                                       deps.get("tamper_alerts")), path))
+                                                       deps.get("tamper_alerts"), history=history,
+                                                       history_error=history_error), path))
 
         if path.startswith("/drive-admin/actions"):
             return self._json(200, {"actions": da.describe_actions()})
@@ -1676,13 +2990,36 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(502, {"error": f"screendump capture failed: {exc}"})
             return self._binary_response(200, png_bytes, "image/png")
 
+        if path == "/drive-admin/mounted":
+            import mounted_places
+            import repair
+            done = (deps.get("runner") or repair.RealRunner()).run(["findmnt", "-J", "-o", "TARGET,SOURCE,FSTYPE"], timeout=15)
+            return self._json(200, mounted_places.parse(done.stdout) if done.returncode == 0 else [])
+
         if path == "/drive-admin/approvals":
             return self._json(200, {"grants": _hitl_store(deps).list_grants(self._cookie_token())})
 
         if path.startswith("/drive-admin"):
             runner = deps.get("runner")
-            drives = real_drive_state(runner, pds_runner=deps.get("pds_runner"))
-            volumes = real_volume_state(runner) if runner is not None else []
+            drive_error = ""
+            try:
+                drives = real_drive_state(runner, pds_runner=deps.get("pds_runner"))
+            except DriveInventoryError as exc:
+                drives = []
+                drive_error = str(exc)
+            all_drives, all_drives_error = None, ""
+            try:
+                if runner is None:
+                    raise DriveInventoryError("drive inventory runner unavailable")
+                all_drives = da.list_all_drives(runner, pds_runner=deps.get("pds_runner"))
+            except Exception as exc:      # the page still renders; the failure is shown, never an empty list
+                all_drives_error = str(exc)
+            volume_error = ""
+            try:
+                volumes = real_volume_state(runner)
+            except VolumeInventoryError as exc:
+                volumes = []
+                volume_error = str(exc)
             notice = qs.get("notice", [""])[0]
             notice_ok = qs.get("ok", [None])[0]
             notice_ok = {"1": True, "0": False}.get(notice_ok)  # None when no action just ran at all
@@ -1690,16 +3027,53 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(
                 render_drive_admin_page(drives=drives, volumes=volumes, actions=da.describe_actions(),
                                          notice=notice, notice_ok=notice_ok, acted_on_path=acted_on_path,
-                                         daily_ok=deps["sessions"].get(self._cookie_token(), now).role.startswith(wg.BOT_PREFIX)),
+                                         daily_ok=deps["sessions"].get(self._cookie_token(), now).role.startswith(wg.BOT_PREFIX),
+                                         selected_serial=qs.get("serial", [""])[0], volume_error=volume_error,
+                                         drive_error=drive_error, all_drives=all_drives, all_drives_error=all_drives_error),
                 path))
+
+        if path.startswith('/installer-icons/'):
+            import installer_inputs
+            name=path.rsplit('/',1)[-1]
+            if not re.fullmatch(r'[a-z0-9-]+\.(png|svg)',name):
+                return self._json(404,{'error':'Unknown installer icon'})
+            try:
+                icon=installer_inputs.source_root(__file__)/'packaging/installer-icons'/name
+                if icon.is_symlink() or icon.stat().st_size>512*1024:raise OSError('Invalid icon asset')
+                data=icon.read_bytes()
+            except (installer_inputs.InputError,OSError):
+                return self._json(404,{'error':'Native application icon unavailable'})
+            self.send_response(200);self.send_header('Content-Type','image/svg+xml' if name.endswith('.svg') else 'image/png')
+            self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','private, max-age=3600')
+            self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(data);return
+
+        if path == '/install-plan/discovery':
+            import install_plan_page,application_bundle,install_plan
+            try:
+                found=deps.get('install_plan_discovery',install_plan_page.discover_current)()
+                entries=install_plan_page.catalog_entries(deps.get('installer_repo_root'),
+                    catalog_directory=deps.get('application_catalog_root'))
+                return self._json(200,{'drives':found['drives'],'plan':install_plan.autofill(found),
+                    'os_choices':sorted(install_plan.SUPPORTED_OS),'applications':list(application_bundle.APPS),
+                    'application_entries':entries,
+                    'selected_serial':deps.get('installer_selected_serial',''),
+                    'protected_serials':deps.get('installer_protected_serials',[])})
+            except (install_plan.PlanError,OSError,ValueError,KeyError) as exc:
+                return self._json(503,{'message':'Current installer discovery failed: '+str(exc)})
 
         if path == "/containers/backups":
             import container_page, container_backup
             dest=parse_qs(urlparse(self.path).query).get('destination',[''])[0]
             sets=[];error=''
             if dest:
-                try:sets=container_backup.listing(dest,deps.get('container_backup_run'))
-                except (vh.VmError,OSError,ValueError,RuntimeError) as exc:error=str(exc)
+                import path_picker
+                checked=path_picker.validate(dest,path_picker.roots(deps.get("fs_roots") or ()))      # a pasted address is checked again here
+                if not checked["ok"]:
+                    dest,error="",checked["message"]
+                else:
+                    dest=checked["path"]
+                    try:sets=container_backup.listing(dest,deps.get('container_backup_run'))
+                    except (vh.VmError,OSError,ValueError,RuntimeError) as exc:error=str(exc)
             return self._html_response(200,_with_nav(container_page.render_backups(dest,sets,error),path))
 
         if path == "/containers":
@@ -1711,31 +3085,153 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             return self._html_response(200, _with_nav(page, path))
 
         if path == "/vms/status":
-            host = _vm_host_for(deps)
-            return self._json(200, vm_page.status_snapshot(host.list_vms(), host.list_bases()))
+            try:
+                host = _vm_host_for(deps)
+                return self._json(200, vm_page.status_snapshot(host.list_vms(), host.list_bases()))
+            except (vh.VmError, OSError, ValueError) as exc:
+                return self._json(503, {"error": f"VM inventory unavailable: {exc}", "state": "unknown"})
 
         if path == "/vms":
-            host = _vm_host_for(deps)
             iso_dir = deps.get("vm_iso_dir") or vh.DEFAULT_ISO_DIR
             notice_ok = {"1": True, "0": False}.get(qs.get("ok", [""])[0])
-            return self._html_response(200, _with_nav(vm_page.render_vms_page(
+            inventory_error = ""
+            try:
+                host = _vm_host_for(deps)
+                vms, bases = host.list_vms(), host.list_bases()
+            except (vh.VmError, OSError, ValueError) as exc:
+                page = vm_page.render_vms_page(
+                    store="Unavailable", free_gb="unknown", kvm_ok=_kvm_ok(deps), isos=[],
+                    bases=[], vms=[], backend="Unavailable", persistence_store="Unavailable",
+                    notice=qs.get("notice", [""])[0][:300], notice_ok=notice_ok,
+                    default_display=vh.default_display(os.environ), inventory_error=str(exc))
+                return self._html_response(200, _with_nav(page, path))
+            homepage = ""
+            homepage_error = ""
+            if hasattr(host, "guest_homepage"):
+                try:
+                    homepage = host.guest_homepage()
+                except (vh.VmError, OSError, ValueError) as exc:
+                    homepage_error = str(exc)
+            usage = ("", [], "")
+            try:
+                import proxmox_vm_metrics
+                runner = deps.get("runner")
+                usage = proxmox_vm_metrics.running_cpu_history(runner, proxmox_vm_metrics.list_vms(runner), window_s=3600) if runner else usage
+            except Exception:                                      # noqa: BLE001 - the graph is a bonus: no Proxmox data means no graph, never a broken page
+                usage = ("", [], "")
+            page_bytes = vm_page.render_vms_page(
                 store=str(host.store), free_gb=round(host.free_bytes(host.store) / 2**30), kvm_ok=_kvm_ok(deps),
-                isos=vm_page.available_isos(host, iso_dir), bases=host.list_bases(), vms=host.list_vms(),
+                isos=vm_page.available_isos(host, iso_dir), bases=bases, vms=vms,
                 backend=getattr(host, "backend", "Local QEMU"), persistence_store=str(host.persistence_store),
-                homepage=host.guest_homepage() if hasattr(host, "guest_homepage") else "",
+                homepage=homepage, homepage_error=homepage_error,
                 notice=qs.get("notice", [""])[0][:300], notice_ok=notice_ok,
-                default_display=vh.default_display(os.environ)), path))
+                default_display=vh.default_display(os.environ), inventory_error=inventory_error)
+            return self._html_response(200, _with_nav(vm_page.with_usage(page_bytes, *usage) if usage != ("", [], "") else page_bytes, path))
 
         if path.startswith("/hardware"):
+            import hardware_configuration as hc
+            import hardware_inventory
+            import structured_controls
             runner = deps.get("runner")
-            state = real_hardware_state(runner)
-            return self._html_response(200, _with_nav(render_hardware_page(**state), path))
+            target = qs.get('vm',[''])[0]
+            machine_error = ''
+            try:
+                host = _vm_host_for(deps)
+                machines = host.list_vms()
+            except (RuntimeError, OSError, ValueError, vh.VmError) as exc:
+                host, machines = None, []
+                machine_error = '<p role="alert">VM target listing unavailable: '+html.escape(str(exc))+'</p>'
+            options = '<option value="">This host</option>' + ''.join(
+                f'<option value="{html.escape(vm["name"],quote=True)}" {"selected" if vm["name"]==target else ""}>{html.escape(vm["name"])}</option>' for vm in machines)
+            target_html = f'<form method="get" action="/hardware"><label>Configure <select name="vm" onchange="this.form.submit()">{options}</select></label></form>'+machine_error
+            configuration_html = ''
+            driver_sections = {}
+            import hardware_tabs
+            packages = {'available':False,'error':'Target configuration unavailable'}
+            try:
+                if target:
+                    if target not in {vm['name'] for vm in machines}:raise RuntimeError('Unknown managed VM')
+                    runner = hc.GuestRunner(host,target)
+                    state = {'dependency_results':[], 'inventory':{'pci':hardware_inventory.collect_pci(runner)}}
+                else:
+                    state = real_hardware_state(runner)
+                    settings = deps['source'].current_settings() if deps.get('source') else {}
+                    configuration_html = sw.render_configuration_sections({key:settings[key] for key in ('drivers','proxmox','_live_interfaces') if key in settings})
+                import hardware_inventory
+                module_packages = {}
+                for category, devices in hardware_inventory.group_pci((state.get('inventory') or {}).get('pci') or []).items():
+                    driver_sections[category] = hc.render_driver_controls(runner,devices,target,module_packages)
+                packages = hardware_tabs.package_state(runner)
+            except (RuntimeError,vh.VmError,OSError) as exc:
+                state={'dependency_results':[], 'inventory':{}}
+                configuration_html += f'<p role="alert">Configuration unavailable: {html.escape(str(exc))}</p>'
+            configuration_html += '<p>Choose a category to configure its devices or inspect associated packages and firmware.</p>' + structured_controls.script()
+            category_html = hardware_tabs.render(state.get('inventory') or {},configuration_html=configuration_html,
+                driver_sections=driver_sections,packages=packages,target=target,
+                render_inventory=lambda inventory:_render_inventory(inventory,host_drive_links=not bool(target)))
+            page_bytes = render_hardware_page(**state,target_html=target_html,category_html=category_html)
+            if not target:                                     # the host's own overview, as the TUI's Hardware tab shows it
+                import hardware, hardware_overview
+                try:
+                    rows, overview_error = hardware_overview.overview_rows(hardware.collect, hardware.full_inventory)
+                except Exception as exc:                       # noqa: BLE001 - the overview is reported as unavailable, never a broken page
+                    rows, overview_error = [], str(exc)
+                section = hardware_overview.render_section(rows, overview_error).encode()
+                page_bytes = page_bytes.replace(b"</body>", section + b"</body>", 1) if b"</body>" in page_bytes else page_bytes + section
+            return self._html_response(200, _with_nav(page_bytes, path))
 
         if path.startswith("/master-config"):
-            return self._html_response(200, _with_nav(cpw.render_index_page().encode(), path))
+            import master_configuration
+            settings = deps['source'].current_settings() if deps.get('source') else {}
+            admin_result = sw.handle_admin_view(deps['sessions'], self._cookie_token(), now)
+            elevated = deps['elevation_store'].is_elevated(deps.get('runner'), now) if deps.get('runner') else False
+            from dataclasses import asdict
+            import installer_cache, appdata, container_page
+            additional, errors = [], []
+            additional.append(('Hardware and Remote access', '/hardware', {'configuration_source': 'Settings / drivers, diagnostics, proxmox, ssh and firewall above; device driver bindings are observed on the Hardware tab.'}))
+            additional.append(('Installer Cache / declared sources', '/installer-cache', [asdict(entry) for entry in installer_cache.catalog()]))
+            additional.append(('App Isolation / declared policy', '/app-isolation', {
+                persona: [asdict(plan) for plan in appdata.plan_all(persona)]
+                for persona in drive_installer.DEFAULT_PERSONAS}))
+            additional.append(('Distro containers / storage', '/containers', {'data_store': container_page.load_data(deps.get('vm_config_path'))}))
+            accounts = deps.get('operator_accounts')
+            if accounts:
+                additional.append(('Operators / roles', '/operators', accounts.roles()))
+            else:
+                errors.append('Operator role configuration unavailable')
+            draft_store = deps.get('draft_store')
+            if draft_store is None:
+                errors.append('Durable installer/recipe draft source unavailable')
+            else:
+                session = deps['sessions'].get(self._cookie_token(), now)
+                for kind, title, link in (('installer','Installer plan / saved draft','/install-plan'), ('recipe','Environment recipes / saved draft','/recipes')):
+                    try:
+                        draft = draft_store.get(session.username, kind)
+                        additional.append((title, link, {'status':'Saved draft; not applied. Validate again before execution.', **draft} if draft else {'status':'No saved draft for this user.'}))
+                    except (OSError, ValueError, sqlite3.Error) as exc:
+                        errors.append(title + ' unavailable: ' + str(exc))
+            additional.append(('Recovery, Approvals, Audit and Workload jobs', '/recovery', {'configuration_source': 'Recovery and access settings are in Admin above. Approvals, audit entries and job results are operational records, available in their owning tabs.'}))
+            scheduler = deps.get('scheduler')
+            if scheduler:
+                additional.append(('Operations / schedules', '/operations', scheduler.listing()))
+            else:
+                errors.append('Operation schedule source unavailable')
+            try:
+                host = _vm_host_for(deps)
+                additional.append(('Virtual machines / storage', '/vms', {
+                    'store': str(host.store), 'persistence_store': str(host.persistence_store)}))
+                additional.append(('Virtual machines / configuration', '/vms', [
+                    {key: value for key, value in vm.items() if key in
+                     ('name', 'cpus', 'memory_mb', 'disk_gb', 'firmware', 'base', 'persistence_gb', 'recipe', 'homepage')}
+                    for vm in host.list_vms()]))
+            except (RuntimeError, OSError, vh.VmError) as exc:
+                errors.append('Virtual machine configuration unavailable: ' + str(exc))
+            return self._html_response(200, _with_nav(master_configuration.render(
+                settings, admin_result.body.get('settings', {}), elevated=elevated,
+                additional=additional, errors=errors), path))
 
         if path == "/api/detect":
-            result = cpw.handle_detect(deps["runner"], vg_name=deps.get("vg_name", drive_installer.DEFAULT_VG_NAME))
+            result = cpw.handle_detect(deps["runner"], vg_name=deps.get("vg_name"))
             return self._json(result.status, {"outcome": result.outcome, **result.body})
 
         if path == "/api/active-persona":
@@ -1757,7 +3253,571 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
         if path not in _PUBLIC_PATHS and self._refuse_unauthenticated(deps, now, path.split("?", 1)[0]):
             return
 
-        body = self._read_request_body()
+        if path == "/files/upload":
+            import file_manager
+            import path_picker
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+                made = file_manager.save_upload(parse_qs(urlparse(self.path).query).get("path", [""])[0], parse_qs(urlparse(self.path).query).get("name", [""])[0],
+                                                self.rfile, length, path_picker.roots(deps.get("fs_roots") or ()))
+                if deps.get("audit"):
+                    deps["audit"]({"event": "file_uploaded", "path": made, "bytes": length})
+                return self._json(200, {"ok": True, "message": "Uploaded"})
+            except (file_manager.FileManagerError, ValueError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)})
+
+        try:
+            body = self._read_request_body()
+        except ValueError as exc:
+            return self._json(400,{"ok":False,"message":str(exc)})
+
+        if path == "/files/op":
+            import file_manager
+            import path_picker
+            allowed = path_picker.roots(deps.get("fs_roots") or ())
+            try:
+                op = body.get("op")
+                if op == "mkdir":
+                    file_manager.make_folder(str(body.get("path", "")), str(body.get("name", "")), allowed)
+                elif op == "rename":
+                    file_manager.rename(str(body.get("path", "")), str(body.get("name", "")), allowed)
+                elif op == "delete":
+                    file_manager.delete(str(body.get("path", "")), allowed)
+                else:
+                    raise file_manager.FileManagerError("Unknown action.")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "file_" + op, "path": str(body.get("path", ""))})
+                return self._json(200, {"ok": True, "message": "Done"})
+            except file_manager.FileManagerError as exc:
+                return self._json(409, {"ok": False, "message": str(exc)})
+
+        if path == '/hardware/driver':
+            import hardware_configuration as hc
+            try:
+                if set(body) != {'address','pci_id','module','vm'} or not all(isinstance(v,str) for v in body.values()):
+                    raise RuntimeError('Invalid driver request')
+                gate=deps.get('web_gate')
+                if gate is None:raise RuntimeError('Web action authorization unavailable')
+                gate.origin_for_session(deps['sessions'],self._cookie_token(),'hardware_driver',body,now)
+                runner = hc.GuestRunner(_vm_host_for(deps),body['vm']) if body['vm'] else da.PkexecRunner(executor=deps.get('pkexec_executor'))
+                result=hc.load_driver(runner,address=body['address'],pci_id=body['pci_id'],module=body['module'])
+                if deps.get('audit'):deps['audit']({'event':'hardware_driver_result','target':body['vm'] or 'host',**result})
+                return self._json(200,result)
+            except (RuntimeError,vh.VmError,OSError,ValueError) as exc:
+                return self._json(409,{'outcome':'refused','detail':str(exc)})
+
+        if path == "/network/tether":
+            import chat_page
+            import tether
+            severity, message = chat_page.tether_message(tether.auto_tether())
+            if deps.get("audit"):
+                deps["audit"]({"event": "tether_requested", "severity": severity})
+            return self._redirect("/network?notice=" + html.escape(message).replace(" ", "+")[:200])
+
+        if path == "/shell/run":
+            line = str(body.get("line", "")).strip()
+            transcript = deps.setdefault("shell_transcript", [])
+            if line:
+                transcript.append(f"baseline> {line[:80]}")
+                transcript.extend(_shell_run(deps, line, str(body.get("harness", "claude"))))
+                del transcript[:-200]
+            return self._redirect("/shell")
+
+        if path == "/chat/ask":
+            import chat_page
+            try:
+                question = chat_page.clean_question(str(body.get("question", "")))
+            except ValueError as exc:
+                return self._redirect("/chat?notice=" + html.escape(str(exc)).replace(" ", "+"))
+            answer = " ".join(_shell_run(deps, "ask " + question, str(body.get("harness", "claude"))))
+            deps.setdefault("chat_history", []).append((question, answer))
+            del deps["chat_history"][:-20]
+            return self._redirect("/chat")
+
+        if path == "/launcher/settings":
+            import layered_settings
+            import launcher_state
+            try:
+                state = _launcher_state(deps)
+                known = {t["id"]: t for t in state["tiles"] if t["id"]}
+                layer, os_id, changes = body.get("layer"), body.get("id"), body.get("changes")
+                if layer not in ("user", "os", "app"):
+                    raise _settings_error("only the user, os and app settings can be changed here")
+                if not isinstance(os_id, str) or os_id not in known:
+                    raise _settings_error("that OS is not on this machine")
+                if not isinstance(changes, dict):
+                    raise _settings_error("changes must be a set of settings")
+                app_id = None
+                if layer == "app":
+                    app = body.get("app")
+                    if app not in launcher_state.APP_LABELS:
+                        raise _settings_error("unknown application")
+                    app_id = next(a["id"] for a in state["apps"] if a["key"] == app)
+                    if app_id is None:
+                        raise _settings_error("application identifiers are unavailable")
+                applied = None
+                tile = known[os_id]
+                if layer == "os" and tile["kind"] == "ct" and changes.get("swap_mb") is not None:
+                    # a container's swap is a native Proxmox setting: apply it first, and store it only if Proxmox accepted it
+                    mb = layered_settings.SHARED_KEYS["swap_mb"](changes["swap_mb"])
+                    if mb is None:
+                        raise _settings_error("that swap size is not offered")
+                    import repair
+                    argv = ["pct", "set", str(tile["vmid"]), "--swap", str(mb)]
+                    done = (deps.get("container_runner") or repair.RealRunner()).run(argv, timeout=60)
+                    if done.returncode != 0:
+                        return self._json(502, {"ok": False, "error": "Proxmox did not accept it: " + ((done.stderr or done.stdout or "failed").strip()[-160:])})
+                    applied = " ".join(argv)
+                layered_settings.write_layer(_launcher_roots(deps), layer, changes, os_id=os_id if layer != "user" else None,
+                                             app_id=app_id, actor="person")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "launcher_settings", "layer": layer, "keys": sorted(changes), "applied": applied})
+                return self._json(200, {"ok": True, "applied": applied})
+            except (layered_settings.SettingsError, ValueError) as exc:
+                return self._json(400, {"ok": False, "error": str(exc)})
+            except (vh.VmError, OSError) as exc:
+                return self._json(503, {"ok": False, "error": f"unavailable: {exc}"})
+
+        if path == "/memory/swap":
+            import layered_settings
+            import swap_config
+            try:
+                if str(body.get("confirm", "")) != "yes":
+                    raise ValueError("Tick the box to confirm; nothing was changed")
+                gib_text = str(body.get("gib", "")).strip()
+                gib, kind = swap_config.validate(int(gib_text) if gib_text.isdigit() else gib_text, str(body.get("kind", "")))
+                runner, vg = _swap_runner(deps)
+                kwargs = {"ensure_room": deps["swap_ensure_room"]} if deps.get("swap_ensure_room") else {}
+                result = swap_config.apply(runner, vg, gib, kind, **kwargs)
+                layered_settings.write_layer(_launcher_roots(deps), "admin", {"host_swap_gib": gib, "host_swap_kind": kind}, actor="admin")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "host_swap_changed", "gib": gib, "kind": kind, "changed": result["changed"]})
+                notice = ("Swap is now " + (f"{gib} GiB ({kind})" if gib else "off") + ("." if not result["notes"] else ". " + " ".join(result["notes"])))
+            except (ValueError, swap_config.SwapError, layered_settings.SettingsError, RuntimeError, OSError) as exc:
+                notice = str(exc)
+            return self._redirect("/memory?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path in ("/workspaces/mode", "/workspaces/dehydrate"):
+            import repair
+            if str(body.get("confirm", "")) != "yes":
+                return self._redirect("/workspaces?notice=" + html.escape("Tick the box to confirm; nothing was changed").replace(" ", "+"))
+            if path == "/workspaces/mode":
+                mode = str(body.get("mode", ""))
+                if mode not in ("persist", "reset"):
+                    return self._redirect("/workspaces?notice=" + html.escape("Choose keep everything or reset at every start").replace(" ", "+"))
+                action, args, event = f"mode {mode}", ["mode", mode], {"event": "kasm_mode_requested", "mode": mode}
+            else:
+                action, args, event = "removal", ["dehydrate", "--yes"], {"event": "kasm_dehydrate_requested"}
+            done = (deps.get("kasm_runner") or repair.RealRunner()).run(
+                ["systemd-run", "--no-block", "--unit=baseline-kasm-action", "/opt/baseline/bin/baseline-kasm", *args], timeout=30)
+            if deps.get("audit"):
+                deps["audit"](event)
+            notice = f"Started: {action}. This page shows the result." if done.returncode == 0 else "Could not start it: " + (done.stderr or "").strip()[-120:]
+            return self._redirect("/workspaces?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path.startswith("/workspaces/suggestions/"):
+            import kasm_advice
+            import kasm_proposals
+            import kasm_setup
+            action = path.rsplit("/", 1)[1]
+            advice = deps.get("kasm_advice") or kasm_advice.Advice(deps.get("kasm_machine") or kasm_setup.KasmSetup())
+            ident, note = str(body.get("id", "")), str(body.get("note", ""))[:300]
+            try:
+                if action not in ("refresh", "try", "finish", "archive"):
+                    raise kasm_proposals.ProposalError("Unknown action.")
+                if action != "refresh" and str(body.get("confirm", "")) != "yes":
+                    raise kasm_proposals.ProposalError("Tick the box to confirm; nothing was changed.")
+                if action == "refresh":
+                    done = advice.refresh()
+                    intake = done["proposals"]
+                    notice = (f"The Wiki is up to date ({done['wiki']['concerns']} concern(s)). " + (f"{len(intake['accepted'])} new proposal(s) to decide on. " if intake["accepted"] else "No new proposals. ")
+                              + (f"{len(intake['rejected'])} did not fit Kasm's settings and were archived with the reason." if intake["rejected"] else ""))
+                elif action == "try":
+                    done = advice.try_it(ident)
+                    notice = "Trial started: " + ", ".join(done["applied"]) + "." + (f" Kasm needs {' and '.join(done['restart'])} restarted before it takes effect." if done["restart"] else "")
+                elif action == "finish":
+                    done = advice.finish(ident, str(body.get("verdict", "")), note)
+                    notice = "Kept." if done["kept"] else "Put back as it was." + (" Left alone because they changed again since: " + ", ".join(done["left_as_found"]) if done["left_as_found"] else "")
+                else:
+                    advice.archive(ident, note)
+                    notice = "Archived."
+                if deps.get("audit"):
+                    deps["audit"]({"event": "kasm_suggestion_" + action, "id": ident[:61]})
+            except (kasm_proposals.ProposalError, kasm_setup.KasmSetupError, kasm_proposals.ui.SettingsError, OSError, ValueError) as exc:
+                notice = str(exc)
+            return self._redirect("/workspaces/suggestions?notice=" + html.escape(notice[:280]).replace(" ", "+"))
+
+        if path == "/workspaces/settings/customize":
+            import kasm_settings_ui
+            import kasm_setup
+            machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+            try:
+                if str(body.get("reset", "")) == "yes":
+                    machine.write_view(None)
+                    notice = "The everyday screen is back to the shipped list."
+                else:
+                    live = machine.read_settings()
+                    if not live["ok"]:
+                        raise kasm_setup.KasmSetupError(live["reason"])
+                    names = kasm_settings_ui.shown_from_form(live["settings"], body)
+                    machine.write_view(names)
+                    notice = f"Saved: {len(names)} setting(s) on the everyday screen."
+                if deps.get("audit"):
+                    deps["audit"]({"event": "kasm_settings_view_changed"})
+            except (kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                notice = str(exc)
+            return self._redirect("/workspaces/settings/customize?notice=" + html.escape(notice[:250]).replace(" ", "+"))
+
+        if path == "/workspaces/settings/apply":
+            import kasm_settings_ui
+            import kasm_setup
+            machine = deps.get("kasm_machine") or kasm_setup.KasmSetup()
+            back = "/workspaces/settings/advanced" if str(body.get("mode", "")) == "advanced" else "/workspaces/settings"
+            if str(body.get("confirm", "")) != "yes":
+                return self._redirect(back + "?notice=" + html.escape("Tick the box to confirm; nothing was changed").replace(" ", "+"))
+            try:
+                live = machine.read_settings()
+                if not live["ok"]:
+                    raise kasm_setup.KasmSetupError(live["reason"])
+                form = {k: v for k, v in body.items() if k not in ("mode", "confirm")}
+                requested = (kasm_settings_ui.advanced_requested(live["settings"], form) if back.endswith("advanced")
+                             else kasm_settings_ui.simple_requested(live["settings"], form, machine.read_view()))
+                result = machine.apply_settings(requested)
+            except (kasm_settings_ui.SettingsError, kasm_setup.KasmSetupError, OSError, ValueError) as exc:
+                return self._redirect(back + "?notice=" + html.escape(str(exc)[:250]).replace(" ", "+"))
+            if deps.get("audit"):
+                deps["audit"]({"event": "kasm_settings_changed", "settings": sorted(a["name"] for a in result["applied"]), "failed": len(result["failed"])})
+            return self._html_response(200, _with_nav(kasm_settings_ui.render_result(result), "/workspaces"))
+
+        if path == "/workspaces/setup":
+            import repair
+            done = (deps.get("kasm_runner") or repair.RealRunner()).run(["systemctl", "start", "--no-block", "baseline-kasm-setup.service"], timeout=30)
+            if deps.get("audit"):
+                deps["audit"]({"event": "kasm_setup_requested"})
+            notice = "Setting up Kasm. This page shows its progress." if done.returncode == 0 else "Could not start the set-up: " + (done.stderr or "").strip()[-120:]
+            return self._redirect("/workspaces?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path.startswith("/power/"):
+            import power_control
+            import repair
+            action = path[len("/power/"):]
+            try:
+                argv = power_control.action_argv(action)
+                if str(body.get("confirm", "")) != "yes":
+                    raise ValueError("Tick the box to confirm; nothing was done")
+                done = (deps.get("power_runner") or repair.RealRunner()).run(argv, timeout=30)
+                if done.returncode != 0:
+                    raise ValueError("Failed: " + (done.stderr or done.stdout or "the command failed").strip()[-120:])
+                if deps.get("audit"):
+                    deps["audit"]({"event": "power_action", "action": action})
+                return self._html_response(200, _with_nav(power_control.render_done(action), "/power"))
+            except ValueError as exc:
+                return self._redirect("/power?notice=" + html.escape(str(exc)).replace(" ", "+"))
+
+        if path in ("/drive-names/assign", "/drive-names/remove"):
+            import drive_names
+            import repair
+            drives_file = deps.get("drives_file") or drive_names.default_path()
+            try:
+                if path == "/drive-names/assign":
+                    drive_names.assign(drives_file, str(body.get("name", "")), str(body.get("serial", "")),
+                                       drive_names.attached(deps.get("runner") or repair.RealRunner()))
+                    notice = "Named."
+                else:
+                    drive_names.remove(drives_file, str(body.get("name", "")))
+                    notice = "Name removed."
+                if deps.get("audit"):
+                    deps["audit"]({"event": "drive_name_changed", "action": path.rsplit("/", 1)[-1]})        # never the serial
+            except (ValueError, OSError) as exc:
+                notice = str(exc)[:160]
+            return self._redirect("/drive-names?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path == "/audio/bluetooth":
+            import audio_bluetooth
+            import repair
+            try:
+                argv = audio_bluetooth.action_argv(str(body.get("action", "")), str(body.get("mac", "")))
+                done = (deps.get("audio_runner") or repair.RealRunner()).run(argv, timeout=30)
+                notice = f"{argv[1]} {argv[2]}: " + ("done" if done.returncode == 0 else ((done.stderr or done.stdout or "failed").strip()[-100:]))
+                if deps.get("audit"):
+                    deps["audit"]({"event": "bluetooth_action", "action": argv[1]})
+            except ValueError as exc:
+                notice = str(exc)
+            return self._redirect("/audio?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path == "/ceph/install":
+            import ceph_setup
+            job = deps.get("ceph_job")
+            if job is None or job.state()["phase"] != "running":
+                deps["ceph_job"] = ceph_setup.InstallJob(deps.get("ceph_runner"))
+                deps["ceph_job"].start()
+                if deps.get("audit"):
+                    deps["audit"]({"event": "ceph_install_requested"})
+            return self._redirect("/ceph")
+
+        if path in ("/security/tfa/start", "/security/tfa/confirm"):
+            import tfa_setup
+            notice = ""
+            try:
+                userid = tfa_setup.check_userid(str(body.get("userid", "")))
+                pending = deps.setdefault("tfa_pending", {})
+                if path == "/security/tfa/start":
+                    secret = tfa_setup.new_secret()
+                    pending[userid] = (secret, tfa_setup.otpauth_uri(userid, secret, issuer="Baseline " + os.uname().nodename))
+                    notice = f"Key made for {userid}; confirm it with a code from your authenticator"
+                else:
+                    secret, uri = pending[userid]
+                    code = str(body.get("code", "")).strip()
+                    if not tfa_setup.verify(secret, code):
+                        raise ValueError("that code does not match; check the key in your authenticator and try again")
+                    done = deps.get("tfa_run", subprocess.run)(tfa_setup.enroll_argv(userid, uri, code, "Baseline authenticator"),
+                                                              capture_output=True, text=True, timeout=60)
+                    if done.returncode != 0:
+                        raise ValueError("Proxmox refused the registration: " + (done.stderr or "").strip()[-120:])
+                    del pending[userid]
+                    notice = f"Two-factor is on for {userid}"
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "tfa_enrolled", "userid": userid})
+            except KeyError:
+                notice = "start the setup first"
+            except ValueError as exc:
+                notice = str(exc)[:160]
+            return self._redirect("/security?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path.startswith("/tools/") and path[7:] in __import__("tool_runner").TOOLS:
+            import tool_runner
+            name = path[7:]
+            action = str(body.get("action", ""))
+            spec = tool_runner.TOOLS[name]["actions"].get(action)
+            result = tool_runner.run(name, action, str(body.get("value", ""))) if spec and spec.get("post") else None
+            return self._html_response(200, _with_nav(tool_runner.render(name, result), "/tools"))
+
+        if path in ("/signins/capture", "/signins/apply", "/signins/forget"):
+            import signin_share
+            import prebuilt_environment as _pe
+            try:
+                host = _vm_host_for(deps)
+                who = deps["sessions"].get(self._cookie_token(), now)
+                owner = _pe.owner_account(host, who.username if who else "")
+                store = _signin_store(deps)
+                if path == "/signins/capture":
+                    done = signin_share.capture_from(host, store, owner, str(body.get("app", "")), str(body.get("vm", "")))
+                    message = f"Saved the {signin_share.LABELS.get(done['app'], done['app'])} sign-in from {done['from']}."
+                elif path == "/signins/forget":
+                    store.forget(str(body.get("app", "")))
+                    message = "Forgotten."
+                else:
+                    report = signin_share.apply_to_running(host, store, owner)
+                    placed = sum(1 for apps in report.values() for r in apps.values() if r.get("applied"))
+                    problems = [f"{vm}: {app}: {r['error']}" for vm, apps in report.items() for app, r in apps.items() if r.get("error")]
+                    message = f"Placed {placed} sign-in(s) on {len(report)} running machine(s)." + (" Problems: " + "; ".join(problems) if problems else "")
+                if deps.get("audit"):
+                    deps["audit"]({"event": "signin_" + path.rsplit("/", 1)[1], "app": str(body.get("app", ""))})
+                return self._json(200, {"ok": True, "message": message})
+            except (signin_share.SigninError, vh.VmError, OSError, ValueError, RuntimeError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)[:240]})
+
+        if path == "/turnkey/owner":
+            import prebuilt_environment as _pe
+            try:
+                _pe.set_owner(_vm_host_for(deps), str(body.get("name", "")))
+            except (_pe.PrebuiltError, OSError) as exc:
+                return self._redirect("/turnkey?notice=" + html.escape(str(exc)[:160]).replace(" ", "+"))
+            who = deps["sessions"].get(self._cookie_token(), now)
+            _turnkey_start(deps, who.username if who else "", force=True)
+            return self._redirect("/turnkey")
+
+        if path == "/turnkey/run":
+            who = deps["sessions"].get(self._cookie_token(), now)
+            _turnkey_start(deps, who.username if who else "", force=True)
+            return self._redirect("/turnkey")
+
+        if path in ("/vault/grant", "/vault/revoke", "/vault/deliver"):
+            import vault_grants
+            import vault
+            try:
+                target, name = str(body.get("target", "")), str(body.get("name", ""))
+                if "vault_grants_path" not in deps and not vault.root_available("/mnt/USER_ADMIN/vault"):
+                    return self._json(409, {"ok": False, "message": "USER_ADMIN is not mounted; credential grants were not changed"})
+                grants = _vault_grants_path(deps)
+                if path == "/vault/grant":
+                    vault_grants.grant(grants, target, name)
+                    return self._json(200, {"ok": True, "message": f"{name} granted to {target}"})
+                if path == "/vault/revoke":
+                    vault_grants.revoke(grants, target, name)
+                    return self._json(200, {"ok": True, "message": f"{name} no longer granted to {target}"})
+                owner_uid = 1100 if target.startswith("vm:") else 0
+                report = vault_grants.deliver(grants, target, _vault_reader(deps), _vault_push_for(deps, target), owner_uid=owner_uid)
+                if deps.get("audit"):
+                    deps["audit"]({"event": "vault_delivered", "target": target, "delivered": report["delivered"], "skipped": sorted(report["skipped"])})
+                return self._json(200, {"ok": not report["skipped"], "message": f"Sent {len(report['delivered'])}; skipped {len(report['skipped'])}", **report})
+            except (vault_grants.GrantError, ValueError, OSError, vh.VmError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)[:200]})
+
+        if path in ("/vault/put", "/vault/delete", "/vault/reveal"):
+            import vault
+            try:
+                store = _vault_store(deps, str(body.get("scope", "")))
+                name = str(body.get("name", ""))
+                if path == "/vault/put":
+                    store.put(name, str(body.get("value", "")))
+                    notice = f"{name} saved"
+                elif path == "/vault/delete":
+                    store.delete(name) if hasattr(store, "delete") else store.vault.delete(name)
+                    notice = f"{name} deleted"
+                else:
+                    value = store.get(name)
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "vault_secret_shown", "name": name})
+                    return self._json(200, {"ok": value is not None, "value": value or "", "message": "" if value is not None else "No such secret"})
+                if deps.get("audit"):
+                    deps["audit"]({"event": "vault_" + path.rsplit("/", 1)[1], "name": name})
+                return self._json(200, {"ok": True, "message": notice})
+            except (vault.VaultLocked, vault.WrongPassphrase):
+                return self._json(409, {"ok": False, "message": "Unlock the vault first."})
+            except (vault.VaultError, vault.SealError, ValueError, OSError) as exc:
+                return self._json(409, {"ok": False, "message": str(exc)[:160]})
+
+        if path in ("/vault/set", "/vault/unlock", "/vault/lock"):
+            import vault
+            notice = ""
+            roots = _vault_roots(deps)
+            if path != "/vault/lock" and any(not _vault_root_available(deps, root) for _label, _scope, root in roots):
+                return self._json(409, {"ok": False, "message": "Vault storage is not mounted; no files were changed."})
+            try:
+                if path == "/vault/lock":
+                    for _label, _scope, root in roots:
+                        vault.Vault(root).lock(vault.RUNTIME_DIR)
+                    deps.pop("vault_passphrase", None)
+                    import shutil
+                    shutil.rmtree(deps.get("ai_runtime_root") or "/run/baseline-ai", ignore_errors=True)
+                    notice = "Vault locked"
+                else:
+                    passphrase = str(body.get("passphrase", ""))
+                    if path == "/vault/set":
+                        if passphrase != str(body.get("again", "")):
+                            raise ValueError("the two passphrases differ")
+                        for _label, _scope, root in roots:
+                            store = vault.Vault(root)
+                            if not store.has_passphrase():
+                                store.set_passphrase(passphrase)
+                    names = []
+                    for _label, _scope, root in roots:
+                        store = vault.Vault(root)
+                        if store.has_passphrase():
+                            names += store.unlock(passphrase, vault.RUNTIME_DIR)
+                    deps["vault_passphrase"] = passphrase
+                    notice = f"Vault unlocked for this boot ({len(names)} secrets)"
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "vault_unlocked", "count": len(names)})
+            except vault.WrongPassphrase:
+                notice = "Wrong passphrase"
+            except (vault.VaultError, vault.SealError, ValueError, OSError) as exc:
+                notice = str(exc)[:160]
+            return self._redirect("/vault?notice=" + html.escape(notice).replace(" ", "+"))
+
+        if path in ('/ai-setup/installer-profile', '/ai-setup/activate'):
+            import ai_provisioning as ai
+            import vault
+            import configuration_drafts
+            me = deps['sessions'].get(self._cookie_token(), now)
+            if me.role not in ('admin', 'operator'):
+                return self._json(403, {'ok': False, 'message': 'AI setup requires an operator account'})
+            try:
+                if path == '/ai-setup/activate':
+                    if set(body) != {'target', 'account'}:
+                        raise ai.SetupError('select a target and optional guest account')
+                    result = _ai_activate(deps, me.username, str(body['target']), str(body['account']) or None)
+                    return self._json(200, {'ok': True, 'message': 'AI setup delivered to runtime; provider authentication was not tested.', **result})
+                if set(body) not in ({'selection', 'revision'}, {'selection', 'revision', 'profile'}):
+                    raise ai.SetupError('invalid AI setup request')
+                selected = ai.choice({'host_configuration': {'ai_setup': body['selection']}})
+                drafts, draft = _ai_draft(deps, me.username)
+                if (draft['revision'] if draft else 0) != body['revision']:
+                    raise configuration_drafts.DraftConflict('Installer draft changed; reload AI setup before saving')
+                if selected['mode'] != 'none':
+                    store = _vault_store(deps, 'admin')
+                    raw_store = getattr(store, '_vault', store)
+                    if not raw_store.has_passphrase() or not deps.get('vault_passphrase') or not raw_store.check_passphrase(deps['vault_passphrase']):
+                        raise ai.SetupError('unlock the encrypted USER_ADMIN vault before importing AI setup')
+                    profile = ai.import_parent(deps.get('ai_parent_home') or Path.home(), selected['providers'], deps.get('ai_parent_environ')) if selected['mode'] == 'parent' else body.get('profile')
+                    if not isinstance(profile, dict) or set(profile.get('providers', {})) != set(selected['providers']):
+                        raise ai.SetupError('enter configurations for exactly the selected providers')
+                    ai.save_profile(raw_store, ai.PROFILE, profile, deps.get('vault_passphrase'))
+                    selected = dict(selected, profile_sha256=hashlib.sha256((raw_store.root / ai.PROFILE).read_bytes()).hexdigest())
+                document = dict(draft['document']) if draft else __import__('install_plan').autofill(
+                    deps.get('install_plan_discovery', __import__('install_plan_page').discover_current)())
+                document.setdefault('host_configuration', {})['ai_setup'] = selected
+                saved = drafts.save(me.username, 'installer', document, expected_revision=body['revision'])
+                if deps.get('audit'):
+                    deps['audit']({'event': 'ai_setup_prepared', 'mode': selected['mode'], 'providers': selected['providers']})
+                return self._json(200, {'ok': True, 'revision': saved['revision'], 'message': 'AI setup saved: encrypted profile in USER_ADMIN vault; selection in installer plan. No provider sign-in was tested.'})
+            except (ai.SetupError, vault.VaultError, vault.SealError, configuration_drafts.DraftError, ValueError, OSError, KeyError, TypeError):
+                return self._json(409, {'ok': False, 'message': 'AI setup was not saved or delivered. Check draft revision, unlocked USER_ADMIN vault, provider configuration, target grant and guest availability.'})
+
+        if path.startswith("/ai-setup/"):
+            import ai_setup_page
+            import provider_setup
+            import vault
+            roots = {scope: root for _label, scope, root in _vault_roots(deps)}
+            try:
+                if path == "/ai-setup/claude/start":
+                    old = deps.get("claude_setup")
+                    if old is not None:
+                        old.cancel()
+                    deps["claude_setup"] = provider_setup.GuidedSetup(
+                        deps.get("claude_setup_argv") or ["claude", "setup-token"], _vault_for(deps, vault.ADMIN_VAULT),
+                        "CLAUDE_CODE_OAUTH_TOKEN",
+                        allowed_url_prefix=ai_setup_page.CLAUDE_URL_PREFIX)
+                    deps["claude_setup"].start()
+                    return self._redirect("/ai-setup/claude")
+                if path == "/ai-setup/claude/code":
+                    session = deps.get("claude_setup")
+                    if session is None:
+                        raise provider_setup.SetupError("no sign-in is in progress")
+                    session.submit_code(str(body.get("code", "")))
+                    return self._redirect("/ai-setup/claude")
+                if path == "/ai-setup/claude/cancel":
+                    if deps.get("claude_setup") is not None:
+                        deps["claude_setup"].cancel()
+                    return self._redirect("/ai-setup")
+                if path == "/ai-setup/paste":
+                    name, scope = ai_setup_page.paste_target(str(body.get("name", "")), str(body.get("scope", "")))
+                    _vault_for(deps, roots[scope]).put(name, str(body.get("value", "")))
+                    if deps.get("audit"):
+                        deps["audit"]({"event": "vault_secret_stored", "name": name, "scope": scope})     # never the value
+                    return self._redirect("/ai-setup?notice=" + html.escape(f"{name} saved to the {scope} vault"))
+            except vault.VaultLocked:
+                return self._redirect("/vault?notice=Unlock+the+vault+first")
+            except (provider_setup.SetupError, vault.VaultError, vault.SealError, ValueError, OSError) as exc:
+                return self._redirect("/ai-setup?notice=" + html.escape(str(exc))[:180].replace(" ", "+"))
+
+        if path == "/console/switch":
+            import console_switch
+            if not console_switch.is_local(self.client_address[0]):
+                return self._html_response(403, console_switch.refused_page())
+            console_switch.switch(run=deps.get("console_run", subprocess.run))
+            return self._redirect("/console")
+
+        if path == "/host/restart":
+            import host_restart
+            runner = deps.get("runner")
+            try:
+                if runner is None:
+                    raise RuntimeError("Host restart service is unavailable")
+                result = host_restart.request_restart(runner)
+                status = 200
+            except (RuntimeError, OSError) as exc:
+                result = {"outcome": "failed", "detail": str(exc)}
+                status = 503
+            if deps.get("audit"):
+                deps["audit"]({"event": "host_restart_request", **result})
+            if self._is_json_request():
+                return self._json(status, result)
+            return self._html_response(status, _with_nav(
+                ('<html><body><h1>Host restart</h1><p>' + html.escape(result["detail"]) +
+                 '</p><a href="/drive-admin">Back to Drive Administration</a></body></html>').encode(),
+                "/drive-admin"))
 
         if path == "/login":
             if self._throttled("login", now):
@@ -1767,8 +3827,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             if role is not None:
                 session = deps["sessions"].create(body["username"], now, role=role)
                 session.ttl_s = _operator_session_seconds(deps)
+                deps["sessions"].persist(session)
                 self._record_attempt("login", now, ok=True)
-                return self._redirect("/operations", set_cookie=ws.session_cookie(session.token))
+                _turnkey_start(deps, body["username"])
+                return self._redirect("/operations" if session.role == "operator" else "/home", set_cookie=ws.session_cookie(session.token))
             result = sw.handle_login(deps["verifier"], deps["sessions"],
                                       body.get("username", ""), body.get("password", ""), now,
                                       persona_provider=deps.get("persona_provider"))
@@ -1776,10 +3838,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 operator = deps["sessions"].sessions[result.body["token"]]
                 operator.role = "operator"
                 operator.ttl_s = _operator_session_seconds(deps)
+                deps["sessions"].persist(operator)
             self._record_attempt("login", now, ok=result.outcome == "applied")
             if result.outcome == "applied":
                 role = deps["sessions"].sessions[result.body["token"]].role
-                return self._redirect("/operations" if role == "operator" else "/settings",
+                _turnkey_start(deps, body.get("username", ""))
+                return self._redirect("/operations" if role == "operator" else "/home",
                                       set_cookie=ws.session_cookie(result.body["token"]))
             return self._html_response(401, _with_nav(sw.render_login_page("Invalid username or password."), "/login"))
 
@@ -1792,11 +3856,26 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 values = sw.reconstruct_typed_form_values(body, list(current.keys()))
             result = sw.handle_settings_edit(deps["sessions"], deps["applier"], self._cookie_token(),
                                               section, values, now, persona_provider=deps.get("persona_provider"))
+            if self._is_json_request():
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
             if result.outcome == "refused" and result.status == 401:
                 return self._redirect("/login")
             notice = result.body.get("detail") or result.body.get("reason", "")
             settings = deps["source"].current_settings() if deps.get("source") else {}
             return self._html_response(result.status, _with_nav(sw.render_settings_page(settings, notice), "/settings"))
+
+        if path == "/diagnostics/iperf3/run":
+            options = body if self._is_json_request() else sw.reconstruct_typed_form_values(
+                body, ["role", "peer_address", "port", "bind_address"])
+            result = sw.handle_iperf3_run(deps["sessions"], deps["applier"], self._cookie_token(), options, now,
+                                          persona_provider=deps.get("persona_provider"))
+            if deps.get("audit"):
+                deps["audit"]({"event": "iperf3_request", "outcome": result.outcome, **result.body})
+            if self._is_json_request():
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
+            settings = deps["source"].current_settings() if deps.get("source") else {}
+            return self._html_response(result.status, _with_nav(sw.render_settings_page(
+                settings, result.body.get("detail") or result.body.get("error", "")), "/settings"))
 
         if path == "/admin/elevate":
             if self._throttled("elevate", now):
@@ -1814,6 +3893,8 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             values = body if self._is_json_request() else sw.reconstruct_typed_form_values(body, ["value"])
             result = sw.handle_admin_edit(deps["sessions"], deps.get("runner"), deps["elevation_store"],
                                            self._cookie_token(), group, key, values.get("value"), now)
+            if self._is_json_request():
+                return self._json(result.status, {"outcome": result.outcome, **result.body})
             notice = result.body.get("detail") or result.body.get("error") or result.body.get("reason", "")
             return self._redirect(f"/admin?notice={notice}")
 
@@ -1891,6 +3972,22 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             action_id, params, _serial = request
             return self._start_drive_job(deps, action_id, params, authorization, store)
 
+        if path == "/drive-admin/execute-native":
+            if not isinstance(body, dict) or set(body) != {"challenge_id"} or not isinstance(body["challenge_id"], str):
+                return self._json(400, {"detail": "An exact drive-action permission request is required"})
+            me = deps["sessions"].get(self._cookie_token(), now)
+            if me is None or me.role not in ("admin", "operator"):
+                return self._json(403, {"detail": "Native drive actions require an operator account"})
+            store = _hitl_store(deps)
+            request = store.pending_request(body["challenge_id"])
+            if request is None or request[0] != "unmount_partition":
+                return self._json(403, {"detail": "Native partition-unmount request expired or already used"})
+            try:
+                authorization = store.request_native_policykit(self._cookie_token(), body["challenge_id"])
+            except hitl.ConfirmationError as exc:
+                return self._json(403, {"detail": str(exc)})
+            return self._start_drive_job(deps, request[0], request[1], authorization, store)
+
         if path == "/drive-admin/approvals":
             if self._throttled("confirm", now):
                 return
@@ -1931,6 +4028,37 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     return self._json(200,jobs.acknowledge(jid,body.get("name","")))
                 job=jobs.get(jid)
                 context=job.get('context',{})
+                if job['kind']=='installer' and job['action']=='update_installed_drive':
+                    import installed_drive_update
+                    bundle=Path(jobs.parameters(jid)['backup_id'])
+                    owner=deps['sessions'].get(self._cookie_token(),now).username
+                    owned=Path(deps['installer_bundle_root'])/hashlib.sha256(owner.encode()).hexdigest()
+                    if bundle.parent != owned or bundle.is_symlink():
+                        return self._json(403,{'message':'Update snapshot belongs to another operator'})
+                    try:
+                        observation=installed_drive_update.inspect_update(bundle)
+                    except (installed_drive_update.UpdateError,OSError,ValueError,KeyError) as exc:
+                        observation={'available':False,'message':'Native update inspection unavailable: '+str(exc)}
+                    return self._json(200,jobs.inspect(jid,observation))
+                if job['kind']=='installer' and job['action']=='acquire_ubuntu_source':
+                    import installer_sources,installer_cache
+                    try:
+                        lock=installer_sources.locks(deps['runner'],deps.get('installer_cache_root',installer_cache.DEFAULT_CACHE_ROOT)).get('ubuntu_base')
+                        message='Source verified on current cache filesystem.' if lock else 'No published source; acknowledge and retry acquisition.'
+                        observation={'available':True,'message':message+' No installation stages ran.'}
+                    except (installer_sources.SourceError,OSError) as exc:
+                        observation={'available':False,'message':str(exc)+' Restore cache mount before inspecting acquisition.'}
+                    return self._json(200,jobs.inspect(jid,observation))
+                if job['kind']=='installer' and job['action']=='prepare_inputs':
+                    import installer_inputs
+                    owner=deps['sessions'].get(self._cookie_token(),now).username
+                    folder=Path(deps['installer_bundle_root'])/hashlib.sha256(owner.encode()).hexdigest()/job['name']
+                    try:
+                        checks=installer_inputs.verify(folder)
+                        observation={'available':True,'message':'Source preparation files verified; ready='+str(checks['ready'])+'. No physical installation stages ran.'}
+                    except (installer_inputs.InputError,OSError,ValueError) as exc:
+                        observation={'available':True,'message':'Source preparation incomplete or damaged: '+str(exc)+'. These source-only files are not usable. No physical installation stages ran; acknowledge this failed preparation and prepare a new bundle.'}
+                    return self._json(200,jobs.inspect(jid,observation))
                 if job['kind']=='container':
                     import distro_containers
                     host=deps.get('container_host') or (distro_containers.DistroContainers(context['data_store']) if context.get('data_store') else _container_host_for(deps))
@@ -1951,6 +4079,268 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 return self._json(200,jobs.inspect(jid,observation))
             except (workload_jobs.JobError,ValueError,TypeError) as exc:
                 return self._json(409,{'message':str(exc)})
+
+        if path in ('/install-plan/draft', '/recipes/draft', '/install-plan/display'):
+            import configuration_drafts
+            store = deps.get('draft_store')
+            if store is None:
+                return self._json(503, {'ok':False, 'message':'Durable configuration draft storage unavailable'})
+            if not isinstance(body,dict) or set(body) != {'document','revision'}:
+                return self._json(400, {'ok':False,'message':'Draft requires document and revision only'})
+            session = deps['sessions'].get(self._cookie_token(), now)
+            kind = 'installer-display' if path == '/install-plan/display' else 'installer' if path.startswith('/install-plan') else 'recipe'
+            try:
+                draft = store.save(session.username, kind, body['document'], expected_revision=body['revision'])
+                if deps.get('audit'):
+                    deps['audit']({'event':'configuration_draft_saved','username':session.username,'kind':kind,'revision':draft['revision']})
+                return self._json(200, {'ok':True, 'draft':draft})
+            except configuration_drafts.DraftConflict as exc:
+                return self._json(409, {'ok':False,'message':str(exc)})
+            except configuration_drafts.DraftError as exc:
+                return self._json(400, {'ok':False,'message':str(exc)})
+            except (OSError, sqlite3.Error) as exc:
+                return self._json(503, {'ok':False,'message':'Draft could not be saved: ' + str(exc)})
+
+        if path == "/network/connection":
+            import network, netpref, network_connection
+            if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
+                return self._json(403,{'message':'Changing a network connection requires an operator account'})
+            if not isinstance(body,dict) or not isinstance(body.get('dev'),str) or not isinstance(body.get('alias'),str) or not isinstance(body.get('power'),bool):
+                return self._json(400,{'message':'Provide a connection, a name and whether it is switched on'})
+            try:
+                known = {i["name"] for i in network.list_interfaces()}
+            except (OSError, network.NetworkProbeError):
+                known = set()
+            if body['dev'] not in known:
+                return self._json(404,{'message':'no such network connection'})
+            try:
+                admin_up = network.is_admin_up(body['dev'])
+            except network.NetworkProbeError:
+                admin_up = None
+            if admin_up and not body['power'] and not body.get('confirm_power_off'):
+                try:
+                    carrying = any(f["fact"] == "nic_detected" and body['dev'] in str(f.get("detail", "")) for f in network.check_lifeline())
+                except (OSError, network.NetworkProbeError):
+                    carrying = True                                # unknown: ask for the confirmation rather than risk cutting this page off
+                if carrying:
+                    return self._json(409,{'ok':False,'message':'This connection may carry your internet access and this page. Confirm to switch it off.','needs_confirmation':True})
+            messages, failed = network_connection.apply_changes(network, netpref, body['dev'], alias=body['alias'], power_on=body['power'], admin_up_at_open=admin_up, role=body.get('role') or None)
+            if deps.get('audit'):deps['audit']({'event':'network_connection_changed','dev':body['dev'],'failed':failed})
+            return self._json(409 if failed else 200,{'ok':not failed,'message':"; ".join(messages) or 'Nothing changed.'})
+
+        if path == "/web-address":
+            import web_address
+            if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
+                return self._json(403,{'message':'Changing the web address requires an operator account'})
+            if not isinstance(body,dict) or set(body)!={'bind_host','port'}:
+                return self._json(400,{'message':'Provide an address and a port'})
+            try:
+                saved=web_address.save(body['bind_host'],body['port'],path=deps.get("web_env_file") or web_address.ENV_FILE,
+                                       local_addresses=web_address.local_addresses(deps["runner"]) if deps.get("runner") else None)
+            except (web_address.AddressError,OSError) as exc:
+                return self._json(400,{'message':str(exc)})
+            if deps.get('audit'):deps['audit']({'event':'web_address_changed','bind_host':saved['bind_host'],'port':saved['port']})
+            return self._json(200,{'ok':True,**saved})
+
+        if path == "/managed-mode":
+            import managed_mode
+            if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
+                return self._json(403,{'message':'Changing managed server mode requires an operator account'})
+            if not isinstance(body,dict) or set(body)-{'mode','mirror_root','remote_rebuild'} or not isinstance(body.get('mirror_root'),(str,type(None))) or not isinstance(body.get('remote_rebuild',False),bool):
+                return self._json(400,{'message':'Provide a mode, where the mirror is kept and whether remote rebuild is allowed'})
+            if body.get('mirror_root'):
+                import path_picker
+                checked = path_picker.validate(body['mirror_root'], path_picker.roots(deps.get("fs_roots") or ()))
+                if not checked['ok']:
+                    return self._json(400,{'message':checked['message']})
+                body = dict(body, mirror_root=checked['path'])
+            try:
+                saved=managed_mode.save(body,deps.get("managed_file"))
+            except (managed_mode.ManagedError,OSError) as exc:
+                return self._json(400,{'message':str(exc)})
+            if deps.get('audit'):deps['audit']({'event':'managed_mode_changed','mode':saved['mode'],'remote_rebuild':saved['remote_rebuild']})
+            return self._json(200,{'ok':True,'mode':saved['mode']})
+
+        if path == '/installer-cache/acquire':
+            import installer_sources,installer_cache
+            jobs=deps.get('workload_jobs');gate=deps.get('web_gate')
+            if jobs is None or gate is None or deps.get('runner') is None:return self._json(503,{'message':'Durable native acquisition unavailable'})
+            if not isinstance(body,dict) or set(body)!={'source','request_id'} or body['source']!='ubuntu_base' or not isinstance(body['request_id'],str) or not 1<=len(body['request_id'])<=64:
+                return self._json(400,{'message':'Choose the supported pinned Ubuntu source and a request ID'})
+            owner=deps['sessions'].get(self._cookie_token(),now).username
+            identity=hashlib.sha256((owner+':'+body['request_id']).encode()).hexdigest()
+            signed={'source':'ubuntu_base'}
+            try:
+                origin=gate.origin_for_session(deps['sessions'],self._cookie_token(),'installer_source_acquire',signed,now)
+                root=deps.get('installer_cache_root',installer_cache.DEFAULT_CACHE_ROOT)
+                def acquire(report):
+                    wg.require(origin,'installer_source_acquire',signed)
+                    report('Checking mounted INSTALLER_CACHE identity, acquiring pinned vanilla Ubuntu source, and verifying SHA256.')
+                    try:lock=installer_sources.acquire_ubuntu(deps['runner'],root)
+                    except (installer_sources.SourceError,OSError) as exc:return {'ok':False,'message':str(exc)}
+                    return {'ok':True,'message':'Vanilla Ubuntu source verified at '+lock['path']+'. HTTPS and SHA256 verified; detached signature not verified. No VM or installation created.'}
+                job=jobs.submit('installer','acquire_ubuntu_source',{'name':'ubuntu-source'},acquire,request_id='source:'+identity,with_progress=True)
+                return self._json(202,{'job_id':job['id'],'state':job['state'],'executed':False})
+            except (workload_jobs.JobError,wg.NotFromWebApp,ValueError) as exc:return self._json(409,{'message':str(exc)})
+
+        if path == '/install-plan/app-config':
+            import application_bundle,install_plan_page
+            if not isinstance(body,dict) or set(body)!={'app','configuration'} or not isinstance(body['configuration'],dict):
+                return self._json(400,{'message':'Provide an application and configuration object'})
+            try:
+                install_plan_page.catalog_entries(deps.get('installer_repo_root'),
+                    catalog_directory=deps.get('application_catalog_root'))
+                checked=application_bundle.capture(body['app'],json.dumps(body['configuration']))
+                if checked['excluded_count']:raise application_bundle.er.RecipeError('Unsupported application configuration fields')
+                return self._json(200,{'configuration':checked['configuration'],'applied':False})
+            except (application_bundle.er.RecipeError,OSError,ValueError,KeyError,TypeError) as exc:
+                return self._json(400,{'message':str(exc)})
+
+        if path == '/install-plan/catalog':
+            import application_bundle,install_plan_page
+            if not isinstance(body,dict) or set(body)!={'definition'}:
+                return self._json(400,{'message':'Provide a native application definition'})
+            if deps['sessions'].get(self._cookie_token(),now).role not in ('admin','operator'):
+                return self._json(403,{'message':'Catalog changes require an operator account'})
+            try:
+                definition=body['definition']
+                application_bundle.validate_application_definition(definition)
+                folder=deps.get('application_catalog_root') or application_bundle.application_catalog_directory()
+                application_bundle.save_application_definition(folder,definition)
+                application_bundle.register_application(definition)
+                return self._json(201,{'registered':True,'installed':False,'id':definition['id']})
+            except (application_bundle.er.RecipeError,OSError,ValueError,KeyError,TypeError) as exc:
+                return self._json(400,{'message':str(exc)})
+
+        if path == '/install-plan/execute-native':
+            if not isinstance(body,dict) or set(body)!={'challenge_id'} or not isinstance(body['challenge_id'],str):
+                return self._json(400,{'detail':'An exact native update challenge is required'})
+            me=deps['sessions'].get(self._cookie_token(),now)
+            if me.role not in ('admin','operator'):
+                return self._json(403,{'detail':'Automatic native updates require an operator account'})
+            store=_hitl_store(deps)
+            request=store.pending_request(body['challenge_id'])
+            if request is None or request[0]!='update_installed_drive':
+                return self._json(403,{'detail':'Native update challenge expired or already used'})
+            try:
+                authorization=store.request_native_update(self._cookie_token(),body['challenge_id'])
+            except hitl.ConfirmationError as exc:
+                return self._json(403,{'detail':str(exc)})
+            return self._start_drive_job(deps,request[0],request[1],authorization,store)
+
+        if path in ('/install-plan/continue','/install-plan/update'):
+            selected=deps.get('installer_selected_serial')
+            if body.get('serial') in deps.get('installer_protected_serials',[]) or (selected and body.get('serial') != selected):
+                return self._json(403,{'detail':'This drive is protected or differs from the selected installation target'})
+
+        if path == '/install-plan/continue':
+            import installer_inputs,installed_drive_update
+            jobs=deps.get('workload_jobs');gate=deps.get('web_gate')
+            if jobs is None or gate is None or not deps.get('installer_bundle_root'):
+                return self._json(503,{'message':'Durable installer continuation unavailable'})
+            if (not isinstance(body,dict) or set(body)!={'serial','request_id'}
+                    or not isinstance(body['serial'],str) or not isinstance(body['request_id'],str)
+                    or not 1<=len(body['request_id'])<=64):
+                return self._json(400,{'message':'A selected serial and continuation request ID are required'})
+            try:
+                device=deps.get('installed_update_discovery',installed_drive_update.discover_path)(body['serial'])
+                deps.get('installed_update_recovery',installed_drive_update.discover_recovery)(body['serial'])
+                owner=deps['sessions'].get(self._cookie_token(),now).username
+                drafts=deps.get('draft_store')
+                draft=drafts.get(owner,'installer') if drafts else None
+                recipe=drafts.get(owner,'recipe') if drafts else None
+                plan=draft['document'] if draft else {'installed_update':{'serial':body['serial']}}
+                settings=deps['source'].current_settings() if deps.get('source') else {}
+                settings={key:value for key,value in settings.items() if not key.startswith('_')}
+                identity=hashlib.sha256(json.dumps({'owner':owner,'serial':body['serial'],
+                    'request':body['request_id']},sort_keys=True).encode()).hexdigest()
+                name=identity[:32]
+                folder=Path(deps['installer_bundle_root'])/hashlib.sha256(owner.encode()).hexdigest()/name
+                signed={'serial':body['serial'],'bundle':name,'device_path':device}
+                origin=gate.origin_for_session(deps['sessions'],self._cookie_token(),'installer_prepare_inputs',signed,now)
+                root=Path(deps.get('installer_repo_root') or Path(__file__).resolve().parents[2])
+                def capture(report):
+                    wg.require(origin,'installer_prepare_inputs',signed)
+                    report('Automatically capturing current source and existing configuration; no physical writes.')
+                    installer_inputs.prepare(root,folder,plan=plan,settings=settings,
+                        recipe=recipe['document'] if recipe else None,artifact_locks={})
+                    installer_inputs.verify(folder)
+                    return {'ok':True,'message':'Existing-installation update inputs captured and integrity checked. '
+                        'Online target package provisioning still requires native authorization; no new installation or workload was created.'}
+                job=jobs.submit('installer','prepare_inputs',{'name':name},capture,
+                    request_id='update-inputs:'+identity,with_progress=True)
+                return self._json(202,{'job_id':job['id'],'state':job['state'],'executed':False})
+            except (installed_drive_update.UpdateError,installer_inputs.InputError,workload_jobs.JobError,
+                    wg.NotFromWebApp,OSError,ValueError) as exc:
+                return self._json(409,{'message':str(exc),'executed':False})
+
+        if path == '/install-plan/update':
+            import installer_inputs,installed_drive_update
+            jobs=deps.get('workload_jobs')
+            if jobs is None or not deps.get('installer_bundle_root'):
+                return self._json(503,{'outcome':'refused','detail':'Durable installer inputs unavailable'})
+            if (not isinstance(body,dict) or set(body)!={'serial','job_id'}
+                    or not isinstance(body['serial'],str) or not isinstance(body['job_id'],str)):
+                return self._json(400,{'outcome':'refused','detail':'Select a serial and completed preparation job'})
+            try:
+                job=jobs.get(body['job_id'])
+                if (job['kind'],job['action'],job['state'])!=('installer','prepare_inputs','completed'):
+                    raise installer_inputs.InputError('A completed preparation job is required')
+                owner=deps['sessions'].get(self._cookie_token(),now).username
+                folder=Path(deps['installer_bundle_root'])/hashlib.sha256(owner.encode()).hexdigest()/job['name']
+                installer_inputs.verify(folder)
+                device=deps.get('installed_update_discovery',installed_drive_update.discover_path)(body['serial'])
+                recovery=deps.get('installed_update_recovery',installed_drive_update.discover_recovery)(body['serial'])
+                prepared=da.prepare_action('update_installed_drive',{'device_path':device,
+                    'input_bundle':str(folder),'recovery_folder':str(recovery)},pds_runner=deps.get('pds_runner'))
+                challenge=_hitl_store(deps).challenge(self._cookie_token(),'update_installed_drive',
+                    prepared['params'],prepared['serial'],prepared['summary'])
+                return self._json(200,{'outcome':'confirmation_required','challenge':challenge})
+            except (installer_inputs.InputError,installed_drive_update.UpdateError,workload_jobs.JobError,
+                    pds.PhysicalDeviceSafetyError,OSError,ValueError) as exc:
+                return self._json(409,{'outcome':'refused','detail':str(exc)})
+
+        if path == '/install-plan/prepare-inputs':
+            import installer_inputs
+            drafts=deps.get('draft_store');jobs=deps.get('workload_jobs');gate=deps.get('web_gate')
+            if drafts is None or jobs is None or gate is None or not deps.get('installer_bundle_root'):
+                return self._json(503,{'message':'Durable installer preparation unavailable'})
+            if not isinstance(body,dict) or set(body)!={'revision','request_id'} or type(body['revision']) is not int or not isinstance(body['request_id'],str) or not 1<=len(body['request_id'])<=64:
+                return self._json(400,{'message':'Installer preparation requires saved draft revision and request ID'})
+            owner=deps['sessions'].get(self._cookie_token(),now).username
+            try:
+                draft=drafts.get(owner,'installer')
+                if draft is None or draft['revision']!=body['revision']:
+                    return self._json(409,{'message':'Save/reload the current installer draft before preparing inputs'})
+                recipe=drafts.get(owner,'recipe')
+                settings=deps['source'].current_settings() if deps.get('source') else {}
+                settings={key:value for key,value in settings.items() if not key.startswith('_')}
+                plan=draft['document']
+                source_locks=dict(deps.get('installer_artifact_locks',{}));source_errors=[]
+                if deps.get('installer_cache_root') and deps.get('runner'):
+                    import installer_sources
+                    try:source_locks.update(installer_sources.locks(deps['runner'],deps['installer_cache_root']))
+                    except (installer_sources.SourceError,OSError) as exc:source_errors.append(str(exc))
+                recipe_document=recipe['document'] if recipe else None
+                identity=hashlib.sha256(json.dumps({'owner':owner,'request':body['request_id'],'revision':body['revision']},sort_keys=True).encode()).hexdigest()
+                name=identity[:32]
+                folder=Path(deps['installer_bundle_root'])/hashlib.sha256(owner.encode()).hexdigest()/name
+                signed={'revision':draft['revision'],'bundle':name}
+                origin=gate.origin_for_session(deps['sessions'],self._cookie_token(),'installer_prepare_inputs',signed,now)
+                root=Path(deps.get('installer_repo_root') or Path(__file__).resolve().parents[2])
+                def prepare_inputs(report):
+                    wg.require(origin,'installer_prepare_inputs',signed)
+                    report('Capturing current code, saved configuration and source/dependency checks. No physical stages run.')
+                    result=installer_inputs.prepare(root,folder,plan=plan,settings=settings,recipe=recipe_document,artifact_locks=source_locks,source_errors=source_errors)
+                    installer_inputs.verify(folder)
+                    message='Installer inputs prepared and integrity checked. '
+                    message+='Ready for the next execution preflight.' if result['ready'] else 'Not ready to install: '+ '; '.join(result['errors'])
+                    return {'ok':True,'message':message}
+                job=jobs.submit('installer','prepare_inputs',{'name':name},prepare_inputs,
+                    request_id='installer-inputs:'+identity,with_progress=True)
+                return self._json(202,{'job_id':job['id'],'state':job['state'],'executed':False})
+            except (workload_jobs.JobError,installer_inputs.InputError,wg.NotFromWebApp,OSError,ValueError) as exc:
+                return self._json(409,{'message':str(exc),'executed':False})
 
         if path == "/install-plan/action":
             import install_plan_page, install_plan
@@ -1974,7 +4364,10 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
             action=str(body.get('action',''))
             kind='container' if path=='/containers/action' else 'vm'
             # Capture the backend/storage at submission. Changing defaults is refused while work needs review.
-            host=_container_host_for(deps) if kind=='container' else _vm_host_for(deps)
+            try:
+                host=_container_host_for(deps) if kind=='container' else _vm_host_for(deps)
+            except (vh.VmError, OSError, ValueError) as exc:
+                return self._json(503,{'ok':False,'message':f'Native workload storage configuration unavailable: {exc}'})
             if host is None:
                 return self._json(503,{'ok':False,'message':'native backend unavailable'})
             if action in ('set_data','set_store'):
@@ -1985,11 +4378,12 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                     vm_page.save_store(deps.get('vm_config_path'),body.get('store'),persistence_store=body.get('persistence_store'))
                 return self._json(200,result)
             actions={'container':{'create','start','shutdown','rebuild','refresh','reset_login','recover','backup','restore'},
-                     'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_overlay','start','request_stop','force_stop',
-                           'configure','eject_iso','rollback','freeze','delete_vm','delete_base','reset_login','inspect_app'}}
+                     'vm':{'prepare_ubuntu','create_ubuntu','create_iso','create_prebuilt','create_overlay','start','request_stop','force_stop',
+                           'configure','eject_iso','rollback','freeze','delete_vm','delete_base','reset_login','inspect_app','verify_ubuntu'}}
             if action not in actions[kind]:
                 return self._json(400,{'ok':False,'message':'unknown workload action'})
             params={k:v for k,v in body.items() if k not in ('action','request_id')}
+            submitter=(deps['sessions'].get(self._cookie_token(),now) or type('S',(),{'username':''})()).username     # the Proxmox user who is signed in: the owner of what is created
             origin=None
             if kind=='container' and action in ('backup','restore'):
                 gate=deps.get('web_gate')
@@ -2006,7 +4400,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
                 host.run=traced_run
                 try:
                     result=container_page.perform(host,action,params,origin=origin,backup_run=deps.get('container_backup_run')) if kind=='container' else \
-                        vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR)
+                        vm_page.perform(host,action,params,iso_dir=deps.get('vm_iso_dir') or vh.DEFAULT_ISO_DIR,os_bases_dir=deps.get('os_bases_dir') or DEFAULT_OS_BASES_DIR,owner=submitter)
                 finally:
                     host.run=original_run
                 audit=deps.get('audit')
@@ -2045,7 +4439,7 @@ class UnifiedHandler(ws.SecureHandlerMixin, http.server.BaseHTTPRequestHandler):
 def make_server(*, deps: dict, host: str = "127.0.0.1", port: int = 8200) -> http.server.HTTPServer:
     if deps.get('workload_jobs') is None and deps.get('vm_config_path'):
         deps['workload_jobs']=workload_jobs.WorkloadJobs(Path(deps['vm_config_path']).parent/'workload-jobs.sqlite')
-    server = http.server.HTTPServer((host, port), UnifiedHandler)
+    server = http.server.ThreadingHTTPServer((host, port), UnifiedHandler)
     server.deps = deps  # type: ignore[attr-defined]
     original_close=server.server_close
     def close():
@@ -2095,7 +4489,8 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
                                             runner=runner, store_mac_key=wg.derive_key(root_key, "settings-store"),
                                             store_mac_marker=state / "settings-store.initialized", on_tamper=on_tamper)
     deps = dict(settings_server.deps)
-    deps["vg_name"] = drive_installer.DEFAULT_VG_NAME
+    deps["sessions"] = sw.SessionStore(path=state / "sessions.sqlite",mac_key=wg.derive_key(root_key,"login-sessions"))
+    deps["vg_name"] = None                      # resolved when used, from the running root (cardinality.host_vg_name), never a bare default name
     deps["config_path"] = cpw.DEFAULT_CONFIG_PATH
     deps["network_interface"] = "eno1"
     deps["pds_runner"] = pds.Runner()
@@ -2109,6 +4504,19 @@ def build_real_server(host: str = "0.0.0.0", port: int = 8100, data_path=None,
         state / "operators.json", mac_key=wg.derive_key(root_key, "operator-accounts"), on_tamper=on_tamper)
     deps["tamper_alerts"] = tamper_alerts
     deps["vm_config_path"] = state / "vm-config.json"
+    import configuration_drafts
+    deps["draft_store"] = configuration_drafts.DraftStore(state / "configuration-drafts.sqlite")
+    deps["installer_bundle_root"] = state / "installer-inputs"
+    deps["application_catalog_root"] = state / "application-definitions"
+    deps["installer_selected_serial"] = os.environ.get('BASELINE_INSTALLER_SELECTED_SERIAL','')
+    deps["installer_protected_serials"] = [s for s in os.environ.get('BASELINE_INSTALLER_PROTECTED_SERIALS','').split(',') if s]
+    import installer_cache
+    deps["installer_cache_root"] = installer_cache.DEFAULT_CACHE_ROOT
+    import installer_inputs
+    try:
+        deps["installer_repo_root"] = installer_inputs.source_root(__file__)
+    except installer_inputs.InputError:
+        deps["installer_repo_root"] = None
     deps["scheduler"] = ops.Scheduler(
         gate, ops.ScheduleStore(state / "schedules.json"),
         lambda op, params, origin: _start_operation_job(deps, op, params, origin))
@@ -2145,9 +4553,10 @@ def main() -> int:
     import os
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8100
+    host = os.environ.get("BASELINE_WEB_BIND_HOST", "0.0.0.0")
     data_path = sw.resolve_data_path(os.environ)
-    server = build_real_server(port=port, data_path=data_path, state_dir=resolve_state_dir(os.environ))
-    print(f"Baseline web app on http://0.0.0.0:{port}/  (login: this machine's account password)")
+    server = build_real_server(host=host, port=port, data_path=data_path, state_dir=resolve_state_dir(os.environ))
+    print(f"Baseline web app on http://{host}:{port}/  (login: this machine's account password)")
     print(f"Data store: {data_path}")
     server.deps["scheduler"].start()
     try:

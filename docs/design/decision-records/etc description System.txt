@@ -1,0 +1,108 @@
+{
+  "/etc": {
+    "description": "System‑wide configuration files that affect the whole system (owner‑root, generally mode 0644/0755).",
+    "items": [
+      { "path": "/etc/default", "type": "file", "purpose": "Boot‑time kernel and GRUB defaults (e.g. GRUB_CMDLINE_LINUX)." },
+      { "path": "/etc/grub", "type": "dir", "purpose": "GRUB configuration; contains grub.cfg after update‑grub." },
+      { "path": "/etc/lightdm", "type": "dir", "purpose": "Display‑manager (LightDM) settings; greeter, sessions, user lists." },
+      { "path": "/etc/lightdm/lightdm.conf.d", "type": "dir", "purpose": "Drop‑in overrides for LightDM (01_debian.conf, 02_ubuntu.conf)." },
+      { "path": "/etc/cups", "type": "dir", "purpose": "CUPS printing system – cupsd.conf, printers.conf, error_log." },
+      { "path": "/etc/postgresql", "type": "dir", "purpose": "PostgreSQL cluster configs; sub‑dirs /etc/postgresql/<version>/<cluster>." },
+      { "path": "/etc/ssl", "type": "dir", "purpose": "SSL/TLS certificates and keys; /etc/ssl/private for private keys." },
+      { "path": "/etc/systemd", "type": "dir", "purpose": "System‑d unit files, overrides, timers." },
+      { "path": "/etc/systemd/system", "type": "dir", "purpose": "Drop‑in directory for custom/third‑party service units." },
+      { "path": "/etc/systemd/system/**.service.d", "type": "dir", "purpose": "Per‑service override conf files (e.g. ollama, nemotron)." },
+      { "path": "/etc/fonts", "type": "dir", "purpose": "Font configuration (fonts.conf, sub‑dirs)." },
+      { "path": "/etc/pam.d", "type": "dir", "purpose": "Pluggable Authentication Module policies." },
+      { "path": "/etc/apt", "type": "dir", "purpose": "APT sources.list, sources.list.d, preferences." },
+      { "path": "/etc/cron*", "type": "dir|file", "purpose": "Scheduled jobs (crontabs, system‑cron, anacron)." },
+      { "path": "/etc/adduser.d", "type": "dir", "purpose": "Default options for adduser / addgroup." },
+      { "path": "/etc/skel", "type": "dir", "purpose": "Template files copied into new users’ home directories." }
+    ]
+  },
+  "/usr": {
+    "description": "Read‑only‑after‑install hierarchy that holds the bulk of user‑level utilities, libraries and architecture‑independent data.",
+    "items": [
+      { "path": "/usr/bin", "type": "dir", "purpose": "Executables for all users." },
+      { "path": "/usr/lib", "type": "dir", "purpose": "Library files (shared libs, Python packages, cargo binaries)." },
+      { "path": "/usr/lib/cargo/bin", "type": "dir", "purpose": "Rust‑based binaries such as sudo‑rs." },
+      { "path": "/usr/share", "type": "dir", "purpose": "Architecture‑independent data (docs, icons, themes, systemd units)." },
+      { "path": "/usr/share/doc", "type": "dir", "purpose": "Package documentation (changelogs, copyright)." },
+      { "path": "/usr/share/factory", "type": "dir", "purpose": "Vendor‑supplied default config files that may be copied to /etc at boot." },
+      { "path": "/usr/share/factory/etc", "type": "dir", "purpose": "Pristine copies of config files that the system may deploy to /etc/." },
+      { "path": "/usr/share/doc/*/docs", "type": "dir", "purpose": "Per‑package README/usage information." },
+      { "path": "/usr/share/icons", "type": "dir", "purpose": "Icon themes (e.g. Yaru)." },
+      { "path": "/usr/share/themes", "type": "dir", "purpose": "GTK/Qt/desktop themes." },
+      { "path": "/usr/share/glib‑2.0", "type": "dir", "purpose": "GIO/GLib settings schemas." },
+      { "path": "/usr/share/kbd", "type": "dir", "purpose": "Keyboard‑layout and console‑font data." },
+      { "path": "/usr/lib/systemd", "type": "dir", "purpose": "System‑d unit files shipped by packages." },
+      { "path": "/usr/lib/systemd/system‑default", "type": "file", "purpose": "Default target symlink (e.g. multi‑user.target)." },
+      { "path": "/usr/share/man", "type": "dir", "purpose": "Manual pages." },
+      { "path": "/usr/share/locale", "type": "dir", "purpose": "Localised message catalogs." }
+    ]
+  },
+  "/var": {
+    "description": "Variable data that persists across boots – logs, caches, databases, spool, runtime state.",
+    "items": [
+      { "path": "/var/log", "type": "dir", "purpose": "System log files (syslog, auth.log, cups/error_log, Xorg.0.log)." },
+      { "path": "/var/log/cups", "type": "dir", "purpose": "CUPS error log; can grow unbounded if MaxLogSize 0." },
+      { "path": "/var/lib", "type": "dir", "purpose": "Persistent private data for packages (PostgreSQL data dirs, Valkey, snap data)." },
+      { "path": "/var/lib/postgresql", "type": "dir", "purpose": "PostgreSQL data directories (per version/cluster)." },
+      { "path": "/var/lib/snapd", "type": "dir", "purpose": "Snap internal data (common state, confinement paths)." },
+      { "path": "/var/cache", "type": "dir", "purpose": "Package‑cache and application caches (apt caches, snap caches)." },
+      { "path": "/var/cache/man", "type": "dir", "purpose": "Pre‑formatted man pages." },
+      { "path": "/var/cache/fonts", "type": "dir", "purpose": "Locally generated font files." },
+      { "path": "/var/spool", "type": "dir", "purpose": "Print and mail spools." },
+      { "path": "/var/tmp", "type": "dir", "purpose": "Bigger temporary files that survive reboots." },
+      { "path": "/var/run", "type": "dir", "purpose": "Runtime files flushed on boot (e.g. PID files, lock files)." },
+      { "path": "/var/run/snap", "type": "dir", "purpose": "Snap runtime state (socket activation, device nodes)." }
+    ]
+  },
+  "/run": {
+    "description": "Temporary runtime data created early in the boot process; cleared or rebuilt each boot.",
+    "items": [
+      { "path": "/run/systemd", "type": "dir", "purpose": "System‑d runtime state (units, sockets, timers)." },
+      { "path": "/run/udev", "type": "dir", "purpose": "uDev device node persistence." },
+      { "path": "/run/snap", "type": "dir", "purpose": "Snap‑specific runtime state (sockets, credential dirs)." },
+      { "path": "/run/lock", "type": "dir", "purpose": "Lock files for mutual exclusion." },
+      { "path": "/run/shm", "type": "dir", "purpose": "Shared memory segment (tmpfs)." }
+    ]
+  },
+  "~/.config": {
+    "description": "User‑specific application configuration and state – XDG‑specified directory.",
+    "items": [
+      { "path": "~/.config/systemd", "type": "dir", "purpose": "User‑level systemd units (e.g. odysseus‑ui, colibri‑backend)." },
+      { "path": "~/.config/autostart", "type": "dir", "purpose": "Desktop‑environment autostart entries." },
+      { "path": "~/.config/gtk‑3.0", "type": "dir", "purpose": "GTK+ 3 settings (icons, theme, font)." },
+      { "path": "~/.config/libinput", "type": "dir", "purpose": "Touch‑pad / keyboard configuration." }
+    ]
+  },
+  "~/.cache": {
+    "description": "User‑specific cache data that may be safely cleared.",
+    "items": [
+      { "path": "~/.cache/thumbnails", "type": "dir", "purpose": "GTK+ thumbnail cache." },
+      { "path": "~/.cache/fonts", "type": "dir", "purpose": "User font cache." }
+    ]
+  },
+  "~/.local": {
+    "description": "User‑local data that follows the XDG Base Directory Specification.",
+    "items": [
+      { "path": "~/.local/share", "type": "dir", "purpose": "User data that is not strictly config nor cache (e.g. application databases)." }
+    ]
+  },
+  "/var/snap": {
+    "description": "Snap‑package state – each snap has a sub‑directory under /var/snap/<snap>.<channel>.",
+    "items": [
+      { "path": "/var/snap/postgresql", "type": "dir", "purpose": "Snap‑based PostgreSQL data and config." },
+      { "path": "/var/snap/microk8s", "type": "dir", "purpose": "MicroK8s daemon data (API server, containerd, etc.)." },
+      { "path": "/var/snap/ollama", "type": "dir", "purpose": "Ollama snap models and state." },
+      { "path": "/var/snap/nemotron-3-nano-omni", "type": "dir", "purpose": "Nemotron model runner snap data." }
+    ]
+  },
+  "/etc/alternatives": {
+    "description": "Symbolic‑link map for the `update‑alternatives` system (e.g. /usr/bin/sudo).",
+    "items": [
+      { "path": "/etc/alternatives/sudo", "type": "symlink", "purpose": "Points to the active sudo binary (sudo‑rs or sudo.ws)." }
+    ]
+  }
+}

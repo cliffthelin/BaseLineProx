@@ -61,6 +61,10 @@ class CommandResult:
     detail: str
 
 
+class BackupReadError(RuntimeError):
+    """An archive could not be listed; this is never an empty archive."""
+
+
 def backup_required(install_detection: dict) -> bool:
     return bool(install_detection.get("found_volumes"))
 
@@ -151,11 +155,15 @@ def list_backup_contents_argv(archive_path: str) -> list:
 
 
 def list_backup_contents(runner: Runner, archive_path: str) -> list:
-    """Real listing, for a selective-restore preview - an unreadable
-    archive reads back as an empty list, never raises."""
+    """Return the real member list or raise when tar cannot read it.
+
+    Empty output is a valid empty archive only when tar itself succeeds;
+    command failure must not be presented as an empty backup.
+    """
     proc = runner.run(list_backup_contents_argv(archive_path), timeout=60)
     if proc.returncode != 0:
-        return []
+        detail = proc.stderr.strip() or f"tar exited with status {proc.returncode}"
+        raise BackupReadError(f"could not read backup archive {archive_path}: {detail}")
     return [line for line in proc.stdout.splitlines() if line]
 
 

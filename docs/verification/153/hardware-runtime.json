@@ -1,0 +1,7 @@
+{
+  "scope": "real host network/PCI/driver/block inventory; read-only",
+  "network_interfaces": ["eno1", "mpqemubr0", "tailscale0", "tap-dadf89c4e3c", "wlp9s0"],
+  "pci_devices": 45,
+  "pci_driver_bindings_checked": 45,
+  "block_devices": ["nvme0n1", "nvme1n1", "sda", "sdb", "sdc", "sdd", "sde", "sdf", "sdg", "sdh", "sdi", "sdj", "sdk"]
+}

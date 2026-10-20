@@ -77,10 +77,10 @@ absent; the Firefox screenshot proves the policy, not loading Proxmox there.
 
 ## Real proof — approved Proxmox clone
 
-The actual PC601 source serial FD01N6557110C271B was resolved and validated
+The actual PC601 source serial <PC601 drive serial> was resolved and validated
 through physical_device_safety before access. QEMU opened its raw backing
 source read-only; every proof write went to /tmp/baseline-proxmox-live-proof/
-source-overlay.qcow2. The other serial MD89N41071210AP4E was not changed.
+source-overlay.qcow2. The other serial <PC401 drive serial> was not changed.
 The clone ran actual Proxmox 9.2.2, kernel 7.0.2-6-pve and nested KVM.
 
 SSH 127.0.0.1:22230, Proxmox 127.0.0.1:18006 and Baseline

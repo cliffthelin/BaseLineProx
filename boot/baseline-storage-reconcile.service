@@ -1,0 +1,17 @@
+[Unit]
+Description=Reconcile Proxmox storage definitions with the verified Baseline drive storage
+# Needs a running pve-cluster, which starts after the persistence redirects (DR259: Proxmox's state is overlay data on USER_ADMIN), so this
+# runs after both. baseline-storage-verify.service has already verified the volumes before any of that.
+ConditionPathExists=/etc/baseline/independent-drive.json
+After=local-fs.target baseline-storage-verify.service baseline-persist-bind-mounts.service pve-cluster.service
+Wants=pve-cluster.service
+Requires=baseline-storage-verify.service
+Before=baseline-firstboot.service baseline.service baseline-web.service baseline-kiosk.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/baseline/bin/baseline-single-drive-storage verify --reconcile-proxmox
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

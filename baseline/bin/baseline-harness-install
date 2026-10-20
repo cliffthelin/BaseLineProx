@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Timer entry point: once online, install what the offline cache did not carry: the harness CLIs (Claude Code, OpenCode, OpenAI Codex)
+and the audio/Bluetooth packages."""
+import json
+import sys
+
+sys.path.insert(0, "/opt/baseline/lib")
+import harness_install  # noqa: E402
+
+if __name__ == "__main__":
+    print(json.dumps({"harnesses": harness_install.run_once(), "audio_bluetooth": harness_install.run_extras()}))

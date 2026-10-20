@@ -47,7 +47,10 @@ class IsoBuilderRunner:
     def makedirs(self, path: Path) -> None:
         raise NotImplementedError
 
-    def copytree(self, src: Path, dst: Path) -> None:
+    def copytree(self, src: Path, dst: Path, *, ignore=None) -> None:
+        raise NotImplementedError
+
+    def copy_file(self, src: Path, dst: Path) -> None:
         raise NotImplementedError
 
     def remove_tree(self, path: Path) -> None:
@@ -81,8 +84,11 @@ class RealIsoBuilderRunner(IsoBuilderRunner):
     def makedirs(self, path):
         Path(path).mkdir(parents=True, exist_ok=True)
 
-    def copytree(self, src, dst):
-        shutil.copytree(str(src), str(dst))
+    def copytree(self, src, dst, *, ignore=None):
+        shutil.copytree(str(src), str(dst), ignore=ignore)
+
+    def copy_file(self, src, dst):
+        shutil.copy2(str(src), str(dst))
 
     def remove_tree(self, path):
         shutil.rmtree(str(path), ignore_errors=True)
@@ -108,10 +114,13 @@ class IsoBuildResult:
 
 
 ISO_TARGET_DIR = "/baseline-src"
+# The self-contained installer's offline package cache (offline_cache.py), carried next to the source and copied
+# onto the installed drive's INSTALLER_CACHE by baseline-first-boot-install.
+ISO_CACHE_DIR = "/baseline-cache"
 
 
 def remaster_argv(source_iso: Path, output_iso: Path, staging_dir: Path,
-                   iso_target_dir: str = ISO_TARGET_DIR) -> list:
+                   iso_target_dir: str = ISO_TARGET_DIR, *, cache_dir: Path | None = None) -> list:
     """`-boot_image any patch` (real bug found live, 2026-09-29 -
     correcting this same day's own earlier `keep` choice, which was
     wrong). The real Proxmox source ISO's own boot record is a
@@ -138,8 +147,11 @@ def remaster_argv(source_iso: Path, output_iso: Path, staging_dir: Path,
     ISO's actual boot complexity - only a real, isolated QEMU boot
     test settles it. That's the standing verification this function's
     own choice depends on, not assumed from either signal alone."""
-    return ["xorriso", "-indev", str(source_iso), "-outdev", str(output_iso),
-            "-boot_image", "any", "patch", "-map", str(staging_dir), iso_target_dir, "--"]
+    argv = ["xorriso", "-indev", str(source_iso), "-outdev", str(output_iso),
+            "-boot_image", "any", "patch", "-map", str(staging_dir), iso_target_dir]
+    if cache_dir is not None:
+        argv += ["-map", str(cache_dir), ISO_CACHE_DIR]
+    return argv + ["--"]
 
 
 def find_in_iso_argv(iso_path: Path, iso_target_path: str) -> list:
@@ -167,16 +179,22 @@ def stage_baseline_source(runner: IsoBuilderRunner, *, repo_root: Path, staging_
     earlier, failed attempt."""
     runner.remove_tree(staging_dir)
     runner.makedirs(staging_dir)
-    runner.copytree(repo_root / "boot", staging_dir / "boot")
-    runner.copytree(repo_root / "baseline", staging_dir / "baseline")
-    runner.copytree(repo_root / "packaging", staging_dir / "packaging")
-    runner.copytree(repo_root / "automation", staging_dir / "automation")
-    runner.copytree(repo_root / "docs", staging_dir / "docs")
+    ignore_generated = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".pytest_cache", ".mypy_cache")
+    for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
+        runner.copytree(repo_root / name, staging_dir / name, ignore=ignore_generated)
+    # The operator's supported-OS list is private (git-ignored, DR261), so it is not part of the repository tree above: the installer media carries a copy of
+    # the working one next to the source, and first boot puts it on USER_ADMIN.
+    listing = repo_root / "config" / "local" / "supported-os.json"
+    if listing.is_file():
+        runner.makedirs(staging_dir / "config")
+        runner.copy_file(listing, staging_dir / "config" / "supported-os.json")
+    runner.copy_file(repo_root / "README.md", staging_dir / "README.md")
+    runner.copy_file(repo_root / "AGENTS.md", staging_dir / "AGENTS.md")
 
 
 def build_current_iso(runner: IsoBuilderRunner, *, source_iso: Path, repo_root: Path,
                        output_iso: Path, workspace: Path,
-                       iso_target_dir: str = ISO_TARGET_DIR) -> IsoBuildResult:
+                       iso_target_dir: str = ISO_TARGET_DIR, offline_cache: Path | None = None) -> IsoBuildResult:
     checks: list[PostconditionResult] = []
     runner.makedirs(workspace)
     staging_dir = workspace / "staging"
@@ -192,7 +210,8 @@ def build_current_iso(runner: IsoBuilderRunner, *, source_iso: Path, repo_root: 
     # `FAILURE: -indev differs from -outdev and -outdev media holds
     # non-zero data`. Removed first so every real retry starts clean.
     runner.remove_file(output_iso)
-    proc = runner.run(remaster_argv(source_iso, output_iso, staging_dir, iso_target_dir), timeout=600)
+    proc = runner.run(remaster_argv(source_iso, output_iso, staging_dir, iso_target_dir, cache_dir=offline_cache),
+                      timeout=1800)
     checks.append(PostconditionResult("xorriso_remaster_exit_zero", proc.returncode == 0, proc.stderr.strip()[-500:]))
     if proc.returncode != 0:
         return IsoBuildResult(ok=False, postconditions=checks, stdout=proc.stdout, stderr=proc.stderr)
@@ -215,6 +234,14 @@ def build_current_iso(runner: IsoBuilderRunner, *, source_iso: Path, repo_root: 
         find_proc.returncode == 0 and "provision.sh" in find_proc.stdout,
         find_proc.stdout.strip()[-200:] or find_proc.stderr.strip()[-200:],
     ))
+
+    if offline_cache is not None:
+        cache_proc = runner.run(find_in_iso_argv(output_iso, f"{ISO_CACHE_DIR}/MANIFEST.json"), timeout=60)
+        checks.append(PostconditionResult(
+            "offline_cache_present_in_output_iso",
+            cache_proc.returncode == 0 and "MANIFEST.json" in cache_proc.stdout,
+            cache_proc.stdout.strip()[-200:] or cache_proc.stderr.strip()[-200:],
+        ))
 
     ok = all(c.ok for c in checks)
     return IsoBuildResult(ok=ok, output_path=output_iso if ok else None, postconditions=checks,

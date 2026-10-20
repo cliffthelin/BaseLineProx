@@ -51,9 +51,14 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import references
 import registry
 
 TYPE_ID = "gpu_devices"
+
+
+class GpuInventoryError(RuntimeError):
+    """GPU inventory could not be read; it must not appear as an empty bus."""
 
 HOST_DISPLAY = "host_display"
 VFIO_PASSTHROUGH = "vfio_passthrough"
@@ -104,17 +109,29 @@ class RealRunner(Runner):
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
             return GpuProc(proc.returncode, proc.stdout, proc.stderr)
-        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        except (subprocess.TimeoutExpired, OSError) as exc:
             return GpuProc(returncode=-1, stderr=str(exc))
 
     def path_exists(self, path):
-        return Path(path).exists()
+        try:
+            Path(path).stat()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise GpuInventoryError(f"could not inspect {path}: {exc}") from exc
 
     def listdir(self, path):
-        return [p.name for p in Path(path).iterdir()] if Path(path).is_dir() else []
+        try:
+            return [p.name for p in Path(path).iterdir()]
+        except OSError as exc:
+            raise GpuInventoryError(f"could not enumerate {path}: {exc}") from exc
 
     def realpath(self, path):
-        return str(Path(path).resolve())
+        try:
+            return str(Path(path).resolve(strict=True))
+        except OSError as exc:
+            raise GpuInventoryError(f"could not resolve {path}: {exc}") from exc
 
     def which(self, name):
         return shutil.which(name)
@@ -189,7 +206,8 @@ def detect_gpus(runner: Runner) -> list:
     `drive_admin.list_candidate_drives` does for drives."""
     proc = runner.run(["lspci", "-Dmmnnk"], timeout=15)
     if proc.returncode != 0:
-        return []
+        detail = (proc.stderr or proc.stdout or f"lspci exited with status {proc.returncode}").strip()
+        raise GpuInventoryError(f"GPU inventory failed: {detail}")
     devices = []
     for row in _parse_lspci(proc.stdout):
         addr = row["addr"]
@@ -209,7 +227,14 @@ def _mdev_evidence(runner: Runner, device: GpuDevice) -> ModeAvailability:
     mdev_path = f"/sys/bus/pci/devices/{device.pci_address}/mdev_supported_types"
     if runner.path_exists(mdev_path):
         types = runner.listdir(mdev_path)
-        return ModeAvailability(VGPU_MDEV_SPLIT, True, f"active now - mdev types available: {types}")
+        if types:
+            return ModeAvailability(VGPU_MDEV_SPLIT, True, f"active now - mdev types available: {types}")
+        if device.pci_id in KNOWN_VGPU_CAPABLE_IDS:
+            return ModeAvailability(VGPU_MDEV_SPLIT, True,
+                                    f"hardware supports this ({device.model} is a known vGPU-capable card) "
+                                    "but no mediated-device types are exposed right now")
+        return ModeAvailability(VGPU_MDEV_SPLIT, False,
+                                "mdev_supported_types exists but reports no mediated-device types")
     if device.pci_id in KNOWN_VGPU_CAPABLE_IDS:
         return ModeAvailability(
             VGPU_MDEV_SPLIT, True,
@@ -223,10 +248,16 @@ def _sriov_evidence(runner: Runner, device: GpuDevice) -> ModeAvailability:
     if not runner.path_exists(path):
         return ModeAvailability(SRIOV, False, "no sriov_totalvfs - this device has no SR-IOV capability")
     proc = runner.run(["cat", path])
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"cat exited with status {proc.returncode}").strip()
+        raise GpuInventoryError(f"could not read SR-IOV capability for {device.pci_address}: {detail}")
     try:
-        total = int((proc.stdout or "0").strip())
-    except ValueError:
-        total = 0
+        raw = proc.stdout.strip()
+        total = int(raw)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise GpuInventoryError(f"malformed SR-IOV capability for {device.pci_address}: {proc.stdout!r}") from exc
+    if total < 0:
+        raise GpuInventoryError(f"malformed SR-IOV capability for {device.pci_address}: {total}")
     if total > 0:
         return ModeAvailability(SRIOV, True, f"sriov_totalvfs={total} - up to {total} virtual functions")
     return ModeAvailability(SRIOV, False, "sriov_totalvfs is 0")
@@ -343,6 +374,7 @@ def sync_detected_gpus(runner: Runner) -> list:
                 "modes": [{"mode": m.mode, "available": m.available, "evidence": m.evidence} for m in modes],
             },
         )
+        references.link(TYPE_ID, d.pci_address, kind="hardware", name="gpu-" + d.pci_address)
     return devices
 
 

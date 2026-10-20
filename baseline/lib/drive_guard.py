@@ -1,15 +1,15 @@
-"""No formatting a drive that holds data unless the Baseline installer made it (operator instruction 2026-10-01).
+"""Protect populated drives and keep destructive actions inside each installer lane (DR300).
 
 A drive "has data" if it carries any partition, filesystem, LVM or encrypted volume. A blank drive, or one whose
 partition table is empty, has none. A drive whose state cannot be read is treated as HAVING data, because the safe
 mistake is refusing.
 
-A drive counts as installer-made only if its GPT disk GUID is one the installer generated and registered. The
-installer stamps a fresh GUID (`sgdisk -U`, which changes nothing but the disk identifier) and records it in the
-registry; the check compares the drive's current GUID to the registry. A drive that holds data and does not carry
-such a GUID can NEVER be formatted by Baseline. There is no override: `require_may_format` has no parameter that
-relaxes it, and neither a human confirmation (hitl.py) nor a standing approval can skip it, because a refused
-request never even reaches a confirmation.
+A drive normally counts as installer-made only if its GPT disk GUID is one the installer generated and registered.
+Each installer lane's own drives are runtime data on the persistent admin volume (the development lock: those may be
+reinstalled even when they hold old data); no serial is ever stored in the repository. Nothing lists another lane's drives: a drive whose disk GUID is a Baseline host stamp for
+its own serial from a DIFFERENT lane is recognised as that lane's (`lane_verdict`) and refused before the empty-disk
+or installer-UUID paths. Missing/invalid lane identity enables no development lock. These are source policy, not
+caller parameters.
 
 Adopting a drive that predates this rule (`stamp_installer_identity`) is non-destructive and is limited to a drive
 that is empty or whose every partition is one of Baseline's own volumes, so stamping cannot be used to launder a
@@ -21,10 +21,80 @@ import re
 import subprocess
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import registry
 
 REGISTRY_TYPE = "installer_drives"
+# This installer lane's own drives are DATA, never code: the file /etc/baseline/own-drives (one hardware serial per line), which lives on the persistent admin volume, is written on the installed
+# system itself (its first boot records the drive it runs from) and is never in the repository. BASELINE_OWN_DRIVES_FILE names another file (a build or test host). Another lane's drive is not
+# listed anywhere: it is recognised from the identifier stamped on the drive (identifiers.stamped_lane), which names the lane that installed it.
+OWN_DRIVES_PATH = "/etc/baseline/own-drives"
+_SERIAL_LINE = re.compile(r"^[A-Za-z0-9_.-]{8,64}$")
+
+
+def _installer_lane_uuid() -> str | None:
+    path = Path(__file__).resolve().parent.parent / "INSTALLER_UUID"
+    try:
+        return str(uuid.UUID(path.read_text(encoding="ascii").strip()))
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def own_drives_file() -> Path:
+    import os
+    return Path(os.environ.get("BASELINE_OWN_DRIVES_FILE") or OWN_DRIVES_PATH)
+
+
+_FLAGS = ("disposable", "released")
+
+
+def own_drive_serials(path=None, lane_uuid=..., *, disposable_only: bool = False, released_only: bool = False) -> frozenset:
+    """The serials in the lane's own-drives file: `SERIAL [disposable] [released]` per line (blank lines and # comments ignored). The drives are this lane's allowed targets; `disposable` is the
+    development lock (reinstallable over old data) and `released` is a deliberate hand-over of a drive another installer lane stamped (it no longer counts as that lane's). Only the operator marks
+    either. Without a valid lane identity there are none; an absent or unreadable file means none."""
+    if lane_uuid is ...:
+        lane_uuid = _installer_lane_uuid()
+    if not lane_uuid:
+        return frozenset()
+    try:
+        lines = Path(path or own_drives_file()).read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return frozenset()
+    found = set()
+    for line in lines:
+        words = line.split("#", 1)[0].split()
+        if not words or not _SERIAL_LINE.match(words[0]) or any(w not in _FLAGS for w in words[1:]) or len(set(words[1:])) != len(words[1:]):
+            continue
+        if (disposable_only and "disposable" not in words[1:]) or (released_only and "released" not in words[1:]):
+            continue
+        found.add(words[0])
+    return frozenset(found)
+
+
+def record_own_drive(serial: str, path=None, *, disposable: bool = False, released: bool = False) -> bool:
+    """Add one serial to the own-drives file (idempotent; a plain serial only; `disposable` only when the operator says so). Returns whether it was newly added."""
+    if not isinstance(serial, str) or not _SERIAL_LINE.match(serial):
+        raise ValueError("a drive serial is plain letters, digits and ._- , 8 to 64 characters")
+    target = Path(path or own_drives_file())
+    if serial in own_drive_serials(target):
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "a") as handle:
+        handle.write(serial + (" disposable" if disposable else "") + (" released" if released else "") + "\n")
+    return True
+
+
+def lane_verdict(ptuuid, serial) -> str:
+    """`ours`, `other` or `none`: whether the drive's disk GUID is a stamp from this installer lane, from another lane, or not a Baseline stamp for this drive at all."""
+    import identifiers
+    lane = identifiers.stamped_lane(ptuuid, serial) if ptuuid else None
+    ours = (_installer_lane_uuid() or "").replace("-", "")[:8]
+    if lane is None:
+        return "none"
+    return "ours" if ours and lane == ours else "other"
+
+
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 # Partition names Baseline itself creates, including the older names that real drives still carry.
 _OWN_LABEL_RE = re.compile(r"^(BASELINE|INSTALLER_CACHE|SESSION_TEMP|SUBSTRATE(_PERSISTENCE)?|USER(_[A-Z0-9_]+)?|"
@@ -141,19 +211,50 @@ def is_installer_uuid(guid) -> bool:
     return guid in registry.list_entries(REGISTRY_TYPE, scope=registry.GLOBAL, read_only=True)
 
 
-def require_may_format(device_path: str, *, run=None) -> None:
-    """Raises DataProtectionError unless the drive is empty or carries an installer-generated UUID. Takes no
-    option that relaxes it."""
-    state = read_drive_state(device_path, run=run)
+def _authorize_format(device_path: str, state: DriveState, *, serial: str | None,
+                      installer_uuid_registered: bool) -> None:
+    """Apply lane identity before blank-disk or registered-GUID allowances."""
+    if serial is None:
+        raise DataProtectionError(
+            f"refused: {device_path} serial could not be read unambiguously; no override")
+    if lane_verdict(state.ptuuid, serial) == "other" and serial not in own_drive_serials(released_only=True):
+        raise DataProtectionError(f"refused: {device_path} carries another installer lane's stamp ({serial}); no override")
+    if not state.known:
+        raise DataProtectionError(
+            f"refused: {device_path} drive state could not be read as one whole disk; no override")
+    if serial in own_drive_serials(disposable_only=True):
+        return None
     if not state.has_data:
         return None
-    if state.known and state.ptuuid and is_installer_uuid(state.ptuuid):
+    if state.ptuuid and installer_uuid_registered:
         return None
-    why = ("its contents could not be read, so it is treated as holding data" if not state.known
-           else "it holds data and does not carry a UUID generated by the Baseline installer")
     raise DataProtectionError(
-        f"refused: {device_path} will not be formatted: {why}. Baseline never formats a drive with data unless "
-        "the installer created it, and there is no override.")
+        f"refused: {device_path} will not be formatted: it holds data and does not carry a UUID generated by the "
+        "Baseline installer. Baseline never formats a drive with data unless the installer created it, and there is no override.")
+
+
+def require_may_format(device_path: str, *, run=None, serial: str | None = None) -> None:
+    """Raises unless whole-disk state and an exact, freshly validated serial authorize this drive.
+
+    Callers that already used ``physical_device_safety.validate_target_device`` pass its serial, avoiding a
+    second independent serial lookup that could disagree or be unavailable. Direct callers omit it and must
+    provide one unambiguous serial through the read-only lsblk probe.
+    """
+    state = read_drive_state(device_path, run=run)
+    if serial is not None:
+        serial = serial.strip() if isinstance(serial, str) else None
+        if not serial or any(ch.isspace() for ch in serial):
+            serial = None
+    else:
+        serial_reader = run or _default_run
+        try:
+            rc, output = serial_reader(["lsblk", "-dn", "-o", "SERIAL", device_path])
+        except Exception:  # noqa: BLE001 - inability to identify the target keeps the guard closed
+            rc, output = 1, ""
+        serials = output.splitlines() if isinstance(output, str) else []
+        serial = serials[0].strip() if rc == 0 and len(serials) == 1 else None
+    registered = bool(serial and state.ptuuid and is_installer_uuid(state.ptuuid))
+    return _authorize_format(device_path, state, serial=serial, installer_uuid_registered=registered)
 
 
 def stamp_installer_identity(cmd, device_path: str, *, serial: str, read=None) -> StampResult:

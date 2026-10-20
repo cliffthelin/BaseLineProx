@@ -17,6 +17,7 @@ class FakeIsoBuilderRunner(ib.IsoBuilderRunner):
         self.files = {}  # path -> size (int) - content itself is irrelevant to this module's own logic
         self.dirs = set()
         self.copied_trees = []  # (src, dst) pairs
+        self.copied_files = []  # (src, dst) pairs
         self.removed_trees = []
         self.removed_files = []
         self.command_responses = []
@@ -45,9 +46,12 @@ class FakeIsoBuilderRunner(ib.IsoBuilderRunner):
     def makedirs(self, path):
         self.dirs.add(str(path))
 
-    def copytree(self, src, dst):
+    def copytree(self, src, dst, *, ignore=None):
         self.copied_trees.append((str(src), str(dst)))
         self.dirs.add(str(dst))
+
+    def copy_file(self, src, dst):
+        self.copied_files.append((str(src), str(dst)))
 
     def remove_tree(self, path):
         self.removed_trees.append(str(path))
@@ -87,6 +91,28 @@ def test_installer_carries_the_desktop_packaging_that_provision_requires():
     r = FakeIsoBuilderRunner()
     ib.stage_baseline_source(r, repo_root=Path("/repo"), staging_dir=Path("/ws/staging"))
     assert ("/repo/packaging", "/ws/staging/packaging") in r.copied_trees
+
+
+def test_real_source_staging_omits_generated_python_bytecode(tmp_path):
+    source = tmp_path / "source"
+    for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
+        (source / name).mkdir(parents=True)
+        (source / name / "kept.py").write_text("source\n")
+    (source / "baseline/lib").mkdir(parents=True)
+    (source / "baseline/lib/kept.py").write_text("source\n")
+    (source / "baseline/lib/__pycache__").mkdir(parents=True)
+    (source / "baseline/lib/__pycache__/stale.cpython-314.pyc").write_bytes(b"generated")
+    (source / "tests/stale.pyc").write_bytes(b"generated")
+    (source / "README.md").write_text("overview\n")
+    (source / "AGENTS.md").write_text("instructions\n")
+    staging = tmp_path / "staging"
+
+    ib.stage_baseline_source(ib.RealIsoBuilderRunner(), repo_root=source, staging_dir=staging)
+
+    assert (staging / "baseline/lib/kept.py").is_file()
+    assert (staging / "README.md").is_file()
+    assert not (staging / "baseline/lib/__pycache__").exists()
+    assert not (staging / "tests/stale.pyc").exists()
 
 
 def test_stage_baseline_source_removes_a_stale_staging_dir_before_copying():
@@ -226,3 +252,45 @@ def test_installer_carries_registered_tasks_and_user_walkthrough_docs():
     ib.stage_baseline_source(r,repo_root=Path('/repo'),staging_dir=Path('/ws/staging'))
     assert ('/repo/automation','/ws/staging/automation') in r.copied_trees
     assert ('/repo/docs','/ws/staging/docs') in r.copied_trees
+
+
+def test_source_payload_contains_the_console_check_required_by_provision():
+    runner = FakeIsoBuilderRunner()
+    ib.stage_baseline_source(runner, repo_root=Path('/repo'), staging_dir=Path('/stage'))
+    assert ('/repo/tests', '/stage/tests') in runner.copied_trees
+
+
+def test_real_source_staging_carries_root_platform_documentation(tmp_path):
+    """Exercise the production filesystem runner, so ISO docs cannot be
+    silently omitted from the source payload built for a new machine."""
+    repo = tmp_path / "repo"
+    for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
+        (repo / name).mkdir(parents=True)
+        (repo / name / "content.txt").write_text(name, encoding="utf-8")
+    (repo / "README.md").write_text("Platform overview", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("Build and safety instructions", encoding="utf-8")
+
+    staged = tmp_path / "workspace" / "staging"
+    ib.stage_baseline_source(ib.RealIsoBuilderRunner(), repo_root=repo, staging_dir=staged)
+
+    assert (staged / "README.md").read_text(encoding="utf-8") == "Platform overview"
+    assert (staged / "AGENTS.md").read_text(encoding="utf-8") == "Build and safety instructions"
+    assert (staged / "tools" / "content.txt").read_text(encoding="utf-8") == "tools"
+    assert (staged / "docs" / "content.txt").read_text(encoding="utf-8") == "docs"
+
+
+def test_the_private_supported_os_list_rides_on_the_media_next_to_the_source_when_there_is_one(tmp_path):
+    source = tmp_path / "repo"
+    for name in ("boot", "baseline", "packaging", "automation", "docs", "tests", "tools"):
+        (source / name).mkdir(parents=True)
+    (source / "README.md").write_text("x\n")
+    (source / "AGENTS.md").write_text("x\n")
+    staging = tmp_path / "with"
+    ib.stage_baseline_source(ib.RealIsoBuilderRunner(), repo_root=source, staging_dir=staging)
+    assert not (staging / "config").exists()                                             # no list: nothing is invented
+    (source / "config/local").mkdir(parents=True)
+    (source / "config/local/supported-os.json").write_text('{"os": []}')
+    (source / "config/local/other-private.txt").write_text("not carried")
+    staging = tmp_path / "without"
+    ib.stage_baseline_source(ib.RealIsoBuilderRunner(), repo_root=source, staging_dir=staging)
+    assert (staging / "config/supported-os.json").read_text() == '{"os": []}' and not (staging / "config/other-private.txt").exists()

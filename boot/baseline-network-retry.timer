@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry the confirmed network change until the connection verifies (DR247)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

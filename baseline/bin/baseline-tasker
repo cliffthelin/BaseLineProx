@@ -3,8 +3,14 @@
 import argparse,json,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'lib'))
-import tasker
+import application_bundle as ab
 import environment_recipes as er
+try:
+    ab.load_deployed_application_definitions(__file__)
+    ab.load_application_catalog(ab.application_catalog_directory())
+except (er.RecipeError,OSError) as exc:
+    print('Refused: '+str(exc),file=sys.stderr);sys.exit(1)
+import tasker
 parser=argparse.ArgumentParser(description=__doc__);commands=parser.add_subparsers(dest='action',required=True)
 commands.add_parser('catalog')
 compat=commands.add_parser('compatibility');compat.add_argument('registry')

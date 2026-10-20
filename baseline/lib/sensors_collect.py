@@ -33,6 +33,7 @@ than the outer loop runs at all.
 """
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 
@@ -130,7 +131,14 @@ def collect_once(runner: repair.Runner, conn, *, now: float, retention_s: float 
         if not _source_is_due(conn, source, now):
             continue
         sensors_history.record_attempt(conn, source, now)
-        samples += flatten_fn(collect_fn(runner))
+        try:
+            collected = collect_fn(runner)
+        except drive_installer.VolumeObservationError as exc:
+            # A volume observation that failed is recorded as no samples (never as zeros) and must not cost the other sources
+            # their samples for this cycle.
+            print(f"[baseline-sensors-collect] {source}: observation failed, no samples recorded: {exc}", file=sys.stderr)
+            continue
+        samples += flatten_fn(collected)
 
     for source, key, value, unit in samples:
         sensors_history.record_sample(conn, ts=now, source=source, key=key, value=value, unit=unit)

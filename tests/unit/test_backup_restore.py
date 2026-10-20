@@ -81,11 +81,12 @@ def test_list_backup_contents_parses_real_tar_listing():
     assert contents == ["USER/", "USER/docs/"]
 
 
-def test_list_backup_contents_empty_on_a_real_failure():
+def test_list_backup_contents_reports_a_real_failure_instead_of_empty_archive():
     runner = FakeRunner(command_responses=[
         (lambda a: a[:2] == ["tar", "-tzf"], FakeProc(1, "", "not a tar archive")),
     ])
-    assert br.list_backup_contents(runner, "/tmp/bad.tar.gz") == []
+    with pytest.raises(br.BackupReadError, match="not a tar archive"):
+        br.list_backup_contents(runner, "/tmp/bad.tar.gz")
 
 
 def test_restore_backup_creates_the_destination_root_first():

@@ -1,0 +1,6 @@
+{
+  "_note": "Copy to config/local/supported-os.json (git-ignored) and edit. One entry per operating system the host should offer. Only id and name are required; apps defaults to all five (vscode, spotify, chrome, chatgpt, claude).",
+  "os": [
+    {"id": "example-linux", "name": "Example Linux", "kind": "vm", "iso": "example-linux-amd64.iso", "apps": ["vscode", "chrome"], "notes": "an example entry; replace it"}
+  ]
+}

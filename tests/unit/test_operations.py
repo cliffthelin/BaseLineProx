@@ -192,6 +192,49 @@ def test_test_restore_fails_loudly_when_nothing_comes_back_or_there_are_no_sets(
     assert ops.execute("backup_test_restore", {}, _origin(), print_fn=lines.append, get_setting=lambda g, k: "x") == 1
 
 
+def test_test_restore_reports_temp_cleanup_failure_instead_of_success(monkeypatch, tmp_path):
+    import os
+    import shutil
+    import tempfile
+
+    original_rmtree = shutil.rmtree
+    original_mkdtemp = tempfile.mkdtemp
+    holder = tmp_path / "test-restore-stage"
+    holder.mkdir()
+    scratch_path = None
+
+    def stage_temp(*, prefix):
+        nonlocal scratch_path
+        scratch_path = original_mkdtemp(prefix=prefix, dir=holder)
+        return scratch_path
+
+    def leave_stage_on_ignored_error(path, *, ignore_errors=False, **kwargs):
+        if ignore_errors:
+            return None
+        raise OSError("simulated cleanup denial")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", stage_temp)
+    monkeypatch.setattr(shutil, "rmtree", leave_stage_on_ignored_error)
+    monkeypatch.setattr(ops, "_destination", lambda gs, run: object())
+    monkeypatch.setattr(ops.offdrive_backup, "list_sets", lambda dest: [_Set])
+
+    def fake_restore(dest, set_name, label, out_dir):
+        (Path(out_dir) / "restored.txt").write_text("recovered data")
+
+    from pathlib import Path
+    monkeypatch.setattr(ops.offdrive_backup, "restore_label", fake_restore)
+    messages = []
+    try:
+        result = ops.execute("backup_test_restore", {}, _origin(), print_fn=messages.append,
+                             get_setting=lambda g, k: "x")
+        assert result == 1
+        assert any("cleanup" in message.lower() for message in messages)
+        assert scratch_path and os.path.exists(scratch_path)
+    finally:
+        if scratch_path and os.path.exists(scratch_path):
+            original_rmtree(scratch_path)
+
+
 def test_test_restore_needs_the_web_app(monkeypatch):
     woh.configured_gate()
     with pytest.raises(wg.NotFromWebApp):
